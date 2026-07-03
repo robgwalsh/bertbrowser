@@ -1,0 +1,47 @@
+<Window x:Class="BertStat.App.Views.TagManagerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Manage tags" Width="420" Height="480"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <DockPanel Margin="10">
+        <!-- New tag row -->
+        <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="90"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBox Grid.Column="0" Text="{Binding NewTagName, UpdateSourceTrigger=PropertyChanged}"
+                     VerticalContentAlignment="Center" Margin="0,0,6,0"
+                     KeyDown="NewTagBox_KeyDown"/>
+            <TextBox Grid.Column="1" Text="{Binding NewTagColor, UpdateSourceTrigger=PropertyChanged}"
+                     VerticalContentAlignment="Center" Margin="0,0,6,0" ToolTip="#RRGGBB"/>
+            <Button Grid.Column="2" Content="Add" Padding="12,4" Command="{Binding AddTagCommand}"/>
+        </Grid>
+
+        <TextBlock DockPanel.Dock="Top" Text="{Binding ErrorMessage}" Foreground="Firebrick"
+                   TextWrapping="Wrap" Margin="0,0,0,6"/>
+
+        <!-- Bottom buttons -->
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button Content="Rename…" Padding="12,4" Margin="0,0,6,0" Click="Rename_Click"/>
+            <Button Content="Set color" Padding="12,4" Margin="0,0,6,0" Click="SetColor_Click"/>
+            <Button Content="Delete" Padding="12,4" Margin="0,0,6,0" Command="{Binding DeleteTagCommand}"
+                    CommandParameter="{Binding SelectedTag}"/>
+            <Button Content="Close" Padding="12,4" IsCancel="True"/>
+        </StackPanel>
+
+        <!-- Tag list -->
+        <ListBox ItemsSource="{Binding Tags}" SelectedItem="{Binding SelectedTag, Mode=TwoWay}">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Orientation="Horizontal" Margin="2">
+                        <Border Background="{Binding Color, Converter={StaticResource TagColor}}"
+                                Width="14" Height="14" CornerRadius="7" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </DockPanel>
+</Window>
