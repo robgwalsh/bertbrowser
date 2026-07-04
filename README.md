@@ -1,14 +1,17 @@
 # bertbrowser
 
-A Windows file browser built for my personal preferences. If it does what you want, great — but the design intent is **simplicity over customization**: there are no themes, no plugin system, and very few settings. Features get added when I need them, not when they can be toggled.
+A Windows file browser built for my personal preferences. The overall design intent is **simplicity over customization**.
 
 ## What it does
 
-- **Browse** — folder tree, file list, breadcrumbs, back/forward/up navigation. Double-click opens files with their default app. Natural sorting (`file2` before `file10`) and real shell icons.
-- **Tag files** — create tags (with optional colors), assign them to files, and filter. The tag filter is subtree-aware: activate it and the file list flattens into every tagged file under the current folder, matching any or all of the checked tags.
-- **Directory sizes** — compute the recursive size of any folder on demand. One scan caches results for the folder *and every subfolder* in SQLite, so drilling down afterwards is instant. Scans skip junctions/symlinks, survive access-denied folders (results are flagged incomplete rather than failing), and can be cancelled without losing previously cached values.
+- **Browse** — Expected modern file browser features
+- **Tag files** — Express multiple organizational views beyond the default hierarchical viewpoint of a file browser
+- **Directory sizes** — Show total size on directories, just like files
+- **Search** - Windows search that doesn't blow
 
-Everything is stored in a local SQLite database. Tags are attached to paths, not file contents — if you move a file outside the app, its tags don't follow (missing files can be pruned from the tag database in the UI).
+## What it does not do
+
+- **Connect To the Internet**
 
 ## Requirements
 
