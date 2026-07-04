@@ -49,8 +49,16 @@ Prompt answers:
 first-package moderation takes a few days).
 
 After that PR merges, automate future versions by adding this job to
-`.github/workflows/release.yml` and creating a classic PAT with `public_repo`
-scope stored as the `WINGET_PAT` repo secret (fine-grained PATs don't work):
+`.github/workflows/release.yml`. Two prerequisites:
+
+1. A fork of `microsoft/winget-pkgs` named exactly `winget-pkgs` under your
+   account — winget-releaser pushes manifest branches to it. The first
+   `wingetcreate` submission creates this fork for you; otherwise:
+   `gh repo fork microsoft/winget-pkgs --clone=false`
+2. A **classic** PAT with only the `public_repo` scope (fine-grained PATs
+   don't work — they can't open PRs against repos you don't own). Create at
+   <https://github.com/settings/tokens/new?scopes=public_repo&description=winget-releaser>,
+   then store it: `gh secret set WINGET_PAT --repo robgwalsh/bertbrowser`
 
 ```yaml
   winget:
