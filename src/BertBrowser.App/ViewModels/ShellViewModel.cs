@@ -37,6 +37,13 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty]
     private string _searchText = "";
 
+    private int _activeScans;
+
+    [ObservableProperty]
+    private bool _isScanning;
+
+    partial void OnIsScanningChanged(bool value) => CancelScansCommand.NotifyCanExecuteChanged();
+
     public bool CanGoBack => _backStack.Count > 0;
     public bool CanGoForward => _forwardStack.Count > 0;
     public bool CanGoUp => CurrentPath.Length > 0 && Path.GetDirectoryName(CurrentPath) is not null;
@@ -220,7 +227,7 @@ public sealed partial class ShellViewModel : ObservableObject
         var outcome = await _searchService.SearchAsync(CurrentPath, queryText, ct, progress);
         if (outcome is null || ct.IsCancellationRequested) return;
 
-        await FileList.CompleteSearchAsync(outcome, ct);
+        await FileList.CompleteSearchAsync(outcome, queryText, ct);
         if (ct.IsCancellationRequested) return;
 
         var suffix = outcome.Source switch
@@ -299,6 +306,8 @@ public sealed partial class ShellViewModel : ObservableObject
         foreach (var dir in dirs)
             dir.IsSizeComputing = true;
 
+        _activeScans++;
+        IsScanning = true;
         try
         {
             foreach (var dir in dirs)
@@ -318,6 +327,8 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             foreach (var dir in dirs)
                 dir.IsSizeComputing = false;
+            if (--_activeScans == 0)
+                IsScanning = false;
         }
     }
 
@@ -331,7 +342,7 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>Cancels in-flight size scans; the cache keeps its previous values.</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(IsScanning))]
     private void CancelScans()
     {
         _scanCts.Cancel();

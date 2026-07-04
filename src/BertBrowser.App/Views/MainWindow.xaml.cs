@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -157,6 +159,66 @@ public partial class MainWindow : Window
         {
             _shell.FileList.SetSort(column);
         }
+    }
+
+    /// <summary>Mirrors the main-panel selection into the folder tree (the item's own
+    /// folder for directories, its parent for files), expanding and scrolling as needed.</summary>
+    private void FileList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (FileListView.SelectedItem is not FileItemViewModel item) return;
+
+        var dir = item.IsDirectory ? item.FullPath : Path.GetDirectoryName(item.FullPath);
+        if (string.IsNullOrEmpty(dir)) return;
+
+        var chain = _shell.Tree.RevealPath(dir);
+        if (chain.Count == 0) return;
+
+        // Containers for freshly expanded nodes only exist after a layout pass.
+        Dispatcher.InvokeAsync(() => ScrollTreeChainIntoView(chain), DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Positions the revealed node roughly 40% down the tree's viewport.</summary>
+    private void ScrollTreeChainIntoView(IReadOnlyList<DirectoryNodeViewModel> chain)
+    {
+        ItemsControl parent = FolderTree;
+        TreeViewItem? container = null;
+        foreach (var node in chain)
+        {
+            parent.UpdateLayout();
+            container = parent.ItemContainerGenerator.ContainerFromItem(node) as TreeViewItem;
+            if (container is null) return;
+            parent = container;
+        }
+        if (container is null) return;
+
+        var scroller = FindDescendant<ScrollViewer>(FolderTree);
+        if (scroller is null)
+        {
+            container.BringIntoView();
+            return;
+        }
+
+        try
+        {
+            var rowTop = container.TransformToAncestor(scroller).Transform(default).Y;
+            var target = scroller.VerticalOffset + rowTop - scroller.ViewportHeight * 0.4;
+            scroller.ScrollToVerticalOffset(Math.Max(0, target));
+        }
+        catch (InvalidOperationException)
+        {
+            container.BringIntoView(); // not connected to the visual tree yet
+        }
+    }
+
+    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match) return match;
+            if (FindDescendant<T>(child) is { } nested) return nested;
+        }
+        return null;
     }
 
     private void FileList_DoubleClick(object sender, MouseButtonEventArgs e)

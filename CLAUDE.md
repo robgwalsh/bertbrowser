@@ -18,6 +18,8 @@ dotnet run --project src/BertBrowser.App   # launch the app (optional arg: start
 
 `Directory.Build.props` sets `TreatWarningsAsErrors` and `Nullable` for all projects — any warning fails the build.
 
+If a build fails with MSB3021/MSB3026 because a running BertBrowser instance locks `bin\Debug`, just kill it (`Get-Process BertBrowser | Stop-Process -Force`) and rebuild — no need to ask or build to a scratch directory.
+
 ## Structure
 
 - `src/BertBrowser.Core` — plain net8.0, no UI dependencies: SQLite persistence, path canonicalization, tag/size services. This is the only project with tests; keep anything testable here rather than in the App.

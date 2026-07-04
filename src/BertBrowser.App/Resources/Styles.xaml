@@ -37,9 +37,8 @@
         <Setter Property="Cursor" Value="Hand"/>
     </Style>
 
-    <!-- Search box: prominent rounded field to the right of the address bar. -->
-    <Style x:Key="SearchBoxBorder" TargetType="Border">
-        <Setter Property="Margin" Value="8,0,0,0"/>
+    <!-- Rounded toolbar field, shared by the address bar and the search box. -->
+    <Style x:Key="FieldBorder" TargetType="Border">
         <Setter Property="Background" Value="White"/>
         <Setter Property="BorderBrush" Value="#BBB"/>
         <Setter Property="BorderThickness" Value="1"/>

@@ -33,6 +33,10 @@ public sealed partial class FileListViewModel : ObservableObject
     [ObservableProperty]
     private string? _errorMessage;
 
+    /// <summary>Shown centered in the file panel when a search finishes with no hits.</summary>
+    [ObservableProperty]
+    private string? _emptyMessage;
+
     [ObservableProperty]
     private SortColumn _sortBy = SortColumn.Name;
 
@@ -55,6 +59,7 @@ public sealed partial class FileListViewModel : ObservableObject
         IsLoading = true;
         IsFlattened = false;
         ErrorMessage = null;
+        EmptyMessage = null;
         try
         {
             var entries = await Task.Run(() => _fileSystem.ListDirectory(path), ct);
@@ -97,6 +102,7 @@ public sealed partial class FileListViewModel : ObservableObject
         IsLoading = true;
         IsFlattened = true;
         ErrorMessage = null;
+        EmptyMessage = null;
         try
         {
             var tagged = await _tagService.QueryTaggedFilesUnderAsync(root, tagIds, mode);
@@ -140,6 +146,7 @@ public sealed partial class FileListViewModel : ObservableObject
         IsLoading = true;
         IsFlattened = true;
         ErrorMessage = null;
+        EmptyMessage = null;
         Items = new ObservableCollection<FileItemViewModel>();
     }
 
@@ -151,7 +158,7 @@ public sealed partial class FileListViewModel : ObservableObject
     }
 
     /// <summary>Replaces the streamed list with the final sorted outcome and hydrates sizes/tags.</summary>
-    public async Task CompleteSearchAsync(SearchOutcome outcome, CancellationToken ct)
+    public async Task CompleteSearchAsync(SearchOutcome outcome, string queryText, CancellationToken ct)
     {
         try
         {
@@ -163,6 +170,7 @@ public sealed partial class FileListViewModel : ObservableObject
             }, ct);
 
             ReplaceItems(items);
+            EmptyMessage = items.Count == 0 ? $"No results for '{queryText}' in this folder" : null;
             await HydrateDirSizesAsync(items, ct);
             await HydrateTagsAsync(items.Where(i => !i.IsDirectory).ToList(), ct);
         }

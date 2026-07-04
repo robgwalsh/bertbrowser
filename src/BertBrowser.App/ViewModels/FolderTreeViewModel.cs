@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
 
 namespace BertBrowser.App.ViewModels;
@@ -49,7 +50,73 @@ public sealed class FolderTreeViewModel
         catch (IOException) { return Array.Empty<string>(); }
     }
 
-    internal void RaiseSelected(string path) => DirectorySelected?.Invoke(path);
+    internal void RaiseSelected(string path)
+    {
+        if (!_suppressSelectionEvents)
+            DirectorySelected?.Invoke(path);
+    }
+
+    private bool _suppressSelectionEvents;
+
+    /// <summary>
+    /// Expands the tree down to <paramref name="path"/> (or its deepest reachable ancestor)
+    /// and selects that node without raising <see cref="DirectorySelected"/>. Returns the
+    /// root-to-node chain so the view can locate the container to scroll to; empty if no
+    /// root covers the path.
+    /// </summary>
+    public IReadOnlyList<DirectoryNodeViewModel> RevealPath(string path)
+    {
+        var targetKey = PathKey.Canonicalize(path);
+
+        // Deepest covering root wins, e.g. Documents over its drive.
+        DirectoryNodeViewModel? root = null;
+        var rootKey = "";
+        foreach (var candidate in Roots)
+        {
+            var key = PathKey.Canonicalize(candidate.FullPath);
+            if ((key == targetKey || PathKey.IsUnder(targetKey, key)) && key.Length > rootKey.Length)
+            {
+                root = candidate;
+                rootKey = key;
+            }
+        }
+        if (root is null) return Array.Empty<DirectoryNodeViewModel>();
+
+        var chain = new List<DirectoryNodeViewModel> { root };
+        var node = root;
+        var nodeKey = rootKey;
+        while (nodeKey != targetKey)
+        {
+            node.IsExpanded = true; // populates children synchronously on first expansion
+
+            DirectoryNodeViewModel? next = null;
+            foreach (var child in node.Children)
+            {
+                if (child.FullPath.Length == 0) continue; // unexpanded-node placeholder
+                var childKey = PathKey.Canonicalize(child.FullPath);
+                if (childKey == targetKey || PathKey.IsUnder(targetKey, childKey))
+                {
+                    next = child;
+                    nodeKey = childKey;
+                    break;
+                }
+            }
+            if (next is null) break; // not in the tree (deleted/hidden) — settle for the deepest ancestor
+            node = next;
+            chain.Add(node);
+        }
+
+        _suppressSelectionEvents = true;
+        try
+        {
+            node.IsSelected = true;
+        }
+        finally
+        {
+            _suppressSelectionEvents = false;
+        }
+        return chain;
+    }
 }
 
 public sealed partial class DirectoryNodeViewModel : ObservableObject

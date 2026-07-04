@@ -26,7 +26,11 @@ rows for temp trees are harmless but persistent).
   (e.g. `2 result(s) for 'report' under … — indexed`) is the best programmatic
   assertion surface.
 - File-list rows are ControlType.**DataItem** (GridView mode), not ListItem; scope
-  the FindAll to the FileListView element or you'll count breadcrumb items.
+  the FindAll to the FileListView element or you'll count breadcrumb items. Row
+  `Name` is just the ViewModel type name — match a row by its descendant Text
+  elements, then `SelectionItemPattern.Select()` it.
+- Folder-tree nodes are ControlType.TreeItem with Name = folder name; check
+  selection via `SelectionItemPattern.Current.IsSelected`.
 - Setting text: `ValuePattern.SetValue` occasionally garbles WPF TextBox content —
   always read the value back and retry until it matches. Real keystrokes
   (`SendKeys` after `SetFocus`) also work but require foreground.
