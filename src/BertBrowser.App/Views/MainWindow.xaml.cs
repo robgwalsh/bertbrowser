@@ -119,6 +119,29 @@ public partial class MainWindow : Window
 
     private void PathBox_LostFocus(object sender, RoutedEventArgs e) => HidePathBox();
 
+    // --- Search box ---
+
+    private void SearchBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            _shell.ClearSearchCommand.Execute(null);
+            FileListView.Focus();
+            e.Handled = true;
+        }
+    }
+
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        if ((e.Key == Key.F || e.Key == Key.E) && Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            SearchBox.Focus();
+            SearchBox.SelectAll();
+            e.Handled = true;
+        }
+        base.OnPreviewKeyDown(e);
+    }
+
     private void HidePathBox()
     {
         PathBox.Visibility = Visibility.Collapsed;

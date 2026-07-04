@@ -54,6 +54,13 @@ public sealed partial class FileItemViewModel : ObservableObject
             : Path.GetExtension(entry.Name) is { Length: > 1 } ext ? ext[1..].ToUpperInvariant() + " file" : "File";
     }
 
+    /// <summary>Search-result mode: a real filesystem entry (file or directory) plus its
+    /// parent path relative to the search root.</summary>
+    public FileItemViewModel(FileEntry entry, string relativePath) : this(entry)
+    {
+        RelativePath = relativePath;
+    }
+
     public FileItemViewModel(string fullPath, string relativePath, IReadOnlyList<Tag> tags)
     {
         Name = Path.GetFileName(fullPath);

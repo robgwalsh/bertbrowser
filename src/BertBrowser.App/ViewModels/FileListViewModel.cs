@@ -134,6 +134,52 @@ public sealed partial class FileListViewModel : ObservableObject
         }
     }
 
+    /// <summary>Search mode: prepares an empty flattened list for streamed hits to append into.</summary>
+    public void BeginSearch()
+    {
+        IsLoading = true;
+        IsFlattened = true;
+        ErrorMessage = null;
+        Items = new ObservableCollection<FileItemViewModel>();
+    }
+
+    /// <summary>Appends one batch of live-scan hits (called on the UI thread via IProgress).</summary>
+    public void AppendSearchHits(IReadOnlyList<SearchHit> hits)
+    {
+        foreach (var hit in hits)
+            Items.Add(CreateSearchItem(hit));
+    }
+
+    /// <summary>Replaces the streamed list with the final sorted outcome and hydrates sizes/tags.</summary>
+    public async Task CompleteSearchAsync(SearchOutcome outcome, CancellationToken ct)
+    {
+        try
+        {
+            var items = await Task.Run(() =>
+            {
+                var vms = outcome.Hits.Select(CreateSearchItem).ToList();
+                SortInPlace(vms);
+                return vms;
+            }, ct);
+
+            ReplaceItems(items);
+            await HydrateDirSizesAsync(items, ct);
+            await HydrateTagsAsync(items.Where(i => !i.IsDirectory).ToList(), ct);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private static FileItemViewModel CreateSearchItem(SearchHit hit) =>
+        new(new FileEntry(hit.Name, hit.DisplayPath, hit.IsDirectory,
+                hit.IsDirectory ? -1 : hit.SizeBytes, hit.ModifiedUtc, default),
+            hit.RelativeDirDisplay);
+
     public void SetSort(SortColumn column)
     {
         if (SortBy == column)

@@ -37,6 +37,35 @@
         <Setter Property="Cursor" Value="Hand"/>
     </Style>
 
+    <!-- Search box: prominent rounded field to the right of the address bar. -->
+    <Style x:Key="SearchBoxBorder" TargetType="Border">
+        <Setter Property="Margin" Value="8,0,0,0"/>
+        <Setter Property="Background" Value="White"/>
+        <Setter Property="BorderBrush" Value="#BBB"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="Height" Value="28"/>
+        <Style.Triggers>
+            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                <Setter Property="BorderBrush" Value="#1C86D1"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- ✕ inside the search box; hidden while the box is empty. -->
+    <Style x:Key="SearchClearButton" TargetType="Button">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Foreground" Value="#666"/>
+        <Setter Property="Padding" Value="6,0"/>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding SearchText}" Value="">
+                <Setter Property="Visibility" Value="Collapsed"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
     <!-- Explorer-style chevron expander for the folder tree. -->
     <Style x:Key="TreeExpanderStyle" TargetType="ToggleButton">
         <Setter Property="Focusable" Value="False"/>

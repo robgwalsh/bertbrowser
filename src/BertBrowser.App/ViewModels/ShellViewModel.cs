@@ -1,7 +1,10 @@
 using System.Diagnostics;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using BertBrowser.Core.Data;
+using BertBrowser.Core.Models;
+using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
 
 namespace BertBrowser.App.ViewModels;
@@ -12,11 +15,13 @@ public sealed partial class ShellViewModel : ObservableObject
 {
     private readonly IDirectorySizeService _sizeService;
     private readonly ITagService _tagService;
+    private readonly ISearchService _searchService;
 
     private readonly Stack<string> _backStack = new();
     private readonly Stack<string> _forwardStack = new();
     private CancellationTokenSource _navigationCts = new();
     private CancellationTokenSource _scanCts = new();
+    private CancellationTokenSource _searchDebounceCts = new();
 
     public FileListViewModel FileList { get; }
     public FolderTreeViewModel Tree { get; }
@@ -28,6 +33,9 @@ public sealed partial class ShellViewModel : ObservableObject
 
     [ObservableProperty]
     private string _statusText = "Ready";
+
+    [ObservableProperty]
+    private string _searchText = "";
 
     public bool CanGoBack => _backStack.Count > 0;
     public bool CanGoForward => _forwardStack.Count > 0;
@@ -57,10 +65,12 @@ public sealed partial class ShellViewModel : ObservableObject
         IFileSystemService fileSystem,
         ITagService tagService,
         IDirectorySizeService sizeService,
+        ISearchService searchService,
         DirSizeRepository dirSizeRepository)
     {
         _sizeService = sizeService;
         _tagService = tagService;
+        _searchService = searchService;
 
         FileList = new FileListViewModel(fileSystem, tagService, dirSizeRepository);
         Tree = new FolderTreeViewModel(fileSystem);
@@ -68,6 +78,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
         Tree.DirectorySelected += path => _ = NavigateToAsync(path);
         TagFilter.FilterChanged += () => _ = RefreshViewAsync();
+        _searchService.IndexRefreshed += OnIndexRefreshed;
     }
 
     /// <summary>Overrides the initial directory (e.g. from the command line).</summary>
@@ -123,6 +134,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
     private async Task SetPathAndLoadAsync(string path)
     {
+        ClearSearchState(); // navigating exits search mode, like Explorer
         CurrentPath = path;
         BackCommand.NotifyCanExecuteChanged();
         ForwardCommand.NotifyCanExecuteChanged();
@@ -140,7 +152,11 @@ public sealed partial class ShellViewModel : ObservableObject
 
         try
         {
-            if (TagFilter.IsActive)
+            if (SearchQuery.Parse(SearchText) is not null)
+            {
+                await RunSearchAsync(ct);
+            }
+            else if (TagFilter.IsActive)
             {
                 await FileList.LoadFlattenedAsync(
                     CurrentPath, TagFilter.CheckedTagIds,
@@ -160,6 +176,92 @@ public sealed partial class ShellViewModel : ObservableObject
         catch (OperationCanceledException)
         {
         }
+    }
+
+    // --- Search ---
+
+    private bool _suppressSearchRefresh;
+
+    partial void OnSearchTextChanged(string value)
+    {
+        _searchDebounceCts.Cancel();
+        if (_suppressSearchRefresh) return;
+        _searchDebounceCts = new CancellationTokenSource();
+        _ = DebouncedSearchAsync(_searchDebounceCts.Token);
+    }
+
+    private async Task DebouncedSearchAsync(CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(200, ct);
+            await RefreshViewAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // superseded by further typing or navigation
+        }
+    }
+
+    private async Task RunSearchAsync(CancellationToken ct)
+    {
+        var queryText = SearchText;
+        FileList.BeginSearch();
+        StatusText = $"Searching for '{queryText}'…";
+
+        // Progress is constructed on the UI thread, so batches marshal back to it.
+        var progress = new Progress<IReadOnlyList<SearchHit>>(batch =>
+        {
+            if (ct.IsCancellationRequested) return;
+            FileList.AppendSearchHits(batch);
+            StatusText = $"{FileList.Items.Count} result(s) so far for '{queryText}'…";
+        });
+
+        var outcome = await _searchService.SearchAsync(CurrentPath, queryText, ct, progress);
+        if (outcome is null || ct.IsCancellationRequested) return;
+
+        await FileList.CompleteSearchAsync(outcome, ct);
+        if (ct.IsCancellationRequested) return;
+
+        var suffix = outcome.Source switch
+        {
+            SearchResultSource.LiveScan => " — indexing in background…",
+            SearchResultSource.StaleIndex => " — refreshing index…",
+            _ => " — indexed",
+        };
+        var truncated = outcome.Truncated ? " (showing first 1,000)" : "";
+        StatusText = $"{outcome.Hits.Count} result(s) for '{queryText}' under {CurrentPath}{truncated}{suffix}";
+    }
+
+    [RelayCommand]
+    private async Task ClearSearchAsync()
+    {
+        ClearSearchState();
+        await RefreshViewAsync();
+    }
+
+    /// <summary>Resets the search box without triggering the debounced refresh.</summary>
+    private void ClearSearchState()
+    {
+        _searchDebounceCts.Cancel();
+        if (SearchText.Length > 0)
+        {
+            _suppressSearchRefresh = true;
+            SearchText = "";
+            _suppressSearchRefresh = false;
+        }
+    }
+
+    /// <summary>A background (re)crawl finished; re-run the search against the fresh index.</summary>
+    private void OnIndexRefreshed(string rootKey)
+    {
+        if (CurrentPath.Length == 0 || SearchQuery.Parse(SearchText) is null) return;
+
+        var currentKey = PathKey.Canonicalize(CurrentPath);
+        if (!currentKey.Equals(rootKey, StringComparison.Ordinal) && !PathKey.IsUnder(currentKey, rootKey))
+            return;
+
+        Application.Current?.Dispatcher.InvokeAsync(() => _ = RefreshViewAsync());
     }
 
     [RelayCommand]

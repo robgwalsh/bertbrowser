@@ -79,28 +79,67 @@
                             Click="ManageTags_Click"/>
                 </StackPanel>
 
-                <!-- Breadcrumb / editable path -->
+                <!-- Breadcrumb / editable path + search -->
                 <Grid Margin="6,0">
-                    <ItemsControl x:Name="Breadcrumb" ItemsSource="{Binding BreadcrumbSegments}"
-                                  VerticalAlignment="Center"
-                                  MouseLeftButtonUp="Breadcrumb_EmptyClick" Background="Transparent">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <StackPanel Orientation="Horizontal"/>
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel Orientation="Horizontal">
-                                    <Button Style="{StaticResource BreadcrumbButton}" Content="{Binding Name}"
-                                            Click="BreadcrumbSegment_Click" Tag="{Binding FullPath}"/>
-                                    <TextBlock Text="›" VerticalAlignment="Center" Foreground="Gray"/>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                    <TextBox x:Name="PathBox" Visibility="Collapsed" VerticalAlignment="Center"
-                             KeyDown="PathBox_KeyDown" LostFocus="PathBox_LostFocus"/>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="300"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Grid>
+                        <ItemsControl x:Name="Breadcrumb" ItemsSource="{Binding BreadcrumbSegments}"
+                                      VerticalAlignment="Center"
+                                      MouseLeftButtonUp="Breadcrumb_EmptyClick" Background="Transparent">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Style="{StaticResource BreadcrumbButton}" Content="{Binding Name}"
+                                                Click="BreadcrumbSegment_Click" Tag="{Binding FullPath}"/>
+                                        <TextBlock Text="›" VerticalAlignment="Center" Foreground="Gray"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBox x:Name="PathBox" Visibility="Collapsed" VerticalAlignment="Center"
+                                 KeyDown="PathBox_KeyDown" LostFocus="PathBox_LostFocus"/>
+                    </Grid>
+
+                    <!-- Local search that doesn't suck: files & folders under the current directory. -->
+                    <Border Grid.Column="1" Style="{StaticResource SearchBoxBorder}">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Left" Text="🔍" Margin="8,0,4,0"
+                                       VerticalAlignment="Center" Foreground="#666"/>
+                            <Button DockPanel.Dock="Right" Content="✕" ToolTip="Clear search (Esc)"
+                                    Command="{Binding ClearSearchCommand}"
+                                    Style="{StaticResource SearchClearButton}"/>
+                            <Grid>
+                                <TextBox x:Name="SearchBox" BorderThickness="0" Background="Transparent"
+                                         VerticalContentAlignment="Center"
+                                         AutomationProperties.Name="Search this folder"
+                                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                         KeyDown="SearchBox_KeyDown"
+                                         ToolTip="Search files and folders under this directory (Ctrl+F)"/>
+                                <TextBlock Text="Search this folder" Foreground="Gray" Margin="4,0,0,0"
+                                           VerticalAlignment="Center" IsHitTestVisible="False">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding SearchText}" Value="">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
+                        </DockPanel>
+                    </Border>
                 </Grid>
             </DockPanel>
 

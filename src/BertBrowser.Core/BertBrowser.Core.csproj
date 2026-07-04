@@ -12,4 +12,8 @@
     <EmbeddedResource Include="Data\Migrations\*.sql" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="BertBrowser.Core.Tests" />
+  </ItemGroup>
+
 </Project>

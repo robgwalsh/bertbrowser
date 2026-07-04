@@ -25,9 +25,13 @@ public partial class App : Application
         services.AddSingleton(new Db(dbPath));
         services.AddSingleton<TagRepository>();
         services.AddSingleton<DirSizeRepository>();
+        services.AddSingleton<FsIndexRepository>();
         services.AddSingleton<IFileSystemService, FileSystemService>();
         services.AddSingleton<IDirectorySizeService, DirectorySizeService>();
         services.AddSingleton<ITagService, TagService>();
+        services.AddSingleton<IndexCrawler>();
+        services.AddSingleton<IIndexWatcherService, IndexWatcherService>();
+        services.AddSingleton<ISearchService, SearchService>();
         services.AddSingleton<ShellViewModel>();
         services.AddSingleton<MainWindow>();
         Services = services.BuildServiceProvider();
@@ -44,5 +48,12 @@ public partial class App : Application
 
         var window = Services.GetRequiredService<MainWindow>();
         window.Show();
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        // Disposes IDisposable singletons (index watchers, search service).
+        (Services as IDisposable)?.Dispose();
+        base.OnExit(e);
     }
 }
