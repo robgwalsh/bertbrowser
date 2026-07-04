@@ -40,7 +40,7 @@ Any new table keyed by path must store `PathKey.Canonicalize()` output and query
 
 ### Database
 
-`Db` (Core/Data) is the connection factory and migration runner. Connections open in WAL mode with foreign keys on. Migrations are embedded resources at `Data/Migrations/NNN_*.sql`, applied in order and tracked via `PRAGMA user_version`. To change the schema, add a new numbered `.sql` file — the csproj glob picks it up; never edit an existing migration. The live DB is `%LOCALAPPDATA%\BertBrowser\bertbrowser.db` (settings: `settings.json` in the same folder).
+`Db` (Core/Data) is the connection factory and migration runner. Connections open in WAL mode with foreign keys on. Migrations are embedded resources at `Data/Migrations/NNN_*.sql`, applied in order and tracked via `PRAGMA user_version`. To change the schema, add a new numbered `.sql` file — the csproj glob picks it up; never edit an existing migration. The live DB is `%USERPROFILE%\.bertbrowser\bertbrowser.db` (settings: `settings.json` in the same folder; paths come from `AppPaths` in the App project). Data must never live in `%LOCALAPPDATA%\BertBrowser` — that is the Velopack install directory, deleted on uninstall.
 
 Repositories (`TagRepository`, `DirSizeRepository`) are synchronous ADO.NET; `TagService` is the async facade that keeps ViewModels off the SQLite calls. Follow that layering for new data access.
 

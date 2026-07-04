@@ -36,8 +36,8 @@ Note that warnings are treated as errors across the solution (`Directory.Build.p
 
 | What | Where |
 |---|---|
-| Tag + size-cache database | `%LOCALAPPDATA%\BertBrowser\bertbrowser.db` |
-| Window/session settings | `%LOCALAPPDATA%\BertBrowser\settings.json` |
+| Tag + size-cache database | `%USERPROFILE%\.bertbrowser\bertbrowser.db` |
+| Window/session settings | `%USERPROFILE%\.bertbrowser\settings.json` |
 
 Delete the folder to reset the app completely.
 

@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Derive version from tag
+        id: ver
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        run: dotnet test bertbrowser.sln -c Release
+
+      - name: Publish
+        run: >
+          dotnet publish src/BertBrowser.App/BertBrowser.App.csproj -c Release
+          -r win-x64 --self-contained true
+          -p:Version=${{ steps.ver.outputs.version }} -o publish
+
+      - name: Pack and upload Velopack release
+        shell: pwsh
+        run: |
+          dotnet tool install -g vpk
+          # Fetch the previous release (if any) so vpk can build a delta package.
+          # Fails on the very first release when the repo has none - that's fine.
+          vpk download github --repoUrl https://github.com/${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
+          if ($LASTEXITCODE -ne 0) { Write-Host "No previous release found; building full package only." }
+          vpk pack --packId BertBrowser --packVersion ${{ steps.ver.outputs.version }} `
+            --packDir publish --mainExe BertBrowser.exe --packTitle BertBrowser `
+            --packAuthors "Rob Walsh" --icon src/BertBrowser.App/Assets/app.ico
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          vpk upload github --repoUrl https://github.com/${{ github.repository }} `
+            --token ${{ secrets.GITHUB_TOKEN }} --publish `
+            --releaseName "BertBrowser ${{ steps.ver.outputs.version }}" `
+            --tag ${{ github.ref_name }}
+          if ($LASTEXITCODE -ne 0) { exit 1 }

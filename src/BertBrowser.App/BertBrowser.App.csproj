@@ -6,10 +6,20 @@
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>BertBrowser</AssemblyName>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <StartupObject>BertBrowser.App.App</StartupObject>
   </PropertyGroup>
+
+  <!-- App.xaml is a Page (not ApplicationDefinition) so our explicit Main runs
+       VelopackApp.Build().Run() before any WPF startup. -->
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <PackageReference Include="Velopack" Version="1.2.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
   </ItemGroup>
 

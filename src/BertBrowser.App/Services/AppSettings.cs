@@ -11,9 +11,7 @@ public sealed class AppSettings
     public bool WindowMaximized { get; set; }
     public string? LastPath { get; set; }
 
-    private static string FilePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "BertBrowser", "settings.json");
+    private static string FilePath => AppPaths.SettingsPath;
 
     public static AppSettings Load()
     {

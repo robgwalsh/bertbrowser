@@ -14,7 +14,7 @@ src\BertBrowser.App\bin\Debug\net8.0-windows\BertBrowser.exe "<start-directory>"
 ```
 
 Point the start-directory argument at a throwaway tree under `%TEMP%` — the app
-writes to the real DB at `%LOCALAPPDATA%\BertBrowser\bertbrowser.db` (search index
+writes to the real DB at `%USERPROFILE%\.bertbrowser\bertbrowser.db` (search index
 rows for temp trees are harmless but persistent).
 
 ## Driving the UI (System.Windows.Automation from PowerShell)
@@ -42,7 +42,7 @@ rows for temp trees are harmless but persistent).
   path: UIA `ValuePattern.SetValue` (no focus needed) + `PrintWindow(hwnd, hdc, 2)`
   (PW_RENDERFULLCONTENT — captures occluded WPF windows correctly).
 - Kill the process instead of closing the window if you don't want the app to save
-  `LastPath`/window bounds into `%LOCALAPPDATA%\BertBrowser\settings.json`.
+  `LastPath`/window bounds into `%USERPROFILE%\.bertbrowser\settings.json`.
 
 ## Flows worth driving
 

@@ -5,6 +5,7 @@ using BertBrowser.App.Views;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Velopack;
 
 namespace BertBrowser.App;
 
@@ -12,17 +13,27 @@ public partial class App : Application
 {
     public static IServiceProvider Services { get; private set; } = null!;
 
+    [STAThread]
+    private static void Main(string[] args)
+    {
+        // Must run before any WPF code: handles Velopack install/update/uninstall
+        // hooks and exits the process when invoked as one.
+        VelopackApp.Build().Run();
+
+        var app = new App();
+        app.InitializeComponent();
+        app.Run();
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
-        var dbPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "BertBrowser", "bertbrowser.db");
+        AppPaths.MigrateLegacyData();
 
         var services = new ServiceCollection();
         services.AddSingleton(AppSettings.Load());
-        services.AddSingleton(new Db(dbPath));
+        services.AddSingleton(new Db(AppPaths.DbPath));
         services.AddSingleton<TagRepository>();
         services.AddSingleton<DirSizeRepository>();
         services.AddSingleton<FsIndexRepository>();
@@ -32,6 +43,7 @@ public partial class App : Application
         services.AddSingleton<IndexCrawler>();
         services.AddSingleton<IIndexWatcherService, IndexWatcherService>();
         services.AddSingleton<ISearchService, SearchService>();
+        services.AddSingleton<IUpdateService, UpdateService>();
         services.AddSingleton<ShellViewModel>();
         services.AddSingleton<MainWindow>();
         Services = services.BuildServiceProvider();
@@ -48,6 +60,8 @@ public partial class App : Application
 
         var window = Services.GetRequiredService<MainWindow>();
         window.Show();
+
+        _ = Task.Run(() => Services.GetRequiredService<IUpdateService>().CheckAndStageUpdateAsync());
     }
 
     protected override void OnExit(ExitEventArgs e)
