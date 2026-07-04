@@ -11,7 +11,19 @@ An offline Windows file browser built for my personal preferences. The overall d
 
 ## What it does not do
 
-- **Connect To the Internet**
+- **Connect To the Internet** — except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates
+
+## Install
+
+No .NET or other prerequisites — the installer is self-contained (Windows 10/11, x64). It installs per-user (no admin prompt), and the app keeps itself up to date automatically.
+
+**winget:**
+
+```powershell
+winget install RobWalsh.BertBrowser
+```
+
+**Or directly:** grab `BertBrowser-win-Setup.exe` from the [latest release](https://github.com/robgwalsh/bertbrowser/releases/latest) and run it. There's also a `BertBrowser-win-Portable.zip` if you'd rather not install anything.
 
 ## Requirements
 
