@@ -11,7 +11,7 @@ An offline Windows file browser built for my personal preferences. The overall d
 
 ## What it does not do
 
-- **Connect To the Internet** — except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates
+- **Connect to the Internet** — except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates
 
 ## Install
 
