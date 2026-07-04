@@ -1,6 +1,6 @@
 # bertbrowser
 
-A Windows file browser built for my personal preferences. The overall design intent is **simplicity over customization**.
+An offline Windows file browser built for my personal preferences. The overall design intent is **simplicity over customization**.
 
 ## What it does
 
