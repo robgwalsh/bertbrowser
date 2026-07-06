@@ -1,13 +1,17 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using BertBrowser.App.Interop;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
 
 namespace BertBrowser.App.ViewModels;
 
+/// <summary>The sidebar's "Drives" section: every ready drive (fixed, removable/USB,
+/// network, optical) as an expandable tree, plus any connected portable devices
+/// (phones/cameras) as leaf rows that open in Explorer.</summary>
 public sealed class FolderTreeViewModel
 {
-    public ObservableCollection<DirectoryNodeViewModel> Roots { get; } = new();
+    public ObservableCollection<ISidebarNode> Roots { get; } = new();
 
     public event Action<string>? DirectorySelected;
 
@@ -17,18 +21,6 @@ public sealed class FolderTreeViewModel
     {
         _fileSystem = fileSystem;
 
-        foreach (var special in new[]
-                 {
-                     Environment.SpecialFolder.Desktop,
-                     Environment.SpecialFolder.MyDocuments,
-                     Environment.SpecialFolder.UserProfile,
-                 })
-        {
-            var path = Environment.GetFolderPath(special);
-            if (path.Length > 0 && Directory.Exists(path))
-                Roots.Add(new DirectoryNodeViewModel(this, path, Path.GetFileName(path) is { Length: > 0 } n ? n : path));
-        }
-
         foreach (var drive in _fileSystem.GetDrives())
         {
             var label = string.IsNullOrEmpty(drive.VolumeLabel)
@@ -36,6 +28,15 @@ public sealed class FolderTreeViewModel
                 : $"{drive.VolumeLabel} ({drive.Name.TrimEnd('\\')})";
             Roots.Add(new DirectoryNodeViewModel(this, drive.RootDirectory.FullName, label));
         }
+    }
+
+    /// <summary>Enumerates MTP/PTP portable devices off the UI thread and appends them
+    /// below the drives. Must be awaited on the UI thread so the nodes are added there.</summary>
+    public async Task LoadDevicesAsync()
+    {
+        var devices = await Task.Run(PortableDevices.Enumerate);
+        foreach (var device in devices)
+            Roots.Add(new PortableDeviceNodeViewModel(device));
     }
 
     internal bool HasSubdirectories(string path) => _fileSystem.HasSubdirectories(path);
@@ -68,15 +69,16 @@ public sealed class FolderTreeViewModel
     {
         var targetKey = PathKey.Canonicalize(path);
 
-        // Deepest covering root wins, e.g. Documents over its drive.
+        // Deepest covering root wins (only directory roots can cover a path — devices can't).
         DirectoryNodeViewModel? root = null;
         var rootKey = "";
         foreach (var candidate in Roots)
         {
-            var key = PathKey.Canonicalize(candidate.FullPath);
+            if (candidate is not DirectoryNodeViewModel dir) continue;
+            var key = PathKey.Canonicalize(dir.FullPath);
             if ((key == targetKey || PathKey.IsUnder(targetKey, key)) && key.Length > rootKey.Length)
             {
-                root = candidate;
+                root = dir;
                 rootKey = key;
             }
         }
@@ -119,7 +121,7 @@ public sealed class FolderTreeViewModel
     }
 }
 
-public sealed partial class DirectoryNodeViewModel : ObservableObject
+public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarNode
 {
     private static readonly DirectoryNodeViewModel Placeholder = new();
 

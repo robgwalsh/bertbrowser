@@ -28,6 +28,11 @@ public sealed partial class ShellViewModel : ObservableObject
     public FileListViewModel FileList { get; }
     public FolderTreeViewModel Tree { get; }
     public TagFilterViewModel TagFilter { get; }
+    public BookmarksViewModel Bookmarks { get; }
+
+    /// <summary>Raised after navigation so the view can select and scroll to a specific
+    /// file (e.g. when a bookmarked file is opened).</summary>
+    public event Action<string>? RevealFileRequested;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(BreadcrumbSegments), nameof(CanGoUp))]
@@ -76,6 +81,7 @@ public sealed partial class ShellViewModel : ObservableObject
         IDirectorySizeService sizeService,
         ISearchService searchService,
         IFileTransferService fileTransfer,
+        IBookmarkService bookmarkService,
         DirSizeRepository dirSizeRepository)
     {
         _sizeService = sizeService;
@@ -86,6 +92,7 @@ public sealed partial class ShellViewModel : ObservableObject
         FileList = new FileListViewModel(fileSystem, tagService, dirSizeRepository);
         Tree = new FolderTreeViewModel(fileSystem);
         TagFilter = new TagFilterViewModel(tagService);
+        Bookmarks = new BookmarksViewModel(bookmarkService);
 
         Tree.DirectorySelected += path => _ = NavigateToAsync(path);
         TagFilter.FilterChanged += () => _ = RefreshViewAsync();
@@ -97,8 +104,63 @@ public sealed partial class ShellViewModel : ObservableObject
 
     public async Task InitializeAsync()
     {
+        await Bookmarks.LoadAsync();
+
         var start = StartPath ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         await NavigateToAsync(start);
+
+        // Portable devices can be slow to enumerate; append them after the first view loads.
+        await Tree.LoadDevicesAsync();
+    }
+
+    // --- Bookmarks ---
+
+    /// <summary>Opens a bookmark: navigate into a folder, or reveal a bookmarked file in its
+    /// containing folder.</summary>
+    public async Task OpenBookmarkAsync(BookmarkItemViewModel? bookmark)
+    {
+        if (bookmark is null) return;
+
+        if (bookmark.IsDirectory)
+        {
+            if (!Directory.Exists(bookmark.FullPath))
+            {
+                StatusText = $"Folder not found: {bookmark.FullPath}";
+                return;
+            }
+            await NavigateToAsync(bookmark.FullPath);
+            return;
+        }
+
+        var parent = Path.GetDirectoryName(bookmark.FullPath);
+        if (parent is null) return;
+        await NavigateToAsync(parent);
+        RevealFileRequested?.Invoke(bookmark.FullPath);
+    }
+
+    public async Task RemoveBookmarkAsync(BookmarkItemViewModel? bookmark)
+    {
+        if (bookmark is null) return;
+        await Bookmarks.RemoveAsync(bookmark.FullPath);
+    }
+
+    /// <summary>Adds or removes bookmarks for the given entries. When any are not yet
+    /// bookmarked, bookmarks them all; otherwise removes them all.</summary>
+    public async Task ToggleBookmarksAsync(IReadOnlyList<(string FullPath, bool IsDirectory)> entries)
+    {
+        if (entries.Count == 0) return;
+
+        var anyMissing = entries.Any(e => !Bookmarks.IsBookmarked(e.FullPath));
+        foreach (var (fullPath, isDirectory) in entries)
+        {
+            if (anyMissing)
+                await Bookmarks.AddAsync(fullPath, isDirectory);
+            else
+                await Bookmarks.RemoveAsync(fullPath);
+        }
+        StatusText = anyMissing
+            ? $"Bookmarked {entries.Count} item(s)"
+            : $"Removed {entries.Count} bookmark(s)";
     }
 
     [RelayCommand]

@@ -26,6 +26,7 @@ public partial class MainWindow : Window
         ApplyWindowSettings();
 
         _shell.FileList.PropertyChanged += FileList_PropertyChanged;
+        _shell.RevealFileRequested += OnRevealFileRequested;
         UpdateRelPathColumn();
 
         Loaded += async (_, _) => await _shell.InitializeAsync();
@@ -389,6 +390,11 @@ public partial class MainWindow : Window
         CopyMenuItem.IsEnabled = CutMenuItem.IsEnabled = selection.Count > 0;
         PasteMenuItem.IsEnabled = BertBrowser.App.Services.FileClipboard.HasFiles();
 
+        BookmarkMenuItem.IsEnabled = selection.Count > 0;
+        // "Remove bookmark" only when every selected item is already bookmarked.
+        var allBookmarked = selection.Count > 0 && selection.All(i => _shell.Bookmarks.IsBookmarked(i.FullPath));
+        BookmarkMenuItem.Header = allBookmarked ? "Remove bookmark" : "Bookmark";
+
         RebuildCustomCommandItems(menu, CustomCommandsSeparator,
             selection.Select(i => (i.FullPath, i.IsDirectory)).ToList());
     }
@@ -443,6 +449,51 @@ public partial class MainWindow : Window
             _shell.RemoveMissingCommand.Execute(item);
     }
 
+    // --- Bookmarks ---
+
+    private void ContextBookmark_Click(object sender, RoutedEventArgs e)
+    {
+        var entries = SelectedFileItems().Select(i => (i.FullPath, i.IsDirectory)).ToList();
+        _ = _shell.ToggleBookmarksAsync(entries);
+    }
+
+    private void BookmarkRow_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is BookmarkItemViewModel item)
+            _ = _shell.OpenBookmarkAsync(item);
+    }
+
+    private void BookmarkOpen_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is BookmarkItemViewModel item)
+            _ = _shell.OpenBookmarkAsync(item);
+    }
+
+    private void BookmarkRemove_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is BookmarkItemViewModel item)
+            _ = _shell.RemoveBookmarkAsync(item);
+    }
+
+    /// <summary>Selects and scrolls to a freshly-loaded file (e.g. after opening a bookmarked file).</summary>
+    private void OnRevealFileRequested(string fullPath)
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            foreach (var obj in FileListView.Items)
+            {
+                if (obj is FileItemViewModel vm &&
+                    string.Equals(vm.FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    FileListView.SelectedItem = vm;
+                    FileListView.ScrollIntoView(vm);
+                    (FileListView.ItemContainerGenerator.ContainerFromItem(vm) as ListViewItem)?.Focus();
+                    break;
+                }
+            }
+        }, DispatcherPriority.Loaded);
+    }
+
     // --- Properties dialog ---
 
     private DirectoryNodeViewModel? _treeContextNode;
@@ -458,13 +509,29 @@ public partial class MainWindow : Window
         if (d is TreeViewItem { DataContext: DirectoryNodeViewModel { FullPath.Length: > 0 } node })
         {
             _treeContextNode = node;
+            TreeBookmarkMenuItem.Header =
+                _shell.Bookmarks.IsBookmarked(node.FullPath) ? "Remove bookmark" : "Bookmark";
             if (FolderTree.ContextMenu is { } menu)
                 RebuildCustomCommandItems(menu, TreeCustomCommandsSeparator, [(node.FullPath, true)]);
         }
         else
         {
-            e.Handled = true; // empty area or unexpanded placeholder: no menu
+            e.Handled = true; // portable device, empty area, or unexpanded placeholder: no menu
         }
+    }
+
+    private void TreeBookmark_Click(object sender, RoutedEventArgs e)
+    {
+        if (_treeContextNode is { } node)
+            _ = _shell.ToggleBookmarksAsync([(node.FullPath, true)]);
+    }
+
+    /// <summary>Double-clicking a portable device opens it in Explorer (its MTP contents
+    /// aren't a filesystem path the in-app list can read).</summary>
+    private void FolderTree_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (FolderTree.SelectedItem is PortableDeviceNodeViewModel device)
+            BertBrowser.App.Interop.PortableDevices.OpenInExplorer(device.Device);
     }
 
     private void TreeProperties_Click(object sender, RoutedEventArgs e)

@@ -40,6 +40,48 @@ public static class ShellIcons
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DestroyIcon(IntPtr hIcon);
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct SHSTOCKICONINFO
+    {
+        public uint cbSize;
+        public IntPtr hIcon;
+        public int iSysImageIndex;
+        public int iIcon;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szPath;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SHGetStockIconInfo(uint siid, uint uFlags, ref SHSTOCKICONINFO psii);
+
+    private const uint SHGSI_ICON = 0x100;
+    private const uint SIID_DESKTOPPC = 15; // a generic computer/device icon
+
+    private static ImageSource? _computerIcon;
+
+    /// <summary>A generic "device" icon for portable devices (phones/cameras) that have
+    /// no filesystem path to resolve a real icon from. Cached and frozen.</summary>
+    public static ImageSource? GetComputerIcon()
+    {
+        if (_computerIcon is not null) return _computerIcon;
+
+        var info = new SHSTOCKICONINFO { cbSize = (uint)Marshal.SizeOf<SHSTOCKICONINFO>() };
+        if (SHGetStockIconInfo(SIID_DESKTOPPC, SHGSI_ICON | SHGFI_SMALLICON, ref info) != 0 ||
+            info.hIcon == IntPtr.Zero)
+            return null;
+
+        try
+        {
+            var source = Imaging.CreateBitmapSourceFromHIcon(
+                info.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+            source.Freeze();
+            return _computerIcon = source;
+        }
+        finally
+        {
+            DestroyIcon(info.hIcon);
+        }
+    }
+
     public static ImageSource? GetIcon(string path, bool isDirectory)
     {
         // Directories share one icon; files are cached per extension except types

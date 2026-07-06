@@ -37,10 +37,12 @@ public partial class App : Application
         services.AddSingleton<TagRepository>();
         services.AddSingleton<DirSizeRepository>();
         services.AddSingleton<FsIndexRepository>();
+        services.AddSingleton<BookmarkRepository>();
         services.AddSingleton<IFileSystemService, FileSystemService>();
         services.AddSingleton<IDirectorySizeService, DirectorySizeService>();
         services.AddSingleton<IFileTransferService, FileTransferService>();
         services.AddSingleton<ITagService, TagService>();
+        services.AddSingleton<IBookmarkService, BookmarkService>();
         services.AddSingleton<IndexCrawler>();
         services.AddSingleton<IIndexWatcherService, IndexWatcherService>();
         services.AddSingleton<ISearchService, SearchService>();

@@ -116,6 +116,14 @@
         </Setter>
     </Style>
 
+    <!-- Section header above each sidebar group (Bookmarks, Drives & devices). -->
+    <Style x:Key="SidebarHeader" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="#888"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Padding" Value="10,8,10,4"/>
+    </Style>
+
     <!--
       Full-width folder tree rows: indentation is applied inside the row (from the
       node's Depth), so hover/selection highlight and click target span the whole

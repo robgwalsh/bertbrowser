@@ -208,12 +208,67 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Folder tree -->
-            <TreeView x:Name="FolderTree" Grid.Column="0" ItemsSource="{Binding Tree.Roots}" BorderThickness="0"
-                      Background="White" Padding="0,4"
+            <!-- Left sidebar: bookmarks (top, only as tall as needed) + drives/devices (fills rest) -->
+            <Grid Grid.Column="0" Background="White">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- Bookmarks -->
+                <DockPanel Grid.Row="0">
+                    <TextBlock DockPanel.Dock="Top" Text="BOOKMARKS" Style="{StaticResource SidebarHeader}"/>
+                    <TextBlock DockPanel.Dock="Top" Margin="10,0,10,8" Foreground="#AAA" FontSize="11"
+                               TextWrapping="Wrap" Text="Right-click a file or folder to bookmark it."
+                               Visibility="{Binding Bookmarks.HasBookmarks, Converter={StaticResource InverseBoolToVisibility}}"/>
+                    <ScrollViewer MaxHeight="260" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Visibility="{Binding Bookmarks.HasBookmarks, Converter={StaticResource BoolToVisibility}}">
+                        <ItemsControl ItemsSource="{Binding Bookmarks.Items}" Margin="0,0,0,6">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border x:Name="BmRow" Background="Transparent" Padding="10,4"
+                                            MouseLeftButtonUp="BookmarkRow_MouseUp" ToolTip="{Binding FullPath}">
+                                        <Border.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Open" Click="BookmarkOpen_Click">
+                                                    <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8E5;"/></MenuItem.Icon>
+                                                </MenuItem>
+                                                <Separator/>
+                                                <MenuItem Header="Remove bookmark" Click="BookmarkRemove_Click">
+                                                    <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE74D;"/></MenuItem.Icon>
+                                                </MenuItem>
+                                            </ContextMenu>
+                                        </Border.ContextMenu>
+                                        <DockPanel>
+                                            <Image DockPanel.Dock="Left" Source="{Binding Icon}"
+                                                   Width="16" Height="16" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </DockPanel>
+                                    </Border>
+                                    <DataTemplate.Triggers>
+                                        <Trigger SourceName="BmRow" Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="BmRow" Property="Background" Value="{StaticResource RowHoverBrush}"/>
+                                        </Trigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+
+                <!-- Drives & devices -->
+                <DockPanel Grid.Row="1">
+                    <Border DockPanel.Dock="Top" BorderBrush="#EEE" BorderThickness="0,1,0,0">
+                        <TextBlock Text="DRIVES &amp; DEVICES" Style="{StaticResource SidebarHeader}"/>
+                    </Border>
+            <TreeView x:Name="FolderTree" ItemsSource="{Binding Tree.Roots}" BorderThickness="0"
+                      Background="White" Padding="0,2"
                       ItemContainerStyle="{StaticResource FolderTreeItemStyle}"
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                       VirtualizingPanel.IsVirtualizing="False"
+                      MouseDoubleClick="FolderTree_DoubleClick"
                       ContextMenuOpening="FolderTree_ContextMenuOpening">
                 <TreeView.ContextMenu>
                     <ContextMenu>
@@ -222,6 +277,10 @@
                         </MenuItem>
                         <MenuItem Header="Open in VS Code" Click="TreeOpenVSCode_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE943;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <Separator/>
+                        <MenuItem x:Name="TreeBookmarkMenuItem" Header="Bookmark" Click="TreeBookmark_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE734;"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator x:Name="TreeCustomCommandsSeparator" Visibility="Collapsed"/>
                         <Separator/>
@@ -241,6 +300,8 @@
                     </HierarchicalDataTemplate>
                 </TreeView.ItemTemplate>
             </TreeView>
+                </DockPanel>
+            </Grid>
 
             <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="#EEE"/>
 
@@ -287,6 +348,9 @@
                             </MenuItem>
                             <MenuItem Header="Compute size" Click="ContextComputeSize_Click">
                                 <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE1D0;"/></MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem x:Name="BookmarkMenuItem" Header="Bookmark" Click="ContextBookmark_Click">
+                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE734;"/></MenuItem.Icon>
                             </MenuItem>
                             <Separator x:Name="CustomCommandsSeparator" Visibility="Collapsed"/>
                             <Separator/>
