@@ -10,6 +10,7 @@ public sealed class AppSettings
     public double? WindowHeight { get; set; }
     public bool WindowMaximized { get; set; }
     public string? LastPath { get; set; }
+    public List<CustomCommandDefinition> CustomCommands { get; set; } = new();
 
     private static string FilePath => AppPaths.SettingsPath;
 

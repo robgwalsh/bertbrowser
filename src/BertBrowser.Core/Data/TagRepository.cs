@@ -154,6 +154,52 @@ public sealed class TagRepository
         tx.Commit();
     }
 
+    /// <summary>
+    /// Repoints file rows after a move so tags follow the entry: the exact path (a moved
+    /// file, or the directory row itself) plus — when a directory moved — every key under
+    /// the old prefix. Rare conflicts with an existing row at the target key are skipped
+    /// (OR IGNORE) rather than clobbering that row's tags.
+    /// </summary>
+    public void UpdateEntryPaths(string oldPath, string newPath)
+    {
+        var oldKey = PathKey.Canonicalize(oldPath);
+        var newKey = PathKey.Canonicalize(newPath);
+        if (oldKey == newKey) return;
+
+        using var conn = _db.Open();
+        using var tx = conn.BeginTransaction();
+
+        using var exact = conn.CreateCommand();
+        exact.Transaction = tx;
+        exact.CommandText =
+            "UPDATE OR IGNORE file SET path_key = @newKey, display_path = @newDisplay WHERE path_key = @oldKey;";
+        exact.Parameters.AddWithValue("@newKey", newKey);
+        exact.Parameters.AddWithValue("@newDisplay", PathKey.NormalizeDisplay(newPath));
+        exact.Parameters.AddWithValue("@oldKey", oldKey);
+        exact.ExecuteNonQuery();
+
+        // Descendants: rewrite the prefix. Canonical and display forms have equal
+        // lengths (canonical is the display form uppercased), so one offset serves both.
+        var (lo, hi) = PathKey.PrefixBounds(oldKey);
+        using var subtree = conn.CreateCommand();
+        subtree.Transaction = tx;
+        subtree.CommandText =
+            """
+            UPDATE OR IGNORE file
+            SET path_key = @newKey || substr(path_key, @prefixLen + 1),
+                display_path = @newDisplay || substr(display_path, @prefixLen + 1)
+            WHERE path_key >= @lo AND path_key < @hi;
+            """;
+        subtree.Parameters.AddWithValue("@newKey", newKey);
+        subtree.Parameters.AddWithValue("@newDisplay", PathKey.NormalizeDisplay(newPath));
+        subtree.Parameters.AddWithValue("@prefixLen", oldKey.Length);
+        subtree.Parameters.AddWithValue("@lo", lo);
+        subtree.Parameters.AddWithValue("@hi", hi);
+        subtree.ExecuteNonQuery();
+
+        tx.Commit();
+    }
+
     /// <summary>Removes a file row (and all its tag links) entirely, e.g. "Remove missing".</summary>
     public void RemoveFile(string path)
     {

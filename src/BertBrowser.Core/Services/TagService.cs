@@ -15,6 +15,7 @@ public interface ITagService
     Task AssignTagsAsync(IReadOnlyCollection<string> paths, IReadOnlyCollection<long> tagIds);
     Task UnassignTagsAsync(IReadOnlyCollection<string> paths, IReadOnlyCollection<long> tagIds);
     Task RemoveFileAsync(string path);
+    Task MoveEntryAsync(string oldPath, string newPath);
 
     Task<IReadOnlyDictionary<string, IReadOnlyList<Tag>>> GetTagsForPathsAsync(IReadOnlyCollection<string> paths);
     Task<IReadOnlyList<TaggedFile>> QueryTaggedFilesUnderAsync(string directory, IReadOnlyCollection<long> tagIds, TagMatchMode mode);
@@ -54,6 +55,9 @@ public sealed class TagService : ITagService
 
     public Task RemoveFileAsync(string path) =>
         Task.Run(() => _repository.RemoveFile(path));
+
+    public Task MoveEntryAsync(string oldPath, string newPath) =>
+        Task.Run(() => _repository.UpdateEntryPaths(oldPath, newPath));
 
     public Task<IReadOnlyDictionary<string, IReadOnlyList<Tag>>> GetTagsForPathsAsync(IReadOnlyCollection<string> paths) =>
         Task.Run(() => _repository.GetTagsForPaths(paths));

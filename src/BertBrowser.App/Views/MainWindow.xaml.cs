@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using BertBrowser.App.ViewModels;
+using BertBrowser.Core.Data;
 using BertBrowser.Core.Services;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -70,6 +71,16 @@ public partial class MainWindow : Window
     {
         if (e.PropertyName == nameof(FileListViewModel.IsFlattened))
             UpdateRelPathColumn();
+        else if (e.PropertyName == nameof(FileListViewModel.Items))
+            FocusFileList();
+    }
+
+    /// <summary>Gives the file list keyboard focus after it reloads so arrow keys and type-ahead
+    /// work without a click first — unless the user is typing in the search or path box.</summary>
+    private void FocusFileList()
+    {
+        if (SearchBox.IsKeyboardFocusWithin || PathBox.IsKeyboardFocusWithin) return;
+        Dispatcher.InvokeAsync(() => FileListView.Focus(), DispatcherPriority.Input);
     }
 
     /// <summary>The Relative path column only makes sense in flattened tag-filter mode.</summary>
@@ -84,6 +95,13 @@ public partial class MainWindow : Window
         var window = new TagManagerWindow(vm) { Owner = this };
         window.ShowDialog();
         await _shell.OnTagsChangedAsync();
+    }
+
+    private void Settings_Click(object sender, RoutedEventArgs e)
+    {
+        var vm = new SettingsViewModel(_settings);
+        new SettingsWindow(vm) { Owner = this }.ShowDialog();
+        // No refresh needed: context menus rebuild their custom items on every open.
     }
 
     // --- Breadcrumb ---
@@ -139,6 +157,26 @@ public partial class MainWindow : Window
         {
             SearchBox.Focus();
             SearchBox.SelectAll();
+            e.Handled = true;
+        }
+        else if (FileListView.IsKeyboardFocusWithin && Keyboard.Modifiers == ModifierKeys.Control &&
+                 e.Key is Key.C or Key.X or Key.V)
+        {
+            switch (e.Key)
+            {
+                case Key.C: _shell.CopySelectionCommand.Execute(SelectedFileItems()); break;
+                case Key.X: _shell.CutSelectionCommand.Execute(SelectedFileItems()); break;
+                case Key.V: _shell.PasteCommand.Execute(null); break;
+            }
+            e.Handled = true;
+        }
+        // Alt combinations arrive as Key.System with the real key in SystemKey.
+        else if (e.Key == Key.System && e.SystemKey == Key.Enter &&
+                 Keyboard.Modifiers == ModifierKeys.Alt &&
+                 FileListView.IsKeyboardFocusWithin &&
+                 FileListView.SelectedItem is FileItemViewModel selected)
+        {
+            ShowProperties(selected.FullPath, selected.IsDirectory);
             e.Handled = true;
         }
         base.OnPreviewKeyDown(e);
@@ -227,10 +265,86 @@ public partial class MainWindow : Window
             _shell.OpenItemCommand.Execute(item);
     }
 
+    // --- Type-ahead selection ---
+
+    /// <summary>How long typed characters accumulate into one prefix before the buffer resets.</summary>
+    private const long TypeAheadTimeoutMs = 700;
+    private string _typeAheadPrefix = "";
+    private long _typeAheadTick;
+
+    /// <summary>Explorer-style type-to-select: a single letter jumps to (and cycles through) items
+    /// starting with it; letters typed in quick succession match a longer name prefix.</summary>
+    private void FileList_TextInput(object sender, TextCompositionEventArgs e)
+    {
+        if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) != 0) return;
+        var text = e.Text;
+        if (text.Length != 1 || char.IsControl(text[0])) return;
+
+        var now = Environment.TickCount64;
+        if (now - _typeAheadTick > TypeAheadTimeoutMs)
+            _typeAheadPrefix = "";
+        _typeAheadTick = now;
+
+        var selected = FileListView.SelectedIndex;
+
+        // Extending the current prefix: keep the selection if it still matches, else search forward
+        // from it. Skipped for the first keystroke and when the longer prefix matches nothing.
+        if (_typeAheadPrefix.Length > 0 && SelectByPrefix(_typeAheadPrefix + text, selected < 0 ? 0 : selected))
+        {
+            _typeAheadPrefix += text;
+            e.Handled = true;
+            return;
+        }
+
+        // Fresh letter (or a broken prefix): treat this keystroke as a single-letter jump that
+        // advances past the current item, so repeating the same letter cycles through matches.
+        if (SelectByPrefix(text, selected + 1))
+        {
+            _typeAheadPrefix = text;
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>Selects the first item whose name starts with <paramref name="prefix"/>, scanning
+    /// forward from <paramref name="start"/> and wrapping around. Returns false if none match.</summary>
+    private bool SelectByPrefix(string prefix, int start)
+    {
+        var items = FileListView.Items;
+        var count = items.Count;
+        if (count == 0) return false;
+        if (start < 0) start = 0;
+
+        for (var i = 0; i < count; i++)
+        {
+            var idx = (start + i) % count;
+            if (items[idx] is FileItemViewModel vm &&
+                vm.Name.StartsWith(prefix, StringComparison.CurrentCultureIgnoreCase))
+            {
+                FileListView.SelectedIndex = idx;
+                FileListView.ScrollIntoView(items[idx]);
+                (FileListView.ItemContainerGenerator.ContainerFromIndex(idx) as ListViewItem)?.Focus();
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void ContextOpen_Click(object sender, RoutedEventArgs e)
     {
         if (FileListView.SelectedItem is FileItemViewModel item)
             _shell.OpenItemCommand.Execute(item);
+    }
+
+    private void ContextOpenTerminal_Click(object sender, RoutedEventArgs e)
+    {
+        if (FileListView.SelectedItem is FileItemViewModel item)
+            _shell.OpenInTerminal(item.FullPath, item.IsDirectory);
+    }
+
+    private void ContextOpenVSCode_Click(object sender, RoutedEventArgs e)
+    {
+        if (FileListView.SelectedItem is FileItemViewModel item)
+            _shell.OpenInVSCode(item.FullPath, item.IsDirectory);
     }
 
     private async void ContextTags_Click(object sender, RoutedEventArgs e)
@@ -251,6 +365,72 @@ public partial class MainWindow : Window
             await _shell.OnTagsChangedAsync();
     }
 
+    // --- Clipboard + custom commands ---
+
+    private List<FileItemViewModel> SelectedFileItems() =>
+        FileListView.SelectedItems.Cast<FileItemViewModel>().ToList();
+
+    private void ContextCopy_Click(object sender, RoutedEventArgs e) =>
+        _shell.CopySelectionCommand.Execute(SelectedFileItems());
+
+    private void ContextCut_Click(object sender, RoutedEventArgs e) =>
+        _shell.CutSelectionCommand.Execute(SelectedFileItems());
+
+    private void ContextPaste_Click(object sender, RoutedEventArgs e) =>
+        _shell.PasteCommand.Execute(null);
+
+    /// <summary>Enables clipboard items for the current state and rebuilds the
+    /// user-defined command entries for the selection.</summary>
+    private void FileList_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (FileListView.ContextMenu is not { } menu) return;
+
+        var selection = SelectedFileItems();
+        CopyMenuItem.IsEnabled = CutMenuItem.IsEnabled = selection.Count > 0;
+        PasteMenuItem.IsEnabled = BertBrowser.App.Services.FileClipboard.HasFiles();
+
+        RebuildCustomCommandItems(menu, CustomCommandsSeparator,
+            selection.Select(i => (i.FullPath, i.IsDirectory)).ToList());
+    }
+
+    /// <summary>Replaces the custom-command section of a context menu (everything tagged
+    /// with a CustomCommandDefinition) with the entries applicable to the given targets.</summary>
+    private void RebuildCustomCommandItems(
+        ContextMenu menu, Separator anchor, IReadOnlyList<(string FullPath, bool IsDirectory)> targets)
+    {
+        for (var i = menu.Items.Count - 1; i >= 0; i--)
+        {
+            if (menu.Items[i] is MenuItem { Tag: BertBrowser.App.Services.CustomCommandDefinition })
+                menu.Items.RemoveAt(i);
+        }
+
+        var applicable = _settings.CustomCommands
+            .Where(c => targets.Any(t => t.IsDirectory ? c.AppliesToDirectories : c.AppliesToFiles))
+            .ToList();
+        anchor.Visibility = applicable.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        var insertAt = menu.Items.IndexOf(anchor) + 1;
+        foreach (var definition in applicable)
+        {
+            // "__" so underscores in names render instead of becoming access keys.
+            var item = new MenuItem
+            {
+                Header = definition.Name.Replace("_", "__"),
+                Tag = definition,
+                Icon = new TextBlock
+                {
+                    // E8A7 = OpenInNewWindow: reads as "launch externally".
+                    Text = "",
+                    FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+                    FontSize = 16,
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x44, 0x44, 0x44)),
+                },
+            };
+            item.Click += (_, _) => _shell.RunCustomCommand(definition, targets);
+            menu.Items.Insert(insertAt++, item);
+        }
+    }
+
     private void ContextComputeSize_Click(object sender, RoutedEventArgs e)
     {
         var items = FileListView.SelectedItems.Cast<FileItemViewModel>().ToList();
@@ -261,5 +441,64 @@ public partial class MainWindow : Window
     {
         if (FileListView.SelectedItem is FileItemViewModel item)
             _shell.RemoveMissingCommand.Execute(item);
+    }
+
+    // --- Properties dialog ---
+
+    private DirectoryNodeViewModel? _treeContextNode;
+
+    /// <summary>Right-click doesn't select in a TreeView, and selecting programmatically
+    /// would navigate the shell — so capture the node under the cursor instead.</summary>
+    private void FolderTree_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        _treeContextNode = null;
+        var d = e.OriginalSource as DependencyObject;
+        while (d is not null and not TreeViewItem)
+            d = VisualTreeHelper.GetParent(d);
+        if (d is TreeViewItem { DataContext: DirectoryNodeViewModel { FullPath.Length: > 0 } node })
+        {
+            _treeContextNode = node;
+            if (FolderTree.ContextMenu is { } menu)
+                RebuildCustomCommandItems(menu, TreeCustomCommandsSeparator, [(node.FullPath, true)]);
+        }
+        else
+        {
+            e.Handled = true; // empty area or unexpanded placeholder: no menu
+        }
+    }
+
+    private void TreeProperties_Click(object sender, RoutedEventArgs e)
+    {
+        if (_treeContextNode is { } node)
+            ShowProperties(node.FullPath, isDirectory: true);
+    }
+
+    private void TreeOpenTerminal_Click(object sender, RoutedEventArgs e)
+    {
+        if (_treeContextNode is { } node)
+            _shell.OpenInTerminal(node.FullPath, isDirectory: true);
+    }
+
+    private void TreeOpenVSCode_Click(object sender, RoutedEventArgs e)
+    {
+        if (_treeContextNode is { } node)
+            _shell.OpenInVSCode(node.FullPath, isDirectory: true);
+    }
+
+    private void ContextProperties_Click(object sender, RoutedEventArgs e)
+    {
+        if (FileListView.SelectedItem is FileItemViewModel item)
+            ShowProperties(item.FullPath, item.IsDirectory);
+    }
+
+    private void ShowProperties(string fullPath, bool isDirectory)
+    {
+        var vm = new PropertiesViewModel(fullPath, isDirectory,
+            App.Services.GetRequiredService<ITagService>(),
+            App.Services.GetRequiredService<IDirectorySizeService>(),
+            App.Services.GetRequiredService<DirSizeRepository>());
+        new PropertiesDialog(vm) { Owner = this }.ShowDialog();
+        if (vm.AttributesChanged)
+            _shell.RefreshCommand.Execute(null); // hidden-bit toggles can add/remove rows
     }
 }

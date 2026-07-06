@@ -39,6 +39,7 @@ public partial class App : Application
         services.AddSingleton<FsIndexRepository>();
         services.AddSingleton<IFileSystemService, FileSystemService>();
         services.AddSingleton<IDirectorySizeService, DirectorySizeService>();
+        services.AddSingleton<IFileTransferService, FileTransferService>();
         services.AddSingleton<ITagService, TagService>();
         services.AddSingleton<IndexCrawler>();
         services.AddSingleton<IIndexWatcherService, IndexWatcherService>();

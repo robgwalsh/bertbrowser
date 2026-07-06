@@ -10,6 +10,14 @@
     <conv:TagColorConverter x:Key="TagColor"/>
     <conv:DepthToIndentConverter x:Key="DepthToIndent" IndentSize="16"/>
 
+    <!--
+      Windows-native icon glyphs. Segoe Fluent Icons is the Windows 11 shell font;
+      Segoe MDL2 Assets is the Windows 10 fallback (most codepoints are shared). Used
+      via glyph codepoints (see the Segoe Fluent Icons glyph list) on toolbar buttons
+      and menu items so icons inherit Foreground and stay crisp at any DPI.
+    -->
+    <FontFamily x:Key="SymbolFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+
     <!-- Shared row colors so the folder tree and the file list highlight identically. -->
     <SolidColorBrush x:Key="RowHoverBrush" Color="#E5F3FB"/>
     <SolidColorBrush x:Key="RowSelectedBrush" Color="#CBE8F6"/>
@@ -28,6 +36,23 @@
         <Setter Property="Padding" Value="8,4"/>
         <Setter Property="Margin" Value="2,0"/>
         <Setter Property="MinWidth" Value="28"/>
+    </Style>
+
+    <!-- Icon glyph inside a toolbar button; inherits the button's Foreground. -->
+    <Style x:Key="ToolbarIcon" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource SymbolFont}"/>
+        <Setter Property="FontSize" Value="15"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+    </Style>
+
+    <!-- Icon glyph for a MenuItem.Icon slot. -->
+    <Style x:Key="MenuIcon" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource SymbolFont}"/>
+        <Setter Property="FontSize" Value="16"/>
+        <Setter Property="Foreground" Value="#444"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
     </Style>
 
     <Style x:Key="BreadcrumbButton" TargetType="Button">

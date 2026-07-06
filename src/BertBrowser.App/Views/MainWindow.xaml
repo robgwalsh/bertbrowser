@@ -58,25 +58,55 @@
 
             <DockPanel Margin="6,4">
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                    <Button Style="{StaticResource ToolbarButton}" Content="◀" ToolTip="Back (Alt+Left)"
-                            Command="{Binding BackCommand}"/>
-                    <Button Style="{StaticResource ToolbarButton}" Content="▶" ToolTip="Forward (Alt+Right)"
-                            Command="{Binding ForwardCommand}"/>
-                    <Button Style="{StaticResource ToolbarButton}" Content="▲" ToolTip="Up (Alt+Up)"
-                            Command="{Binding UpCommand}"/>
-                    <Button Style="{StaticResource ToolbarButton}" Content="⟳" ToolTip="Refresh (F5)"
-                            Command="{Binding RefreshCommand}"/>
+                    <Button Style="{StaticResource ToolbarButton}" ToolTip="Back (Alt+Left)"
+                            Command="{Binding BackCommand}">
+                        <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE72B;"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolbarButton}" ToolTip="Forward (Alt+Right)"
+                            Command="{Binding ForwardCommand}">
+                        <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE72A;"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolbarButton}" ToolTip="Up (Alt+Up)"
+                            Command="{Binding UpCommand}">
+                        <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE74A;"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolbarButton}" ToolTip="Refresh (F5)"
+                            Command="{Binding RefreshCommand}">
+                        <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE72C;"/>
+                    </Button>
                     <Separator Margin="4,2"/>
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
-                    <Button Style="{StaticResource ToolbarButton}" Content="Σ Sizes here"
+                    <Button Style="{StaticResource ToolbarButton}"
                             ToolTip="Compute content sizes of all folders in this directory"
-                            Command="{Binding ComputeSizesHereCommand}"/>
-                    <Button Style="{StaticResource ToolbarButton}" Content="✕ Cancel scan"
-                            Command="{Binding CancelScansCommand}"/>
-                    <Button Style="{StaticResource ToolbarButton}" Content="🏷 Manage tags"
-                            Click="ManageTags_Click"/>
+                            Command="{Binding ComputeSizesHereCommand}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE1D0;" Margin="0,0,6,0"/>
+                            <TextBlock Text="Sizes here" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource ToolbarButton}"
+                            Command="{Binding CancelScansCommand}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE711;" Margin="0,0,6,0"/>
+                            <TextBlock Text="Cancel scan" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource ToolbarButton}" Click="ManageTags_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE8EC;" Margin="0,0,6,0"/>
+                            <TextBlock Text="Manage tags" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource ToolbarButton}"
+                            ToolTip="Custom context menu commands"
+                            Click="Settings_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE713;" Margin="0,0,6,0"/>
+                            <TextBlock Text="Settings" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
 
                 <!-- Breadcrumb / editable path + search -->
@@ -116,11 +146,14 @@
                     <!-- Local search that doesn't suck: files & folders under the current directory. -->
                     <Border Grid.Column="1" Style="{StaticResource FieldBorder}" Margin="8,0,0,0">
                         <DockPanel>
-                            <TextBlock DockPanel.Dock="Left" Text="🔍" Margin="8,0,4,0"
+                            <TextBlock DockPanel.Dock="Left" FontFamily="{StaticResource SymbolFont}"
+                                       Text="&#xE721;" FontSize="13" Margin="8,0,6,0"
                                        VerticalAlignment="Center" Foreground="#666"/>
-                            <Button DockPanel.Dock="Right" Content="✕" ToolTip="Clear search (Esc)"
+                            <Button DockPanel.Dock="Right" ToolTip="Clear search (Esc)"
                                     Command="{Binding ClearSearchCommand}"
-                                    Style="{StaticResource SearchClearButton}"/>
+                                    Style="{StaticResource SearchClearButton}">
+                                <TextBlock FontFamily="{StaticResource SymbolFont}" Text="&#xE711;" FontSize="12"/>
+                            </Button>
                             <Grid>
                                 <TextBox x:Name="SearchBox" BorderThickness="0" Background="Transparent"
                                          VerticalContentAlignment="Center"
@@ -180,7 +213,23 @@
                       Background="White" Padding="0,4"
                       ItemContainerStyle="{StaticResource FolderTreeItemStyle}"
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                      VirtualizingPanel.IsVirtualizing="False">
+                      VirtualizingPanel.IsVirtualizing="False"
+                      ContextMenuOpening="FolderTree_ContextMenuOpening">
+                <TreeView.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Open in Terminal" Click="TreeOpenTerminal_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE756;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="Open in VS Code" Click="TreeOpenVSCode_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE943;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <Separator x:Name="TreeCustomCommandsSeparator" Visibility="Collapsed"/>
+                        <Separator/>
+                        <MenuItem Header="Properties…" Click="TreeProperties_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE946;"/></MenuItem.Icon>
+                        </MenuItem>
+                    </ContextMenu>
+                </TreeView.ContextMenu>
                 <TreeView.ItemTemplate>
                     <HierarchicalDataTemplate ItemsSource="{Binding Children}">
                         <DockPanel Background="Transparent">
@@ -199,23 +248,55 @@
             <ListView x:Name="FileListView" Grid.Column="2"
                           ItemsSource="{Binding FileList.Items}"
                           BorderThickness="0"
+                          IsTextSearchEnabled="False"
                           VirtualizingPanel.IsVirtualizing="True"
                           VirtualizingPanel.VirtualizationMode="Recycling"
                           ScrollViewer.IsDeferredScrollingEnabled="False"
                           GridViewColumnHeader.Click="FileList_HeaderClick"
                           MouseDoubleClick="FileList_DoubleClick"
-                          SelectionChanged="FileList_SelectionChanged">
+                          SelectionChanged="FileList_SelectionChanged"
+                          TextInput="FileList_TextInput"
+                          ContextMenuOpening="FileList_ContextMenuOpening">
                     <ListView.ItemContainerStyle>
                         <StaticResource ResourceKey="FileRowStyle"/>
                     </ListView.ItemContainerStyle>
                     <ListView.ContextMenu>
                         <ContextMenu>
-                            <MenuItem Header="Open" Click="ContextOpen_Click"/>
+                            <MenuItem Header="Open" Click="ContextOpen_Click">
+                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8E5;"/></MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="Open in Terminal" Click="ContextOpenTerminal_Click">
+                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE756;"/></MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="Open in VS Code" Click="ContextOpenVSCode_Click">
+                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE943;"/></MenuItem.Icon>
+                            </MenuItem>
                             <Separator/>
-                            <MenuItem Header="Tags…" Click="ContextTags_Click"/>
-                            <MenuItem Header="Compute size" Click="ContextComputeSize_Click"/>
+                            <MenuItem x:Name="CutMenuItem" Header="Cut" InputGestureText="Ctrl+X" Click="ContextCut_Click">
+                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C6;"/></MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem x:Name="CopyMenuItem" Header="Copy" InputGestureText="Ctrl+C" Click="ContextCopy_Click">
+                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C8;"/></MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem x:Name="PasteMenuItem" Header="Paste" InputGestureText="Ctrl+V" Click="ContextPaste_Click">
+                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE77F;"/></MenuItem.Icon>
+                            </MenuItem>
                             <Separator/>
-                            <MenuItem Header="Remove missing entry" Click="ContextRemoveMissing_Click"/>
+                            <MenuItem Header="Tags…" Click="ContextTags_Click">
+                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8EC;"/></MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="Compute size" Click="ContextComputeSize_Click">
+                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE1D0;"/></MenuItem.Icon>
+                            </MenuItem>
+                            <Separator x:Name="CustomCommandsSeparator" Visibility="Collapsed"/>
+                            <Separator/>
+                            <MenuItem Header="Remove missing entry" Click="ContextRemoveMissing_Click">
+                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE74D;"/></MenuItem.Icon>
+                            </MenuItem>
+                            <Separator/>
+                            <MenuItem Header="Properties…" InputGestureText="Alt+Enter" Click="ContextProperties_Click">
+                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE946;"/></MenuItem.Icon>
+                            </MenuItem>
                         </ContextMenu>
                     </ListView.ContextMenu>
                     <ListView.View>
