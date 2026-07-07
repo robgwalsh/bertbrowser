@@ -10,4 +10,5 @@ public sealed record SearchHit(
     string Name,
     bool IsDirectory,
     long SizeBytes,
-    DateTime ModifiedUtc);
+    DateTime ModifiedUtc,
+    bool Hidden = false);

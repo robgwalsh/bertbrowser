@@ -77,6 +77,28 @@ public sealed class IndexWatcherApplyTests : IDisposable
     }
 
     [Fact]
+    public void CreatedFile_HiddenStateIsRelativeToRoot()
+    {
+        // The test root lives under %TEMP% (inside the hidden %AppData% folder), so a naive
+        // walk-to-drive-root would wrongly flag everything hidden. Effective-hidden must be
+        // measured from the indexed root, matching a full crawl's seed.
+        var visible = Path.Combine(_rootDir, "plain.txt");
+        File.WriteAllBytes(visible, new byte[1]);
+        var secret = Path.Combine(_rootDir, "secret.txt");
+        File.WriteAllBytes(secret, new byte[1]);
+        File.SetAttributes(secret, File.GetAttributes(secret) | FileAttributes.Hidden);
+
+        Apply(WatcherChangeTypes.Created, visible);
+        Apply(WatcherChangeTypes.Created, secret);
+
+        // Hidden excluded: the plain file survives, the hidden one does not.
+        Assert.Single(_repo.Search(_rootDir, Q("plain"), 100, includeHidden: false).Hits);
+        Assert.Empty(_repo.Search(_rootDir, Q("secret"), 100, includeHidden: false).Hits);
+        // The hidden file is still indexed (flagged) for when hidden is shown.
+        Assert.True(Assert.Single(_repo.Search(_rootDir, Q("secret"), 100).Hits).Hidden);
+    }
+
+    [Fact]
     public void DeletedEntry_RemovesSubtree()
     {
         // Deletion applies to the index only — the entry is already gone from disk.

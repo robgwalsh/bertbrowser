@@ -16,6 +16,63 @@
         <KeyBinding Key="F5" Command="{Binding RefreshCommand}"/>
     </Window.InputBindings>
 
+    <Window.Resources>
+        <!-- Thumbnail (tile) view: a wrap of square previews with the name beneath. The tile
+             and image size track FileList.ThumbnailSize so the footer slider resizes them live. -->
+        <ItemsPanelTemplate x:Key="ThumbPanel">
+            <WrapPanel Orientation="Horizontal"/>
+        </ItemsPanelTemplate>
+
+        <DataTemplate x:Key="ThumbTileTemplate">
+            <StackPanel Margin="6,6,6,2"
+                        Width="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}">
+                <Image Source="{Binding Thumbnail}" Opacity="{Binding IconOpacity}"
+                       Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       Width="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}"
+                       Height="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}"/>
+                <TextBlock Text="{Binding Name}" TextWrapping="Wrap" TextAlignment="Center"
+                           Margin="0,4,0,0" MaxHeight="32" TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+        </DataTemplate>
+
+        <Style x:Key="ThumbItemStyle" TargetType="ListViewItem">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListViewItem">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="4" Margin="2"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedBrush}"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsSelected" Value="True"/>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedHoverBrush}"/>
+                            </MultiTrigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsSelected" Value="True"/>
+                                    <Condition Property="Selector.IsSelectionActive" Value="False"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedInactiveBrush}"/>
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
     <DockPanel>
         <!-- Header: toolbar, tag filter, error banner -->
         <Border DockPanel.Dock="Top" BorderBrush="#DDD" BorderThickness="0,0,0,1">
@@ -99,13 +156,15 @@
                             <TextBlock Text="Manage tags" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
+                    <Separator Margin="4,2"/>
                     <Button Style="{StaticResource ToolbarButton}"
-                            ToolTip="Custom context menu commands"
+                            ToolTip="Scan progress" Click="ScanProgress_Click">
+                        <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE9D9;"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolbarButton}"
+                            ToolTip="Settings — custom context menu commands"
                             Click="Settings_Click">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE713;" Margin="0,0,6,0"/>
-                            <TextBlock Text="Settings" VerticalAlignment="Center"/>
-                        </StackPanel>
+                        <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE713;"/>
                     </Button>
                 </StackPanel>
 
@@ -196,8 +255,36 @@
 
         <!-- Status bar -->
         <StatusBar DockPanel.Dock="Bottom">
-            <StatusBarItem>
+            <StatusBar.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <DockPanel HorizontalAlignment="Stretch" LastChildFill="False"/>
+                </ItemsPanelTemplate>
+            </StatusBar.ItemsPanel>
+            <StatusBarItem DockPanel.Dock="Left">
                 <TextBlock Text="{Binding StatusText}"/>
+            </StatusBarItem>
+            <!-- Thumbnail size: min = details list, dragging right grows thumbnails. -->
+            <StatusBarItem DockPanel.Dock="Right">
+                <StackPanel Orientation="Horizontal" ToolTip="Thumbnail size — drag left for the details list">
+                    <TextBlock Style="{StaticResource ToolbarIcon}" FontSize="13" Text="&#xE8FD;"
+                               Margin="0,0,6,0" Foreground="#666" VerticalAlignment="Center"/>
+                    <Slider x:Name="ThumbSlider" Width="130" Minimum="0" Maximum="1"
+                            VerticalAlignment="Center"
+                            Value="{Binding FileList.ThumbnailScale, Mode=TwoWay}"
+                            AutomationProperties.Name="Thumbnail size"/>
+                </StackPanel>
+            </StatusBarItem>
+            <!-- Live scan progress; click to open the scan-progress dialog. -->
+            <StatusBarItem DockPanel.Dock="Right"
+                           Visibility="{Binding IsScanning, Converter={StaticResource BoolToVisibility}}">
+                <Button Style="{StaticResource BreadcrumbButton}" Click="ScanProgress_Click"
+                        ToolTip="Show all scan progress">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource ToolbarIcon}" FontSize="13" Text="&#xE9D9;"
+                                   Margin="0,0,6,0" Foreground="#1C86D1"/>
+                        <TextBlock Text="{Binding ScanSummary}" VerticalAlignment="Center" Foreground="#1C86D1"/>
+                    </StackPanel>
+                </Button>
             </StatusBarItem>
         </StatusBar>
 
@@ -208,16 +295,18 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Left sidebar: bookmarks (top, only as tall as needed) + drives/devices (fills rest) -->
+            <!-- Left sidebar: drives/devices (top, fills rest) + bookmarks (below, only as tall as needed) -->
             <Grid Grid.Column="0" Background="White">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <!-- Bookmarks -->
-                <DockPanel Grid.Row="0">
-                    <TextBlock DockPanel.Dock="Top" Text="BOOKMARKS" Style="{StaticResource SidebarHeader}"/>
+                <!-- Bookmarks (below the drive list; sized to content) -->
+                <DockPanel Grid.Row="1">
+                    <Border DockPanel.Dock="Top" BorderBrush="#EEE" BorderThickness="0,1,0,0">
+                        <TextBlock Text="BOOKMARKS" Style="{StaticResource SidebarHeader}"/>
+                    </Border>
                     <TextBlock DockPanel.Dock="Top" Margin="10,0,10,8" Foreground="#AAA" FontSize="11"
                                TextWrapping="Wrap" Text="Right-click a file or folder to bookmark it."
                                Visibility="{Binding Bookmarks.HasBookmarks, Converter={StaticResource InverseBoolToVisibility}}"/>
@@ -258,11 +347,9 @@
                     </ScrollViewer>
                 </DockPanel>
 
-                <!-- Drives & devices -->
-                <DockPanel Grid.Row="1">
-                    <Border DockPanel.Dock="Top" BorderBrush="#EEE" BorderThickness="0,1,0,0">
-                        <TextBlock Text="DRIVES &amp; DEVICES" Style="{StaticResource SidebarHeader}"/>
-                    </Border>
+                <!-- Drives & devices (fills the sidebar above the bookmarks) -->
+                <DockPanel Grid.Row="0">
+                    <TextBlock DockPanel.Dock="Top" Text="DRIVES &amp; DEVICES" Style="{StaticResource SidebarHeader}"/>
             <TreeView x:Name="FolderTree" ItemsSource="{Binding Tree.Roots}" BorderThickness="0"
                       Background="White" Padding="0,2"
                       ItemContainerStyle="{StaticResource FolderTreeItemStyle}"
@@ -364,13 +451,14 @@
                         </ContextMenu>
                     </ListView.ContextMenu>
                     <ListView.View>
-                        <GridView>
+                        <GridView x:Name="DetailsView">
                             <GridViewColumn Width="320" x:Name="NameColumn">
                                 <GridViewColumnHeader Content="Name" Tag="Name"/>
                                 <GridViewColumn.CellTemplate>
                                     <DataTemplate>
                                         <StackPanel Orientation="Horizontal">
-                                            <Image Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,6,0"/>
+                                            <Image Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,6,0"
+                                                   Opacity="{Binding IconOpacity}"/>
                                             <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
                                         </StackPanel>
                                     </DataTemplate>

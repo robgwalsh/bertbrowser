@@ -10,6 +10,8 @@ namespace BertBrowser.App.ViewModels;
 /// it in Explorer.</summary>
 public sealed partial class PortableDeviceNodeViewModel : ObservableObject, ISidebarNode
 {
+    private readonly FolderTreeViewModel _tree;
+
     public PortableDevice Device { get; }
 
     public string Name => Device.Name;
@@ -29,5 +31,16 @@ public sealed partial class PortableDeviceNodeViewModel : ObservableObject, ISid
     [ObservableProperty]
     private bool _isSelected;
 
-    public PortableDeviceNodeViewModel(PortableDevice device) => Device = device;
+    partial void OnIsSelectedChanged(bool value)
+    {
+        // A device is a leaf (nothing to expand), but selecting it still makes it the active
+        // accordion item, so collapse any open drive above it.
+        if (value) _tree.CollapseOtherRoots(this);
+    }
+
+    public PortableDeviceNodeViewModel(FolderTreeViewModel tree, PortableDevice device)
+    {
+        _tree = tree;
+        Device = device;
+    }
 }

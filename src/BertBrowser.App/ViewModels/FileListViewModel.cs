@@ -43,6 +43,32 @@ public sealed partial class FileListViewModel : ObservableObject
     [ObservableProperty]
     private bool _sortDescending;
 
+    // Thumbnail zoom. The footer slider drives ThumbnailScale (0..1). 0 keeps the details
+    // list; anything above switches to thumbnail tiles whose pixel size ramps from
+    // MinThumbnail to MaxThumbnail. A small dead-zone just above 0 snaps to the minimum size
+    // so the user doesn't have to land on an exact pixel to get the smallest thumbnails.
+    private const double MinThumbnail = 64;
+    private const double MaxThumbnail = 256;
+    private const double DeadZone = 0.05;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ThumbnailSize), nameof(IsThumbnailView))]
+    private double _thumbnailScale;
+
+    /// <summary>Effective tile size in pixels (0 = details list).</summary>
+    public double ThumbnailSize
+    {
+        get
+        {
+            if (ThumbnailScale <= 0) return 0;
+            if (ThumbnailScale < DeadZone) return MinThumbnail;
+            var t = (ThumbnailScale - DeadZone) / (1 - DeadZone);
+            return MinThumbnail + t * (MaxThumbnail - MinThumbnail);
+        }
+    }
+
+    public bool IsThumbnailView => ThumbnailSize > 0;
+
     [ObservableProperty]
     private ObservableCollection<FileItemViewModel> _items = new();
 
@@ -54,7 +80,7 @@ public sealed partial class FileListViewModel : ObservableObject
     }
 
     /// <summary>Normal browsing: direct children of <paramref name="path"/>.</summary>
-    public async Task LoadDirectoryAsync(string path, CancellationToken ct)
+    public async Task LoadDirectoryAsync(string path, bool includeHidden, CancellationToken ct)
     {
         IsLoading = true;
         IsFlattened = false;
@@ -67,7 +93,10 @@ public sealed partial class FileListViewModel : ObservableObject
 
             var items = await Task.Run(() =>
             {
-                var vms = entries.Select(e => new FileItemViewModel(e)).ToList();
+                var vms = entries
+                    .Where(e => includeHidden || !e.Attributes.HasFlag(FileAttributes.Hidden))
+                    .Select(e => new FileItemViewModel(e))
+                    .ToList();
                 SortInPlace(vms);
                 return vms;
             }, ct);
@@ -97,7 +126,7 @@ public sealed partial class FileListViewModel : ObservableObject
     /// matching the filter. Entirely DB-driven.
     /// </summary>
     public async Task LoadFlattenedAsync(
-        string root, IReadOnlyCollection<long> tagIds, TagMatchMode mode, CancellationToken ct)
+        string root, IReadOnlyCollection<long> tagIds, TagMatchMode mode, bool includeHidden, CancellationToken ct)
     {
         IsLoading = true;
         IsFlattened = true;
@@ -123,7 +152,8 @@ public sealed partial class FileListViewModel : ObservableObject
                         .ToList();
                     var vm = new FileItemViewModel(file.DisplayPath, relative, tags);
                     vm.HydrateFromDisk();
-                    vms.Add(vm);
+                    if (includeHidden || !vm.IsHidden)
+                        vms.Add(vm);
                 }
                 SortInPlace(vms);
                 return vms;
@@ -185,7 +215,8 @@ public sealed partial class FileListViewModel : ObservableObject
 
     private static FileItemViewModel CreateSearchItem(SearchHit hit) =>
         new(new FileEntry(hit.Name, hit.DisplayPath, hit.IsDirectory,
-                hit.IsDirectory ? -1 : hit.SizeBytes, hit.ModifiedUtc, default),
+                hit.IsDirectory ? -1 : hit.SizeBytes, hit.ModifiedUtc,
+                hit.Hidden ? FileAttributes.Hidden : 0),
             hit.RelativeDirDisplay);
 
     public void SetSort(SortColumn column)

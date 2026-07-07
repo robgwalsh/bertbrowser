@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -18,6 +20,10 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly ITagService _tagService;
     private readonly ISearchService _searchService;
     private readonly IFileTransferService _fileTransfer;
+    private readonly AppSettings _settings;
+
+    /// <summary>Reflects the current "Show hidden items" setting (may change while running).</summary>
+    private bool IncludeHidden => _settings.ShowHiddenItems;
 
     private readonly Stack<string> _backStack = new();
     private readonly Stack<string> _forwardStack = new();
@@ -29,6 +35,10 @@ public sealed partial class ShellViewModel : ObservableObject
     public FolderTreeViewModel Tree { get; }
     public TagFilterViewModel TagFilter { get; }
     public BookmarksViewModel Bookmarks { get; }
+
+    /// <summary>Every directory size scan currently in flight, shown live in the scan-progress
+    /// dialog. Mutated only on the UI thread (from <see cref="ComputeSizeAsync"/>'s continuations).</summary>
+    public ObservableCollection<ScanProgressViewModel> ActiveScans { get; } = new();
 
     /// <summary>Raised after navigation so the view can select and scroll to a specific
     /// file (e.g. when a bookmarked file is opened).</summary>
@@ -44,10 +54,12 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty]
     private string _searchText = "";
 
-    private int _activeScans;
-
     [ObservableProperty]
     private bool _isScanning;
+
+    /// <summary>Footer summary of in-flight scans (blank when idle); clicking it opens the dialog.</summary>
+    [ObservableProperty]
+    private string _scanSummary = "";
 
     partial void OnIsScanningChanged(bool value) => CancelScansCommand.NotifyCanExecuteChanged();
 
@@ -82,14 +94,17 @@ public sealed partial class ShellViewModel : ObservableObject
         ISearchService searchService,
         IFileTransferService fileTransfer,
         IBookmarkService bookmarkService,
-        DirSizeRepository dirSizeRepository)
+        DirSizeRepository dirSizeRepository,
+        AppSettings settings)
     {
         _sizeService = sizeService;
         _tagService = tagService;
         _searchService = searchService;
         _fileTransfer = fileTransfer;
+        _settings = settings;
 
         FileList = new FileListViewModel(fileSystem, tagService, dirSizeRepository);
+        FileList.PropertyChanged += OnFileListPropertyChanged;
         Tree = new FolderTreeViewModel(fileSystem);
         TagFilter = new TagFilterViewModel(tagService);
         Bookmarks = new BookmarksViewModel(bookmarkService);
@@ -205,10 +220,39 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private async Task RefreshAsync() => await RefreshViewAsync();
 
+    // --- Per-directory thumbnail zoom ---
+
+    private bool _suppressThumbnailPersist;
+
+    /// <summary>Persist the slider position for the directory the user changed it in, so tile
+    /// vs. list (and the zoom level) is remembered per folder. Zero (details) drops the entry.</summary>
+    private void OnFileListPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(FileListViewModel.ThumbnailScale)) return;
+        if (_suppressThumbnailPersist || CurrentPath.Length == 0) return;
+
+        var key = PathKey.Canonicalize(CurrentPath);
+        if (FileList.ThumbnailScale > 0)
+            _settings.DirectoryThumbnailScales[key] = FileList.ThumbnailScale;
+        else
+            _settings.DirectoryThumbnailScales.Remove(key);
+    }
+
+    /// <summary>Restores the saved zoom for <paramref name="path"/> (details if none) without
+    /// counting the programmatic change as a user edit to persist.</summary>
+    private void ApplyDirectoryThumbnailScale(string path)
+    {
+        var scale = _settings.DirectoryThumbnailScales.TryGetValue(PathKey.Canonicalize(path), out var s) ? s : 0;
+        _suppressThumbnailPersist = true;
+        FileList.ThumbnailScale = scale;
+        _suppressThumbnailPersist = false;
+    }
+
     private async Task SetPathAndLoadAsync(string path)
     {
         ClearSearchState(); // navigating exits search mode, like Explorer
         CurrentPath = path;
+        ApplyDirectoryThumbnailScale(path); // restore this folder's tile/list preference
         BackCommand.NotifyCanExecuteChanged();
         ForwardCommand.NotifyCanExecuteChanged();
         UpCommand.NotifyCanExecuteChanged();
@@ -233,13 +277,13 @@ public sealed partial class ShellViewModel : ObservableObject
             {
                 await FileList.LoadFlattenedAsync(
                     CurrentPath, TagFilter.CheckedTagIds,
-                    TagFilter.MatchAll ? TagMatchMode.All : TagMatchMode.Any, ct);
+                    TagFilter.MatchAll ? TagMatchMode.All : TagMatchMode.Any, IncludeHidden, ct);
                 if (!ct.IsCancellationRequested)
                     StatusText = $"{FileList.Items.Count} tagged file(s) under {CurrentPath}";
             }
             else
             {
-                await FileList.LoadDirectoryAsync(CurrentPath, ct);
+                await FileList.LoadDirectoryAsync(CurrentPath, IncludeHidden, ct);
                 if (!ct.IsCancellationRequested)
                     StatusText = $"{FileList.Items.Count} item(s)";
             }
@@ -290,7 +334,7 @@ public sealed partial class ShellViewModel : ObservableObject
             StatusText = $"{FileList.Items.Count} result(s) so far for '{queryText}'…";
         });
 
-        var outcome = await _searchService.SearchAsync(CurrentPath, queryText, ct, progress);
+        var outcome = await _searchService.SearchAsync(CurrentPath, queryText, ct, progress, IncludeHidden);
         if (outcome is null || ct.IsCancellationRequested) return;
 
         await FileList.CompleteSearchAsync(outcome, queryText, ct);
@@ -366,36 +410,71 @@ public sealed partial class ShellViewModel : ObservableObject
         var dirs = items.Where(i => i.IsDirectory).ToList();
         if (dirs.Count == 0) return;
 
-        var progress = new Progress<DirScanProgress>(p =>
-            StatusText = $"Scanning… {p.DirectoriesScanned} folders, {ByteSizeFormatter.Format(p.BytesSoFar)}");
-
         foreach (var dir in dirs)
             dir.IsSizeComputing = true;
 
-        _activeScans++;
-        IsScanning = true;
         try
         {
             foreach (var dir in dirs)
             {
-                var result = await _sizeService.ComputeAsync(dir.FullPath, _scanCts.Token, progress);
-                if (result is not null)
+                // A per-scan token linked to the shared _scanCts: the dialog's row "Cancel"
+                // (and the row's own token) stops just this scan, while "Cancel all" /
+                // the toolbar cancel trips _scanCts and takes every scan with it.
+                using var scanCts = CancellationTokenSource.CreateLinkedTokenSource(_scanCts.Token);
+                var scan = new ScanProgressViewModel(dir.FullPath, scanCts);
+                var progress = new Progress<DirScanProgress>(p =>
                 {
-                    dir.SizeBytes = result.SizeBytes;
-                    dir.SizeIncomplete = result.Incomplete;
-                    dir.SizeComputedUtc = result.ComputedUtc;
+                    scan.CurrentDirectory = p.CurrentDirectory;
+                    scan.DirectoriesScanned = p.DirectoriesScanned;
+                    scan.BytesSoFar = p.BytesSoFar;
+                    UpdateScanSummary();
+                });
+
+                ActiveScans.Add(scan);
+                IsScanning = true;
+                UpdateScanSummary();
+                try
+                {
+                    var result = await _sizeService.ComputeAsync(dir.FullPath, scanCts.Token, progress);
+                    if (result is not null)
+                    {
+                        dir.SizeBytes = result.SizeBytes;
+                        dir.SizeIncomplete = result.Incomplete;
+                        dir.SizeComputedUtc = result.ComputedUtc;
+                    }
                 }
-                dir.IsSizeComputing = false;
+                finally
+                {
+                    dir.IsSizeComputing = false;
+                    ActiveScans.Remove(scan);
+                    if (ActiveScans.Count == 0)
+                        IsScanning = false;
+                    UpdateScanSummary();
+                }
             }
-            StatusText = "Size scan complete";
+            if (!_scanCts.IsCancellationRequested)
+                StatusText = "Size scan complete";
         }
         finally
         {
             foreach (var dir in dirs)
                 dir.IsSizeComputing = false;
-            if (--_activeScans == 0)
-                IsScanning = false;
         }
+    }
+
+    /// <summary>Rolls the live per-scan counters up into the footer summary string.</summary>
+    private void UpdateScanSummary()
+    {
+        if (ActiveScans.Count == 0)
+        {
+            ScanSummary = "";
+            return;
+        }
+
+        var folders = ActiveScans.Sum(s => s.DirectoriesScanned);
+        var bytes = ActiveScans.Sum(s => s.BytesSoFar);
+        var what = ActiveScans.Count == 1 ? ActiveScans[0].FolderName : $"{ActiveScans.Count} folders";
+        ScanSummary = $"Scanning {what}… {folders:N0} folders, {ByteSizeFormatter.Format(bytes)}";
     }
 
     /// <summary>Toolbar action: compute sizes for every direct child folder of the current directory.</summary>

@@ -34,14 +34,15 @@ public sealed class FsIndexRepository
         cmd.Transaction = tx;
         cmd.CommandText =
             """
-            INSERT INTO fs_entry(path_key, name, name_key, is_dir, size_bytes, modified_utc, crawl_gen)
-            VALUES (@key, @name, @nameKey, @isDir, @size, @modified, @gen)
+            INSERT INTO fs_entry(path_key, name, name_key, is_dir, size_bytes, modified_utc, hidden, crawl_gen)
+            VALUES (@key, @name, @nameKey, @isDir, @size, @modified, @hidden, @gen)
             ON CONFLICT(path_key) DO UPDATE SET
                 name = excluded.name,
                 name_key = excluded.name_key,
                 is_dir = excluded.is_dir,
                 size_bytes = excluded.size_bytes,
                 modified_utc = excluded.modified_utc,
+                hidden = excluded.hidden,
                 crawl_gen = excluded.crawl_gen;
             """;
         var pKey = cmd.Parameters.Add("@key", SqliteType.Text);
@@ -50,6 +51,7 @@ public sealed class FsIndexRepository
         var pIsDir = cmd.Parameters.Add("@isDir", SqliteType.Integer);
         var pSize = cmd.Parameters.Add("@size", SqliteType.Integer);
         var pModified = cmd.Parameters.Add("@modified", SqliteType.Text);
+        var pHidden = cmd.Parameters.Add("@hidden", SqliteType.Integer);
         var pGen = cmd.Parameters.Add("@gen", SqliteType.Integer);
 
         foreach (var row in rows)
@@ -60,6 +62,7 @@ public sealed class FsIndexRepository
             pIsDir.Value = row.IsDirectory ? 1 : 0;
             pSize.Value = row.SizeBytes;
             pModified.Value = row.ModifiedUtc.ToString("O");
+            pHidden.Value = row.Hidden ? 1 : 0;
             pGen.Value = crawlGen;
             cmd.ExecuteNonQuery();
         }
@@ -162,7 +165,8 @@ public sealed class FsIndexRepository
     /// ancestor directory rows (full display paths are not stored — they would roughly
     /// double the index size).
     /// </summary>
-    public (IReadOnlyList<SearchHit> Hits, bool Truncated) Search(string rootPath, SearchQuery query, int cap)
+    public (IReadOnlyList<SearchHit> Hits, bool Truncated) Search(
+        string rootPath, SearchQuery query, int cap, bool includeHidden = true)
     {
         var rootKey = PathKey.Canonicalize(rootPath);
         var rootDisplay = PathKey.NormalizeDisplay(rootPath);
@@ -170,16 +174,17 @@ public sealed class FsIndexRepository
 
         using var conn = _db.Open();
 
-        var rows = new List<(string Key, string Name, bool IsDir, long Size, DateTime Modified)>();
+        var rows = new List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)>();
         using (var cmd = conn.CreateCommand())
         {
             var globs = string.Join(" AND ", Enumerable.Range(0, query.GlobPatterns.Count)
                 .Select(i => $"name_key GLOB @g{i}"));
+            var hiddenFilter = includeHidden ? "" : "AND hidden = 0 ";
             cmd.CommandText =
                 $"""
-                SELECT path_key, name, is_dir, size_bytes, modified_utc
+                SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden
                 FROM fs_entry
-                WHERE path_key >= @lo AND path_key < @hi AND {globs}
+                WHERE path_key >= @lo AND path_key < @hi AND {globs} {hiddenFilter}
                 LIMIT @limit;
                 """;
             cmd.Parameters.AddWithValue("@lo", lo);
@@ -196,7 +201,8 @@ public sealed class FsIndexRepository
                     reader.GetString(1),
                     reader.GetInt32(2) != 0,
                     reader.GetInt64(3),
-                    DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind)));
+                    DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                    reader.GetInt32(5) != 0));
             }
         }
 
@@ -216,7 +222,8 @@ public sealed class FsIndexRepository
                 row.Name,
                 row.IsDir,
                 row.Size,
-                row.Modified));
+                row.Modified,
+                row.Hidden));
         }
         return (hits, truncated);
     }
@@ -228,7 +235,7 @@ public sealed class FsIndexRepository
     /// </summary>
     private static Dictionary<string, string> LookupAncestorNames(
         SqliteConnection conn,
-        List<(string Key, string Name, bool IsDir, long Size, DateTime Modified)> rows,
+        List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)> rows,
         int loLength)
     {
         var keys = new HashSet<string>(StringComparer.Ordinal);

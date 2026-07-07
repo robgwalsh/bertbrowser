@@ -36,7 +36,7 @@ public sealed class FolderTreeViewModel
     {
         var devices = await Task.Run(PortableDevices.Enumerate);
         foreach (var device in devices)
-            Roots.Add(new PortableDeviceNodeViewModel(device));
+            Roots.Add(new PortableDeviceNodeViewModel(this, device));
     }
 
     internal bool HasSubdirectories(string path) => _fileSystem.HasSubdirectories(path);
@@ -55,6 +55,19 @@ public sealed class FolderTreeViewModel
     {
         if (!_suppressSelectionEvents)
             DirectorySelected?.Invoke(path);
+    }
+
+    /// <summary>Accordion behavior for the top-level rows (drives &amp; devices): only one
+    /// root is ever expanded, so the active one gets all the section's vertical space while
+    /// the rest collapse to a single bordered header. Called when a root becomes the active
+    /// one (expanded, or — for childless device leaves — selected).</summary>
+    internal void CollapseOtherRoots(ISidebarNode activeRoot)
+    {
+        foreach (var sibling in Roots)
+        {
+            if (!ReferenceEquals(sibling, activeRoot) && sibling.IsExpanded)
+                sibling.IsExpanded = false;
+        }
     }
 
     private bool _suppressSelectionEvents;
@@ -166,13 +179,21 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
 
     partial void OnIsExpandedChanged(bool value)
     {
-        if (value) Populate();
+        if (!value) return;
+
+        Populate();
+        if (Depth == 0) _tree?.CollapseOtherRoots(this); // accordion: only one root open
     }
 
     partial void OnIsSelectedChanged(bool value)
     {
-        if (value && _tree is not null)
-            _tree.RaiseSelected(FullPath);
+        if (!value || _tree is null) return;
+
+        _tree.RaiseSelected(FullPath);
+
+        // The accordion headers have no expander arrow, so selecting a root header is what
+        // opens it (and collapses the others). Deeper rows expand via their own chevrons.
+        if (Depth == 0) IsExpanded = true;
     }
 
     private void Populate()

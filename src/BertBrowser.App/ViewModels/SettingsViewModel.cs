@@ -55,9 +55,13 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private CustomCommandItemViewModel? _selectedCommand;
 
+    [ObservableProperty]
+    private bool _showHiddenItems;
+
     public SettingsViewModel(AppSettings settings)
     {
         _settings = settings;
+        ShowHiddenItems = settings.ShowHiddenItems;
         Commands = new ObservableCollection<CustomCommandItemViewModel>(
             settings.CustomCommands.Select(d => new CustomCommandItemViewModel(d)));
         SelectedCommand = Commands.FirstOrDefault();
@@ -98,6 +102,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
 
         _settings.CustomCommands = Commands.Select(c => c.ToDefinition()).ToList();
+        _settings.ShowHiddenItems = ShowHiddenItems;
         _settings.Save();
         error = null;
         return true;

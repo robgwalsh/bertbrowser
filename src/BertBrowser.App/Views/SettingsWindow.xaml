@@ -4,6 +4,13 @@
         Title="Settings" Width="620" Height="440"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
     <DockPanel Margin="10">
+        <!-- General options -->
+        <TextBlock DockPanel.Dock="Top" Text="General" FontWeight="SemiBold" Margin="0,0,0,4"/>
+        <CheckBox DockPanel.Dock="Top" Content="Show hidden items" Margin="0,0,0,2"
+                  IsChecked="{Binding ShowHiddenItems}"/>
+        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="Gray" Margin="0,0,0,12"
+                   Text="Show hidden files and folders in listings and search results (dimmed, like Explorer)."/>
+
         <TextBlock DockPanel.Dock="Top" Text="Custom context menu commands" FontWeight="SemiBold"/>
         <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="Gray" Margin="0,4,0,10"
                    Text="These commands appear in the right-click menu of the file list and folder tree. In Arguments, {path}, {name} and {dir} expand per item — quote tokens that may contain spaces, e.g. &quot;{path}&quot;. Blank arguments default to the quoted full path."/>

@@ -76,6 +76,27 @@ public sealed class IndexCrawlerTests : IDisposable
     }
 
     [Fact]
+    public async Task Crawl_PropagatesHiddenIntoSubtree()
+    {
+        CreateFile(@"Visible\keep.txt");
+        CreateFile(@"Secret\inside.txt"); // "inside" is not itself hidden…
+        // …but its parent folder is, so it must count as hidden.
+        var secret = Path.Combine(_rootDir, "Secret");
+        File.SetAttributes(secret, File.GetAttributes(secret) | FileAttributes.Hidden);
+
+        Assert.True(await _crawler.CrawlAsync(_rootDir, CancellationToken.None));
+
+        // With hidden included, the file inside the hidden folder is found and flagged.
+        var (withHidden, _) = _repo.Search(_rootDir, Q("inside"), 100);
+        Assert.True(Assert.Single(withHidden).Hidden);
+
+        // With hidden excluded, nothing under the hidden folder surfaces…
+        Assert.Empty(_repo.Search(_rootDir, Q("inside"), 100, includeHidden: false).Hits);
+        // …while a sibling under a visible folder still does.
+        Assert.Single(_repo.Search(_rootDir, Q("keep"), 100, includeHidden: false).Hits);
+    }
+
+    [Fact]
     public async Task Crawl_EmitsJunctionButDoesNotDescend()
     {
         CreateFile(@"real\inner.bin");

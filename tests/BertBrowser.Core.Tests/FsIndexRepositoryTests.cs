@@ -27,8 +27,8 @@ public sealed class FsIndexRepositoryTests : IDisposable
     }
 
     /// <summary>Index rows are synthetic — no real filesystem needed for repo tests.</summary>
-    private static FsEntryRow Row(string displayPath, bool isDir = false, long size = 0) =>
-        new(PathKey.Canonicalize(displayPath), Path.GetFileName(displayPath), isDir, size, DateTime.UtcNow);
+    private static FsEntryRow Row(string displayPath, bool isDir = false, long size = 0, bool hidden = false) =>
+        new(PathKey.Canonicalize(displayPath), Path.GetFileName(displayPath), isDir, size, DateTime.UtcNow, hidden);
 
     private static SearchQuery Q(string text) => SearchQuery.Parse(text)!;
 
@@ -48,6 +48,27 @@ public sealed class FsIndexRepositoryTests : IDisposable
         Assert.Equal(42, hit.SizeBytes);
         Assert.False(hit.IsDirectory);
         Assert.False(truncated);
+    }
+
+    [Fact]
+    public void Search_ExcludesHiddenUnlessRequested()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\report-visible.txt"),
+            Row(@"C:\Data\report-secret.txt", hidden: true),
+        }, crawlGen: 1);
+
+        // Default (includeHidden: true) surfaces both, flagging the hidden one.
+        var (all, _) = _repo.Search(@"C:\Data", Q("report"), cap: 100);
+        Assert.Equal(2, all.Count);
+        Assert.True(Assert.Single(all, h => h.Name == "report-secret.txt").Hidden);
+
+        // includeHidden: false drops the hidden row entirely.
+        var (visible, _) = _repo.Search(@"C:\Data", Q("report"), cap: 100, includeHidden: false);
+        var hit = Assert.Single(visible);
+        Assert.Equal("report-visible.txt", hit.Name);
+        Assert.False(hit.Hidden);
     }
 
     [Fact]

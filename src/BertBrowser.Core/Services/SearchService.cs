@@ -17,7 +17,7 @@ public interface ISearchService
     /// </summary>
     Task<SearchOutcome?> SearchAsync(
         string rootPath, string queryText, CancellationToken ct,
-        IProgress<IReadOnlyList<SearchHit>>? liveBatches = null);
+        IProgress<IReadOnlyList<SearchHit>>? liveBatches = null, bool includeHidden = true);
 
     /// <summary>Fires (on a worker thread) with the canonical root key whose (re)crawl just completed.</summary>
     event Action<string>? IndexRefreshed;
@@ -52,7 +52,7 @@ public sealed class SearchService : ISearchService, IDisposable
 
     public async Task<SearchOutcome?> SearchAsync(
         string rootPath, string queryText, CancellationToken ct,
-        IProgress<IReadOnlyList<SearchHit>>? liveBatches = null)
+        IProgress<IReadOnlyList<SearchHit>>? liveBatches = null, bool includeHidden = true)
     {
         var query = SearchQuery.Parse(queryText);
         if (query is null)
@@ -72,7 +72,7 @@ public sealed class SearchService : ISearchService, IDisposable
                 EnsureIndexed(covering.PathKey, covering.DisplayPath);
 
             var (hits, truncated) = await Task.Run(
-                () => _repository.Search(rootPath, query, MaxResults), ct).ConfigureAwait(false);
+                () => _repository.Search(rootPath, query, MaxResults, includeHidden), ct).ConfigureAwait(false);
             return new SearchOutcome(
                 hits, truncated,
                 fresh ? SearchResultSource.Index : SearchResultSource.StaleIndex,
@@ -80,12 +80,12 @@ public sealed class SearchService : ISearchService, IDisposable
         }
 
         EnsureIndexed(rootKey, PathKey.NormalizeDisplay(rootPath));
-        return await Task.Run(() => LiveScan(rootPath, query, ct, liveBatches), ct).ConfigureAwait(false);
+        return await Task.Run(() => LiveScan(rootPath, query, ct, liveBatches, includeHidden), ct).ConfigureAwait(false);
     }
 
     private SearchOutcome LiveScan(
         string rootPath, SearchQuery query, CancellationToken ct,
-        IProgress<IReadOnlyList<SearchHit>>? liveBatches)
+        IProgress<IReadOnlyList<SearchHit>>? liveBatches, bool includeHidden)
     {
         var rootDisplay = PathKey.NormalizeDisplay(rootPath);
         var hits = new List<SearchHit>();
@@ -107,7 +107,7 @@ public sealed class SearchService : ISearchService, IDisposable
             if (relDir == ".") relDir = "";
 
             var hit = new SearchHit(
-                entry.DisplayPath, relDir, entry.Name, entry.IsDirectory, entry.SizeBytes, entry.ModifiedUtc);
+                entry.DisplayPath, relDir, entry.Name, entry.IsDirectory, entry.SizeBytes, entry.ModifiedUtc, entry.Hidden);
             hits.Add(hit);
             batch.Add(hit);
 
@@ -118,7 +118,7 @@ public sealed class SearchService : ISearchService, IDisposable
                 sinceFlush.Restart();
             }
             return true;
-        }, ct);
+        }, ct, includeHidden);
 
         if (batch.Count > 0)
             liveBatches?.Report(batch.ToArray());

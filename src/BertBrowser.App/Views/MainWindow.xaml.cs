@@ -28,6 +28,7 @@ public partial class MainWindow : Window
         _shell.FileList.PropertyChanged += FileList_PropertyChanged;
         _shell.RevealFileRequested += OnRevealFileRequested;
         UpdateRelPathColumn();
+        ApplyViewMode(); // honor a restored thumbnail zoom level
 
         Loaded += async (_, _) => await _shell.InitializeAsync();
         Closing += (_, _) => SaveWindowSettings();
@@ -65,7 +66,7 @@ public partial class MainWindow : Window
         _settings.WindowHeight = bounds.Height;
         _settings.WindowMaximized = WindowState == WindowState.Maximized;
         _settings.LastPath = _shell.CurrentPath.Length > 0 ? _shell.CurrentPath : null;
-        _settings.Save();
+        _settings.Save(); // per-directory thumbnail scales are already updated live in the map
     }
 
     private void FileList_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -74,6 +75,40 @@ public partial class MainWindow : Window
             UpdateRelPathColumn();
         else if (e.PropertyName == nameof(FileListViewModel.Items))
             FocusFileList();
+        else if (e.PropertyName == nameof(FileListViewModel.IsThumbnailView))
+            ApplyViewMode();
+    }
+
+    private bool? _thumbnailViewApplied;
+
+    /// <summary>Swaps the file list between the details <see cref="GridView"/> and the
+    /// thumbnail-tile layout to match <see cref="FileListViewModel.IsThumbnailView"/>.
+    /// One ListView is reused so all its interactions (selection, context menu, double-click,
+    /// type-ahead) work in both modes.</summary>
+    private void ApplyViewMode()
+    {
+        var thumbnails = _shell.FileList.IsThumbnailView;
+        if (_thumbnailViewApplied == thumbnails) return; // only churn the view on a real change
+        _thumbnailViewApplied = thumbnails;
+
+        if (thumbnails)
+        {
+            FileListView.View = null; // a null View lets ItemsPanel/ItemTemplate take over
+            FileListView.ItemsPanel = (ItemsPanelTemplate)FindResource("ThumbPanel");
+            FileListView.ItemTemplate = (DataTemplate)FindResource("ThumbTileTemplate");
+            FileListView.ItemContainerStyle = (Style)FindResource("ThumbItemStyle");
+            // Disabling the horizontal scrollbar bounds the WrapPanel to the viewport width so
+            // tiles roll onto the next row; only a vertical scrollbar ever appears.
+            ScrollViewer.SetHorizontalScrollBarVisibility(FileListView, ScrollBarVisibility.Disabled);
+        }
+        else
+        {
+            FileListView.View = DetailsView;
+            FileListView.ClearValue(ItemsControl.ItemsPanelProperty);   // restore virtualizing stack
+            FileListView.ClearValue(ItemsControl.ItemTemplateProperty); // GridView supplies cells
+            FileListView.ItemContainerStyle = (Style)FindResource("FileRowStyle");
+            FileListView.ClearValue(ScrollViewer.HorizontalScrollBarVisibilityProperty); // columns can scroll again
+        }
     }
 
     /// <summary>Gives the file list keyboard focus after it reloads so arrow keys and type-ahead
@@ -101,9 +136,16 @@ public partial class MainWindow : Window
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
         var vm = new SettingsViewModel(_settings);
-        new SettingsWindow(vm) { Owner = this }.ShowDialog();
-        // No refresh needed: context menus rebuild their custom items on every open.
+        if (new SettingsWindow(vm) { Owner = this }.ShowDialog() == true)
+        {
+            // Reload so a changed "Show hidden items" setting takes effect immediately.
+            // (Custom-command menus rebuild on every open, so they need no refresh.)
+            _shell.RefreshCommand.Execute(null);
+        }
     }
+
+    private void ScanProgress_Click(object sender, RoutedEventArgs e) =>
+        new ScanProgressWindow(_shell) { Owner = this }.ShowDialog();
 
     // --- Breadcrumb ---
 

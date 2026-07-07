@@ -61,7 +61,8 @@ public sealed class IndexCrawler
 
         FileSystemWalker.Walk(root, entry =>
         {
-            buffer.Add(new FsEntryRow(entry.PathKey, entry.Name, entry.IsDirectory, entry.SizeBytes, entry.ModifiedUtc));
+            buffer.Add(new FsEntryRow(
+                entry.PathKey, entry.Name, entry.IsDirectory, entry.SizeBytes, entry.ModifiedUtc, entry.Hidden));
             if (buffer.Count >= ChunkSize)
             {
                 _repository.UpsertEntries(buffer, crawlGen);
@@ -70,7 +71,7 @@ public sealed class IndexCrawler
                 progress?.Report(total);
             }
             return true;
-        }, ct);
+        }, ct, includeHidden: true); // index everything with its hidden flag; queries filter
 
         _repository.UpsertEntries(buffer, crawlGen);
         total += buffer.Count;

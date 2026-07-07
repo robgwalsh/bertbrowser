@@ -204,21 +204,23 @@ public sealed class IndexWatcherService : IIndexWatcherService
     private void CollectUpsert(FsChange change, List<FsEntryRow> upserts, long crawlGen)
     {
         var key = PathKey.Canonicalize(change.FullPath);
+        var hidden = IsEffectivelyHidden(change.FullPath, change.RootKey);
 
         if (Directory.Exists(change.FullPath))
         {
             var info = new DirectoryInfo(change.FullPath);
-            upserts.Add(new FsEntryRow(key, info.Name, true, 0, info.LastWriteTimeUtc));
+            upserts.Add(new FsEntryRow(key, info.Name, true, 0, info.LastWriteTimeUtc, hidden));
 
             // A folder moved into the tree raises a single Created event for the top
-            // directory only — index its contents with a bounded mini-crawl.
+            // directory only — index its contents with a bounded mini-crawl, seeding the
+            // walk with this folder's effective hidden state so descendants inherit it.
             if (change.Type == WatcherChangeTypes.Created)
-                MiniCrawl(change, upserts, crawlGen);
+                MiniCrawl(change, upserts, crawlGen, hidden);
         }
         else if (File.Exists(change.FullPath))
         {
             var info = new FileInfo(change.FullPath);
-            upserts.Add(new FsEntryRow(key, info.Name, false, info.Length, info.LastWriteTimeUtc));
+            upserts.Add(new FsEntryRow(key, info.Name, false, info.Length, info.LastWriteTimeUtc, hidden));
         }
         else
         {
@@ -227,7 +229,7 @@ public sealed class IndexWatcherService : IIndexWatcherService
         }
     }
 
-    private void MiniCrawl(FsChange change, List<FsEntryRow> upserts, long crawlGen)
+    private void MiniCrawl(FsChange change, List<FsEntryRow> upserts, long crawlGen, bool rootHidden)
     {
         var count = 0;
         var capped = false;
@@ -238,17 +240,41 @@ public sealed class IndexWatcherService : IIndexWatcherService
                 capped = true;
                 return false;
             }
-            upserts.Add(new FsEntryRow(entry.PathKey, entry.Name, entry.IsDirectory, entry.SizeBytes, entry.ModifiedUtc));
+            upserts.Add(new FsEntryRow(
+                entry.PathKey, entry.Name, entry.IsDirectory, entry.SizeBytes, entry.ModifiedUtc, entry.Hidden));
             if (upserts.Count >= 20_000)
             {
                 _repository.UpsertEntries(upserts, crawlGen);
                 upserts.Clear();
             }
             return true;
-        }, CancellationToken.None);
+        }, CancellationToken.None, includeHidden: true, rootHidden: rootHidden);
 
         if (capped)
             _repository.MarkRootStale(change.RootKey); // too big to patch live; re-crawl on next search
+    }
+
+    /// <summary>Effective hidden state for a path the watcher just saw change: its own
+    /// Hidden attribute or that of any ancestor down to — but not including — the indexed
+    /// root. Stopping at the root mirrors how a full crawl seeds the root as non-hidden, so
+    /// watcher and crawl agree even when the root itself sits inside a hidden system folder
+    /// (e.g. an indexed subtree under %AppData%). Best-effort — a lost stat means "not hidden".</summary>
+    private static bool IsEffectivelyHidden(string fullPath, string rootKey)
+    {
+        try
+        {
+            for (var path = fullPath; path is not null; path = Path.GetDirectoryName(path))
+            {
+                if (PathKey.Canonicalize(path) == rootKey)
+                    break; // reached the indexed root; its own hidden state doesn't count
+                if ((File.GetAttributes(path) & FileAttributes.Hidden) != 0)
+                    return true;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+        }
+        return false;
     }
 
     public void Dispose()

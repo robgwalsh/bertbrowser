@@ -128,6 +128,11 @@
       Full-width folder tree rows: indentation is applied inside the row (from the
       node's Depth), so hover/selection highlight and click target span the whole
       horizontal extent of the panel, like the file list.
+
+      Top-level rows (Depth 0) are the accordion headers for the drives & devices
+      section: a bordered, tinted header bar with no expander chevron. Selecting one
+      opens it (the VM collapses the others), so it fills the section while the rest
+      stay as single-line headers. Deeper folder rows keep their chevrons.
     -->
     <Style x:Key="FolderTreeItemStyle" TargetType="TreeViewItem">
         <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
@@ -138,24 +143,35 @@
             <Setter.Value>
                 <ControlTemplate TargetType="TreeViewItem">
                     <StackPanel>
-                        <Border x:Name="Bd" Background="Transparent" MinHeight="26"
-                                SnapsToDevicePixels="True">
-                            <Grid Margin="{Binding Depth, Converter={StaticResource DepthToIndent}}">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="18"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <ToggleButton x:Name="Expander" Style="{StaticResource TreeExpanderStyle}"
-                                              IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
-                                              VerticalAlignment="Center"/>
-                                <ContentPresenter x:Name="PART_Header" Grid.Column="1"
-                                                  ContentSource="Header"
-                                                  VerticalAlignment="Center" Margin="0,0,4,0"/>
-                            </Grid>
+                        <Border x:Name="Chrome" Background="Transparent"
+                                BorderBrush="#DDDDDD" BorderThickness="0">
+                            <Border x:Name="Bd" Background="Transparent" MinHeight="26"
+                                    SnapsToDevicePixels="True">
+                                <Grid Margin="{Binding Depth, Converter={StaticResource DepthToIndent}}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="18"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ToggleButton x:Name="Expander" Style="{StaticResource TreeExpanderStyle}"
+                                                  IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                                  VerticalAlignment="Center"/>
+                                    <ContentPresenter x:Name="PART_Header" Grid.Column="1"
+                                                      ContentSource="Header"
+                                                      VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                </Grid>
+                            </Border>
                         </Border>
                         <ItemsPresenter x:Name="ItemsHost"/>
                     </StackPanel>
                     <ControlTemplate.Triggers>
+                        <!-- Depth 0 rows are accordion headers: bordered, tinted, no chevron. -->
+                        <DataTrigger Binding="{Binding Depth}" Value="0">
+                            <Setter TargetName="Chrome" Property="Background" Value="#F3F3F3"/>
+                            <Setter TargetName="Chrome" Property="BorderThickness" Value="0,0,0,1"/>
+                            <Setter TargetName="Chrome" Property="TextElement.FontWeight" Value="SemiBold"/>
+                            <Setter TargetName="Bd" Property="MinHeight" Value="32"/>
+                            <Setter TargetName="Expander" Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
                         <Trigger Property="IsExpanded" Value="False">
                             <Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed"/>
                         </Trigger>

@@ -14,6 +14,12 @@ public sealed partial class FileItemViewModel : ObservableObject
     public DateTime ModifiedUtc { get; private set; }
     public string TypeName { get; }
 
+    /// <summary>Hidden (own or inherited) — drives the dimmed-icon treatment.</summary>
+    public bool IsHidden { get; private set; }
+
+    /// <summary>Ghosted like Explorer when hidden.</summary>
+    public double IconOpacity => IsHidden ? 0.45 : 1.0;
+
     /// <summary>Path relative to the filter root; only set in flattened tag-filter mode.</summary>
     public string RelativePath { get; }
 
@@ -47,6 +53,7 @@ public sealed partial class FileItemViewModel : ObservableObject
         FullPath = entry.FullPath;
         IsDirectory = entry.IsDirectory;
         ModifiedUtc = entry.ModifiedUtc;
+        IsHidden = entry.Attributes.HasFlag(FileAttributes.Hidden);
         RelativePath = string.Empty;
         SizeBytes = entry.IsDirectory ? null : entry.SizeBytes;
         TypeName = entry.IsDirectory
@@ -79,7 +86,9 @@ public sealed partial class FileItemViewModel : ObservableObject
         {
             SizeBytes = info.Length;
             ModifiedUtc = info.LastWriteTimeUtc;
+            IsHidden = info.Attributes.HasFlag(FileAttributes.Hidden);
             OnPropertyChanged(nameof(ModifiedDisplay));
+            OnPropertyChanged(nameof(IconOpacity));
         }
         else
         {
@@ -98,6 +107,40 @@ public sealed partial class FileItemViewModel : ObservableObject
             }
             return _icon;
         }
+    }
+
+    /// <summary>Pixel size the shell thumbnail is fetched at; tiles scale this down to the
+    /// slider's current size, so one fetch serves every zoom level. Set to 2× the largest tile
+    /// (256) so it stays crisp when downscaled — and, crucially, isn't upscaled on high-DPI
+    /// displays where a 256-tile can render at 384–512 physical pixels.</summary>
+    private const int ThumbnailPixelSize = 512;
+
+    private ImageSource? _thumbnail;
+    private bool _thumbnailRequested;
+
+    /// <summary>A large Explorer-style thumbnail, loaded lazily off the UI thread the first
+    /// time a tile asks for it (only realized tiles do, thanks to virtualization). Shows the
+    /// small shell icon until the real thumbnail arrives, then falls back to it on failure.</summary>
+    public ImageSource? Thumbnail
+    {
+        get
+        {
+            if (!_thumbnailRequested)
+            {
+                _thumbnailRequested = true;
+                _thumbnail = Icon; // instant placeholder while the real one loads
+                _ = LoadThumbnailAsync();
+            }
+            return _thumbnail;
+        }
+    }
+
+    private async Task LoadThumbnailAsync()
+    {
+        var image = await Task.Run(() => ShellThumbnails.GetThumbnail(FullPath, ThumbnailPixelSize));
+        if (image is null) return; // keep the icon placeholder
+        _thumbnail = image;
+        OnPropertyChanged(nameof(Thumbnail));
     }
 
     public string SizeDisplay =>

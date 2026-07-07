@@ -10,6 +10,15 @@ public sealed class AppSettings
     public double? WindowHeight { get; set; }
     public bool WindowMaximized { get; set; }
     public string? LastPath { get; set; }
+
+    /// <summary>When false (default), hidden files/folders are excluded from listings and
+    /// search; when true they appear with a dimmed icon, like Explorer.</summary>
+    public bool ShowHiddenItems { get; set; }
+
+    /// <summary>Per-directory thumbnail-zoom slider position (0..1), keyed by canonical path.
+    /// 0 (or absent) = details list. Only folders explicitly zoomed are stored.</summary>
+    public Dictionary<string, double> DirectoryThumbnailScales { get; set; } = new();
+
     public List<CustomCommandDefinition> CustomCommands { get; set; } = new();
 
     private static string FilePath => AppPaths.SettingsPath;
