@@ -3,6 +3,7 @@ using System.Diagnostics;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
+using BertBrowser.Core.Services.Mft;
 
 namespace BertBrowser.Core.Services;
 
@@ -18,6 +19,14 @@ public interface ISearchService
     Task<SearchOutcome?> SearchAsync(
         string rootPath, string queryText, CancellationToken ct,
         IProgress<IReadOnlyList<SearchHit>>? liveBatches = null, bool includeHidden = true);
+
+    /// <summary>
+    /// Whole-PC search across every MFT-indexed volume. Returns null when the query is too
+    /// short. Results are served straight from the index; while the MFT build is still in
+    /// flight they are partial and <c>RefreshPending</c> is set (the caller re-queries when
+    /// <c>IMftIndexService.IndexRefreshed</c> fires).
+    /// </summary>
+    Task<SearchOutcome?> SearchAllAsync(string queryText, CancellationToken ct, bool includeHidden = true);
 
     /// <summary>Fires (on a worker thread) with the canonical root key whose (re)crawl just completed.</summary>
     event Action<string>? IndexRefreshed;
@@ -38,16 +47,32 @@ public sealed class SearchService : ISearchService, IDisposable
     private readonly FsIndexRepository _repository;
     private readonly IndexCrawler _crawler;
     private readonly IIndexWatcherService _watchers;
+    private readonly IMftIndexService _mft;
     private readonly ConcurrentDictionary<string, Task> _activeCrawls = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _lifetime = new();
 
     public event Action<string>? IndexRefreshed;
 
-    public SearchService(FsIndexRepository repository, IndexCrawler crawler, IIndexWatcherService watchers)
+    public SearchService(FsIndexRepository repository, IndexCrawler crawler, IIndexWatcherService watchers, IMftIndexService mft)
     {
         _repository = repository;
         _crawler = crawler;
         _watchers = watchers;
+        _mft = mft;
+    }
+
+    public async Task<SearchOutcome?> SearchAllAsync(string queryText, CancellationToken ct, bool includeHidden = true)
+    {
+        var query = SearchQuery.Parse(queryText);
+        if (query is null)
+            return null;
+
+        var (hits, truncated) = await Task.Run(
+            () => _repository.SearchGlobal(query, MaxResults, includeHidden), ct).ConfigureAwait(false);
+
+        // While volumes are still enumerating the results are partial; the ViewModel re-queries
+        // on IMftIndexService.IndexRefreshed.
+        return new SearchOutcome(hits, truncated, SearchResultSource.Index, RefreshPending: _mft.IsBuilding);
     }
 
     public async Task<SearchOutcome?> SearchAsync(
@@ -63,11 +88,14 @@ public sealed class SearchService : ISearchService, IDisposable
 
         if (covering is not null)
         {
-            // Fresh = crawl completed, nothing flagged stale, and a live watcher is
-            // patching changes. Watchers are in-memory, so the first search each app
-            // session deliberately lands on the stale path: instant cached results
-            // plus one background re-crawl that re-attaches the watcher.
-            var fresh = !covering.Stale && _watchers.IsWatching(covering.PathKey);
+            // Fresh = crawl completed, nothing flagged stale, and something is patching
+            // changes live — either the MFT/USN tail (for NTFS volumes) or a FileSystemWatcher
+            // (the crawl fallback for other roots). FileSystemWatchers are in-memory, so the
+            // first crawl-backed search each session deliberately lands on the stale path:
+            // instant cached results plus one background re-crawl that re-attaches the watcher.
+            // MFT-covered roots are kept live by the indexer, so they never fall to the crawler.
+            var fresh = !covering.Stale
+                && (_mft.IsIndexed(covering.PathKey) || _watchers.IsWatching(covering.PathKey));
             if (!fresh)
                 EnsureIndexed(covering.PathKey, covering.DisplayPath);
 

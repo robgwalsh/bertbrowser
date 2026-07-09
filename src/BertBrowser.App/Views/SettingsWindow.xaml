@@ -8,8 +8,19 @@
         <TextBlock DockPanel.Dock="Top" Text="General" FontWeight="SemiBold" Margin="0,0,0,4"/>
         <CheckBox DockPanel.Dock="Top" Content="Show hidden items" Margin="0,0,0,2"
                   IsChecked="{Binding ShowHiddenItems}"/>
-        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="Gray" Margin="0,0,0,12"
+        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="Gray" Margin="0,0,0,10"
                    Text="Show hidden files and folders in listings and search results (dimmed, like Explorer)."/>
+
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2">
+            <TextBlock Text="Vertical scroll speed" VerticalAlignment="Center"/>
+            <TextBlock DockPanel.Dock="Right" Text="{Binding ScrollSpeedText}" VerticalAlignment="Center"
+                       HorizontalAlignment="Right" MinWidth="36" Foreground="#555"/>
+            <Slider Margin="12,0,8,0" VerticalAlignment="Center" Minimum="1" Maximum="6"
+                    TickFrequency="0.5" IsSnapToTickEnabled="True"
+                    Value="{Binding ScrollSpeed, Mode=TwoWay}"/>
+        </DockPanel>
+        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="Gray" Margin="0,0,0,12"
+                   Text="How fast the mouse wheel scrolls the file list (1× = system default)."/>
 
         <TextBlock DockPanel.Dock="Top" Text="Custom context menu commands" FontWeight="SemiBold"/>
         <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="Gray" Margin="0,4,0,10"

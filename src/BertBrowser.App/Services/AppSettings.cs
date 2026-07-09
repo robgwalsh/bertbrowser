@@ -19,6 +19,9 @@ public sealed class AppSettings
     /// 0 (or absent) = details list. Only folders explicitly zoomed are stored.</summary>
     public Dictionary<string, double> DirectoryThumbnailScales { get; set; } = new();
 
+    /// <summary>Mouse-wheel vertical scroll speed multiplier (1 = OS default). Defaults to 2×.</summary>
+    public double ScrollSpeedMultiplier { get; set; } = 2.0;
+
     public List<CustomCommandDefinition> CustomCommands { get; set; } = new();
 
     private static string FilePath => AppPaths.SettingsPath;

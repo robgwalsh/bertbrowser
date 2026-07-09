@@ -4,6 +4,7 @@ using BertBrowser.App.ViewModels;
 using BertBrowser.App.Views;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.Mft;
 using Microsoft.Extensions.DependencyInjection;
 using Velopack;
 
@@ -45,6 +46,7 @@ public partial class App : Application
         services.AddSingleton<IBookmarkService, BookmarkService>();
         services.AddSingleton<IndexCrawler>();
         services.AddSingleton<IIndexWatcherService, IndexWatcherService>();
+        services.AddSingleton<IMftIndexService, MftIndexService>();
         services.AddSingleton<ISearchService, SearchService>();
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddSingleton<ShellViewModel>();
@@ -63,6 +65,10 @@ public partial class App : Application
 
         var window = Services.GetRequiredService<MainWindow>();
         window.Show();
+
+        // Build the global MFT search index in the background (each NTFS volume on its own
+        // thread); it needs the elevation this app requests via its manifest.
+        Services.GetRequiredService<IMftIndexService>().Start();
 
         _ = Task.Run(() => Services.GetRequiredService<IUpdateService>().CheckAndStageUpdateAsync());
     }

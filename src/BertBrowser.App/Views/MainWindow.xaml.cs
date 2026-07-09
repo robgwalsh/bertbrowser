@@ -65,8 +65,23 @@ public partial class MainWindow : Window
         _settings.WindowWidth = bounds.Width;
         _settings.WindowHeight = bounds.Height;
         _settings.WindowMaximized = WindowState == WindowState.Maximized;
-        _settings.LastPath = _shell.CurrentPath.Length > 0 ? _shell.CurrentPath : null;
+        // Restore the last directory next launch — but never a hidden folder.
+        _settings.LastPath = _shell.CurrentPath.Length > 0 && !IsHiddenDirectory(_shell.CurrentPath)
+            ? _shell.CurrentPath
+            : null;
         _settings.Save(); // per-directory thumbnail scales are already updated live in the map
+    }
+
+    private static bool IsHiddenDirectory(string path)
+    {
+        try
+        {
+            return new DirectoryInfo(path).Attributes.HasFlag(FileAttributes.Hidden);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private void FileList_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -93,9 +108,10 @@ public partial class MainWindow : Window
 
         if (thumbnails)
         {
-            FileListView.View = null; // a null View lets ItemsPanel/ItemTemplate take over
+            FileListView.View = null; // a null View lets ItemsPanel/the template selector take over
             FileListView.ItemsPanel = (ItemsPanelTemplate)FindResource("ThumbPanel");
-            FileListView.ItemTemplate = (DataTemplate)FindResource("ThumbTileTemplate");
+            // A selector renders media as tiles and folders/non-media as full-width rows.
+            FileListView.ItemTemplateSelector = (DataTemplateSelector)FindResource("ThumbOrRowSelector");
             FileListView.ItemContainerStyle = (Style)FindResource("ThumbItemStyle");
             // Disabling the horizontal scrollbar bounds the WrapPanel to the viewport width so
             // tiles roll onto the next row; only a vertical scrollbar ever appears.
@@ -104,8 +120,8 @@ public partial class MainWindow : Window
         else
         {
             FileListView.View = DetailsView;
-            FileListView.ClearValue(ItemsControl.ItemsPanelProperty);   // restore virtualizing stack
-            FileListView.ClearValue(ItemsControl.ItemTemplateProperty); // GridView supplies cells
+            FileListView.ClearValue(ItemsControl.ItemsPanelProperty);           // restore virtualizing stack
+            FileListView.ClearValue(ItemsControl.ItemTemplateSelectorProperty); // GridView supplies cells
             FileListView.ItemContainerStyle = (Style)FindResource("FileRowStyle");
             FileListView.ClearValue(ScrollViewer.HorizontalScrollBarVisibilityProperty); // columns can scroll again
         }
@@ -146,6 +162,41 @@ public partial class MainWindow : Window
 
     private void ScanProgress_Click(object sender, RoutedEventArgs e) =>
         new ScanProgressWindow(_shell) { Owner = this }.ShowDialog();
+
+    /// <summary>Applies the configurable scroll-speed multiplier to mouse-wheel scrolling.
+    /// Reproduces WPF's default (WheelScrollLines lines per notch) scaled by the setting, so
+    /// 1× matches the system and 2× (the default) is twice as fast.</summary>
+    private void Scroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        // Let Shift+wheel do its native horizontal scroll untouched.
+        if (e.Delta == 0 || e.Handled || Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) return;
+
+        var scrollViewer = FindScrollViewer((DependencyObject)sender);
+        if (scrollViewer is null) return;
+
+        var wheelLines = SystemParameters.WheelScrollLines;
+        if (wheelLines <= 0) wheelLines = 3; // -1 = "one page"; fall back to the common default
+        var lines = (int)Math.Round(Math.Abs(e.Delta) / 120.0 * wheelLines * _settings.ScrollSpeedMultiplier);
+        lines = Math.Clamp(lines, 1, 240);
+
+        for (var i = 0; i < lines; i++)
+        {
+            if (e.Delta > 0) scrollViewer.LineUp();
+            else scrollViewer.LineDown();
+        }
+        e.Handled = true;
+    }
+
+    private static ScrollViewer? FindScrollViewer(DependencyObject root)
+    {
+        if (root is ScrollViewer sv) return sv;
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            if (FindScrollViewer(VisualTreeHelper.GetChild(root, i)) is { } found)
+                return found;
+        }
+        return null;
+    }
 
     // --- Breadcrumb ---
 
@@ -306,6 +357,16 @@ public partial class MainWindow : Window
     {
         if (FileListView.SelectedItem is FileItemViewModel item)
             _shell.OpenItemCommand.Execute(item);
+    }
+
+    /// <summary>Enter opens the selected item, like double-click.</summary>
+    private void FileList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && FileListView.SelectedItem is FileItemViewModel item)
+        {
+            _shell.OpenItemCommand.Execute(item);
+            e.Handled = true;
+        }
     }
 
     // --- Type-ahead selection ---

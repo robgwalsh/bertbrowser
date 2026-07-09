@@ -72,6 +72,56 @@ public sealed class FsIndexRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void SearchGlobal_SpansDrivesWithFullPaths()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data", isDir: true),
+            Row(@"C:\Data\report.txt", size: 5),
+            Row(@"C:\readme-report.md"),        // direct child of the drive root
+            Row(@"D:\Backup", isDir: true),
+            Row(@"D:\Backup\report-old.txt"),
+            Row(@"C:\Data\unrelated.txt"),
+        }, crawlGen: 1);
+
+        var (hits, truncated) = _repo.SearchGlobal(Q("report"), cap: 100);
+
+        Assert.False(truncated);
+        var paths = hits.Select(h => h.DisplayPath).OrderBy(p => p).ToList();
+        Assert.Equal(new[]
+        {
+            @"C:\Data\report.txt",
+            @"C:\readme-report.md",
+            @"D:\Backup\report-old.txt",
+        }, paths);
+
+        // The Folder column carries the full parent path (Everything-style), not a relative one.
+        var deep = Assert.Single(hits, h => h.Name == "report.txt");
+        Assert.Equal(@"C:\Data", deep.RelativeDirDisplay);
+        var atRoot = Assert.Single(hits, h => h.Name == "readme-report.md");
+        Assert.Equal(@"C:\", atRoot.RelativeDirDisplay);
+    }
+
+    [Fact]
+    public void SearchGlobal_HonorsHiddenAndTruncation()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\a-report.txt"),
+            Row(@"C:\b-report.txt"),
+            Row(@"C:\c-report.txt", hidden: true),
+        }, crawlGen: 1);
+
+        var (visible, _) = _repo.SearchGlobal(Q("report"), cap: 100, includeHidden: false);
+        Assert.Equal(2, visible.Count);
+        Assert.DoesNotContain(visible, h => h.Name == "c-report.txt");
+
+        var (capped, truncated) = _repo.SearchGlobal(Q("report"), cap: 1);
+        Assert.True(truncated);
+        Assert.Single(capped);
+    }
+
+    [Fact]
     public void Search_ScopesToSubtree_SiblingPrefixExcluded()
     {
         _repo.UpsertEntries(new[]

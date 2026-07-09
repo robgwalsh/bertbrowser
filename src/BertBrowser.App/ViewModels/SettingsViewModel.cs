@@ -58,10 +58,17 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _showHiddenItems;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ScrollSpeedText))]
+    private double _scrollSpeed;
+
+    public string ScrollSpeedText => $"{ScrollSpeed:0.0}×";
+
     public SettingsViewModel(AppSettings settings)
     {
         _settings = settings;
         ShowHiddenItems = settings.ShowHiddenItems;
+        ScrollSpeed = settings.ScrollSpeedMultiplier;
         Commands = new ObservableCollection<CustomCommandItemViewModel>(
             settings.CustomCommands.Select(d => new CustomCommandItemViewModel(d)));
         SelectedCommand = Commands.FirstOrDefault();
@@ -103,6 +110,7 @@ public sealed partial class SettingsViewModel : ObservableObject
 
         _settings.CustomCommands = Commands.Select(c => c.ToDefinition()).ToList();
         _settings.ShowHiddenItems = ShowHiddenItems;
+        _settings.ScrollSpeedMultiplier = ScrollSpeed;
         _settings.Save();
         error = null;
         return true;

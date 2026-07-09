@@ -69,6 +69,21 @@ public sealed partial class FileListViewModel : ObservableObject
 
     public bool IsThumbnailView => ThumbnailSize > 0;
 
+    private bool _lastThumbnailView;
+
+    partial void OnThumbnailScaleChanged(double value)
+    {
+        // Crossing the details/thumbnail boundary changes the item bands (media move to the
+        // bottom), so re-sort in place; resizing within thumbnail mode needs no reshuffle.
+        if (IsThumbnailView == _lastThumbnailView) return;
+        _lastThumbnailView = IsThumbnailView;
+
+        if (Items.Count == 0) return; // a fresh load will sort with the right mode anyway
+        var items = Items.ToList();
+        SortInPlace(items);
+        ReplaceItems(items);
+    }
+
     [ObservableProperty]
     private ObservableCollection<FileItemViewModel> _items = new();
 
@@ -187,20 +202,25 @@ public sealed partial class FileListViewModel : ObservableObject
             Items.Add(CreateSearchItem(hit));
     }
 
-    /// <summary>Replaces the streamed list with the final sorted outcome and hydrates sizes/tags.</summary>
-    public async Task CompleteSearchAsync(SearchOutcome outcome, string queryText, CancellationToken ct)
+    /// <summary>Replaces the streamed list with the final sorted outcome and hydrates sizes/tags.
+    /// When <paramref name="hydrateMetadata"/> is set (global/MFT results, which carry no size or
+    /// timestamp), each hit is stat'd from disk off-thread before sorting and binding.</summary>
+    public async Task CompleteSearchAsync(SearchOutcome outcome, string queryText, bool hydrateMetadata, CancellationToken ct)
     {
         try
         {
             var items = await Task.Run(() =>
             {
                 var vms = outcome.Hits.Select(CreateSearchItem).ToList();
+                if (hydrateMetadata)
+                    foreach (var vm in vms)
+                        vm.HydrateSearchMetadata();
                 SortInPlace(vms);
                 return vms;
             }, ct);
 
             ReplaceItems(items);
-            EmptyMessage = items.Count == 0 ? $"No results for '{queryText}' in this folder" : null;
+            EmptyMessage = items.Count == 0 ? $"No results for '{queryText}'" : null;
             await HydrateDirSizesAsync(items, ct);
             await HydrateTagsAsync(items.Where(i => !i.IsDirectory).ToList(), ct);
         }
@@ -292,14 +312,24 @@ public sealed partial class FileListViewModel : ObservableObject
 
         items.Sort((a, b) =>
         {
-            // Directories group before files in normal mode, regardless of direction.
-            if (!IsFlattened && a.IsDirectory != b.IsDirectory)
-                return a.IsDirectory ? -1 : 1;
+            // Layout bands (folders, then non-media files as rows, then media tiles) always
+            // sort ahead of the column direction, so rows stay grouped above the thumbnails.
+            var band = LayoutBand(a) - LayoutBand(b);
+            if (band != 0) return band;
 
             var result = cmp(a, b);
             if (result == 0)
                 result = NaturalStringComparer.Instance.Compare(a.Name, b.Name);
             return SortDescending ? -result : result;
         });
+    }
+
+    /// <summary>Ordering band: directories (0) first, then non-media files (1), then — only
+    /// in thumbnail mode — media files (2) so they collect below the rows.</summary>
+    private int LayoutBand(FileItemViewModel item)
+    {
+        if (!IsFlattened && item.IsDirectory) return 0;
+        if (IsThumbnailView && item.IsMedia) return 2;
+        return 1;
     }
 }

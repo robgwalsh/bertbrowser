@@ -228,6 +228,69 @@ public sealed class FsIndexRepository
         return (hits, truncated);
     }
 
+    /// <summary>The drive root prefix length in a canonical key: "C:\" — MFT-indexed roots
+    /// are always local NTFS drives, so every global hit shares this 3-char root.</summary>
+    private const int DriveRootLength = 3;
+
+    /// <summary>
+    /// Whole-index ("This PC") search: the same GLOB filter as <see cref="Search"/> but with
+    /// no subtree bound, so it scans every indexed volume. Results carry full display paths
+    /// (Everything-style) reconstructed from each row's ancestor directory names up to its
+    /// drive root. <see cref="SearchHit.RelativeDirDisplay"/> holds the full parent path.
+    /// </summary>
+    public (IReadOnlyList<SearchHit> Hits, bool Truncated) SearchGlobal(
+        SearchQuery query, int cap, bool includeHidden = true)
+    {
+        using var conn = _db.Open();
+
+        var rows = new List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)>();
+        using (var cmd = conn.CreateCommand())
+        {
+            var globs = string.Join(" AND ", Enumerable.Range(0, query.GlobPatterns.Count)
+                .Select(i => $"name_key GLOB @g{i}"));
+            var hiddenFilter = includeHidden ? "" : "AND hidden = 0 ";
+            cmd.CommandText =
+                $"""
+                SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden
+                FROM fs_entry
+                WHERE {globs} {hiddenFilter}
+                LIMIT @limit;
+                """;
+            cmd.Parameters.AddWithValue("@limit", cap + 1);
+            for (var i = 0; i < query.GlobPatterns.Count; i++)
+                cmd.Parameters.AddWithValue($"@g{i}", query.GlobPatterns[i]);
+
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                rows.Add((
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.GetInt32(2) != 0,
+                    reader.GetInt64(3),
+                    DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                    reader.GetInt32(5) != 0));
+            }
+        }
+
+        var truncated = rows.Count > cap;
+        if (truncated)
+            rows.RemoveAt(rows.Count - 1);
+
+        var ancestorNames = LookupAncestorNames(conn, rows, DriveRootLength);
+
+        var hits = new List<SearchHit>(rows.Count);
+        foreach (var row in rows)
+        {
+            var driveRoot = row.Key[..DriveRootLength]; // "C:\"
+            var relDir = BuildRelativeDir(row.Key, DriveRootLength, ancestorNames);
+            var parentFull = relDir.Length == 0 ? driveRoot : driveRoot + relDir; // driveRoot ends with '\'
+            var display = parentFull.EndsWith('\\') ? parentFull + row.Name : parentFull + '\\' + row.Name;
+            hits.Add(new SearchHit(display, parentFull, row.Name, row.IsDir, row.Size, row.Modified, row.Hidden));
+        }
+        return (hits, truncated);
+    }
+
     /// <summary>
     /// Display names for every distinct ancestor directory (strictly between the search
     /// root and each hit). Each ancestor is itself an fs_entry row keyed by a prefix of

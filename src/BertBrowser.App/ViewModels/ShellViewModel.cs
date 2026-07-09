@@ -9,6 +9,7 @@ using BertBrowser.Core.Data;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.Mft;
 
 namespace BertBrowser.App.ViewModels;
 
@@ -20,6 +21,7 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly ITagService _tagService;
     private readonly ISearchService _searchService;
     private readonly IFileTransferService _fileTransfer;
+    private readonly IMftIndexService _mftIndex;
     private readonly AppSettings _settings;
 
     /// <summary>Reflects the current "Show hidden items" setting (may change while running).</summary>
@@ -53,6 +55,21 @@ public sealed partial class ShellViewModel : ObservableObject
 
     [ObservableProperty]
     private string _searchText = "";
+
+    /// <summary>Search scope: true = whole PC (the MFT global index), false = the current
+    /// folder subtree. Defaults to whole-PC, the point of the MFT index.</summary>
+    [ObservableProperty]
+    private bool _searchGlobal = true;
+
+    /// <summary>MFT indexing state for the status bar ("Indexing C:…"); empty when idle.</summary>
+    [ObservableProperty]
+    private string _indexingStatus = "";
+
+    partial void OnSearchGlobalChanged(bool value)
+    {
+        if (SearchQuery.Parse(SearchText) is not null)
+            _ = RefreshViewAsync();
+    }
 
     [ObservableProperty]
     private bool _isScanning;
@@ -94,6 +111,7 @@ public sealed partial class ShellViewModel : ObservableObject
         ISearchService searchService,
         IFileTransferService fileTransfer,
         IBookmarkService bookmarkService,
+        IMftIndexService mftIndex,
         DirSizeRepository dirSizeRepository,
         AppSettings settings)
     {
@@ -101,6 +119,7 @@ public sealed partial class ShellViewModel : ObservableObject
         _tagService = tagService;
         _searchService = searchService;
         _fileTransfer = fileTransfer;
+        _mftIndex = mftIndex;
         _settings = settings;
 
         FileList = new FileListViewModel(fileSystem, tagService, dirSizeRepository);
@@ -112,6 +131,9 @@ public sealed partial class ShellViewModel : ObservableObject
         Tree.DirectorySelected += path => _ = NavigateToAsync(path);
         TagFilter.FilterChanged += () => _ = RefreshViewAsync();
         _searchService.IndexRefreshed += OnIndexRefreshed;
+        _mftIndex.IndexRefreshed += OnMftIndexRefreshed;
+        _mftIndex.StatusChanged += OnMftStatusChanged;
+        IndexingStatus = _mftIndex.StatusText;
     }
 
     /// <summary>Overrides the initial directory (e.g. from the command line).</summary>
@@ -324,30 +346,56 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         var queryText = SearchText;
         FileList.BeginSearch();
-        StatusText = $"Searching for '{queryText}'…";
 
-        // Progress is constructed on the UI thread, so batches marshal back to it.
-        var progress = new Progress<IReadOnlyList<SearchHit>>(batch =>
+        SearchOutcome? outcome;
+        if (SearchGlobal)
         {
-            if (ct.IsCancellationRequested) return;
-            FileList.AppendSearchHits(batch);
-            StatusText = $"{FileList.Items.Count} result(s) so far for '{queryText}'…";
-        });
+            // Whole-PC: served straight from the MFT index, no live streaming.
+            StatusText = $"Searching this PC for '{queryText}'…";
+            outcome = await _searchService.SearchAllAsync(queryText, ct, IncludeHidden);
+        }
+        else
+        {
+            StatusText = $"Searching for '{queryText}'…";
+            // Progress is constructed on the UI thread, so batches marshal back to it.
+            var progress = new Progress<IReadOnlyList<SearchHit>>(batch =>
+            {
+                if (ct.IsCancellationRequested) return;
+                FileList.AppendSearchHits(batch);
+                StatusText = $"{FileList.Items.Count} result(s) so far for '{queryText}'…";
+            });
+            outcome = await _searchService.SearchAsync(CurrentPath, queryText, ct, progress, IncludeHidden);
+        }
 
-        var outcome = await _searchService.SearchAsync(CurrentPath, queryText, ct, progress, IncludeHidden);
         if (outcome is null || ct.IsCancellationRequested) return;
 
-        await FileList.CompleteSearchAsync(outcome, queryText, ct);
+        // Global hits come from MFT rows with no size/timestamp, so hydrate them from disk.
+        await FileList.CompleteSearchAsync(outcome, queryText, hydrateMetadata: SearchGlobal, ct);
         if (ct.IsCancellationRequested) return;
 
+        var scope = SearchGlobal ? "this PC" : CurrentPath;
         var suffix = outcome.Source switch
         {
             SearchResultSource.LiveScan => " — indexing in background…",
             SearchResultSource.StaleIndex => " — refreshing index…",
+            _ when SearchGlobal && outcome.RefreshPending => " — indexing drives…",
             _ => " — indexed",
         };
         var truncated = outcome.Truncated ? " (showing first 1,000)" : "";
-        StatusText = $"{outcome.Hits.Count} result(s) for '{queryText}' under {CurrentPath}{truncated}{suffix}";
+        StatusText = $"{outcome.Hits.Count} result(s) for '{queryText}' in {scope}{truncated}{suffix}";
+    }
+
+    /// <summary>A volume's MFT index just finished (or refreshed): re-run an active whole-PC
+    /// search so the now-populated index is reflected.</summary>
+    private void OnMftIndexRefreshed(string rootKey)
+    {
+        if (!SearchGlobal || SearchQuery.Parse(SearchText) is null) return;
+        Application.Current?.Dispatcher.InvokeAsync(() => _ = RefreshViewAsync());
+    }
+
+    private void OnMftStatusChanged()
+    {
+        Application.Current?.Dispatcher.InvokeAsync(() => IndexingStatus = _mftIndex.StatusText);
     }
 
     [RelayCommand]

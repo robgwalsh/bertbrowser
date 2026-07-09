@@ -1,6 +1,7 @@
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.Mft;
 using Xunit;
 
 namespace BertBrowser.Core.Tests;
@@ -12,6 +13,7 @@ public sealed class SearchServiceTests : IDisposable
     private readonly FsIndexRepository _repo;
     private readonly IndexCrawler _crawler;
     private readonly FakeWatcherService _watchers = new();
+    private readonly FakeMftIndexService _mft = new();
     private readonly SearchService _service;
 
     public SearchServiceTests()
@@ -23,7 +25,7 @@ public sealed class SearchServiceTests : IDisposable
         db.Migrate();
         _repo = new FsIndexRepository(db);
         _crawler = new IndexCrawler(_repo);
-        _service = new SearchService(_repo, _crawler, _watchers);
+        _service = new SearchService(_repo, _crawler, _watchers, _mft);
     }
 
     public void Dispose()
@@ -49,6 +51,20 @@ public sealed class SearchServiceTests : IDisposable
         public bool IsWatching(string rootKey) { lock (_watching) return _watching.Contains(rootKey); }
         public void Watch(string rootKey, string displayPath) { lock (_watching) _watching.Add(rootKey); }
         public void StopAll() { lock (_watching) _watching.Clear(); }
+        public void Dispose() { }
+    }
+
+    /// <summary>No NTFS volumes in tests — this stand-in reports nothing indexed, so the
+    /// crawl/live-scan fallback paths are exercised exactly as before the MFT feature.</summary>
+    private sealed class FakeMftIndexService : IMftIndexService
+    {
+        public void Start() { }
+        public bool AnyIndexed => false;
+        public bool IsBuilding => false;
+        public bool IsIndexed(string pathKey) => false;
+        public string StatusText => "";
+        public event Action<string>? IndexRefreshed { add { } remove { } }
+        public event Action? StatusChanged { add { } remove { } }
         public void Dispose() { }
     }
 

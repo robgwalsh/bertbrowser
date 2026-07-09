@@ -20,6 +20,18 @@ public sealed partial class FileItemViewModel : ObservableObject
     /// <summary>Ghosted like Explorer when hidden.</summary>
     public double IconOpacity => IsHidden ? 0.45 : 1.0;
 
+    /// <summary>Files that get a real visual preview (images/videos). Only these render as
+    /// thumbnail tiles; folders and other files always stay as rows.</summary>
+    private static readonly HashSet<string> MediaExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg", ".jpeg", ".jfif", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".ico",
+        ".heic", ".heif", ".avif", ".svg",
+        ".mp4", ".mov", ".avi", ".mkv", ".wmv", ".webm", ".m4v", ".flv", ".mpg", ".mpeg",
+        ".3gp", ".m2ts", ".mts",
+    };
+
+    public bool IsMedia => !IsDirectory && MediaExtensions.Contains(Path.GetExtension(FullPath));
+
     /// <summary>Path relative to the filter root; only set in flattened tag-filter mode.</summary>
     public string RelativePath { get; }
 
@@ -93,6 +105,36 @@ public sealed partial class FileItemViewModel : ObservableObject
         else
         {
             IsMissing = true;
+        }
+    }
+
+    /// <summary>Fills size/modified/hidden from disk for a search result whose index row
+    /// lacked them — MFT-built rows carry no size or timestamp. Unlike
+    /// <see cref="HydrateFromDisk"/> this never flags a directory as missing (it stats
+    /// directories too); intended to run off the UI thread before the item is bound.</summary>
+    public void HydrateSearchMetadata()
+    {
+        try
+        {
+            if (IsDirectory)
+            {
+                var info = new DirectoryInfo(FullPath);
+                if (!info.Exists) return;
+                ModifiedUtc = info.LastWriteTimeUtc;
+                IsHidden = info.Attributes.HasFlag(FileAttributes.Hidden);
+            }
+            else
+            {
+                var info = new FileInfo(FullPath);
+                if (!info.Exists) return;
+                SizeBytes = info.Length;
+                ModifiedUtc = info.LastWriteTimeUtc;
+                IsHidden = info.Attributes.HasFlag(FileAttributes.Hidden);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // Best-effort: leave the index's (empty) values in place.
         }
     }
 

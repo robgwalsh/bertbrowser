@@ -148,6 +148,12 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
     /// <summary>Nesting level; drives row indentation in the full-width item template.</summary>
     public int Depth { get; }
 
+    /// <summary>Hidden folder — ghosts the icon like the file list does.</summary>
+    public bool IsHidden { get; }
+
+    /// <summary>Dimmed like Explorer when hidden.</summary>
+    public double IconOpacity => IsHidden ? 0.45 : 1.0;
+
     public System.Windows.Media.ImageSource? Icon =>
         _icon ??= FullPath.Length > 0 ? Interop.ShellIcons.GetIcon(FullPath, isDirectory: true) : null;
 
@@ -172,9 +178,23 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
         Depth = depth;
         var fileName = Path.GetFileName(fullPath);
         Name = displayName ?? (fileName.Length > 0 ? fileName : fullPath);
+        IsHidden = IsHiddenDirectory(fullPath);
 
         if (tree.HasSubdirectories(fullPath))
             Children.Add(Placeholder);
+    }
+
+    /// <summary>Hidden attribute for a directory; false for drive roots and anything we can't stat.</summary>
+    private static bool IsHiddenDirectory(string fullPath)
+    {
+        try
+        {
+            return new DirectoryInfo(fullPath).Attributes.HasFlag(FileAttributes.Hidden);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     partial void OnIsExpandedChanged(bool value)
