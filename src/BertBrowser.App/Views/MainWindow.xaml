@@ -162,21 +162,6 @@
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
-                    <Button Style="{StaticResource ToolbarButton}"
-                            ToolTip="Compute content sizes of all folders in this directory"
-                            Command="{Binding ComputeSizesHereCommand}">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE1D0;" Margin="0,0,6,0"/>
-                            <TextBlock Text="Sizes here" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
-                    <Button Style="{StaticResource ToolbarButton}"
-                            Command="{Binding CancelScansCommand}">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE711;" Margin="0,0,6,0"/>
-                            <TextBlock Text="Cancel scan" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
                     <Button Style="{StaticResource ToolbarButton}" Click="ManageTags_Click">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE8EC;" Margin="0,0,6,0"/>
@@ -184,10 +169,6 @@
                         </StackPanel>
                     </Button>
                     <Separator Margin="4,2"/>
-                    <Button Style="{StaticResource ToolbarButton}"
-                            ToolTip="Scan progress" Click="ScanProgress_Click">
-                        <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE9D9;"/>
-                    </Button>
                     <Button Style="{StaticResource ToolbarButton}"
                             ToolTip="Settings — custom context menu commands"
                             Click="Settings_Click">
@@ -324,18 +305,6 @@
                             AutomationProperties.Name="Thumbnail size"/>
                 </StackPanel>
             </StatusBarItem>
-            <!-- Live scan progress; click to open the scan-progress dialog. -->
-            <StatusBarItem DockPanel.Dock="Right"
-                           Visibility="{Binding IsScanning, Converter={StaticResource BoolToVisibility}}">
-                <Button Style="{StaticResource BreadcrumbButton}" Click="ScanProgress_Click"
-                        ToolTip="Show all scan progress">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Style="{StaticResource ToolbarIcon}" FontSize="13" Text="&#xE9D9;"
-                                   Margin="0,0,6,0" Foreground="#1C86D1"/>
-                        <TextBlock Text="{Binding ScanSummary}" VerticalAlignment="Center" Foreground="#1C86D1"/>
-                    </StackPanel>
-                </Button>
-            </StatusBarItem>
         </StatusBar>
 
         <Grid>
@@ -429,7 +398,7 @@
                 </TreeView.ContextMenu>
                 <TreeView.ItemTemplate>
                     <HierarchicalDataTemplate ItemsSource="{Binding Children}">
-                        <DockPanel Background="Transparent">
+                        <DockPanel Background="Transparent" MouseLeftButtonUp="FolderTreeItem_Click">
                             <Image DockPanel.Dock="Left" Source="{Binding Icon}"
                                    Width="16" Height="16" Margin="0,0,6,0" VerticalAlignment="Center"
                                    Opacity="{Binding IconOpacity}"/>

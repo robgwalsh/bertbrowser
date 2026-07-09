@@ -160,9 +160,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ScanProgress_Click(object sender, RoutedEventArgs e) =>
-        new ScanProgressWindow(_shell) { Owner = this }.ShowDialog();
-
     /// <summary>Applies the configurable scroll-speed multiplier to mouse-wheel scrolling.
     /// Reproduces WPF's default (WheelScrollLines lines per notch) scaled by the setting, so
     /// 1× matches the system and 2× (the default) is twice as fast.</summary>
@@ -635,6 +632,17 @@ public partial class MainWindow : Window
     {
         if (FolderTree.SelectedItem is PortableDeviceNodeViewModel device)
             BertBrowser.App.Interop.PortableDevices.OpenInExplorer(device.Device);
+    }
+
+    /// <summary>A single click on a folder row toggles its expansion (on top of selecting/
+    /// navigating), so the tree opens and closes without having to hit the small chevron. Drive
+    /// roots (Depth 0) are left to their accordion select-to-open behaviour; only nested folders
+    /// with children toggle here.</summary>
+    private void FolderTreeItem_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: DirectoryNodeViewModel node }
+            && node.Depth > 0 && node.Children.Count > 0)
+            node.IsExpanded = !node.IsExpanded;
     }
 
     private void TreeProperties_Click(object sender, RoutedEventArgs e)

@@ -33,12 +33,13 @@ internal static class MftPathBuilder
         string driveRoot,
         Dictionary<ulong, (string Path, bool Hidden)> dirCache,
         out string displayPath,
-        out bool hidden)
+        out bool hidden,
+        ulong rootFrn = NtfsRoot)
     {
         displayPath = "";
         hidden = false;
 
-        if (frn == NtfsRoot)
+        if (frn == rootFrn)
         {
             displayPath = driveRoot;
             return true;
@@ -62,7 +63,7 @@ internal static class MftPathBuilder
             pending.Add((currentFrn, current));
 
             var parentFrn = current.ParentFrn;
-            if (parentFrn == NtfsRoot || parentFrn == currentFrn)
+            if (parentFrn == rootFrn || parentFrn == currentFrn)
                 break; // reached the volume root; basePath stays driveRoot
 
             if (dirCache.TryGetValue(parentFrn, out var cached))

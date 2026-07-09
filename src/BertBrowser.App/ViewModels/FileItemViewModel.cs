@@ -114,6 +114,10 @@ public sealed partial class FileItemViewModel : ObservableObject
     /// directories too); intended to run off the UI thread before the item is bound.</summary>
     public void HydrateSearchMetadata()
     {
+        // Raw-$MFT index rows already carry a real timestamp (and size); only the names-only
+        // USN-enum fallback leaves them unset, so stat just those.
+        if (ModifiedUtc != default)
+            return;
         try
         {
             if (IsDirectory)

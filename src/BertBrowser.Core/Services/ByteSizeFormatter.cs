@@ -15,8 +15,12 @@ public static class ByteSizeFormatter
             value /= 1024;
             unit++;
         }
-        return unit == 0
-            ? $"{bytes} B"
-            : $"{value:0.#} {Units[unit]}";
+        if (unit == 0)
+            return $"{bytes} B";
+
+        // GB and larger get finer precision (3 decimals) so big folders are distinguishable;
+        // KB/MB stay at 1 decimal.
+        var format = unit >= 3 ? "0.000" : "0.#";
+        return $"{value.ToString(format)} {Units[unit]}";
     }
 }

@@ -9,17 +9,17 @@ using Microsoft.Win32.SafeHandles;
 namespace BertBrowser.Core.Services.Mft;
 
 /// <summary>
-/// Indexes one NTFS volume by reading its Master File Table, and keeps it live by tailing
-/// the USN change journal. The initial pass (<see cref="BuildInitialIndex"/>) enumerates
-/// every record with FSCTL_ENUM_USN_DATA — orders of magnitude faster than walking the
-/// tree — reconstructs paths from the flat FRN→parent references, and bulk-upserts them
-/// into the shared <c>fs_entry</c> index. <see cref="Tail"/> then applies create / delete /
-/// rename records as they happen.
+/// Indexes one NTFS volume and keeps it live via the USN change journal. The initial pass reads
+/// the raw <c>$MFT</c> (<see cref="MftReader"/>) to get names, parents, sizes and timestamps in
+/// one sweep — populating the <c>fs_entry</c> search index <em>and</em> a full <c>dir_size_cache</c>
+/// rollup so every folder shows its size instantly. If the raw read can't parse the volume it
+/// falls back to <see cref="EnumerateMft"/> (FSCTL_ENUM_USN_DATA — names only, no sizes; the DFS
+/// scanner still handles sizing there). <see cref="Tail"/> then applies create / delete / rename
+/// records as they happen.
 ///
-/// FSCTL_ENUM_USN_DATA does not return sizes or timestamps, so rows are written with size 0
-/// and <see cref="DateTime.MinValue"/>; the UI hydrates those lazily for displayed results.
-/// A resident FRN→path map of directories only (a small fraction of all entries) is retained
-/// after the initial pass so the tail can resolve change-record paths without a rescan.
+/// Everything is keyed by 48-bit MFT record numbers (root = 5). USN journal references are the
+/// same record number in their low 48 bits, so the tail masks them to look up the resident
+/// directory map built by the initial pass.
 /// </summary>
 internal sealed class MftVolumeIndexer : IDisposable
 {
@@ -29,6 +29,7 @@ internal sealed class MftVolumeIndexer : IDisposable
     private static readonly TimeSpan TailPollInterval = TimeSpan.FromMilliseconds(1000);
 
     private readonly FsIndexRepository _repository;
+    private readonly DirSizeRepository _dirSizeRepository;
     private readonly string _driveRoot; // "C:\"
     private readonly string _rootKey;   // canonical "C:\"
 
@@ -38,27 +39,26 @@ internal sealed class MftVolumeIndexer : IDisposable
     private long _maxUsn;
     private int _lastError;
 
-    /// <summary>Directory FRN → (display path, effective-hidden). Built during the initial
-    /// enum and maintained by the tail; the source of truth for resolving change paths.</summary>
+    /// <summary>Directory record number → (display path, effective-hidden). Built during the
+    /// initial pass and maintained by the tail; the source of truth for resolving change paths.</summary>
     private readonly Dictionary<ulong, (string Path, bool Hidden)> _dirs = new();
 
-    /// <summary>Old paths captured from RENAME_OLD_NAME records, paired with the matching
-    /// RENAME_NEW_NAME/CLOSE record by file reference number.</summary>
+    /// <summary>Old paths captured from RENAME_OLD_NAME records, keyed by record number.</summary>
     private readonly Dictionary<ulong, string> _pendingRenames = new();
 
     public string RootKey => _rootKey;
     public string DriveRoot => _driveRoot;
 
-    public MftVolumeIndexer(FsIndexRepository repository, string driveLetter)
+    public MftVolumeIndexer(FsIndexRepository repository, DirSizeRepository dirSizeRepository, string driveLetter)
     {
         _repository = repository;
+        _dirSizeRepository = dirSizeRepository;
         _driveRoot = driveLetter + @":\";
         _rootKey = _driveRoot.ToUpperInvariant();
     }
 
     /// <summary>Opens the raw volume and activates its USN journal. Returns false (rather
-    /// than throwing) if the volume can't be opened or has no usable journal — the caller
-    /// simply leaves that drive to the crawl fallback.</summary>
+    /// than throwing) if the volume can't be opened or has no usable journal.</summary>
     public bool Open()
     {
         var handle = NtfsNative.CreateFileW(
@@ -71,7 +71,7 @@ internal sealed class MftVolumeIndexer : IDisposable
         {
             handle.Dispose();
             // Retry read-only: creating a journal needs write, but querying an existing one
-            // (the common case) does not, and some volumes deny write handles.
+            // (and reading the MFT) does not, and some volumes deny write handles.
             handle = NtfsNative.CreateFileW(
                 $@"\\.\{_driveRoot[..2]}", NtfsNative.GenericRead,
                 NtfsNative.FileShareRead | NtfsNative.FileShareWrite,
@@ -115,9 +115,9 @@ internal sealed class MftVolumeIndexer : IDisposable
     }
 
     /// <summary>
-    /// One full MFT enumeration → path reconstruction → bulk upsert. On completion the
-    /// volume root is registered <c>complete</c> so searches route to the index, and the
-    /// resident directory map (<see cref="_dirs"/>) is ready for the tail.
+    /// Builds the index for the volume: raw <c>$MFT</c> first (names + sizes + dates + folder-size
+    /// rollup), falling back to the names-only USN enumeration if the raw read fails. On success
+    /// the volume root is registered <c>complete</c> and the resident directory map is ready.
     /// </summary>
     public void BuildInitialIndex(CancellationToken ct)
     {
@@ -126,6 +126,140 @@ internal sealed class MftVolumeIndexer : IDisposable
         var crawledUtc = DateTime.UtcNow;
         var crawlGen = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
+        if (!BuildFromRawMft(ct, crawlGen))
+        {
+            ct.ThrowIfCancellationRequested();
+            BuildFromUsnEnum(ct, crawlGen);
+        }
+        ct.ThrowIfCancellationRequested();
+
+        _repository.SweepVanished(_rootKey, crawlGen);
+        _repository.UpsertRoot(_rootKey, _driveRoot, crawledUtc, complete: true);
+    }
+
+    /// <summary>Raw-$MFT build: fs_entry rows with real sizes/dates plus the dir_size_cache
+    /// rollup. Returns false (without writing fs_entry) if the volume can't be parsed.</summary>
+    private bool BuildFromRawMft(CancellationToken ct, long crawlGen)
+    {
+        var reader = new MftReader(_handle!);
+        var records = new List<MftFileRecord>();
+
+        try
+        {
+            if (!reader.TryReadAll(ct, records.Add))
+                return false;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return false; // unexpected layout / read error — fall back to the USN enumeration
+        }
+
+        var computedUtc = DateTime.UtcNow;
+
+        // Resolve every directory's path first: needed both for fs_entry keys and to stat the
+        // handful of heavily-fragmented files that came back with an unknown (-1) size.
+        var dirNodes = new Dictionary<ulong, MftNode>();
+        foreach (var rec in records)
+            if (rec.IsDirectory)
+                dirNodes[rec.RecordNumber] = new MftNode(rec.Name, rec.ParentRecordNumber, true, rec.Hidden);
+
+        _dirs.Clear();
+        foreach (var recno in dirNodes.Keys)
+            MftPathBuilder.TryResolve(dirNodes, recno, _driveRoot, _dirs, out _, out _, NtfsLayout.RootRecordNumber);
+
+        var sizes = new MftDirectorySizeBuilder();
+        var rows = new List<FsEntryRow>(UpsertChunk);
+        foreach (var raw in records)
+        {
+            ct.ThrowIfCancellationRequested();
+            var rec = raw.Size >= 0 ? raw : raw with { Size = StatFileSize(raw) };
+            sizes.Add(rec);
+            if (TryResolveRecord(rec, out var key, out var hidden))
+            {
+                rows.Add(new FsEntryRow(key, rec.Name, rec.IsDirectory, rec.IsDirectory ? 0 : rec.Size, rec.ModifiedUtc, hidden));
+                if (rows.Count >= UpsertChunk)
+                {
+                    _repository.UpsertEntries(rows, crawlGen);
+                    rows.Clear();
+                }
+            }
+        }
+        _repository.UpsertEntries(rows, crawlGen);
+
+        foreach (var chunk in sizes.Build(_driveRoot, computedUtc, _dirs).Chunk(UpsertChunk))
+            _dirSizeRepository.UpsertMany(chunk);
+        return true;
+    }
+
+    /// <summary>Reads a file's real length from disk — used only for the rare fragmented files
+    /// whose size the base MFT record can't report. Best-effort; a vanished file counts as 0.</summary>
+    private long StatFileSize(in MftFileRecord rec)
+    {
+        string parentPath;
+        if (rec.ParentRecordNumber == NtfsLayout.RootRecordNumber)
+            parentPath = _driveRoot;
+        else if (_dirs.TryGetValue(rec.ParentRecordNumber, out var parent))
+            parentPath = parent.Path;
+        else
+            return 0;
+
+        var path = parentPath.EndsWith('\\') ? parentPath + rec.Name : parentPath + '\\' + rec.Name;
+        try
+        {
+            return Math.Max(0, new FileInfo(path).Length);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>Resolves a raw record's canonical key + effective-hidden from the resident
+    /// directory map. Directories look up their own resolved path; files hang off their parent.</summary>
+    private bool TryResolveRecord(in MftFileRecord rec, out string key, out bool hidden)
+    {
+        key = "";
+        hidden = false;
+        if (rec.IsDirectory)
+        {
+            if (!_dirs.TryGetValue(rec.RecordNumber, out var dir))
+                return false;
+            key = dir.Path.ToUpperInvariant();
+            hidden = dir.Hidden;
+            return true;
+        }
+
+        string parentPath;
+        bool parentHidden;
+        if (rec.ParentRecordNumber == NtfsLayout.RootRecordNumber)
+        {
+            parentPath = _driveRoot;
+            parentHidden = false;
+        }
+        else if (_dirs.TryGetValue(rec.ParentRecordNumber, out var parent))
+        {
+            parentPath = parent.Path;
+            parentHidden = parent.Hidden;
+        }
+        else
+        {
+            return false;
+        }
+
+        var display = parentPath.EndsWith('\\') ? parentPath + rec.Name : parentPath + '\\' + rec.Name;
+        key = display.ToUpperInvariant();
+        hidden = parentHidden || rec.Hidden;
+        return true;
+    }
+
+    /// <summary>Fallback build via FSCTL_ENUM_USN_DATA — names only (size 0, no timestamp);
+    /// the DFS scanner still provides sizes for these volumes on demand.</summary>
+    private void BuildFromUsnEnum(CancellationToken ct, long crawlGen)
+    {
         var map = EnumerateMft(ct);
         if (ct.IsCancellationRequested) return;
 
@@ -134,13 +268,11 @@ internal sealed class MftVolumeIndexer : IDisposable
         foreach (var (frn, node) in map)
         {
             ct.ThrowIfCancellationRequested();
-            if (frn == NtfsNative.RootFileReferenceNumber || node.Name is "." or "..")
+            if (frn == NtfsLayout.RootRecordNumber || node.Name is "." or "..")
                 continue;
-            if (!MftPathBuilder.TryResolve(map, frn, _driveRoot, _dirs, out var display, out var hidden))
+            if (!MftPathBuilder.TryResolve(map, frn, _driveRoot, _dirs, out var display, out var hidden, NtfsLayout.RootRecordNumber))
                 continue;
 
-            // display is already a well-formed absolute path with single separators, so the
-            // canonical key is just its invariant-uppercase form — no need for GetFullPath.
             rows.Add(new FsEntryRow(display.ToUpperInvariant(), node.Name, node.IsDirectory, 0, DateTime.MinValue, hidden));
             if (rows.Count >= UpsertChunk)
             {
@@ -149,9 +281,6 @@ internal sealed class MftVolumeIndexer : IDisposable
             }
         }
         _repository.UpsertEntries(rows, crawlGen);
-
-        _repository.SweepVanished(_rootKey, crawlGen);
-        _repository.UpsertRoot(_rootKey, _driveRoot, crawledUtc, complete: true);
     }
 
     private Dictionary<ulong, MftNode> EnumerateMft(CancellationToken ct)
@@ -168,15 +297,13 @@ internal sealed class MftVolumeIndexer : IDisposable
         while (!ct.IsCancellationRequested)
         {
             if (!IoctlStruct(NtfsNative.FsctlEnumUsnData, input, buffer, out var bytes))
-            {
-                // ERROR_HANDLE_EOF is the normal end of the table.
-                break;
-            }
+                break; // ERROR_HANDLE_EOF is the normal end of the table
             if (bytes <= sizeof(ulong))
                 break;
 
             foreach (var rec in UsnRecordParser.Parse(buffer, sizeof(ulong), bytes))
-                map[rec.FileReferenceNumber] = new MftNode(rec.Name, rec.ParentFileReferenceNumber, rec.IsDirectory, rec.IsHidden);
+                map[NtfsLayout.RecordNumber(rec.FileReferenceNumber)] =
+                    new MftNode(rec.Name, NtfsLayout.RecordNumber(rec.ParentFileReferenceNumber), rec.IsDirectory, rec.IsHidden);
 
             input.StartFileReferenceNumber = BinaryPrimitives.ReadUInt64LittleEndian(buffer);
         }
@@ -234,7 +361,7 @@ internal sealed class MftVolumeIndexer : IDisposable
             if ((rec.Reason & NtfsNative.UsnReasonRenameOldName) != 0)
             {
                 if (TryResolvePath(rec, out var oldPath, out _))
-                    _pendingRenames[rec.FileReferenceNumber] = oldPath;
+                    _pendingRenames[NtfsLayout.RecordNumber(rec.FileReferenceNumber)] = oldPath;
                 continue;
             }
 
@@ -256,7 +383,7 @@ internal sealed class MftVolumeIndexer : IDisposable
             return;
         _repository.DeleteSubtree(key);
         if (rec.IsDirectory)
-            RemoveDirSubtree(rec.FileReferenceNumber, key);
+            RemoveDirSubtree(NtfsLayout.RecordNumber(rec.FileReferenceNumber), key);
     }
 
     private void ApplyRename(UsnRecord rec)
@@ -265,7 +392,7 @@ internal sealed class MftVolumeIndexer : IDisposable
             return;
 
         var crawlGen = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        if (_pendingRenames.Remove(rec.FileReferenceNumber, out var oldPath))
+        if (_pendingRenames.Remove(NtfsLayout.RecordNumber(rec.FileReferenceNumber), out var oldPath))
         {
             var oldKey = oldPath.ToUpperInvariant();
             _repository.Rename(oldKey, newKey, rec.Name, crawlGen);
@@ -284,13 +411,13 @@ internal sealed class MftVolumeIndexer : IDisposable
         if (!TryResolvePath(rec, out var display, out var key))
             return;
 
-        var hidden = ParentHidden(rec.ParentFileReferenceNumber) || rec.IsHidden;
+        var hidden = ParentHidden(NtfsLayout.RecordNumber(rec.ParentFileReferenceNumber)) || rec.IsHidden;
         var (size, modified) = StatBestEffort(display, rec.IsDirectory);
         var crawlGen = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         _repository.UpsertEntries(new[] { new FsEntryRow(key, rec.Name, rec.IsDirectory, size, modified, hidden) }, crawlGen);
 
         if (rec.IsDirectory)
-            _dirs[rec.FileReferenceNumber] = (display, hidden);
+            _dirs[NtfsLayout.RecordNumber(rec.FileReferenceNumber)] = (display, hidden);
     }
 
     /// <summary>Resolves the display path (and canonical key) of a change record from its
@@ -300,11 +427,12 @@ internal sealed class MftVolumeIndexer : IDisposable
     {
         display = "";
         key = "";
-        if (rec.ParentFileReferenceNumber == NtfsNative.RootFileReferenceNumber)
+        var parentRecord = NtfsLayout.RecordNumber(rec.ParentFileReferenceNumber);
+        if (parentRecord == NtfsLayout.RootRecordNumber)
         {
             display = _driveRoot + rec.Name;
         }
-        else if (_dirs.TryGetValue(rec.ParentFileReferenceNumber, out var parent))
+        else if (_dirs.TryGetValue(parentRecord, out var parent))
         {
             display = parent.Path.EndsWith('\\') ? parent.Path + rec.Name : parent.Path + '\\' + rec.Name;
         }
@@ -316,9 +444,9 @@ internal sealed class MftVolumeIndexer : IDisposable
         return true;
     }
 
-    private bool ParentHidden(ulong parentFrn) =>
-        parentFrn != NtfsNative.RootFileReferenceNumber
-        && _dirs.TryGetValue(parentFrn, out var parent) && parent.Hidden;
+    private bool ParentHidden(ulong parentRecord) =>
+        parentRecord != NtfsLayout.RootRecordNumber
+        && _dirs.TryGetValue(parentRecord, out var parent) && parent.Hidden;
 
     private static (long Size, DateTime Modified) StatBestEffort(string path, bool isDirectory)
     {
@@ -336,9 +464,9 @@ internal sealed class MftVolumeIndexer : IDisposable
     }
 
     /// <summary>Drops a deleted directory and all descendant directories from the resident map.</summary>
-    private void RemoveDirSubtree(ulong frn, string key)
+    private void RemoveDirSubtree(ulong recordNumber, string key)
     {
-        _dirs.Remove(frn);
+        _dirs.Remove(recordNumber);
         var (lo, hi) = PathKey.PrefixBounds(key);
         foreach (var stale in _dirs.Where(kv => string.CompareOrdinal(kv.Value.Path.ToUpperInvariant(), lo) >= 0
                                               && string.CompareOrdinal(kv.Value.Path.ToUpperInvariant(), hi) < 0)
@@ -351,8 +479,8 @@ internal sealed class MftVolumeIndexer : IDisposable
     /// the linear scan over the (small) directory map is acceptable.</summary>
     private void RewriteDirSubtree(string oldKey, string newKey, string newDisplay, UsnRecord rec)
     {
-        var hidden = ParentHidden(rec.ParentFileReferenceNumber) || rec.IsHidden;
-        _dirs[rec.FileReferenceNumber] = (newDisplay, hidden);
+        var hidden = ParentHidden(NtfsLayout.RecordNumber(rec.ParentFileReferenceNumber)) || rec.IsHidden;
+        _dirs[NtfsLayout.RecordNumber(rec.FileReferenceNumber)] = (newDisplay, hidden);
 
         var (lo, hi) = PathKey.PrefixBounds(oldKey);
         foreach (var (frn, value) in _dirs.ToList())

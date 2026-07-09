@@ -5,7 +5,7 @@ An offline Windows file browser built for my personal preferences. The overall d
 ## What it does
 
 - **Browse** — Expected modern file browser features
-- **Search** - Windows search that doesn't blow
+- **Search** - Fast global search using MFT indexing and USN journal tracking
 - **Tag files** — Express multiple organizational views beyond the default hierarchical viewpoint of a file browser
 - **Directory sizes** — Show total size on directories, just like files
 

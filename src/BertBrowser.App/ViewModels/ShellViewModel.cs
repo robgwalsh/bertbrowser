@@ -30,17 +30,12 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly Stack<string> _backStack = new();
     private readonly Stack<string> _forwardStack = new();
     private CancellationTokenSource _navigationCts = new();
-    private CancellationTokenSource _scanCts = new();
     private CancellationTokenSource _searchDebounceCts = new();
 
     public FileListViewModel FileList { get; }
     public FolderTreeViewModel Tree { get; }
     public TagFilterViewModel TagFilter { get; }
     public BookmarksViewModel Bookmarks { get; }
-
-    /// <summary>Every directory size scan currently in flight, shown live in the scan-progress
-    /// dialog. Mutated only on the UI thread (from <see cref="ComputeSizeAsync"/>'s continuations).</summary>
-    public ObservableCollection<ScanProgressViewModel> ActiveScans { get; } = new();
 
     /// <summary>Raised after navigation so the view can select and scroll to a specific
     /// file (e.g. when a bookmarked file is opened).</summary>
@@ -70,15 +65,6 @@ public sealed partial class ShellViewModel : ObservableObject
         if (SearchQuery.Parse(SearchText) is not null)
             _ = RefreshViewAsync();
     }
-
-    [ObservableProperty]
-    private bool _isScanning;
-
-    /// <summary>Footer summary of in-flight scans (blank when idle); clicking it opens the dialog.</summary>
-    [ObservableProperty]
-    private string _scanSummary = "";
-
-    partial void OnIsScanningChanged(bool value) => CancelScansCommand.NotifyCanExecuteChanged();
 
     public bool CanGoBack => _backStack.Count > 0;
     public bool CanGoForward => _forwardStack.Count > 0;
@@ -210,11 +196,48 @@ public sealed partial class ShellViewModel : ObservableObject
             return;
         }
 
+        path = ResolveInaccessibleJunction(path);
+        if (path.Equals(CurrentPath, StringComparison.OrdinalIgnoreCase)) return;
+
         if (CurrentPath.Length > 0)
             _backStack.Push(CurrentPath);
         _forwardStack.Clear();
 
         await SetPathAndLoadAsync(path);
+    }
+
+    /// <summary>
+    /// Windows' legacy compatibility junctions (<c>My Documents</c>, <c>Cookies</c>,
+    /// <c>Application Data</c>, <c>Recent</c>, …) carry an explicit deny-list ACL on the
+    /// reparse point itself so apps can't traverse the old shell path — listing them throws
+    /// "Access is denied" even elevated. The deny is on the junction, not its target, so when a
+    /// junction can't be listed directly we follow the reparse point to its real target (which
+    /// <em>is</em> accessible) and browse there instead. Normal, listable junctions are left at
+    /// their own path.
+    /// </summary>
+    private static string ResolveInaccessibleJunction(string path)
+    {
+        try
+        {
+            var info = new DirectoryInfo(path);
+            if ((info.Attributes & FileAttributes.ReparsePoint) == 0)
+                return path; // ordinary directory — nothing to follow
+
+            try
+            {
+                using var probe = Directory.EnumerateFileSystemEntries(path).GetEnumerator();
+                probe.MoveNext();
+                return path; // listable junction — browse in place
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return info.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? path;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return path; // give up gracefully; the normal load path will report any error
+        }
     }
 
     [RelayCommand(CanExecute = nameof(CanGoBack))]
@@ -348,11 +371,14 @@ public sealed partial class ShellViewModel : ObservableObject
         FileList.BeginSearch();
 
         SearchOutcome? outcome;
+        // Search never surfaces hidden files/folders, regardless of the "Show hidden items"
+        // browse setting — hidden entries are index noise (AppData, system junk) that bury the
+        // results a search is actually for.
         if (SearchGlobal)
         {
             // Whole-PC: served straight from the MFT index, no live streaming.
             StatusText = $"Searching this PC for '{queryText}'…";
-            outcome = await _searchService.SearchAllAsync(queryText, ct, IncludeHidden);
+            outcome = await _searchService.SearchAllAsync(queryText, ct, includeHidden: false);
         }
         else
         {
@@ -364,7 +390,7 @@ public sealed partial class ShellViewModel : ObservableObject
                 FileList.AppendSearchHits(batch);
                 StatusText = $"{FileList.Items.Count} result(s) so far for '{queryText}'…";
             });
-            outcome = await _searchService.SearchAsync(CurrentPath, queryText, ct, progress, IncludeHidden);
+            outcome = await _searchService.SearchAsync(CurrentPath, queryText, ct, progress, includeHidden: false);
         }
 
         if (outcome is null || ct.IsCancellationRequested) return;
@@ -385,12 +411,21 @@ public sealed partial class ShellViewModel : ObservableObject
         StatusText = $"{outcome.Hits.Count} result(s) for '{queryText}' in {scope}{truncated}{suffix}";
     }
 
-    /// <summary>A volume's MFT index just finished (or refreshed): re-run an active whole-PC
-    /// search so the now-populated index is reflected.</summary>
+    /// <summary>A volume's MFT index just finished: re-run an active whole-PC search, or — in
+    /// normal browsing — refresh the folder sizes now that <c>dir_size_cache</c> is populated.</summary>
     private void OnMftIndexRefreshed(string rootKey)
     {
-        if (!SearchGlobal || SearchQuery.Parse(SearchText) is null) return;
-        Application.Current?.Dispatcher.InvokeAsync(() => _ = RefreshViewAsync());
+        Application.Current?.Dispatcher.InvokeAsync(() =>
+        {
+            if (SearchQuery.Parse(SearchText) is not null)
+            {
+                if (SearchGlobal) _ = RefreshViewAsync();
+            }
+            else
+            {
+                _ = FileList.RefreshDirSizesAsync(CancellationToken.None);
+            }
+        });
     }
 
     private void OnMftStatusChanged()
@@ -465,25 +500,9 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             foreach (var dir in dirs)
             {
-                // A per-scan token linked to the shared _scanCts: the dialog's row "Cancel"
-                // (and the row's own token) stops just this scan, while "Cancel all" /
-                // the toolbar cancel trips _scanCts and takes every scan with it.
-                using var scanCts = CancellationTokenSource.CreateLinkedTokenSource(_scanCts.Token);
-                var scan = new ScanProgressViewModel(dir.FullPath, scanCts);
-                var progress = new Progress<DirScanProgress>(p =>
-                {
-                    scan.CurrentDirectory = p.CurrentDirectory;
-                    scan.DirectoriesScanned = p.DirectoriesScanned;
-                    scan.BytesSoFar = p.BytesSoFar;
-                    UpdateScanSummary();
-                });
-
-                ActiveScans.Add(scan);
-                IsScanning = true;
-                UpdateScanSummary();
                 try
                 {
-                    var result = await _sizeService.ComputeAsync(dir.FullPath, scanCts.Token, progress);
+                    var result = await _sizeService.ComputeAsync(dir.FullPath, CancellationToken.None);
                     if (result is not null)
                     {
                         dir.SizeBytes = result.SizeBytes;
@@ -494,53 +513,15 @@ public sealed partial class ShellViewModel : ObservableObject
                 finally
                 {
                     dir.IsSizeComputing = false;
-                    ActiveScans.Remove(scan);
-                    if (ActiveScans.Count == 0)
-                        IsScanning = false;
-                    UpdateScanSummary();
                 }
             }
-            if (!_scanCts.IsCancellationRequested)
-                StatusText = "Size scan complete";
+            StatusText = "Size scan complete";
         }
         finally
         {
             foreach (var dir in dirs)
                 dir.IsSizeComputing = false;
         }
-    }
-
-    /// <summary>Rolls the live per-scan counters up into the footer summary string.</summary>
-    private void UpdateScanSummary()
-    {
-        if (ActiveScans.Count == 0)
-        {
-            ScanSummary = "";
-            return;
-        }
-
-        var folders = ActiveScans.Sum(s => s.DirectoriesScanned);
-        var bytes = ActiveScans.Sum(s => s.BytesSoFar);
-        var what = ActiveScans.Count == 1 ? ActiveScans[0].FolderName : $"{ActiveScans.Count} folders";
-        ScanSummary = $"Scanning {what}… {folders:N0} folders, {ByteSizeFormatter.Format(bytes)}";
-    }
-
-    /// <summary>Toolbar action: compute sizes for every direct child folder of the current directory.</summary>
-    [RelayCommand]
-    private async Task ComputeSizesHereAsync()
-    {
-        var dirs = FileList.Items.Where(i => i.IsDirectory).ToList();
-        if (dirs.Count > 0)
-            await ComputeSizeAsync(dirs);
-    }
-
-    /// <summary>Cancels in-flight size scans; the cache keeps its previous values.</summary>
-    [RelayCommand(CanExecute = nameof(IsScanning))]
-    private void CancelScans()
-    {
-        _scanCts.Cancel();
-        _scanCts = new CancellationTokenSource();
-        StatusText = "Size scan cancelled";
     }
 
     // --- Clipboard (copy / cut / paste) ---

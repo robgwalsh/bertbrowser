@@ -44,6 +44,7 @@ public interface IMftIndexService : IDisposable
 public sealed class MftIndexService : IMftIndexService
 {
     private readonly FsIndexRepository _repository;
+    private readonly DirSizeRepository _dirSizeRepository;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly List<Thread> _threads = new();
     private readonly List<MftVolumeIndexer> _indexers = new();
@@ -54,7 +55,11 @@ public sealed class MftIndexService : IMftIndexService
     public event Action<string>? IndexRefreshed;
     public event Action? StatusChanged;
 
-    public MftIndexService(FsIndexRepository repository) => _repository = repository;
+    public MftIndexService(FsIndexRepository repository, DirSizeRepository dirSizeRepository)
+    {
+        _repository = repository;
+        _dirSizeRepository = dirSizeRepository;
+    }
 
     public bool AnyIndexed => !_completedRoots.IsEmpty;
 
@@ -79,7 +84,7 @@ public sealed class MftIndexService : IMftIndexService
 
         foreach (var drive in EnumerateNtfsVolumes())
         {
-            var indexer = new MftVolumeIndexer(_repository, drive);
+            var indexer = new MftVolumeIndexer(_repository, _dirSizeRepository, drive);
             _indexers.Add(indexer);
 
             var thread = new Thread(() => RunVolume(indexer, drive))
