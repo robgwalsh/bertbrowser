@@ -292,18 +292,29 @@ public partial class MainWindow : Window
 
     /// <summary>Mirrors the main-panel selection into the folder tree (the item's own
     /// folder for directories, its parent for files), expanding and scrolling as needed.</summary>
-    private void FileList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void FileList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (FileListView.SelectedItem is not FileItemViewModel item) return;
 
         var dir = item.IsDirectory ? item.FullPath : Path.GetDirectoryName(item.FullPath);
         if (string.IsNullOrEmpty(dir)) return;
 
-        var chain = _shell.Tree.RevealPath(dir);
+        // Revealing expands the tree down to this folder; the enumeration + per-child disk probes
+        // run off the UI thread, so this awaits rather than blocking. Best-effort UI sugar — a
+        // failure to reveal must never crash the async-void handler.
+        IReadOnlyList<DirectoryNodeViewModel> chain;
+        try
+        {
+            chain = await _shell.Tree.RevealPathAsync(dir);
+        }
+        catch
+        {
+            return;
+        }
         if (chain.Count == 0) return;
 
         // Containers for freshly expanded nodes only exist after a layout pass.
-        Dispatcher.InvokeAsync(() => ScrollTreeChainIntoView(chain), DispatcherPriority.Loaded);
+        _ = Dispatcher.InvokeAsync(() => ScrollTreeChainIntoView(chain), DispatcherPriority.Loaded);
     }
 
     /// <summary>Positions the revealed node roughly 40% down the tree's viewport.</summary>

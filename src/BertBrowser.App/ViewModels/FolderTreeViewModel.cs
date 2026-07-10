@@ -20,14 +20,28 @@ public sealed class FolderTreeViewModel
     public FolderTreeViewModel(IFileSystemService fileSystem)
     {
         _fileSystem = fileSystem;
+    }
 
-        foreach (var drive in _fileSystem.GetDrives())
-        {
-            var label = string.IsNullOrEmpty(drive.VolumeLabel)
-                ? drive.Name.TrimEnd('\\')
-                : $"{drive.VolumeLabel} ({drive.Name.TrimEnd('\\')})";
-            Roots.Add(new DirectoryNodeViewModel(this, drive.RootDirectory.FullName, label));
-        }
+    /// <summary>Enumerates ready drives off the UI thread and adds them as expandable roots.
+    /// <see cref="IFileSystemService.GetDrives"/> filters on <c>DriveInfo.IsReady</c> and each
+    /// root node's ctor probes for children and reads the volume label — all of which can block
+    /// for seconds on optical/network drives, so none of it may run on the UI thread. Must be
+    /// awaited on the UI thread so the nodes are added there (and before the first
+    /// <see cref="RevealPathAsync"/>, which needs the roots to exist).</summary>
+    public async Task LoadDrivesAsync()
+    {
+        var roots = await Task.Run(() => _fileSystem.GetDrives()
+            .Select(drive =>
+            {
+                var label = string.IsNullOrEmpty(drive.VolumeLabel)
+                    ? drive.Name.TrimEnd('\\')
+                    : $"{drive.VolumeLabel} ({drive.Name.TrimEnd('\\')})";
+                return new DirectoryNodeViewModel(this, drive.RootDirectory.FullName, label);
+            })
+            .ToList());
+
+        foreach (var root in roots)
+            Roots.Add(root);
     }
 
     /// <summary>Enumerates MTP/PTP portable devices off the UI thread and appends them
@@ -78,7 +92,7 @@ public sealed class FolderTreeViewModel
     /// root-to-node chain so the view can locate the container to scroll to; empty if no
     /// root covers the path.
     /// </summary>
-    public IReadOnlyList<DirectoryNodeViewModel> RevealPath(string path)
+    public async Task<IReadOnlyList<DirectoryNodeViewModel>> RevealPathAsync(string path)
     {
         var targetKey = PathKey.Canonicalize(path);
 
@@ -102,7 +116,8 @@ public sealed class FolderTreeViewModel
         var nodeKey = rootKey;
         while (nodeKey != targetKey)
         {
-            node.IsExpanded = true; // populates children synchronously on first expansion
+            node.IsExpanded = true;
+            await node.EnsurePopulatedAsync(); // children load off-thread; wait before descending
 
             DirectoryNodeViewModel? next = null;
             foreach (var child in node.Children)
@@ -139,7 +154,7 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
     private static readonly DirectoryNodeViewModel Placeholder = new();
 
     private readonly FolderTreeViewModel? _tree;
-    private bool _populated;
+    private Task? _populateTask;
     private System.Windows.Media.ImageSource? _icon;
 
     public string FullPath { get; }
@@ -201,7 +216,7 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
     {
         if (!value) return;
 
-        Populate();
+        _ = EnsurePopulatedAsync();
         if (Depth == 0) _tree?.CollapseOtherRoots(this); // accordion: only one root open
     }
 
@@ -216,16 +231,27 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
         if (Depth == 0) IsExpanded = true;
     }
 
-    private void Populate()
+    /// <summary>Populates children off the UI thread on first call; later calls return the same
+    /// task, so the expander binding and <see cref="FolderTreeViewModel.RevealPathAsync"/> never
+    /// enumerate twice or block the UI thread on the directory scan + per-child disk probes.</summary>
+    public Task EnsurePopulatedAsync()
     {
-        if (_populated || _tree is null) return;
-        _populated = true;
+        if (_populateTask is not null) return _populateTask;
+        if (_tree is null) return _populateTask = Task.CompletedTask;
+        return _populateTask = PopulateAsync();
+    }
+
+    private async Task PopulateAsync()
+    {
+        // Enumeration plus each child node's ctor (a hidden-attribute stat and a has-children
+        // probe) are disk I/O — do them off the UI thread, then swap the children in on it.
+        var children = await Task.Run(() => _tree!.GetSubdirectories(FullPath)
+            .OrderBy(Path.GetFileName, Interop.NaturalStringComparer.Instance)
+            .Select(dir => new DirectoryNodeViewModel(_tree, dir, depth: Depth + 1))
+            .ToList());
 
         Children.Clear();
-        foreach (var dir in _tree.GetSubdirectories(FullPath)
-                     .OrderBy(Path.GetFileName, Interop.NaturalStringComparer.Instance))
-        {
-            Children.Add(new DirectoryNodeViewModel(_tree, dir, depth: Depth + 1));
-        }
+        foreach (var child in children)
+            Children.Add(child);
     }
 }

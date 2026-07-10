@@ -58,6 +58,7 @@ public sealed partial class FileItemViewModel : ObservableObject
 
     private ImageSource? _icon;
     private bool _iconLoaded;
+    private bool _iconLoading;
 
     public FileItemViewModel(FileEntry entry)
     {
@@ -146,13 +147,34 @@ public sealed partial class FileItemViewModel : ObservableObject
     {
         get
         {
-            if (!_iconLoaded)
+            if (_iconLoaded) return _icon;
+
+            // Executables, shortcuts and icon files have their icon extracted from disk — a shell
+            // call that can stall for seconds (e.g. a .lnk targeting a dead network share). Bound
+            // through the UI thread it would freeze the whole window during scroll, so load it
+            // off-thread and raise a change when it arrives. Directory/by-extension icons resolve
+            // from the registry without disk access, so they stay inline (no flicker).
+            if (ShellIcons.IsPerFileIcon(FullPath, IsDirectory))
             {
-                _iconLoaded = true;
-                _icon = ShellIcons.GetIcon(FullPath, IsDirectory);
+                if (!_iconLoading)
+                {
+                    _iconLoading = true;
+                    _ = LoadIconAsync();
+                }
+                return _icon; // null placeholder until the real icon loads
             }
-            return _icon;
+
+            _iconLoaded = true;
+            return _icon = ShellIcons.GetIcon(FullPath, IsDirectory);
         }
+    }
+
+    private async Task LoadIconAsync()
+    {
+        var image = await Task.Run(() => ShellIcons.GetIcon(FullPath, IsDirectory));
+        _icon = image;
+        _iconLoaded = true;
+        OnPropertyChanged(nameof(Icon));
     }
 
     /// <summary>Pixel size the shell thumbnail is fetched at; tiles scale this down to the

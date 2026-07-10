@@ -14,7 +14,16 @@ namespace BertBrowser.App.Interop;
 /// </summary>
 public static class ShellIcons
 {
+    // Directory and by-extension icons: a finite key set ("<dir>", "<none>", ".txt", …)
+    // resolved from the registry without touching disk, so this can grow no larger than the
+    // number of distinct extensions on the machine.
     private static readonly ConcurrentDictionary<string, ImageSource?> Cache = new(StringComparer.OrdinalIgnoreCase);
+
+    // Per-file icons (.exe/.ico/.lnk) are extracted from each file and keyed by full path, so an
+    // unbounded cache would leak steadily over a long session (every executable/shortcut/icon
+    // file ever browsed stays pinned). Cap it with LRU eviction.
+    private const int PerFileCacheCap = 512;
+    private static readonly LruIconCache PerFileCache = new(PerFileCacheCap);
 
     private const uint SHGFI_ICON = 0x100;
     private const uint SHGFI_SMALLICON = 0x1;
@@ -82,17 +91,30 @@ public static class ShellIcons
         }
     }
 
+    /// <summary>True for the file types whose icon is extracted from the file itself
+    /// (executables, shortcuts, icon files) — a disk hit that can stall (e.g. a .lnk pointing
+    /// at a dead network share), so callers must resolve these off the UI thread.</summary>
+    public static bool IsPerFileIcon(string path, bool isDirectory)
+    {
+        if (isDirectory) return false;
+        var ext = Path.GetExtension(path);
+        return ext.Equals(".exe", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".ico", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".lnk", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static ImageSource? GetIcon(string path, bool isDirectory)
     {
-        // Directories share one icon; files are cached per extension except types
-        // whose icon is per-file (executables, shortcuts, icon files).
-        var ext = Path.GetExtension(path);
-        var perFile = ext.Equals(".exe", StringComparison.OrdinalIgnoreCase)
-                   || ext.Equals(".ico", StringComparison.OrdinalIgnoreCase)
-                   || ext.Equals(".lnk", StringComparison.OrdinalIgnoreCase);
+        // Executables/shortcuts/icon files carry their own icon: resolve from the file (disk)
+        // and cache by full path in the bounded LRU.
+        if (IsPerFileIcon(path, isDirectory))
+            return PerFileCache.GetOrAdd(path, p => Load(p, isDirectory: false, fromDisk: true));
 
-        var cacheKey = isDirectory ? "<dir>" : perFile ? path : ext.Length == 0 ? "<none>" : ext;
-        return Cache.GetOrAdd(cacheKey, _ => Load(perFile ? path : cacheKey, isDirectory, perFile));
+        // Directories share one icon; everything else is cached per extension, resolved from
+        // file attributes only (no disk access).
+        var ext = Path.GetExtension(path);
+        var cacheKey = isDirectory ? "<dir>" : ext.Length == 0 ? "<none>" : ext;
+        return Cache.GetOrAdd(cacheKey, key => Load(key, isDirectory, fromDisk: false));
     }
 
     private static ImageSource? Load(string pathOrExt, bool isDirectory, bool fromDisk)
@@ -116,6 +138,53 @@ public static class ShellIcons
         finally
         {
             DestroyIcon(info.hIcon);
+        }
+    }
+
+    /// <summary>A small, thread-safe LRU of frozen icons keyed by path. The (potentially slow)
+    /// factory runs outside the lock so one stalled shell call can't block other icon threads.</summary>
+    private sealed class LruIconCache(int capacity)
+    {
+        private readonly object _gate = new();
+        private readonly Dictionary<string, LinkedListNode<(string Key, ImageSource? Icon)>> _map =
+            new(StringComparer.OrdinalIgnoreCase);
+        private readonly LinkedList<(string Key, ImageSource? Icon)> _order = new();
+
+        public ImageSource? GetOrAdd(string key, Func<string, ImageSource?> factory)
+        {
+            lock (_gate)
+            {
+                if (_map.TryGetValue(key, out var hit))
+                {
+                    _order.Remove(hit);
+                    _order.AddFirst(hit);
+                    return hit.Value.Icon;
+                }
+            }
+
+            var icon = factory(key);
+
+            lock (_gate)
+            {
+                // Another thread may have resolved the same key while we were outside the lock.
+                if (_map.TryGetValue(key, out var existing))
+                {
+                    _order.Remove(existing);
+                    _order.AddFirst(existing);
+                    return existing.Value.Icon;
+                }
+
+                var node = new LinkedListNode<(string, ImageSource?)>((key, icon));
+                _order.AddFirst(node);
+                _map[key] = node;
+                if (_map.Count > capacity)
+                {
+                    var lru = _order.Last!;
+                    _order.RemoveLast();
+                    _map.Remove(lru.Value.Key);
+                }
+                return icon;
+            }
         }
     }
 }

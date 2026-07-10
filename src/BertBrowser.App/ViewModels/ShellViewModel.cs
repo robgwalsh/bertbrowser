@@ -129,6 +129,9 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         await Bookmarks.LoadAsync();
 
+        // Drives are enumerated off-thread; the roots must exist before the first reveal.
+        await Tree.LoadDrivesAsync();
+
         var start = StartPath ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         await NavigateToAsync(start);
 
