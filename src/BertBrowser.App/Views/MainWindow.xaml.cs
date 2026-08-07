@@ -184,6 +184,9 @@ public partial class MainWindow : Window
         // Let Shift+wheel do its native horizontal scroll untouched.
         if (e.Delta == 0 || e.Handled || Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) return;
 
+        // Scrolling the tree by hand outranks any row pinned by an earlier click.
+        if (ReferenceEquals(sender, FolderTree)) ClearTreeAnchor();
+
         var scrollViewer = FindScrollViewer((DependencyObject)sender);
         if (scrollViewer is null) return;
 
@@ -389,8 +392,10 @@ public partial class MainWindow : Window
     /// <summary>Positions the revealed node roughly 40% down the tree's viewport.</summary>
     private void ScrollTreeChainIntoView(IReadOnlyList<DirectoryNodeViewModel> chain)
     {
-        // A click that expanded a visible row anchors it under the cursor; re-pin there instead of
-        // repositioning, so navigating into a folder by clicking it doesn't make the tree jump.
+        // A click in the tree anchors the row it landed on; re-pin there instead of repositioning,
+        // so navigating into a folder by clicking it doesn't make the tree jump. (An anchor only
+        // survives while the shell still sits on the row that was clicked — see Shell_PropertyChanged
+        // — so an unrelated reveal of that same folder later still gets the 40% positioning.)
         if (chain.Count > 0 && ReferenceEquals(_treeAnchorNode, chain[^1]))
         {
             RestoreTreeAnchor();
@@ -461,8 +466,17 @@ public partial class MainWindow : Window
 
     private void Shell_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ShellViewModel.CurrentPath))
-            _ = RevealCurrentDirAsync();
+        if (e.PropertyName != nameof(ShellViewModel.CurrentPath)) return;
+
+        // Navigating anywhere but the clicked row retires its anchor: from here on the reveal is
+        // free to position the tree, and a much later return to that folder mustn't snap back to
+        // a viewport offset the row held during some earlier click.
+        if (_treeAnchorNode is { } anchored &&
+            !anchored.FullPath.Equals(_shell.CurrentPath, StringComparison.OrdinalIgnoreCase))
+        {
+            ClearTreeAnchor();
+        }
+        _ = RevealCurrentDirAsync();
     }
 
     /// <summary>Expands the tree down to the current directory, selects it, scrolls it into view,
@@ -579,6 +593,7 @@ public partial class MainWindow : Window
         if (_currentDirNode is null) return;
         _currentDirNode.IsExpanded = false;
         e.Handled = true;
+        ClearTreeAnchor(); // this click's whole point is to move the row back to the top
 
         var chain = _currentDirChain;
         _ = Dispatcher.InvokeAsync(() =>
@@ -889,20 +904,34 @@ public partial class MainWindow : Window
     private DirectoryNodeViewModel? _treeItemMouseDownNode;
     private bool _treeItemExpandedAtMouseDown;
 
-    // A folder row the user clicked to expand/collapse, pinned to the viewport position it had at
-    // the moment of the click so its subtree grows/shrinks *below* it and the row itself stays put
-    // under the cursor. _treeAnchorViewportY is that row top's offset from the tree viewport.
-    private DirectoryNodeViewModel? _treeAnchorNode;
+    // The row the user clicked, pinned to the viewport position it had at the moment of the click:
+    // whatever the click sets off (selection, navigation reveal, expand/collapse reflow) the row
+    // itself must not move under the cursor. _treeAnchorViewportY is that row top's offset from the
+    // tree viewport. The anchor stays live until the user scrolls the tree or navigates elsewhere,
+    // so every layout pass the click triggers — including ones that land long after mouse-up —
+    // re-pins to the same offset.
+    private ISidebarNode? _treeAnchorNode;
     private TreeViewItem? _treeAnchorContainer;
     private double _treeAnchorViewportY;
 
     private void FolderTreeItem_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: DirectoryNodeViewModel node })
+        ClearTreeAnchor();
+        _treeItemMouseDownNode = null;
+        if (sender is not FrameworkElement { DataContext: ISidebarNode node }) return;
+
+        if (node is DirectoryNodeViewModel dir)
         {
-            _treeItemMouseDownNode = node;
-            _treeItemExpandedAtMouseDown = node.IsExpanded;
+            _treeItemMouseDownNode = dir;
+            _treeItemExpandedAtMouseDown = dir.IsExpanded;
         }
+
+        // Mouse-down is the last moment the tree is still in its pre-click layout: this preview
+        // event tunnels ahead of the bubbling one where TreeViewItem selects the row (which focuses
+        // it, scrolls it into view, and kicks off the navigation reveal). Measure here, then undo
+        // whatever that scrolled once the input event has been fully processed.
+        AnchorTreeRow(node, FindAncestorTreeViewItem(sender as DependencyObject));
+        ScheduleTreeAnchorRestore();
     }
 
     /// <summary>A single click on a folder row toggles its expansion (on top of selecting/
@@ -914,29 +943,43 @@ public partial class MainWindow : Window
             && node.Children.Count > 0
             && ReferenceEquals(node, _treeItemMouseDownNode))
         {
-            // Pin the row where it sits now, before the toggle reflows the tree. Without this the
-            // navigation reveal-scroll (or an offset clamp when collapsing near the bottom) slides
-            // the clicked row off the cursor, which reads as an awkward jump.
-            AnchorTreeRow(node, FindAncestorTreeViewItem(sender as DependencyObject));
-
+            // The row is already anchored (mouse-down); the toggle reflows the tree below it, and
+            // again when lazily-loaded children arrive. Re-pin after each so an offset clamp when
+            // collapsing near the bottom — or the reveal-scroll of a click that also navigates —
+            // can't slide the row off the cursor. Every restore targets the same offset, so the
+            // passes never fight.
             node.IsExpanded = !_treeItemExpandedAtMouseDown;
 
-            // When the click also navigates, RevealCurrentDirAsync's scroll honors the anchor; when
-            // it doesn't (re-clicking the current folder to collapse it) re-pin here once the toggle
-            // has settled. Exactly one of the two paths runs, so they never fight over the offset.
-            if (node.FullPath.Equals(_shell.CurrentPath, StringComparison.OrdinalIgnoreCase))
-                _ = Dispatcher.InvokeAsync(RestoreTreeAnchor, DispatcherPriority.Loaded);
-        }
-        else
-        {
-            ClearTreeAnchor();
+            ScheduleTreeAnchorRestore();
+            if (node.IsExpanded)
+                _ = RestoreTreeAnchorAfterPopulateAsync(node);
         }
         _treeItemMouseDownNode = null;
     }
 
+    private void ScheduleTreeAnchorRestore() =>
+        _ = Dispatcher.InvokeAsync(RestoreTreeAnchor, DispatcherPriority.Loaded);
+
+    /// <summary>Re-pins once a freshly expanded node's children have loaded and laid out — that
+    /// enumeration is off-thread, so its reflow can land well after the click. No-ops if the anchor
+    /// has since moved on. Best-effort UI sugar: a failed populate must not crash the handler.</summary>
+    private async Task RestoreTreeAnchorAfterPopulateAsync(DirectoryNodeViewModel node)
+    {
+        try
+        {
+            await node.EnsurePopulatedAsync();
+        }
+        catch
+        {
+            return;
+        }
+        if (!ReferenceEquals(node, _treeAnchorNode)) return;
+        ScheduleTreeAnchorRestore();
+    }
+
     /// <summary>Records the anchored row and its current viewport offset. Cleared (no anchor) when
     /// the row has no realized container or scroll viewer to measure against.</summary>
-    private void AnchorTreeRow(DirectoryNodeViewModel node, TreeViewItem? container)
+    private void AnchorTreeRow(ISidebarNode node, TreeViewItem? container)
     {
         ClearTreeAnchor();
         var scroller = FindDescendant<ScrollViewer>(FolderTree);
@@ -958,14 +1001,14 @@ public partial class MainWindow : Window
         _treeAnchorContainer = null;
     }
 
-    /// <summary>Scrolls the tree so the anchored (just expanded/collapsed) row returns to the exact
-    /// viewport offset it had when clicked, keeping it under the cursor. One-shot: clears the anchor
-    /// so a later, unrelated reveal isn't pinned to a stale position.</summary>
+    /// <summary>Scrolls the tree so the anchored (just clicked) row returns to the exact viewport
+    /// offset it had at mouse-down, keeping it under the cursor. Deliberately not one-shot — a click
+    /// reflows the tree several times as its navigation, expansion and off-thread child load land —
+    /// so the anchor lives until <see cref="ClearTreeAnchor"/> retires it.</summary>
     private void RestoreTreeAnchor()
     {
         var container = _treeAnchorContainer;
         var targetY = _treeAnchorViewportY;
-        ClearTreeAnchor();
         if (container is null) return;
 
         var scroller = FindDescendant<ScrollViewer>(FolderTree);
