@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
-using System.Windows.Media;
 
 namespace BertBrowser.App.Converters;
 
@@ -29,16 +28,6 @@ public sealed class InverseBoolConverter : IValueConverter
         value is not true;
 }
 
-/// <summary>null → true. Used to allow the indeterminate state only where it started indeterminate.</summary>
-public sealed class IsNullConverter : IValueConverter
-{
-    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        value is null;
-
-    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        throw new NotSupportedException();
-}
-
 public sealed class NullToCollapsedConverter : IValueConverter
 {
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
@@ -58,32 +47,6 @@ public sealed class DepthToIndentConverter : IValueConverter
 
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         new Thickness(value is int depth ? depth * IndentSize : 0, 0, 0, 0);
-
-    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        throw new NotSupportedException();
-}
-
-/// <summary>'#RRGGBB' string (or null) to a Brush for tag chips.</summary>
-public sealed class TagColorConverter : IValueConverter
-{
-    private static readonly Brush DefaultBrush = new SolidColorBrush(Color.FromRgb(0x60, 0x7D, 0x8B));
-
-    static TagColorConverter() => DefaultBrush.Freeze();
-
-    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
-    {
-        if (value is string s && s.Length > 0)
-        {
-            try
-            {
-                var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s));
-                brush.Freeze();
-                return brush;
-            }
-            catch (FormatException) { }
-        }
-        return DefaultBrush;
-    }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();

@@ -6,7 +6,6 @@ An offline Windows file browser built for my personal preferences. The overall d
 
 - **Browse** — Expected modern file browser features
 - **Search** - Fast global search using MFT indexing and USN journal tracking
-- **Tag files** — Express multiple organizational views beyond the default hierarchical viewpoint of a file browser
 - **Directory sizes** — Show total size on directories, just like files
 
 ## What it does not do
@@ -48,14 +47,14 @@ Note that warnings are treated as errors across the solution (`Directory.Build.p
 
 | What | Where |
 |---|---|
-| Tag + size-cache database | `%USERPROFILE%\.bertbrowser\bertbrowser.db` |
+| Size-cache + search-index database | `%USERPROFILE%\.bertbrowser\bertbrowser.db` |
 | Window/session settings | `%USERPROFILE%\.bertbrowser\settings.json` |
 
 Delete the folder to reset the app completely.
 
 ## Project layout
 
-- `src/BertBrowser.Core` — everything testable and UI-free: SQLite persistence and migrations, path canonicalization, tag and directory-size services.
+- `src/BertBrowser.Core` — everything testable and UI-free: SQLite persistence and migrations, path canonicalization, search-index and directory-size services.
 - `src/BertBrowser.App` — the WPF shell (MVVM via CommunityToolkit.Mvvm, DI via Microsoft.Extensions.DependencyInjection).
 - `tests/BertBrowser.Core.Tests` — xUnit tests for Core; they run against real temp SQLite databases and directory trees.
 

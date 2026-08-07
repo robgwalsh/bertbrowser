@@ -15,6 +15,8 @@
         <KeyBinding Key="Right" Modifiers="Alt" Command="{Binding ForwardCommand}"/>
         <KeyBinding Key="Up" Modifiers="Alt" Command="{Binding UpCommand}"/>
         <KeyBinding Key="F5" Command="{Binding RefreshCommand}"/>
+        <!-- Ctrl+Z is handled in code-behind, not bound here: a window-level binding would take it
+             away from the search and path boxes, where it must still undo typing. -->
     </Window.InputBindings>
 
     <Window.Resources>
@@ -93,6 +95,10 @@
                                 </MultiTrigger.Conditions>
                                 <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedInactiveBrush}"/>
                             </MultiTrigger>
+                            <!-- Last, so a drag hovering a tile always wins over selection. -->
+                            <Trigger Property="v:DropTarget.IsActive" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource DropTargetBrush}"/>
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -101,45 +107,9 @@
     </Window.Resources>
 
     <DockPanel>
-        <!-- Header: toolbar, tag filter, error banner -->
+        <!-- Header: toolbar, error banner -->
         <Border DockPanel.Dock="Top" BorderBrush="#DDD" BorderThickness="0,0,0,1">
             <StackPanel>
-            <!-- Tag filter panel -->
-            <Expander Header="Tag filter" IsExpanded="False" Padding="6,2" Margin="6,4,6,0">
-                <StackPanel>
-                    <WrapPanel Margin="0,4">
-                        <ItemsControl ItemsSource="{Binding TagFilter.Tags}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <WrapPanel/>
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" Margin="0,2,12,2">
-                                        <StackPanel Orientation="Horizontal">
-                                            <Border Background="{Binding Tag.Color, Converter={StaticResource TagColor}}"
-                                                    Width="10" Height="10" CornerRadius="5" Margin="0,0,4,0"
-                                                    VerticalAlignment="Center"/>
-                                            <TextBlock Text="{Binding Tag.Name}"/>
-                                            <TextBlock Text="{Binding Count, StringFormat=' ({0})'}" Foreground="Gray"/>
-                                        </StackPanel>
-                                    </CheckBox>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </WrapPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,2,0,6">
-                        <TextBlock Text="Match:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <RadioButton Content="Any selected tag" IsChecked="{Binding TagFilter.MatchAll, Converter={StaticResource InverseBool}, Mode=TwoWay}"
-                                     Margin="0,0,10,0" VerticalAlignment="Center"/>
-                        <RadioButton Content="All selected tags" IsChecked="{Binding TagFilter.MatchAll, Mode=TwoWay}"
-                                     VerticalAlignment="Center"/>
-                        <Button Content="Clear" Command="{Binding TagFilter.ClearCommand}" Margin="16,0,0,0" Padding="8,2"/>
-                    </StackPanel>
-                </StackPanel>
-            </Expander>
-
             <DockPanel Margin="6,4">
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
                     <Button Style="{StaticResource ToolbarButton}" ToolTip="Back (Alt+Left)"
@@ -162,13 +132,27 @@
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
-                    <Button Style="{StaticResource ToolbarButton}" Click="ManageTags_Click">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE8EC;" Margin="0,0,6,0"/>
-                            <TextBlock Text="Manage tags" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
-                    <Separator Margin="4,2"/>
+                    <ToggleButton Padding="8,4" Margin="2,0" MinWidth="28"
+                                  IsChecked="{Binding ShowHiddenItems}"
+                                  AutomationProperties.AutomationId="ShowHiddenToggle"
+                                  AutomationProperties.Name="Show hidden items"
+                                  ToolTip="Show hidden files and folders">
+                        <TextBlock>
+                            <TextBlock.Style>
+                                <!-- Eye when showing hidden items, eye-with-slash when not. -->
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource ToolbarIcon}">
+                                    <Setter Property="Text" Value="&#xED1A;"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Value="True"
+                                                     Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=ToggleButton}}">
+                                            <Setter Property="Text" Value="&#xE7B3;"/>
+                                            <Setter Property="Foreground" Value="#1C86D1"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </ToggleButton>
                     <Button Style="{StaticResource ToolbarButton}"
                             ToolTip="Settings — custom context menu commands"
                             Click="Settings_Click">
@@ -285,6 +269,17 @@
             <StatusBarItem DockPanel.Dock="Left">
                 <TextBlock Text="{Binding StatusText}"/>
             </StatusBarItem>
+            <!-- Sticks around after a drop so the way back stays visible once the result
+                 message has been replaced by something else. -->
+            <StatusBarItem DockPanel.Dock="Left"
+                           Visibility="{Binding UndoTransferDescription, Converter={StaticResource NullToCollapsed}}">
+                <TextBlock Text="{Binding UndoTransferDescription}" Foreground="#1C86D1" Margin="10,0,0,0"/>
+            </StatusBarItem>
+            <!-- Current file-list selection (blank when nothing is selected). -->
+            <StatusBarItem DockPanel.Dock="Left"
+                           Visibility="{Binding SelectionSummary, Converter={StaticResource NullToCollapsed}}">
+                <TextBlock Text="{Binding SelectionSummary}" Foreground="#555" Margin="10,0,0,0"/>
+            </StatusBarItem>
             <!-- Background MFT indexing progress (blank when idle). -->
             <StatusBarItem DockPanel.Dock="Left"
                            Visibility="{Binding IndexingStatus, Converter={StaticResource NullToCollapsed}}">
@@ -350,7 +345,8 @@
                                         </Border.ContextMenu>
                                         <DockPanel>
                                             <Image DockPanel.Dock="Left" Source="{Binding Icon}"
-                                                   Width="16" Height="16" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                                   Width="16" Height="16" Margin="0,0,6,0" VerticalAlignment="Center"
+                                                   Opacity="{Binding IconOpacity}"/>
                                             <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
                                                        TextTrimming="CharacterEllipsis"/>
                                         </DockPanel>
@@ -369,11 +365,13 @@
                 <!-- Drives & devices (fills the sidebar above the bookmarks) -->
                 <DockPanel Grid.Row="0">
                     <TextBlock DockPanel.Dock="Top" Text="DRIVES &amp; DEVICES" Style="{StaticResource SidebarHeader}"/>
+                    <Grid>
             <TreeView x:Name="FolderTree" ItemsSource="{Binding Tree.Roots}" BorderThickness="0"
                       Background="White" Padding="0,2"
                       ItemContainerStyle="{StaticResource FolderTreeItemStyle}"
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                       VirtualizingPanel.IsVirtualizing="False"
+                      Loaded="FolderTree_Loaded"
                       MouseDoubleClick="FolderTree_DoubleClick"
                       PreviewMouseWheel="Scroll_PreviewMouseWheel"
                       ContextMenuOpening="FolderTree_ContextMenuOpening">
@@ -398,7 +396,9 @@
                 </TreeView.ContextMenu>
                 <TreeView.ItemTemplate>
                     <HierarchicalDataTemplate ItemsSource="{Binding Children}">
-                        <DockPanel Background="Transparent" MouseLeftButtonUp="FolderTreeItem_Click">
+                        <DockPanel Background="Transparent"
+                                   PreviewMouseLeftButtonDown="FolderTreeItem_PreviewMouseDown"
+                                   MouseLeftButtonUp="FolderTreeItem_Click">
                             <Image DockPanel.Dock="Left" Source="{Binding Icon}"
                                    Width="16" Height="16" Margin="0,0,6,0" VerticalAlignment="Center"
                                    Opacity="{Binding IconOpacity}"/>
@@ -408,6 +408,37 @@
                     </HierarchicalDataTemplate>
                 </TreeView.ItemTemplate>
             </TreeView>
+
+                        <!-- Sticky header: the currently open directory, pinned to the top of the
+                             tree once its own row scrolls out of view above, so it's always one
+                             click away from collapsing. DataContext (the current node) and
+                             visibility are driven from code-behind on scroll. -->
+                        <Border x:Name="PinnedRow" VerticalAlignment="Top" Visibility="Collapsed"
+                                Background="White" BorderBrush="#DDDDDD" BorderThickness="0,0,0,1"
+                                MinHeight="26" SnapsToDevicePixels="True" Cursor="Hand"
+                                MouseLeftButtonUp="PinnedRow_Click"
+                                ToolTip="Collapse the current folder">
+                            <Border.Effect>
+                                <DropShadowEffect Color="#000000" Opacity="0.15"
+                                                  BlurRadius="4" ShadowDepth="1" Direction="270"/>
+                            </Border.Effect>
+                            <Grid Margin="{Binding Depth, Converter={StaticResource DepthToIndent}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="18"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Path Data="M 0,0 L 4.5,4.5 L 9,0" Stroke="#555555" StrokeThickness="1.2"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <DockPanel Grid.Column="1" Margin="0,0,4,0">
+                                    <Image DockPanel.Dock="Left" Source="{Binding Icon}"
+                                           Width="16" Height="16" Margin="0,0,6,0"
+                                           VerticalAlignment="Center" Opacity="{Binding IconOpacity}"/>
+                                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"/>
+                                </DockPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
                 </DockPanel>
             </Grid>
 
@@ -418,11 +449,13 @@
                           ItemsSource="{Binding FileList.Items}"
                           BorderThickness="0"
                           IsTextSearchEnabled="False"
+                          SelectionMode="Extended"
                           VirtualizingPanel.IsVirtualizing="True"
                           VirtualizingPanel.VirtualizationMode="Recycling"
                           ScrollViewer.IsDeferredScrollingEnabled="False"
                           GridViewColumnHeader.Click="FileList_HeaderClick"
                           MouseDoubleClick="FileList_DoubleClick"
+                          PreviewMouseRightButtonDown="FileList_PreviewMouseRightButtonDown"
                           SelectionChanged="FileList_SelectionChanged"
                           TextInput="FileList_TextInput"
                           KeyDown="FileList_KeyDown"
@@ -453,9 +486,6 @@
                                 <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE77F;"/></MenuItem.Icon>
                             </MenuItem>
                             <Separator/>
-                            <MenuItem Header="Tags…" Click="ContextTags_Click">
-                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8EC;"/></MenuItem.Icon>
-                            </MenuItem>
                             <MenuItem Header="Compute size" Click="ContextComputeSize_Click">
                                 <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE1D0;"/></MenuItem.Icon>
                             </MenuItem>
@@ -463,10 +493,6 @@
                                 <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE734;"/></MenuItem.Icon>
                             </MenuItem>
                             <Separator x:Name="CustomCommandsSeparator" Visibility="Collapsed"/>
-                            <Separator/>
-                            <MenuItem Header="Remove missing entry" Click="ContextRemoveMissing_Click">
-                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE74D;"/></MenuItem.Icon>
-                            </MenuItem>
                             <Separator/>
                             <MenuItem Header="Properties…" InputGestureText="Alt+Enter" Click="ContextProperties_Click">
                                 <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE946;"/></MenuItem.Icon>
@@ -522,20 +548,6 @@
                                 <GridViewColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding ModifiedDisplay}"/>
-                                    </DataTemplate>
-                                </GridViewColumn.CellTemplate>
-                            </GridViewColumn>
-                            <GridViewColumn Width="200">
-                                <GridViewColumnHeader Content="Tags" Tag="Tags"/>
-                                <GridViewColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <ItemsControl ItemsSource="{Binding Tags}" ItemTemplate="{StaticResource TagChipTemplate}">
-                                            <ItemsControl.ItemsPanel>
-                                                <ItemsPanelTemplate>
-                                                    <StackPanel Orientation="Horizontal"/>
-                                                </ItemsPanelTemplate>
-                                            </ItemsControl.ItemsPanel>
-                                        </ItemsControl>
                                     </DataTemplate>
                                 </GridViewColumn.CellTemplate>
                             </GridViewColumn>

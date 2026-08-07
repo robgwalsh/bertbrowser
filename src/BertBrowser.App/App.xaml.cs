@@ -35,14 +35,14 @@ public partial class App : Application
         var services = new ServiceCollection();
         services.AddSingleton(AppSettings.Load());
         services.AddSingleton(new Db(AppPaths.DbPath));
-        services.AddSingleton<TagRepository>();
         services.AddSingleton<DirSizeRepository>();
         services.AddSingleton<FsIndexRepository>();
         services.AddSingleton<BookmarkRepository>();
         services.AddSingleton<IFileSystemService, FileSystemService>();
         services.AddSingleton<IDirectorySizeService, DirectorySizeService>();
         services.AddSingleton<IFileTransferService, FileTransferService>();
-        services.AddSingleton<ITagService, TagService>();
+        services.AddSingleton<BertBrowser.Core.Services.Transfer.TransferPlanner>();
+        services.AddSingleton<BertBrowser.Core.Services.Transfer.TransferExecutor>();
         services.AddSingleton<IBookmarkService, BookmarkService>();
         services.AddSingleton<IndexCrawler>();
         services.AddSingleton<IIndexWatcherService, IndexWatcherService>();

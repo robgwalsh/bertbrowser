@@ -7,6 +7,7 @@ using System.Windows.Threading;
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.Transfer;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace BertBrowser.App.Views;
@@ -15,6 +16,8 @@ public partial class MainWindow : Window
 {
     private readonly ShellViewModel _shell;
     private readonly BertBrowser.App.Services.AppSettings _settings;
+    private readonly MarqueeSelector _marquee;
+    private readonly FileDragDropController _dragDrop;
 
     public MainWindow(ShellViewModel shell, BertBrowser.App.Services.AppSettings settings)
     {
@@ -23,15 +26,35 @@ public partial class MainWindow : Window
         _settings = settings;
         DataContext = shell;
 
+        _marquee = MarqueeSelector.Attach(FileListView);
+        // Attached after the marquee so the two never fight: the marquee ignores presses that land
+        // on a row, and this ignores presses that land on empty space.
+        _dragDrop = FileDragDropController.Attach(FileListView, FolderTree, shell, AskAboutConflicts);
+
         ApplyWindowSettings();
 
         _shell.FileList.PropertyChanged += FileList_PropertyChanged;
+        _shell.PropertyChanged += Shell_PropertyChanged;
         _shell.RevealFileRequested += OnRevealFileRequested;
         UpdateRelPathColumn();
         ApplyViewMode(); // honor a restored thumbnail zoom level
 
         Loaded += async (_, _) => await _shell.InitializeAsync();
-        Closing += (_, _) => SaveWindowSettings();
+        Closing += (_, _) =>
+        {
+            SaveWindowSettings();
+            // The pending undo is gone once we exit, so commit whatever a Replace set aside rather
+            // than leaving hidden staging folders behind.
+            _shell.RetireUndoableTransfer();
+        };
+    }
+
+    /// <summary>Shown when a drop would land on names that are already taken. Returns null when
+    /// the user cancels, which abandons the whole drop.</summary>
+    private ConflictResolution? AskAboutConflicts(TransferPlan plan)
+    {
+        var dialog = new TransferConflictDialog(new TransferConflictsViewModel(plan)) { Owner = this };
+        return dialog.ShowDialog() == true ? dialog.Resolution : null;
     }
 
     private void ApplyWindowSettings()
@@ -135,28 +158,21 @@ public partial class MainWindow : Window
         Dispatcher.InvokeAsync(() => FileListView.Focus(), DispatcherPriority.Input);
     }
 
-    /// <summary>The Relative path column only makes sense in flattened tag-filter mode.</summary>
+    /// <summary>The Folder column only makes sense in the flattened search-results list.</summary>
     private void UpdateRelPathColumn() =>
         RelPathColumn.Width = _shell.FileList.IsFlattened ? 220 : 0;
 
     // --- Toolbar / dialogs ---
-
-    private async void ManageTags_Click(object sender, RoutedEventArgs e)
-    {
-        var vm = new TagManagerViewModel(App.Services.GetRequiredService<ITagService>());
-        var window = new TagManagerWindow(vm) { Owner = this };
-        window.ShowDialog();
-        await _shell.OnTagsChangedAsync();
-    }
 
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
         var vm = new SettingsViewModel(_settings);
         if (new SettingsWindow(vm) { Owner = this }.ShowDialog() == true)
         {
-            // Reload so a changed "Show hidden items" setting takes effect immediately.
-            // (Custom-command menus rebuild on every open, so they need no refresh.)
-            _shell.RefreshCommand.Execute(null);
+            // Sync the toolbar toggle to a "Show hidden items" change made in the dialog; its
+            // setter refreshes the list and re-filters bookmarks. (Custom-command menus rebuild
+            // on every open, so they need no refresh.)
+            _shell.ShowHiddenItems = _settings.ShowHiddenItems;
         }
     }
 
@@ -250,6 +266,15 @@ public partial class MainWindow : Window
             SearchBox.SelectAll();
             e.Handled = true;
         }
+        // Undo the last drag-and-drop move. Skipped while a text box has focus so Ctrl+Z still
+        // undoes typing there.
+        else if (e.Key == Key.Z && Keyboard.Modifiers == ModifierKeys.Control &&
+                 !SearchBox.IsKeyboardFocusWithin && !PathBox.IsKeyboardFocusWithin)
+        {
+            if (_shell.UndoTransferCommand.CanExecute(null))
+                _shell.UndoTransferCommand.Execute(null);
+            e.Handled = true;
+        }
         else if (FileListView.IsKeyboardFocusWithin && Keyboard.Modifiers == ModifierKeys.Control &&
                  e.Key is Key.C or Key.X or Key.V)
         {
@@ -265,9 +290,9 @@ public partial class MainWindow : Window
         else if (e.Key == Key.System && e.SystemKey == Key.Enter &&
                  Keyboard.Modifiers == ModifierKeys.Alt &&
                  FileListView.IsKeyboardFocusWithin &&
-                 FileListView.SelectedItem is FileItemViewModel selected)
+                 SelectedFileItems() is { Count: > 0 } selected)
         {
-            ShowProperties(selected.FullPath, selected.IsDirectory);
+            ShowProperties(selected);
             e.Handled = true;
         }
         base.OnPreviewKeyDown(e);
@@ -290,10 +315,15 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Mirrors the main-panel selection into the folder tree (the item's own
-    /// folder for directories, its parent for files), expanding and scrolling as needed.</summary>
+    /// <summary>Updates the status-bar selection summary and mirrors a single-item selection into
+    /// the folder tree (the item's own folder for directories, its parent for files), expanding and
+    /// scrolling as needed. Multi-selection has no one folder to reveal, and a rubber-band drag
+    /// churns the selection every frame, so both skip the tree work.</summary>
     private async void FileList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        QueueSelectionSummary();
+
+        if (_marquee.IsDragging || FileListView.SelectedItems.Count != 1) return;
         if (FileListView.SelectedItem is not FileItemViewModel item) return;
 
         var dir = item.IsDirectory ? item.FullPath : Path.GetDirectoryName(item.FullPath);
@@ -317,9 +347,56 @@ public partial class MainWindow : Window
         _ = Dispatcher.InvokeAsync(() => ScrollTreeChainIntoView(chain), DispatcherPriority.Loaded);
     }
 
+    private bool _selectionSummaryPending;
+
+    /// <summary>Coalesces the summary refresh to one per frame: a rubber-band drag adds and removes
+    /// items one at a time, and each recount walks the whole selection.</summary>
+    private void QueueSelectionSummary()
+    {
+        if (_selectionSummaryPending) return;
+        _selectionSummaryPending = true;
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            _selectionSummaryPending = false;
+            UpdateSelectionSummary();
+        }, DispatcherPriority.Background);
+    }
+
+    /// <summary>Explorer-style "N items selected (size)" in the status bar. Folder sizes count
+    /// only when they've already been computed, so the total never blocks on a scan.</summary>
+    private void UpdateSelectionSummary()
+    {
+        var selected = FileListView.SelectedItems;
+        if (selected.Count == 0)
+        {
+            _shell.SelectionSummary = "";
+            return;
+        }
+
+        var bytes = 0L;
+        foreach (var entry in selected)
+        {
+            if (entry is FileItemViewModel { SizeBytes: { } size })
+                bytes += size;
+        }
+
+        var noun = selected.Count == 1 ? "item" : "items";
+        _shell.SelectionSummary = bytes > 0
+            ? $"{selected.Count:N0} {noun} selected ({BertBrowser.Core.Services.ByteSizeFormatter.Format(bytes)})"
+            : $"{selected.Count:N0} {noun} selected";
+    }
+
     /// <summary>Positions the revealed node roughly 40% down the tree's viewport.</summary>
     private void ScrollTreeChainIntoView(IReadOnlyList<DirectoryNodeViewModel> chain)
     {
+        // A click that expanded a visible row anchors it under the cursor; re-pin there instead of
+        // repositioning, so navigating into a folder by clicking it doesn't make the tree jump.
+        if (chain.Count > 0 && ReferenceEquals(_treeAnchorNode, chain[^1]))
+        {
+            RestoreTreeAnchor();
+            return;
+        }
+
         ItemsControl parent = FolderTree;
         TreeViewItem? container = null;
         foreach (var node in chain)
@@ -359,6 +436,188 @@ public partial class MainWindow : Window
             if (FindDescendant<T>(child) is { } nested) return nested;
         }
         return null;
+    }
+
+    // --- Pinned current-directory header ---
+
+    // The tree row for the currently open directory, and the root-to-node chain used to locate
+    // its container. Kept in sync with the shell's CurrentPath (not the file-list selection) so
+    // the pinned header always tracks the folder being browsed.
+    private IReadOnlyList<DirectoryNodeViewModel> _currentDirChain = Array.Empty<DirectoryNodeViewModel>();
+    private DirectoryNodeViewModel? _currentDirNode;
+
+    /// <summary>Wires the tree's scroll viewer once its template is applied, so the pinned
+    /// header can react to every scroll, expand/collapse, and resize.</summary>
+    private void FolderTree_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (FindDescendant<ScrollViewer>(FolderTree) is { } scroller)
+        {
+            scroller.ScrollChanged -= FolderTreeScrollChanged; // idempotent across re-raises
+            scroller.ScrollChanged += FolderTreeScrollChanged;
+        }
+    }
+
+    private void FolderTreeScrollChanged(object sender, ScrollChangedEventArgs e) => UpdatePinnedRow();
+
+    private void Shell_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ShellViewModel.CurrentPath))
+            _ = RevealCurrentDirAsync();
+    }
+
+    /// <summary>Expands the tree down to the current directory, selects it, scrolls it into view,
+    /// and remembers it as the pinned-header target. Best-effort UI sugar — never throws.</summary>
+    private async Task RevealCurrentDirAsync()
+    {
+        var path = _shell.CurrentPath;
+        if (path.Length == 0) return;
+
+        IReadOnlyList<DirectoryNodeViewModel> chain;
+        try
+        {
+            chain = await _shell.Tree.RevealPathAsync(path);
+        }
+        catch
+        {
+            return;
+        }
+
+        _currentDirChain = chain;
+        _currentDirNode = chain.Count > 0 ? chain[^1] : null;
+
+        // Expand the current directory itself (RevealPathAsync only expands its ancestors) so its
+        // subfolders show in the tree and there's something for the pinned header to collapse.
+        if (_currentDirNode is not null)
+        {
+            _currentDirNode.IsExpanded = true;
+            await _currentDirNode.EnsurePopulatedAsync(); // children load off-thread; wait before measuring
+        }
+
+        // Containers for freshly expanded nodes only exist after a layout pass.
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            if (chain.Count > 0) ScrollTreeChainIntoView(chain);
+            UpdatePinnedRow();
+        }, DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Shows the pinned header when the current directory's row has scrolled above the
+    /// tree's viewport (and only while a vertical scrollbar is present), so the user can always
+    /// collapse it. Hides it otherwise.</summary>
+    private void UpdatePinnedRow()
+    {
+        if (_currentDirNode is null || _currentDirChain.Count == 0)
+        {
+            HidePinnedRow();
+            return;
+        }
+
+        var scroller = FindDescendant<ScrollViewer>(FolderTree);
+        if (scroller is null || scroller.ComputedVerticalScrollBarVisibility != Visibility.Visible)
+        {
+            HidePinnedRow();
+            return;
+        }
+
+        var container = ContainerForChain(_currentDirChain);
+        if (container is null)
+        {
+            HidePinnedRow();
+            return;
+        }
+
+        double rowTop;
+        try
+        {
+            rowTop = container.TransformToAncestor(scroller).Transform(default).Y;
+        }
+        catch (InvalidOperationException)
+        {
+            HidePinnedRow(); // not connected to the visual tree yet
+            return;
+        }
+
+        // container.ActualHeight spans the row plus its expanded subtree; pin while the header is
+        // above the top but some of the subtree is still on screen below the pinned bar.
+        var subtreeHeight = container.ActualHeight;
+        if (rowTop < 0 && rowTop + subtreeHeight > 0)
+        {
+            PinnedRow.DataContext = _currentDirNode;
+            PinnedRow.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            HidePinnedRow();
+        }
+    }
+
+    private void HidePinnedRow()
+    {
+        PinnedRow.Visibility = Visibility.Collapsed;
+        PinnedRow.DataContext = null;
+    }
+
+    /// <summary>Walks the root-to-node chain to the current directory's realized container
+    /// (virtualization is off, so every expanded node has one after layout).</summary>
+    private TreeViewItem? ContainerForChain(IReadOnlyList<DirectoryNodeViewModel> chain)
+    {
+        ItemsControl parent = FolderTree;
+        TreeViewItem? container = null;
+        foreach (var node in chain)
+        {
+            container = parent.ItemContainerGenerator.ContainerFromItem(node) as TreeViewItem;
+            if (container is null) return null;
+            parent = container;
+        }
+        return container;
+    }
+
+    /// <summary>Clicking the pinned header collapses the current directory and scrolls its
+    /// (now collapsed) row back to the top so it's visible again.</summary>
+    private void PinnedRow_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (_currentDirNode is null) return;
+        _currentDirNode.IsExpanded = false;
+        e.Handled = true;
+
+        var chain = _currentDirChain;
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            ScrollTreeChainToTop(chain);
+            UpdatePinnedRow();
+        }, DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Scrolls the tree so the chain's node sits flush at the top of the viewport.</summary>
+    private void ScrollTreeChainToTop(IReadOnlyList<DirectoryNodeViewModel> chain)
+    {
+        var scroller = FindDescendant<ScrollViewer>(FolderTree);
+        var container = ContainerForChain(chain);
+        if (scroller is null || container is null) return;
+
+        try
+        {
+            var rowTop = container.TransformToAncestor(scroller).Transform(default).Y;
+            scroller.ScrollToVerticalOffset(Math.Max(0, scroller.VerticalOffset + rowTop));
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    /// <summary>WPF doesn't select on right-click, so without this the context menu would act on a
+    /// stale selection. Right-clicking inside the selection keeps it (that's how you get a menu for
+    /// many items); right-clicking outside narrows it to the row under the cursor, like Explorer.</summary>
+    private void FileList_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        var d = e.OriginalSource as DependencyObject;
+        while (d is not null and not ListViewItem and not ListView)
+            d = VisualTreeHelper.GetParent(d);
+
+        if (d is not ListViewItem { DataContext: FileItemViewModel item }) return;
+        if (FileListView.SelectedItems.Contains(item)) return;
+
+        FileListView.SelectedItem = item;
     }
 
     private void FileList_DoubleClick(object sender, MouseButtonEventArgs e)
@@ -459,24 +718,6 @@ public partial class MainWindow : Window
             _shell.OpenInVSCode(item.FullPath, item.IsDirectory);
     }
 
-    private async void ContextTags_Click(object sender, RoutedEventArgs e)
-    {
-        var paths = FileListView.SelectedItems.Cast<FileItemViewModel>()
-            .Where(i => !i.IsDirectory)
-            .Select(i => i.FullPath)
-            .ToList();
-        if (paths.Count == 0)
-        {
-            _shell.StatusText = "Select one or more files to tag (folders cannot be tagged).";
-            return;
-        }
-
-        var vm = new AssignTagsViewModel(App.Services.GetRequiredService<ITagService>(), paths);
-        var dialog = new AssignTagsDialog(vm) { Owner = this };
-        if (dialog.ShowDialog() == true)
-            await _shell.OnTagsChangedAsync();
-    }
-
     // --- Clipboard + custom commands ---
 
     private List<FileItemViewModel> SelectedFileItems() =>
@@ -552,12 +793,6 @@ public partial class MainWindow : Window
     {
         var items = FileListView.SelectedItems.Cast<FileItemViewModel>().ToList();
         _shell.ComputeSizeCommand.Execute(items);
-    }
-
-    private void ContextRemoveMissing_Click(object sender, RoutedEventArgs e)
-    {
-        if (FileListView.SelectedItem is FileItemViewModel item)
-            _shell.RemoveMissingCommand.Execute(item);
     }
 
     // --- Bookmarks ---
@@ -645,15 +880,111 @@ public partial class MainWindow : Window
             BertBrowser.App.Interop.PortableDevices.OpenInExplorer(device.Device);
     }
 
+    // The clicked row and its expansion state at mouse-down, captured before selecting the row
+    // navigates to it. Selecting sets the shell's CurrentPath synchronously, and the resulting
+    // RevealCurrentDirAsync auto-expands the current directory — so by mouse-up node.IsExpanded
+    // may already be true. FolderTreeItem_Click toggles from this pre-click value instead of the
+    // live one so the reveal-expand and the click-toggle don't fight (otherwise the first click
+    // would open then immediately collapse the folder).
+    private DirectoryNodeViewModel? _treeItemMouseDownNode;
+    private bool _treeItemExpandedAtMouseDown;
+
+    // A folder row the user clicked to expand/collapse, pinned to the viewport position it had at
+    // the moment of the click so its subtree grows/shrinks *below* it and the row itself stays put
+    // under the cursor. _treeAnchorViewportY is that row top's offset from the tree viewport.
+    private DirectoryNodeViewModel? _treeAnchorNode;
+    private TreeViewItem? _treeAnchorContainer;
+    private double _treeAnchorViewportY;
+
+    private void FolderTreeItem_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: DirectoryNodeViewModel node })
+        {
+            _treeItemMouseDownNode = node;
+            _treeItemExpandedAtMouseDown = node.IsExpanded;
+        }
+    }
+
     /// <summary>A single click on a folder row toggles its expansion (on top of selecting/
-    /// navigating), so the tree opens and closes without having to hit the small chevron. Drive
-    /// roots (Depth 0) are left to their accordion select-to-open behaviour; only nested folders
-    /// with children toggle here.</summary>
+    /// navigating), so the tree opens and closes without having to hit the small chevron. Applies
+    /// to every folder with children, drives included.</summary>
     private void FolderTreeItem_Click(object sender, MouseButtonEventArgs e)
     {
         if (sender is FrameworkElement { DataContext: DirectoryNodeViewModel node }
-            && node.Depth > 0 && node.Children.Count > 0)
-            node.IsExpanded = !node.IsExpanded;
+            && node.Children.Count > 0
+            && ReferenceEquals(node, _treeItemMouseDownNode))
+        {
+            // Pin the row where it sits now, before the toggle reflows the tree. Without this the
+            // navigation reveal-scroll (or an offset clamp when collapsing near the bottom) slides
+            // the clicked row off the cursor, which reads as an awkward jump.
+            AnchorTreeRow(node, FindAncestorTreeViewItem(sender as DependencyObject));
+
+            node.IsExpanded = !_treeItemExpandedAtMouseDown;
+
+            // When the click also navigates, RevealCurrentDirAsync's scroll honors the anchor; when
+            // it doesn't (re-clicking the current folder to collapse it) re-pin here once the toggle
+            // has settled. Exactly one of the two paths runs, so they never fight over the offset.
+            if (node.FullPath.Equals(_shell.CurrentPath, StringComparison.OrdinalIgnoreCase))
+                _ = Dispatcher.InvokeAsync(RestoreTreeAnchor, DispatcherPriority.Loaded);
+        }
+        else
+        {
+            ClearTreeAnchor();
+        }
+        _treeItemMouseDownNode = null;
+    }
+
+    /// <summary>Records the anchored row and its current viewport offset. Cleared (no anchor) when
+    /// the row has no realized container or scroll viewer to measure against.</summary>
+    private void AnchorTreeRow(DirectoryNodeViewModel node, TreeViewItem? container)
+    {
+        ClearTreeAnchor();
+        var scroller = FindDescendant<ScrollViewer>(FolderTree);
+        if (scroller is null || container is null) return;
+        try
+        {
+            _treeAnchorViewportY = container.TransformToAncestor(scroller).Transform(default).Y;
+            _treeAnchorNode = node;
+            _treeAnchorContainer = container;
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private void ClearTreeAnchor()
+    {
+        _treeAnchorNode = null;
+        _treeAnchorContainer = null;
+    }
+
+    /// <summary>Scrolls the tree so the anchored (just expanded/collapsed) row returns to the exact
+    /// viewport offset it had when clicked, keeping it under the cursor. One-shot: clears the anchor
+    /// so a later, unrelated reveal isn't pinned to a stale position.</summary>
+    private void RestoreTreeAnchor()
+    {
+        var container = _treeAnchorContainer;
+        var targetY = _treeAnchorViewportY;
+        ClearTreeAnchor();
+        if (container is null) return;
+
+        var scroller = FindDescendant<ScrollViewer>(FolderTree);
+        if (scroller is null) return;
+        try
+        {
+            var rowTop = container.TransformToAncestor(scroller).Transform(default).Y;
+            scroller.ScrollToVerticalOffset(Math.Max(0, scroller.VerticalOffset + rowTop - targetY));
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private static TreeViewItem? FindAncestorTreeViewItem(DependencyObject? d)
+    {
+        while (d is not null and not TreeViewItem)
+            d = VisualTreeHelper.GetParent(d);
+        return d as TreeViewItem;
     }
 
     private void TreeProperties_Click(object sender, RoutedEventArgs e)
@@ -676,14 +1007,23 @@ public partial class MainWindow : Window
 
     private void ContextProperties_Click(object sender, RoutedEventArgs e)
     {
-        if (FileListView.SelectedItem is FileItemViewModel item)
-            ShowProperties(item.FullPath, item.IsDirectory);
+        if (SelectedFileItems() is { Count: > 0 } selection)
+            ShowProperties(selection);
     }
 
-    private void ShowProperties(string fullPath, bool isDirectory)
+    /// <summary>Opens the properties dialog for a whole selection; with more than one item it
+    /// shows aggregates and edits the shared attributes in bulk.</summary>
+    private void ShowProperties(IReadOnlyList<FileItemViewModel> items) =>
+        ShowProperties(items.Select(i => new PropertiesTarget(i.FullPath, i.IsDirectory)).ToList());
+
+    private void ShowProperties(string fullPath, bool isDirectory) =>
+        ShowProperties([new PropertiesTarget(fullPath, isDirectory)]);
+
+    private void ShowProperties(IReadOnlyList<PropertiesTarget> targets)
     {
-        var vm = new PropertiesViewModel(fullPath, isDirectory,
-            App.Services.GetRequiredService<ITagService>(),
+        if (targets.Count == 0) return;
+
+        var vm = new PropertiesViewModel(targets,
             App.Services.GetRequiredService<IDirectorySizeService>(),
             App.Services.GetRequiredService<DirSizeRepository>());
         new PropertiesDialog(vm) { Owner = this }.ShowDialog();

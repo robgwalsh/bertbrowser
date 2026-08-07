@@ -10,6 +10,7 @@ using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Mft;
+using BertBrowser.Core.Services.Transfer;
 
 namespace BertBrowser.App.ViewModels;
 
@@ -18,14 +19,29 @@ public sealed record BreadcrumbSegment(string Name, string FullPath);
 public sealed partial class ShellViewModel : ObservableObject
 {
     private readonly IDirectorySizeService _sizeService;
-    private readonly ITagService _tagService;
     private readonly ISearchService _searchService;
     private readonly IFileTransferService _fileTransfer;
     private readonly IMftIndexService _mftIndex;
     private readonly AppSettings _settings;
+    private readonly TransferPlanner _transferPlanner;
+    private readonly TransferExecutor _transferExecutor;
 
     /// <summary>Reflects the current "Show hidden items" setting (may change while running).</summary>
-    private bool IncludeHidden => _settings.ShowHiddenItems;
+    private bool IncludeHidden => ShowHiddenItems;
+
+    /// <summary>"Show hidden items" browse setting, toggled from the toolbar and the Settings
+    /// dialog. Mirrors <see cref="AppSettings.ShowHiddenItems"/>; hidden files/folders — and now
+    /// hidden bookmarks — appear only while it is on.</summary>
+    [ObservableProperty]
+    private bool _showHiddenItems;
+
+    partial void OnShowHiddenItemsChanged(bool value)
+    {
+        _settings.ShowHiddenItems = value;
+        _settings.Save();
+        Bookmarks.SetShowHidden(value);
+        _ = RefreshViewAsync();
+    }
 
     private readonly Stack<string> _backStack = new();
     private readonly Stack<string> _forwardStack = new();
@@ -34,7 +50,6 @@ public sealed partial class ShellViewModel : ObservableObject
 
     public FileListViewModel FileList { get; }
     public FolderTreeViewModel Tree { get; }
-    public TagFilterViewModel TagFilter { get; }
     public BookmarksViewModel Bookmarks { get; }
 
     /// <summary>Raised after navigation so the view can select and scroll to a specific
@@ -47,6 +62,12 @@ public sealed partial class ShellViewModel : ObservableObject
 
     [ObservableProperty]
     private string _statusText = "Ready";
+
+    /// <summary>"N items selected (size)" for the file-list selection; empty when nothing is
+    /// selected. Kept beside <see cref="StatusText"/> so a selection never overwrites the
+    /// navigation/search message.</summary>
+    [ObservableProperty]
+    private string _selectionSummary = "";
 
     [ObservableProperty]
     private string _searchText = "";
@@ -92,30 +113,31 @@ public sealed partial class ShellViewModel : ObservableObject
 
     public ShellViewModel(
         IFileSystemService fileSystem,
-        ITagService tagService,
         IDirectorySizeService sizeService,
         ISearchService searchService,
         IFileTransferService fileTransfer,
         IBookmarkService bookmarkService,
         IMftIndexService mftIndex,
         DirSizeRepository dirSizeRepository,
+        TransferPlanner transferPlanner,
+        TransferExecutor transferExecutor,
         AppSettings settings)
     {
         _sizeService = sizeService;
-        _tagService = tagService;
         _searchService = searchService;
         _fileTransfer = fileTransfer;
         _mftIndex = mftIndex;
+        _transferPlanner = transferPlanner;
+        _transferExecutor = transferExecutor;
         _settings = settings;
+        _showHiddenItems = settings.ShowHiddenItems; // seed the field so the ctor doesn't refresh
 
-        FileList = new FileListViewModel(fileSystem, tagService, dirSizeRepository);
+        FileList = new FileListViewModel(fileSystem, dirSizeRepository);
         FileList.PropertyChanged += OnFileListPropertyChanged;
         Tree = new FolderTreeViewModel(fileSystem);
-        TagFilter = new TagFilterViewModel(tagService);
         Bookmarks = new BookmarksViewModel(bookmarkService);
 
         Tree.DirectorySelected += path => _ = NavigateToAsync(path);
-        TagFilter.FilterChanged += () => _ = RefreshViewAsync();
         _searchService.IndexRefreshed += OnIndexRefreshed;
         _mftIndex.IndexRefreshed += OnMftIndexRefreshed;
         _mftIndex.StatusChanged += OnMftStatusChanged;
@@ -127,6 +149,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
     public async Task InitializeAsync()
     {
+        Bookmarks.SetShowHidden(ShowHiddenItems);
         await Bookmarks.LoadAsync();
 
         // Drives are enumerated off-thread; the roots must exist before the first reveal.
@@ -321,22 +344,12 @@ public sealed partial class ShellViewModel : ObservableObject
             {
                 await RunSearchAsync(ct);
             }
-            else if (TagFilter.IsActive)
-            {
-                await FileList.LoadFlattenedAsync(
-                    CurrentPath, TagFilter.CheckedTagIds,
-                    TagFilter.MatchAll ? TagMatchMode.All : TagMatchMode.Any, IncludeHidden, ct);
-                if (!ct.IsCancellationRequested)
-                    StatusText = $"{FileList.Items.Count} tagged file(s) under {CurrentPath}";
-            }
             else
             {
                 await FileList.LoadDirectoryAsync(CurrentPath, IncludeHidden, ct);
                 if (!ct.IsCancellationRequested)
                     StatusText = $"{FileList.Items.Count} item(s)";
             }
-
-            await TagFilter.RefreshAsync(CurrentPath);
         }
         catch (OperationCanceledException)
         {
@@ -537,7 +550,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
     private void SetClipboard(IList<FileItemViewModel>? items, bool cut)
     {
-        var paths = items?.Where(i => !i.IsMissing).Select(i => i.FullPath).ToList();
+        var paths = items?.Select(i => i.FullPath).ToList();
         if (paths is not { Count: > 0 }) return;
 
         try
@@ -574,7 +587,6 @@ public sealed partial class ShellViewModel : ObservableObject
         StatusText = isCut ? "Moving…" : "Copying…";
 
         var errors = new List<string>();
-        var moves = new List<(string From, string To)>();
         var pasted = 0;
 
         await Task.Run(() =>
@@ -587,10 +599,7 @@ public sealed partial class ShellViewModel : ObservableObject
                     {
                         var dest = _fileTransfer.MoveInto(source, destination);
                         if (!dest.Equals(source, StringComparison.OrdinalIgnoreCase))
-                        {
-                            moves.Add((source, dest));
                             pasted++;
-                        }
                     }
                     else
                     {
@@ -605,10 +614,6 @@ public sealed partial class ShellViewModel : ObservableObject
                 }
             }
         });
-
-        // Tags follow moved entries (files exactly, directories with their whole subtree).
-        foreach (var (from, to) in moves)
-            await _tagService.MoveEntryAsync(from, to);
 
         if (isCut && pasted > 0)
         {
@@ -654,6 +659,134 @@ public sealed partial class ShellViewModel : ObservableObject
 
         if (matched.Count > 0)
             StatusText = $"Ran '{command.Name}' on {matched.Count} item(s)";
+    }
+
+    // --- Drag-and-drop transfers ---
+
+    /// <summary>The last completed move, kept so Ctrl+Z can put it back. Retiring it commits any
+    /// entries a Replace displaced into staging.</summary>
+    private TransferOutcome? _undoableTransfer;
+
+    /// <summary>True while a drop is being carried out; blocks a second one from overlapping it.</summary>
+    [ObservableProperty]
+    private bool _isTransferring;
+
+    public bool CanUndoTransfer => _undoableTransfer?.CanUndo == true && !IsTransferring;
+
+    /// <summary>"Undo move of 3 items" for the menu/tooltip; empty when there is nothing to undo.</summary>
+    [ObservableProperty]
+    private string _undoTransferDescription = "";
+
+    /// <summary>Works out what a drop would do, without changing anything. Called while the drag
+    /// hovers, so the view can allow or refuse the drop and explain why.</summary>
+    public TransferPlan PlanDrop(IReadOnlyList<string> sources, string destination, TransferVerb verb) =>
+        _transferPlanner.Plan(sources, destination, verb);
+
+    /// <summary>Carries out a planned drop off the UI thread, then refreshes the list and the tree
+    /// nodes on both sides of the transfer.</summary>
+    public async Task ExecuteDropAsync(
+        TransferPlan plan, IReadOnlyDictionary<string, ConflictResolution>? resolutions)
+    {
+        if (IsTransferring || !plan.HasWork) return;
+
+        IsTransferring = true;
+        UndoTransferCommand.NotifyCanExecuteChanged();
+        try
+        {
+            var verbing = plan.Verb == TransferVerb.Move ? "Moving" : "Copying";
+            StatusText = $"{verbing} {plan.Transfers.Count:N0} item(s)…";
+
+            var progress = new Progress<TransferProgress>(p =>
+                StatusText = p.CurrentName.Length > 0
+                    ? $"{verbing} {p.Done + 1:N0} of {p.Total:N0} — {p.CurrentName}"
+                    : StatusText);
+
+            var outcome = await Task.Run(
+                () => _transferExecutor.Execute(plan, resolutions, CancellationToken.None, progress));
+
+            RetireUndoableTransfer();
+            if (outcome.CanUndo)
+            {
+                _undoableTransfer = outcome;
+                UndoTransferDescription =
+                    $"Ctrl+Z: undo move of {outcome.Completed.Count:N0} item(s)";
+            }
+
+            await RefreshAfterTransferAsync(plan, outcome);
+            StatusText = DescribeOutcome(plan, outcome);
+        }
+        finally
+        {
+            IsTransferring = false;
+            UndoTransferCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanUndoTransfer))]
+    private async Task UndoTransferAsync()
+    {
+        if (_undoableTransfer is not { } outcome) return;
+
+        IsTransferring = true;
+        UndoTransferCommand.NotifyCanExecuteChanged();
+        try
+        {
+            StatusText = "Undoing…";
+            var result = await Task.Run(() => _transferExecutor.Undo(outcome));
+
+            // The record is spent either way: a partial undo must not be replayed.
+            _undoableTransfer = null;
+            UndoTransferDescription = "";
+
+            var directories = outcome.Completed
+                .SelectMany(c => new[] { Path.GetDirectoryName(c.SourcePath), Path.GetDirectoryName(c.FinalPath) })
+                .Append(outcome.DestinationDirectory)
+                .OfType<string>();
+            await Tree.RefreshDirectoriesAsync(directories);
+            await RefreshViewAsync();
+
+            StatusText = result.Failed.Count == 0
+                ? $"Undone — {result.Restored:N0} item(s) put back"
+                : $"Put back {result.Restored:N0} item(s); {result.Failed.Count:N0} could not be restored — {result.Failed[0].Message}";
+        }
+        finally
+        {
+            IsTransferring = false;
+            UndoTransferCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>
+    /// Drops the pending undo record. Anything a Replace displaced into staging is deleted at this
+    /// point and not before: up until now Ctrl+Z could have brought it back.
+    /// </summary>
+    public void RetireUndoableTransfer()
+    {
+        if (_undoableTransfer is { } outcome)
+            TransferExecutor.CommitStaging(outcome);
+        _undoableTransfer = null;
+        UndoTransferDescription = "";
+        UndoTransferCommand.NotifyCanExecuteChanged();
+    }
+
+    private async Task RefreshAfterTransferAsync(TransferPlan plan, TransferOutcome outcome)
+    {
+        var directories = outcome.Completed
+            .Select(c => Path.GetDirectoryName(c.SourcePath))
+            .Append(plan.DestinationDirectory)
+            .OfType<string>();
+        await Tree.RefreshDirectoriesAsync(directories);
+        await RefreshViewAsync();
+    }
+
+    private static string DescribeOutcome(TransferPlan plan, TransferOutcome outcome)
+    {
+        var verb = plan.Verb == TransferVerb.Move ? "Moved" : "Copied";
+        var text = $"{verb} {outcome.Completed.Count:N0} item(s)";
+        if (outcome.Skipped.Count > 0) text += $", skipped {outcome.Skipped.Count:N0}";
+        if (outcome.Failed.Count > 0) text += $", {outcome.Failed.Count:N0} failed — {outcome.Failed[0].Message}";
+        else if (outcome.CanUndo) text += " — Ctrl+Z to undo";
+        return text;
     }
 
     // --- Built-in "Open in…" launchers (files and directories) ---
@@ -723,20 +856,5 @@ public sealed partial class ShellViewModel : ObservableObject
             }
         }
         StatusText = "VS Code not found. Install it, or add 'code' to your PATH.";
-    }
-
-    [RelayCommand]
-    private async Task RemoveMissingAsync(FileItemViewModel? item)
-    {
-        if (item is null || !item.IsMissing) return;
-        await _tagService.RemoveFileAsync(item.FullPath);
-        FileList.Items.Remove(item);
-        await TagFilter.RefreshAsync(CurrentPath);
-    }
-
-    /// <summary>Called by views after tags were edited so chips/counts refresh.</summary>
-    public async Task OnTagsChangedAsync()
-    {
-        await RefreshViewAsync();
     }
 }

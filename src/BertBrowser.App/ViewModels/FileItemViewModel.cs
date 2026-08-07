@@ -32,7 +32,7 @@ public sealed partial class FileItemViewModel : ObservableObject
 
     public bool IsMedia => !IsDirectory && MediaExtensions.Contains(Path.GetExtension(FullPath));
 
-    /// <summary>Path relative to the filter root; only set in flattened tag-filter mode.</summary>
+    /// <summary>Path relative to the search root; only set in flattened search-results mode.</summary>
     public string RelativePath { get; }
 
     [ObservableProperty]
@@ -48,13 +48,6 @@ public sealed partial class FileItemViewModel : ObservableObject
 
     [ObservableProperty]
     private DateTime? _sizeComputedUtc;
-
-    [ObservableProperty]
-    private bool _isMissing;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(TagsDisplay), nameof(TagsSortKey))]
-    private IReadOnlyList<Tag> _tags = Array.Empty<Tag>();
 
     private ImageSource? _icon;
     private bool _iconLoaded;
@@ -81,38 +74,9 @@ public sealed partial class FileItemViewModel : ObservableObject
         RelativePath = relativePath;
     }
 
-    public FileItemViewModel(string fullPath, string relativePath, IReadOnlyList<Tag> tags)
-    {
-        Name = Path.GetFileName(fullPath);
-        FullPath = fullPath;
-        IsDirectory = false;
-        RelativePath = relativePath;
-        Tags = tags;
-        TypeName = Path.GetExtension(fullPath) is { Length: > 1 } ext ? ext[1..].ToUpperInvariant() + " file" : "File";
-    }
-
-    /// <summary>Fills size/modified from disk in flattened mode; marks missing files.</summary>
-    public void HydrateFromDisk()
-    {
-        var info = new FileInfo(FullPath);
-        if (info.Exists)
-        {
-            SizeBytes = info.Length;
-            ModifiedUtc = info.LastWriteTimeUtc;
-            IsHidden = info.Attributes.HasFlag(FileAttributes.Hidden);
-            OnPropertyChanged(nameof(ModifiedDisplay));
-            OnPropertyChanged(nameof(IconOpacity));
-        }
-        else
-        {
-            IsMissing = true;
-        }
-    }
-
     /// <summary>Fills size/modified/hidden from disk for a search result whose index row
-    /// lacked them — MFT-built rows carry no size or timestamp. Unlike
-    /// <see cref="HydrateFromDisk"/> this never flags a directory as missing (it stats
-    /// directories too); intended to run off the UI thread before the item is bound.</summary>
+    /// lacked them — MFT-built rows carry no size or timestamp. Intended to run off the UI
+    /// thread before the item is bound.</summary>
     public void HydrateSearchMetadata()
     {
         // Raw-$MFT index rows already carry a real timestamp (and size); only the names-only
@@ -218,15 +182,8 @@ public sealed partial class FileItemViewModel : ObservableObject
 
     public string ModifiedDisplay => ModifiedUtc == default ? "" : ModifiedUtc.ToLocalTime().ToString("g");
 
-    public string TagsDisplay => string.Join(", ", Tags.Select(t => t.Name));
-
     /// <summary>Unknown sizes sort together at the small end.</summary>
     public long SizeSortKey => SizeBytes ?? -1;
-
-    public string TagsSortKey =>
-        Tags.Count == 0
-            ? "￿" // untagged last
-            : string.Join(",", Tags.Select(t => t.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
 
     public string SizeTooltip =>
         IsDirectory && SizeComputedUtc is { } computed

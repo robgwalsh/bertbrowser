@@ -51,7 +51,7 @@
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Location:" Style="{StaticResource PropName}"/>
-                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding FullPath, Mode=OneWay}" Style="{StaticResource PropValue}"/>
+                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding LocationDisplay, Mode=OneWay}" Style="{StaticResource PropValue}"/>
 
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Type:" Style="{StaticResource PropName}"/>
                         <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding TypeName, Mode=OneWay}" Style="{StaticResource PropValue}"/>
@@ -61,29 +61,52 @@
                         <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SizeDisplay, Mode=OneWay}" Style="{StaticResource PropValue}"
                                  Visibility="{Binding SizeDisplay, Converter={StaticResource NullToCollapsed}}"/>
 
-                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Created:" Style="{StaticResource PropName}"/>
-                        <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding CreatedDisplay, Mode=OneWay}" Style="{StaticResource PropValue}"/>
+                        <!-- Timestamps describe one item; a selection has nothing single to show. -->
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Created:" Style="{StaticResource PropName}"
+                                   Visibility="{Binding IsSingle, Converter={StaticResource BoolToVisibility}}"/>
+                        <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding CreatedDisplay, Mode=OneWay}" Style="{StaticResource PropValue}"
+                                 Visibility="{Binding IsSingle, Converter={StaticResource BoolToVisibility}}"/>
 
-                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Modified:" Style="{StaticResource PropName}"/>
-                        <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding ModifiedDisplay, Mode=OneWay}" Style="{StaticResource PropValue}"/>
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Modified:" Style="{StaticResource PropName}"
+                                   Visibility="{Binding IsSingle, Converter={StaticResource BoolToVisibility}}"/>
+                        <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding ModifiedDisplay, Mode=OneWay}" Style="{StaticResource PropValue}"
+                                 Visibility="{Binding IsSingle, Converter={StaticResource BoolToVisibility}}"/>
 
-                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Accessed:" Style="{StaticResource PropName}"/>
-                        <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding AccessedDisplay, Mode=OneWay}" Style="{StaticResource PropValue}"/>
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Accessed:" Style="{StaticResource PropName}"
+                                   Visibility="{Binding IsSingle, Converter={StaticResource BoolToVisibility}}"/>
+                        <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding AccessedDisplay, Mode=OneWay}" Style="{StaticResource PropValue}"
+                                 Visibility="{Binding IsSingle, Converter={StaticResource BoolToVisibility}}"/>
 
                         <TextBlock Grid.Row="6" Grid.Column="0" Text="Attributes:" Style="{StaticResource PropName}"/>
-                        <StackPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" Margin="0,3"
+                        <StackPanel Grid.Row="6" Grid.Column="1" Margin="0,3"
                                     IsEnabled="{Binding IsMissing, Converter={StaticResource InverseBool}}">
-                            <CheckBox Content="Read-only" IsChecked="{Binding IsReadOnly}" VerticalAlignment="Center"/>
-                            <CheckBox Content="Hidden" IsChecked="{Binding IsHidden}" VerticalAlignment="Center" Margin="12,0,0,0"/>
-                            <Button Content="Apply" Padding="12,2" Margin="16,0,0,0"
-                                    Command="{Binding ApplyAttributesCommand}"
-                                    ToolTip="Applies to this item only, not folder contents."/>
+                            <StackPanel Orientation="Horizontal">
+                                <!-- Three-state over a selection: indeterminate = the items disagree,
+                                     and Apply leaves that bit alone. -->
+                                <CheckBox Content="Read-only" IsChecked="{Binding IsReadOnly}"
+                                          IsThreeState="{Binding IsMultiple}" VerticalAlignment="Center"/>
+                                <CheckBox Content="Hidden" IsChecked="{Binding IsHidden}"
+                                          IsThreeState="{Binding IsMultiple}" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                                <Button Content="Apply" Padding="12,2" Margin="16,0,0,0"
+                                        Command="{Binding ApplyAttributesCommand}"
+                                        ToolTip="{Binding AttributesHint}"/>
+                            </StackPanel>
+                            <TextBlock Foreground="#666" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Text="A filled box means the selected items differ; click it through to a checked or cleared state to apply that to all of them."
+                                       Visibility="{Binding IsMultiple, Converter={StaticResource BoolToVisibility}}"/>
                         </StackPanel>
                     </Grid>
                 </GroupBox>
 
+                <GroupBox Header="Selected items" Padding="8" Margin="0,0,0,8"
+                          Visibility="{Binding IsMultiple, Converter={StaticResource BoolToVisibility}}">
+                    <TextBox Text="{Binding ItemNamesDisplay, Mode=OneWay}" Style="{StaticResource PropValue}"
+                             MaxHeight="120" AcceptsReturn="True" TextWrapping="NoWrap"
+                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                </GroupBox>
+
                 <GroupBox Header="Folder contents" Padding="8" Margin="0,0,0,8"
-                          Visibility="{Binding IsDirectory, Converter={StaticResource BoolToVisibility}}">
+                          Visibility="{Binding HasDirectories, Converter={StaticResource BoolToVisibility}}">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" MinWidth="90"/>
@@ -122,23 +145,9 @@
                     </Grid>
                 </GroupBox>
 
-                <GroupBox Header="Tags" Padding="8" Margin="0,0,0,8"
-                          Visibility="{Binding IsDirectory, Converter={StaticResource InverseBoolToVisibility}}">
-                    <Grid>
-                        <ItemsControl ItemsSource="{Binding Tags}" ItemTemplate="{StaticResource TagChipTemplate}"
-                                      Visibility="{Binding HasTags, Converter={StaticResource BoolToVisibility}}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <WrapPanel/>
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                        </ItemsControl>
-                        <TextBlock Text="No tags" Foreground="#999"
-                                   Visibility="{Binding HasTags, Converter={StaticResource InverseBoolToVisibility}}"/>
-                    </Grid>
-                </GroupBox>
-
-                <GroupBox Header="Details" Padding="8">
+                <!-- Shell property handlers describe one file, so this is single-selection only. -->
+                <GroupBox Header="Details" Padding="8"
+                          Visibility="{Binding IsSingle, Converter={StaticResource BoolToVisibility}}">
                     <StackPanel>
                         <ProgressBar IsIndeterminate="True" Height="4" Margin="0,2,0,6"
                                      Visibility="{Binding IsLoadingDetails, Converter={StaticResource BoolToVisibility}}"/>

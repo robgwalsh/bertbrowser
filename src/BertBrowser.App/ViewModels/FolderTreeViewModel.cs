@@ -50,38 +50,28 @@ public sealed class FolderTreeViewModel
     {
         var devices = await Task.Run(PortableDevices.Enumerate);
         foreach (var device in devices)
-            Roots.Add(new PortableDeviceNodeViewModel(this, device));
+            Roots.Add(new PortableDeviceNodeViewModel(device));
     }
 
     internal bool HasSubdirectories(string path) => _fileSystem.HasSubdirectories(path);
 
-    internal IEnumerable<string> GetSubdirectories(string path)
+    /// <summary>Enumerates immediate subdirectories as <see cref="DirectoryInfo"/> objects, whose
+    /// <c>Attributes</c> come pre-populated from the directory scan — so the child nodes' hidden
+    /// check costs no extra per-child stat.</summary>
+    internal IReadOnlyList<DirectoryInfo> GetSubdirectories(string path)
     {
         try
         {
-            return Directory.EnumerateDirectories(path).ToList();
+            return new DirectoryInfo(path).EnumerateDirectories().ToList();
         }
-        catch (UnauthorizedAccessException) { return Array.Empty<string>(); }
-        catch (IOException) { return Array.Empty<string>(); }
+        catch (UnauthorizedAccessException) { return Array.Empty<DirectoryInfo>(); }
+        catch (IOException) { return Array.Empty<DirectoryInfo>(); }
     }
 
     internal void RaiseSelected(string path)
     {
         if (!_suppressSelectionEvents)
             DirectorySelected?.Invoke(path);
-    }
-
-    /// <summary>Accordion behavior for the top-level rows (drives &amp; devices): only one
-    /// root is ever expanded, so the active one gets all the section's vertical space while
-    /// the rest collapse to a single bordered header. Called when a root becomes the active
-    /// one (expanded, or — for childless device leaves — selected).</summary>
-    internal void CollapseOtherRoots(ISidebarNode activeRoot)
-    {
-        foreach (var sibling in Roots)
-        {
-            if (!ReferenceEquals(sibling, activeRoot) && sibling.IsExpanded)
-                sibling.IsExpanded = false;
-        }
     }
 
     private bool _suppressSelectionEvents;
@@ -92,6 +82,57 @@ public sealed class FolderTreeViewModel
     /// root-to-node chain so the view can locate the container to scroll to; empty if no
     /// root covers the path.
     /// </summary>
+    /// <summary>
+    /// Re-reads the children of every already-expanded node for the given directories, so folders
+    /// that a transfer created or removed show up without a full reload. Nodes that were never
+    /// expanded still carry their placeholder and are left alone — they read from disk on first open.
+    /// </summary>
+    public async Task RefreshDirectoriesAsync(IEnumerable<string> directories)
+    {
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var directory in directories)
+        {
+            if (string.IsNullOrWhiteSpace(directory)) continue;
+            try
+            {
+                keys.Add(PathKey.Canonicalize(directory));
+            }
+            catch (ArgumentException)
+            {
+            }
+        }
+        if (keys.Count == 0) return;
+
+        foreach (var node in Roots.OfType<DirectoryNodeViewModel>())
+            await RefreshMatchingAsync(node, keys);
+    }
+
+    private static async Task RefreshMatchingAsync(DirectoryNodeViewModel node, HashSet<string> keys)
+    {
+        if (node.FullPath.Length == 0) return; // placeholder
+
+        string key;
+        try
+        {
+            key = PathKey.Canonicalize(node.FullPath);
+        }
+        catch (ArgumentException)
+        {
+            return;
+        }
+
+        if (keys.Contains(key))
+        {
+            await node.RepopulateAsync();
+            return; // its subtree was just rebuilt from disk
+        }
+
+        // Only descend where a target could still live.
+        if (!keys.Any(k => PathKey.IsUnder(k, key))) return;
+        foreach (var child in node.Children.ToList())
+            await RefreshMatchingAsync(child, keys);
+    }
+
     public async Task<IReadOnlyList<DirectoryNodeViewModel>> RevealPathAsync(string path)
     {
         var targetKey = PathKey.Canonicalize(path);
@@ -186,20 +227,33 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
         Name = "…";
     }
 
+    /// <summary>Drive-root / general ctor: stats <paramref name="fullPath"/> for its hidden attribute.</summary>
     public DirectoryNodeViewModel(FolderTreeViewModel tree, string fullPath, string? displayName = null, int depth = 0)
+        : this(tree, fullPath, IsHiddenDirectory(fullPath), displayName, depth)
+    {
+    }
+
+    /// <summary>Child ctor: <paramref name="info"/> came from a directory enumeration, so its
+    /// <c>Attributes</c> are already cached — the hidden check adds no per-child disk stat.</summary>
+    internal DirectoryNodeViewModel(FolderTreeViewModel tree, DirectoryInfo info, int depth)
+        : this(tree, info.FullName, IsHiddenDirectory(info), displayName: null, depth: depth)
+    {
+    }
+
+    private DirectoryNodeViewModel(FolderTreeViewModel tree, string fullPath, bool isHidden, string? displayName, int depth)
     {
         _tree = tree;
         FullPath = fullPath;
         Depth = depth;
         var fileName = Path.GetFileName(fullPath);
         Name = displayName ?? (fileName.Length > 0 ? fileName : fullPath);
-        IsHidden = IsHiddenDirectory(fullPath);
+        IsHidden = isHidden;
 
         if (tree.HasSubdirectories(fullPath))
             Children.Add(Placeholder);
     }
 
-    /// <summary>Hidden attribute for a directory; false for drive roots and anything we can't stat.</summary>
+    /// <summary>Hidden attribute for a directory path; false for drive roots and anything we can't stat.</summary>
     private static bool IsHiddenDirectory(string fullPath)
     {
         try
@@ -212,12 +266,24 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
         }
     }
 
+    /// <summary>Hidden attribute from an already-enumerated <see cref="DirectoryInfo"/> (no extra stat).</summary>
+    private static bool IsHiddenDirectory(DirectoryInfo info)
+    {
+        try
+        {
+            return info.Attributes.HasFlag(FileAttributes.Hidden);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     partial void OnIsExpandedChanged(bool value)
     {
         if (!value) return;
 
         _ = EnsurePopulatedAsync();
-        if (Depth == 0) _tree?.CollapseOtherRoots(this); // accordion: only one root open
     }
 
     partial void OnIsSelectedChanged(bool value)
@@ -225,10 +291,6 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
         if (!value || _tree is null) return;
 
         _tree.RaiseSelected(FullPath);
-
-        // The accordion headers have no expander arrow, so selecting a root header is what
-        // opens it (and collapses the others). Deeper rows expand via their own chevrons.
-        if (Depth == 0) IsExpanded = true;
     }
 
     /// <summary>Populates children off the UI thread on first call; later calls return the same
@@ -241,13 +303,22 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
         return _populateTask = PopulateAsync();
     }
 
+    /// <summary>Re-reads this node's children from disk. A node that was never populated keeps its
+    /// placeholder and is left to load on first expand.</summary>
+    public Task RepopulateAsync()
+    {
+        if (_populateTask is null || _tree is null) return Task.CompletedTask;
+        return _populateTask = PopulateAsync();
+    }
+
     private async Task PopulateAsync()
     {
-        // Enumeration plus each child node's ctor (a hidden-attribute stat and a has-children
-        // probe) are disk I/O — do them off the UI thread, then swap the children in on it.
+        // Enumeration plus each child node's has-children probe are disk I/O — do them off the
+        // UI thread, then swap the children in on it. (The hidden-attribute check is free: it
+        // reads the DirectoryInfo.Attributes already cached by the enumeration.)
         var children = await Task.Run(() => _tree!.GetSubdirectories(FullPath)
-            .OrderBy(Path.GetFileName, Interop.NaturalStringComparer.Instance)
-            .Select(dir => new DirectoryNodeViewModel(_tree, dir, depth: Depth + 1))
+            .OrderBy(info => info.Name, Interop.NaturalStringComparer.Instance)
+            .Select(info => new DirectoryNodeViewModel(_tree, info, depth: Depth + 1))
             .ToList());
 
         Children.Clear();

@@ -1,4 +1,4 @@
-using BertBrowser.Core.Paths;
+using BertBrowser.Core.Services.Transfer;
 
 namespace BertBrowser.Core.Services;
 
@@ -18,100 +18,68 @@ public interface IFileTransferService
     string MoveInto(string sourcePath, string destinationDir);
 }
 
+/// <summary>
+/// Single-item transfers for the clipboard (cut/copy/paste). A thin facade over
+/// <see cref="TransferPlanner"/> and <see cref="TransferExecutor"/> so paste and drag-and-drop
+/// share one audited implementation of the rules that keep data intact, rather than each having
+/// their own. Collisions always resolve to <see cref="ConflictResolution.KeepBoth"/> here: paste
+/// has no dialog to ask through, so it must never displace anything.
+/// </summary>
 public sealed class FileTransferService : IFileTransferService
 {
-    public string CopyInto(string sourcePath, string destinationDir)
-    {
-        var isDirectory = RequireSource(sourcePath);
-        if (isDirectory)
-            GuardNotIntoSelf(sourcePath, destinationDir);
+    private readonly TransferPlanner _planner;
+    private readonly TransferExecutor _executor;
 
-        var destination = UniqueDestination(destinationDir, Path.GetFileName(sourcePath), isDirectory);
-        if (isDirectory)
-            CopyDirectory(new DirectoryInfo(sourcePath), destination);
-        else
-            File.Copy(sourcePath, destination);
-        return destination;
+    public FileTransferService() : this(new FileSystemTransferProbe())
+    {
     }
 
-    public string MoveInto(string sourcePath, string destinationDir)
+    public FileTransferService(ITransferProbe probe)
     {
-        var isDirectory = RequireSource(sourcePath);
+        _planner = new TransferPlanner(probe);
+        _executor = new TransferExecutor(probe);
+    }
 
-        var sourceParent = Path.GetDirectoryName(Path.GetFullPath(sourcePath))
-            ?? throw new InvalidOperationException("Cannot move a drive root.");
-        if (PathKey.Canonicalize(sourceParent) == PathKey.Canonicalize(destinationDir))
-            return sourcePath;
+    public string CopyInto(string sourcePath, string destinationDir) =>
+        Transfer(sourcePath, destinationDir, TransferVerb.Copy);
 
-        if (isDirectory)
-            GuardNotIntoSelf(sourcePath, destinationDir);
+    public string MoveInto(string sourcePath, string destinationDir) =>
+        Transfer(sourcePath, destinationDir, TransferVerb.Move);
 
-        var destination = UniqueDestination(destinationDir, Path.GetFileName(sourcePath), isDirectory);
-        if (isDirectory)
+    private string Transfer(string sourcePath, string destinationDir, TransferVerb verb)
+    {
+        var plan = _planner.Plan([sourcePath], destinationDir, verb);
+
+        if (plan.Rejected.Count > 0)
         {
-            try
-            {
-                Directory.Move(sourcePath, destination);
-            }
-            catch (IOException) // Directory.Move cannot cross volumes
-            {
-                CopyDirectory(new DirectoryInfo(sourcePath), destination);
-                Directory.Delete(sourcePath, recursive: true);
-            }
+            var rejected = plan.Rejected[0];
+            // A source already sitting in the destination is the one refusal that is not an error.
+            if (rejected.Reason == TransferRejection.AlreadyInDestination) return sourcePath;
+            throw Rejection(sourcePath, rejected);
         }
-        else
-        {
-            File.Move(sourcePath, destination);
-        }
-        return destination;
+
+        var outcome = _executor.Execute(plan);
+        if (outcome.Failed.Count > 0)
+            throw new IOException(outcome.Failed[0].Message);
+        if (outcome.Completed.Count == 0)
+            throw new IOException($"'{Path.GetFileName(sourcePath)}' could not be transferred.");
+
+        return outcome.Completed[0].FinalPath;
     }
 
-    /// <summary>Returns true when the source is a directory; throws when it does not exist.</summary>
-    private static bool RequireSource(string sourcePath)
+    private static Exception Rejection(string sourcePath, RejectedTransfer rejected) => rejected.Reason switch
     {
-        if (Directory.Exists(sourcePath)) return true;
-        if (File.Exists(sourcePath)) return false;
-        throw new FileNotFoundException($"Source not found: {sourcePath}", sourcePath);
-    }
-
-    private static void GuardNotIntoSelf(string sourceDir, string destinationDir)
-    {
-        var sourceKey = PathKey.Canonicalize(sourceDir);
-        var destKey = PathKey.Canonicalize(destinationDir);
-        if (destKey == sourceKey || PathKey.IsUnder(destKey, sourceKey))
-            throw new InvalidOperationException(
-                $"Cannot copy or move '{Path.GetFileName(sourceDir)}' into itself or one of its subfolders.");
-    }
-
-    private static string UniqueDestination(string destinationDir, string name, bool isDirectory)
-    {
-        var candidate = Path.Combine(destinationDir, name);
-        if (!EntryExists(candidate)) return candidate;
-
-        // Directories number the whole name; files number before the extension.
-        var stem = isDirectory ? name : Path.GetFileNameWithoutExtension(name);
-        var extension = isDirectory ? "" : Path.GetExtension(name);
-        for (var i = 2; ; i++)
-        {
-            candidate = Path.Combine(destinationDir, $"{stem} ({i}){extension}");
-            if (!EntryExists(candidate)) return candidate;
-        }
-    }
-
-    private static bool EntryExists(string path) => File.Exists(path) || Directory.Exists(path);
-
-    private static void CopyDirectory(DirectoryInfo source, string destination)
-    {
-        Directory.CreateDirectory(destination);
-        foreach (var entry in source.EnumerateFileSystemInfos())
-        {
-            // Skip junctions/symlinks, like DirectorySizeService, to avoid cycles.
-            if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) continue;
-
-            if (entry is DirectoryInfo dir)
-                CopyDirectory(dir, Path.Combine(destination, dir.Name));
-            else if (entry is FileInfo file)
-                file.CopyTo(Path.Combine(destination, file.Name));
-        }
-    }
+        TransferRejection.SourceMissing =>
+            new FileNotFoundException($"Source not found: {sourcePath}", sourcePath),
+        TransferRejection.SourceIsRoot =>
+            new InvalidOperationException("Cannot move a drive root."),
+        TransferRejection.DestinationMissing =>
+            new DirectoryNotFoundException(rejected.Message),
+        TransferRejection.DestinationNotDirectory =>
+            new DirectoryNotFoundException(rejected.Message),
+        TransferRejection.DestinationIsSource or TransferRejection.DestinationInsideSource =>
+            new InvalidOperationException(
+                $"Cannot copy or move '{Path.GetFileName(sourcePath)}' into itself or one of its subfolders."),
+        _ => new InvalidOperationException(rejected.Message),
+    };
 }

@@ -14,14 +14,12 @@ public enum SortColumn
     Size,
     Type,
     Modified,
-    Tags,
     RelativePath,
 }
 
 public sealed partial class FileListViewModel : ObservableObject
 {
     private readonly IFileSystemService _fileSystem;
-    private readonly ITagService _tagService;
     private readonly DirSizeRepository _dirSizeRepository;
 
     [ObservableProperty]
@@ -87,10 +85,9 @@ public sealed partial class FileListViewModel : ObservableObject
     [ObservableProperty]
     private ObservableCollection<FileItemViewModel> _items = new();
 
-    public FileListViewModel(IFileSystemService fileSystem, ITagService tagService, DirSizeRepository dirSizeRepository)
+    public FileListViewModel(IFileSystemService fileSystem, DirSizeRepository dirSizeRepository)
     {
         _fileSystem = fileSystem;
-        _tagService = tagService;
         _dirSizeRepository = dirSizeRepository;
     }
 
@@ -119,7 +116,6 @@ public sealed partial class FileListViewModel : ObservableObject
             ReplaceItems(items);
 
             await HydrateDirSizesAsync(items, ct);
-            await HydrateTagsAsync(items.Where(i => !i.IsDirectory).ToList(), ct);
         }
         catch (OperationCanceledException)
         {
@@ -129,55 +125,6 @@ public sealed partial class FileListViewModel : ObservableObject
         {
             Items.Clear();
             ErrorMessage = ex.Message;
-        }
-        finally
-        {
-            IsLoading = false;
-        }
-    }
-
-    /// <summary>
-    /// Flattened tag-filter mode: all tagged files recursively under <paramref name="root"/>
-    /// matching the filter. Entirely DB-driven.
-    /// </summary>
-    public async Task LoadFlattenedAsync(
-        string root, IReadOnlyCollection<long> tagIds, TagMatchMode mode, bool includeHidden, CancellationToken ct)
-    {
-        IsLoading = true;
-        IsFlattened = true;
-        ErrorMessage = null;
-        EmptyMessage = null;
-        try
-        {
-            var tagged = await _tagService.QueryTaggedFilesUnderAsync(root, tagIds, mode);
-            ct.ThrowIfCancellationRequested();
-
-            var allTags = (await _tagService.GetAllTagsAsync()).ToDictionary(t => t.Name, StringComparer.OrdinalIgnoreCase);
-            var rootDisplay = PathKey.NormalizeDisplay(root);
-
-            var items = await Task.Run(() =>
-            {
-                var vms = new List<FileItemViewModel>(tagged.Count);
-                foreach (var file in tagged)
-                {
-                    var relative = Path.GetRelativePath(rootDisplay, Path.GetDirectoryName(file.DisplayPath) ?? rootDisplay);
-                    if (relative == ".") relative = "";
-                    var tags = file.Tags
-                        .Select(n => allTags.TryGetValue(n, out var t) ? t : new Tag(-1, n, null))
-                        .ToList();
-                    var vm = new FileItemViewModel(file.DisplayPath, relative, tags);
-                    vm.HydrateFromDisk();
-                    if (includeHidden || !vm.IsHidden)
-                        vms.Add(vm);
-                }
-                SortInPlace(vms);
-                return vms;
-            }, ct);
-
-            ReplaceItems(items);
-        }
-        catch (OperationCanceledException)
-        {
         }
         finally
         {
@@ -202,7 +149,7 @@ public sealed partial class FileListViewModel : ObservableObject
             Items.Add(CreateSearchItem(hit));
     }
 
-    /// <summary>Replaces the streamed list with the final sorted outcome and hydrates sizes/tags.
+    /// <summary>Replaces the streamed list with the final sorted outcome and hydrates sizes.
     /// When <paramref name="hydrateMetadata"/> is set (global/MFT results, which carry no size or
     /// timestamp), each hit is stat'd from disk off-thread before sorting and binding.</summary>
     public async Task CompleteSearchAsync(SearchOutcome outcome, string queryText, bool hydrateMetadata, CancellationToken ct)
@@ -222,7 +169,6 @@ public sealed partial class FileListViewModel : ObservableObject
             ReplaceItems(items);
             EmptyMessage = items.Count == 0 ? $"No results for '{queryText}'" : null;
             await HydrateDirSizesAsync(items, ct);
-            await HydrateTagsAsync(items.Where(i => !i.IsDirectory).ToList(), ct);
         }
         catch (OperationCanceledException)
         {
@@ -281,20 +227,6 @@ public sealed partial class FileListViewModel : ObservableObject
         }
     }
 
-    private async Task HydrateTagsAsync(IReadOnlyList<FileItemViewModel> files, CancellationToken ct)
-    {
-        if (files.Count == 0) return;
-
-        var map = await _tagService.GetTagsForPathsAsync(files.Select(f => f.FullPath).ToList());
-        ct.ThrowIfCancellationRequested();
-
-        foreach (var file in files)
-        {
-            if (map.TryGetValue(PathKey.Canonicalize(file.FullPath), out var tags))
-                file.Tags = tags;
-        }
-    }
-
     private void ReplaceItems(IReadOnlyList<FileItemViewModel> items) =>
         Items = new ObservableCollection<FileItemViewModel>(items);
 
@@ -305,7 +237,6 @@ public sealed partial class FileListViewModel : ObservableObject
             SortColumn.Size => (a, b) => a.SizeSortKey.CompareTo(b.SizeSortKey),
             SortColumn.Type => (a, b) => string.Compare(a.TypeName, b.TypeName, StringComparison.OrdinalIgnoreCase),
             SortColumn.Modified => (a, b) => a.ModifiedUtc.CompareTo(b.ModifiedUtc),
-            SortColumn.Tags => (a, b) => string.Compare(a.TagsSortKey, b.TagsSortKey, StringComparison.OrdinalIgnoreCase),
             SortColumn.RelativePath => (a, b) => NaturalStringComparer.Instance.Compare(a.RelativePath, b.RelativePath),
             _ => (a, b) => NaturalStringComparer.Instance.Compare(a.Name, b.Name),
         };

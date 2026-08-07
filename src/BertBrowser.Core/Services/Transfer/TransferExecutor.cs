@@ -1,0 +1,491 @@
+using BertBrowser.Core.Paths;
+
+namespace BertBrowser.Core.Services.Transfer;
+
+/// <summary>Restoring a transfer: how many items went back, and what could not.</summary>
+public sealed record TransferUndoResult(int Restored, IReadOnlyList<FailedTransfer> Failed);
+
+/// <summary>
+/// Carries out a <see cref="TransferPlan"/>. Every rule the planner applied is re-checked here
+/// against live disk state, because a plan is built when the drag hovers and executed when it
+/// drops — the filesystem can change in between.
+/// </summary>
+/// <remarks>
+/// The invariants this class exists to hold:
+/// <list type="bullet">
+/// <item>Nothing is ever deleted to make room. <see cref="ConflictResolution.Replace"/> moves the
+/// displaced entry into a hidden staging folder, so an undo can put it back.</item>
+/// <item>A cross-volume directory move copies, verifies the copy matches the source by file count
+/// and total bytes, and only then deletes the source. A verification failure removes the partial
+/// copy and leaves the source untouched.</item>
+/// <item>A directory tree containing junctions or symlinks is refused across volumes rather than
+/// copied without them and then deleted.</item>
+/// <item>A failure on one item never aborts or rolls back the others; each is independent.</item>
+/// </list>
+/// </remarks>
+public sealed class TransferExecutor
+{
+    /// <summary>ERROR_NOT_SAME_DEVICE as an HRESULT — the only <see cref="IOException"/> from
+    /// <see cref="Directory.Move"/> that may be answered with copy-then-delete. Every other one
+    /// (sharing violation, access denied, target exists) must surface as a failure.</summary>
+    private const int HResultNotSameDevice = unchecked((int)0x80070011);
+
+    internal const string StagingPrefix = ".bertbrowser-replaced-";
+
+    private readonly ITransferProbe _probe;
+
+    public TransferExecutor(ITransferProbe probe) => _probe = probe;
+
+    public TransferExecutor() : this(new FileSystemTransferProbe())
+    {
+    }
+
+    /// <param name="plan">The plan to carry out.</param>
+    /// <param name="resolutions">How to settle conflicts, keyed by <see cref="PathKey.Canonicalize"/>
+    /// of the source path. Anything unlisted falls back to the non-destructive
+    /// <see cref="ConflictResolution.KeepBoth"/>.</param>
+    public TransferOutcome Execute(
+        TransferPlan plan,
+        IReadOnlyDictionary<string, ConflictResolution>? resolutions = null,
+        CancellationToken ct = default,
+        IProgress<TransferProgress>? progress = null)
+    {
+        var completed = new List<CompletedTransfer>();
+        var skipped = new List<string>();
+        var failed = new List<FailedTransfer>();
+        string? stagingDirectory = null;
+
+        var done = 0;
+        foreach (var transfer in plan.Transfers)
+        {
+            if (ct.IsCancellationRequested) break;
+            progress?.Report(new TransferProgress(done, plan.Transfers.Count, transfer.Name));
+            done++;
+
+            try
+            {
+                var resolution = Resolution(resolutions, transfer, plan.Verb);
+                var result = ExecuteOne(plan, transfer, resolution, ref stagingDirectory);
+                if (result is null) skipped.Add(transfer.SourcePath);
+                else completed.Add(result);
+            }
+            catch (Exception ex) when (IsTransferFailure(ex))
+            {
+                failed.Add(new FailedTransfer(transfer.SourcePath, $"{transfer.Name}: {ex.Message}"));
+            }
+        }
+
+        progress?.Report(new TransferProgress(done, plan.Transfers.Count, ""));
+        return new TransferOutcome(
+            plan.Verb, plan.DestinationDirectory, completed, skipped, failed, stagingDirectory);
+    }
+
+    /// <summary>Returns the completed record, or null when the item was skipped.</summary>
+    private CompletedTransfer? ExecuteOne(
+        TransferPlan plan, PlannedTransfer transfer, ConflictResolution resolution, ref string? stagingDirectory)
+    {
+        Revalidate(plan, transfer);
+
+        var destinationPath = transfer.DestinationPath;
+        string? displacedStagePath = null;
+
+        // The plan's conflict flag is a snapshot; ask disk again at the moment of the write.
+        if (Exists(destinationPath))
+        {
+            switch (resolution)
+            {
+                case ConflictResolution.Skip:
+                    return null;
+
+                case ConflictResolution.Replace:
+                    stagingDirectory ??= CreateStagingDirectory(plan.DestinationDirectory);
+                    displacedStagePath = Path.Combine(stagingDirectory, Path.GetFileName(destinationPath));
+                    displacedStagePath = UniquePath(displacedStagePath);
+                    // A rename within the same directory tree: instant, and reversible by undo.
+                    MoveEntry(destinationPath, displacedStagePath, Directory.Exists(destinationPath));
+                    break;
+
+                default:
+                    destinationPath = UniquePath(destinationPath);
+                    break;
+            }
+        }
+
+        try
+        {
+            if (plan.Verb == TransferVerb.Move)
+                MoveEntry(transfer.SourcePath, destinationPath, transfer.IsDirectory);
+            else
+                CopyEntry(transfer.SourcePath, destinationPath, transfer.IsDirectory);
+        }
+        catch when (displacedStagePath is not null)
+        {
+            // The name was cleared for a transfer that then failed. Nothing succeeded, so the
+            // displaced entry goes straight back — no undo record will exist to rescue it later.
+            RestoreDisplaced(displacedStagePath, destinationPath);
+            throw;
+        }
+
+        return new CompletedTransfer(
+            transfer.SourcePath, destinationPath, transfer.IsDirectory, displacedStagePath);
+    }
+
+    /// <summary>
+    /// Puts a staged entry back under the name it was displaced from. Never throws: it runs while
+    /// another failure is being propagated, and must not mask it. If even this fails the entry is
+    /// still in staging, which is reported by <see cref="StagedItems"/>.
+    /// </summary>
+    private void RestoreDisplaced(string stagePath, string destinationPath)
+    {
+        try
+        {
+            if (Exists(stagePath) && !Exists(destinationPath))
+                MoveEntry(stagePath, destinationPath, Directory.Exists(stagePath));
+        }
+        catch (Exception ex) when (IsTransferFailure(ex))
+        {
+        }
+    }
+
+    /// <summary>Re-applies the planner's data-safety rules against live disk state.</summary>
+    private void Revalidate(TransferPlan plan, PlannedTransfer transfer)
+    {
+        if (!Exists(transfer.SourcePath))
+            throw new FileNotFoundException($"'{transfer.Name}' no longer exists.", transfer.SourcePath);
+        if (!_probe.DirectoryExists(plan.DestinationDirectory))
+            throw new DirectoryNotFoundException("The destination folder no longer exists.");
+
+        if (!transfer.IsDirectory) return;
+
+        var sourceKey = PathKey.Canonicalize(transfer.SourcePath);
+        var destKey = PathKey.Canonicalize(plan.DestinationDirectory);
+        var sourceResolved = PathKey.Canonicalize(_probe.ResolveFinalPath(transfer.SourcePath));
+        var destResolved = PathKey.Canonicalize(_probe.ResolveFinalPath(plan.DestinationDirectory));
+
+        if (destKey == sourceKey || destResolved == sourceResolved ||
+            PathKey.IsUnder(destKey, sourceKey) || PathKey.IsUnder(destResolved, sourceResolved) ||
+            PathKey.IsUnder(destResolved, sourceKey) || PathKey.IsUnder(destKey, sourceResolved))
+            throw new IOException($"Cannot move '{transfer.Name}' into itself or one of its subfolders.");
+    }
+
+    private static ConflictResolution Resolution(
+        IReadOnlyDictionary<string, ConflictResolution>? resolutions, PlannedTransfer transfer, TransferVerb verb)
+    {
+        var chosen = ConflictResolution.KeepBoth;
+        if (resolutions is not null &&
+            resolutions.TryGetValue(PathKey.Canonicalize(transfer.SourcePath), out var value))
+            chosen = value;
+
+        // Copy is defined as purely additive, so it must never displace an existing entry.
+        return chosen == ConflictResolution.Replace && verb == TransferVerb.Copy
+            ? ConflictResolution.KeepBoth
+            : chosen;
+    }
+
+    // --- Undo ---
+
+    /// <summary>
+    /// Puts a completed move back: each item returns to the path it came from, then anything it
+    /// displaced is restored from staging. Items whose original path has since been taken are
+    /// reported rather than overwritten.
+    /// </summary>
+    public TransferUndoResult Undo(TransferOutcome outcome, CancellationToken ct = default)
+    {
+        if (outcome.Verb != TransferVerb.Move)
+            return new TransferUndoResult(0, [new FailedTransfer("", "Only a move can be undone.")]);
+
+        var failed = new List<FailedTransfer>();
+        var restored = 0;
+
+        // Reverse order so nested transfers unwind in the order they were made.
+        foreach (var item in outcome.Completed.Reverse())
+        {
+            if (ct.IsCancellationRequested) break;
+            var name = Path.GetFileName(item.SourcePath);
+            try
+            {
+                if (!Exists(item.FinalPath))
+                {
+                    failed.Add(new FailedTransfer(item.SourcePath, $"{name}: it is no longer where it was moved to."));
+                    continue;
+                }
+                if (Exists(item.SourcePath))
+                {
+                    failed.Add(new FailedTransfer(item.SourcePath,
+                        $"{name}: something else now occupies its original location."));
+                    continue;
+                }
+
+                var parent = Path.GetDirectoryName(item.SourcePath);
+                if (parent is null || !_probe.DirectoryExists(parent))
+                {
+                    failed.Add(new FailedTransfer(item.SourcePath, $"{name}: its original folder is gone."));
+                    continue;
+                }
+
+                MoveEntry(item.FinalPath, item.SourcePath, item.IsDirectory);
+                restored++;
+
+                // The name it took over is free again: put the displaced entry back.
+                if (item.DisplacedStagePath is { } staged && Exists(staged) && !Exists(item.FinalPath))
+                    MoveEntry(staged, item.FinalPath, Directory.Exists(staged));
+            }
+            catch (Exception ex) when (IsTransferFailure(ex))
+            {
+                failed.Add(new FailedTransfer(item.SourcePath, $"{name}: {ex.Message}"));
+            }
+        }
+
+        PurgeStaging(outcome);
+        return new TransferUndoResult(restored, failed);
+    }
+
+    /// <summary>
+    /// Deletes an outcome's staging folder once it can no longer be undone. Refuses any path that
+    /// is not a staging folder this class created, and leaves a non-empty one alone — losing the
+    /// ability to undo must never turn into losing the data.
+    /// </summary>
+    public void PurgeStaging(TransferOutcome outcome)
+    {
+        if (outcome.StagingDirectory is not { } staging) return;
+        if (!Path.GetFileName(staging).StartsWith(StagingPrefix, StringComparison.Ordinal)) return;
+
+        try
+        {
+            if (!Directory.Exists(staging)) return;
+            if (Directory.EnumerateFileSystemEntries(staging).Any()) return; // still holds displaced data
+            Directory.Delete(staging);
+        }
+        catch (Exception ex) when (IsTransferFailure(ex))
+        {
+            // A leftover hidden folder is harmless; never let cleanup break the operation.
+        }
+    }
+
+    /// <summary>
+    /// Discards an outcome's staging folder <em>and anything still in it</em>, committing the
+    /// replacements it represents. Call this only when the outcome can no longer be undone — up to
+    /// that point the displaced entries are the only copy left. Guarded so it can never delete
+    /// anything other than a staging folder <see cref="CreateStagingDirectory"/> made.
+    /// </summary>
+    public static void CommitStaging(TransferOutcome outcome)
+    {
+        if (outcome.StagingDirectory is not { } staging) return;
+        if (!Path.GetFileName(staging).StartsWith(StagingPrefix, StringComparison.Ordinal)) return;
+
+        try
+        {
+            if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
+        }
+        catch (Exception ex) when (IsTransferFailure(ex))
+        {
+            // A leftover hidden folder is harmless; never let cleanup break the operation.
+        }
+    }
+
+    /// <summary>Everything still parked in staging for an outcome that is no longer undoable.
+    /// Surfaced so the user can be told where displaced items went instead of losing them.</summary>
+    public static IReadOnlyList<string> StagedItems(TransferOutcome outcome)
+    {
+        if (outcome.StagingDirectory is not { } staging || !Directory.Exists(staging))
+            return Array.Empty<string>();
+        try
+        {
+            return Directory.EnumerateFileSystemEntries(staging).ToList();
+        }
+        catch (Exception ex) when (IsTransferFailure(ex))
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    // --- Filesystem primitives ---
+
+    private void MoveEntry(string source, string destination, bool isDirectory)
+    {
+        if (!isDirectory)
+        {
+            File.Move(source, destination); // .NET spans volumes for files
+            return;
+        }
+
+        if (SameVolume(source, destination))
+        {
+            Directory.Move(source, destination);
+            return;
+        }
+
+        try
+        {
+            Directory.Move(source, destination);
+        }
+        catch (IOException ex) when (ex.HResult == HResultNotSameDevice)
+        {
+            // Mount points can make two paths share a root string but not a volume.
+            CrossVolumeMoveDirectory(source, destination);
+        }
+    }
+
+    private void CopyEntry(string source, string destination, bool isDirectory)
+    {
+        if (isDirectory) CopyDirectory(new DirectoryInfo(source), destination);
+        else File.Copy(source, destination);
+    }
+
+    /// <summary>
+    /// Copy, verify, then delete. The source is only removed once the destination is confirmed to
+    /// hold the same number of files and the same total bytes.
+    /// </summary>
+    private void CrossVolumeMoveDirectory(string source, string destination)
+    {
+        var info = new DirectoryInfo(source);
+
+        // Junctions and symlinks cannot be reproduced by copying, and deleting the source after a
+        // copy that dropped them would destroy them. Refuse instead.
+        if (FindReparsePoint(info) is { } link)
+            throw new IOException(
+                $"'{info.Name}' contains a junction or symbolic link ({Path.GetFileName(link)}) and cannot be " +
+                "moved to another drive. Move it within the same drive, or copy it and remove the original.");
+
+        var expected = Measure(info);
+
+        try
+        {
+            CopyDirectory(info, destination);
+        }
+        catch
+        {
+            TryDeletePartialCopy(destination);
+            throw;
+        }
+
+        var actual = Measure(new DirectoryInfo(destination));
+        if (actual != expected)
+        {
+            TryDeletePartialCopy(destination);
+            throw new IOException(
+                $"Verification failed while moving '{info.Name}' to another drive " +
+                $"(expected {expected.Files:N0} files / {expected.Bytes:N0} bytes, " +
+                $"found {actual.Files:N0} / {actual.Bytes:N0}). Nothing was removed.");
+        }
+
+        Directory.Delete(source, recursive: true);
+    }
+
+    private static (int Files, long Bytes) Measure(DirectoryInfo root)
+    {
+        var files = 0;
+        var bytes = 0L;
+        foreach (var file in root.EnumerateFiles("*", SearchOption.AllDirectories))
+        {
+            files++;
+            bytes += file.Length;
+        }
+        return (files, bytes);
+    }
+
+    /// <summary>The first junction/symlink anywhere in the tree, or null.</summary>
+    private static string? FindReparsePoint(DirectoryInfo root)
+    {
+        foreach (var entry in root.EnumerateFileSystemInfos())
+        {
+            if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) return entry.FullName;
+            if (entry is DirectoryInfo child && FindReparsePoint(child) is { } found) return found;
+        }
+        return null;
+    }
+
+    private static void TryDeletePartialCopy(string destination)
+    {
+        try
+        {
+            if (Directory.Exists(destination)) Directory.Delete(destination, recursive: true);
+        }
+        catch (Exception ex) when (IsTransferFailure(ex))
+        {
+            // Best effort: the source is still intact, which is what matters.
+        }
+    }
+
+    private static void CopyDirectory(DirectoryInfo source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var entry in source.EnumerateFileSystemInfos())
+        {
+            if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
+                throw new IOException(
+                    $"'{entry.Name}' is a junction or symbolic link and cannot be copied.");
+
+            if (entry is DirectoryInfo dir)
+                CopyDirectory(dir, Path.Combine(destination, dir.Name));
+            else if (entry is FileInfo file)
+                file.CopyTo(Path.Combine(destination, file.Name));
+        }
+        try
+        {
+            Directory.SetLastWriteTimeUtc(destination, source.LastWriteTimeUtc);
+        }
+        catch (Exception ex) when (IsTransferFailure(ex))
+        {
+            // Cosmetic only.
+        }
+    }
+
+    /// <summary>Conservative: false whenever the volumes cannot be established, which routes the
+    /// move through the guarded fallback instead of assuming a plain rename will do.</summary>
+    private static bool SameVolume(string a, string b)
+    {
+        try
+        {
+            var rootA = Path.GetPathRoot(Path.GetFullPath(a));
+            var rootB = Path.GetPathRoot(Path.GetFullPath(b));
+            return rootA is { Length: > 0 } && rootB is { Length: > 0 }
+                && rootA.Equals(rootB, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
+    private string CreateStagingDirectory(string destinationDirectory)
+    {
+        var path = Path.Combine(destinationDirectory, StagingPrefix + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(path);
+        try
+        {
+            File.SetAttributes(path, File.GetAttributes(path) | FileAttributes.Hidden);
+        }
+        catch (Exception ex) when (IsTransferFailure(ex))
+        {
+            // Visible staging is ugly but not wrong.
+        }
+        return path;
+    }
+
+    /// <summary>"name (2)"-style free path next to <paramref name="path"/>. Directories number the
+    /// whole name; files number before the extension.</summary>
+    private string UniquePath(string path)
+    {
+        if (!Exists(path)) return path;
+
+        var directory = Path.GetDirectoryName(path) ?? "";
+        var name = Path.GetFileName(path);
+        var isDirectory = _probe.DirectoryExists(path);
+        var stem = isDirectory ? name : Path.GetFileNameWithoutExtension(name);
+        var extension = isDirectory ? "" : Path.GetExtension(name);
+
+        for (var i = 2; ; i++)
+        {
+            var candidate = Path.Combine(directory, $"{stem} ({i}){extension}");
+            if (!Exists(candidate)) return candidate;
+        }
+    }
+
+    private bool Exists(string path) => _probe.FileExists(path) || _probe.DirectoryExists(path);
+
+    /// <summary>Errors that mean "this item failed" rather than "the program is broken".</summary>
+    private static bool IsTransferFailure(Exception ex) =>
+        ex is IOException or UnauthorizedAccessException or System.Security.SecurityException
+            or NotSupportedException or ArgumentException;
+}
