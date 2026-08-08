@@ -90,12 +90,17 @@ C# any more** — everything goes through a named token.
   `ThemeCatalog` (the built-ins **as C# data**, not files, so every shipped colour is visible
   to xUnit), and `ThemeResolver`. Resolution **never throws**: an unknown token, a bad hex literal,
   a missing or cyclic base theme each become a `ThemeIssue` and the caller still gets a complete
-  theme. Dark+ and Light+ are roots defining every token; everything else (Tokyo Night, Catppuccin
-  Mocha, Dracula, Nord, Gruvbox Dark, Synthwave, Monokai, Solarized Dark and High Contrast Dark over
-  Dark+; Catppuccin Latte over Light+) is a sparse sheet, resolved through the same inheritance path
-  a user's own theme uses — so that path is exercised by everything we ship. A new built-in is a
-  definition plus an entry in `BuiltIns`, and `ThemeCatalogTests` runs the whole contrast suite over
-  it, so a palette's published colours often need darkening before they clear AA against white text.
+  theme. Dark+ and Light+ are roots defining every token; every other built-in is a sparse sheet
+  over one of them (the dark ones over Dark+, Catppuccin Latte / Rosé Pine Dawn / Solarized Light
+  over Light+), resolved through the same inheritance path a user's own theme uses — so that path is
+  exercised by everything we ship. A new built-in is a definition plus an entry in `BuiltIns`, whose
+  order is the picker's order. Two things bite when authoring one: `ThemeCatalogTests` runs the whole
+  contrast suite over it, so a palette's published colours usually need darkening before they clear
+  AA against white text (Nord's frost, Everforest's green and Catppuccin's mauve all did) — and an
+  eight-digit literal is **`#AARRGGBB`**, so a value copied from a VS Code theme, which writes
+  `#RRGGBBAA`, silently parses as a different colour rather than failing. Ayu Mirage and Cobalt2 are
+  the exceptions that prove the accent tokens are not assumed dark: both keep a light accent and
+  override `Accent.Foreground`/`Text.OnAccent` to the base colour instead.
 - **`BertBrowser.App.Theming`** materialises it. `ThemeTokenDictionary` is a `ResourceDictionary`
   holding one brush per token; `ThemeService` resolves a definition and recolours them.
 
