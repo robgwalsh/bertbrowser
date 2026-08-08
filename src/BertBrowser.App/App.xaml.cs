@@ -1,5 +1,6 @@
 using System.Windows;
 using BertBrowser.App.Services;
+using BertBrowser.App.Theming;
 using BertBrowser.App.ViewModels;
 using BertBrowser.App.Views;
 using BertBrowser.Core.Data;
@@ -34,6 +35,8 @@ public partial class App : Application
 
         var services = new ServiceCollection();
         services.AddSingleton(AppSettings.Load());
+        services.AddSingleton<UserThemeStore>();
+        services.AddSingleton<IThemeService, ThemeService>();
         services.AddSingleton(new Db(AppPaths.DbPath));
         services.AddSingleton<DirSizeRepository>();
         services.AddSingleton<FsIndexRepository>();
@@ -55,6 +58,9 @@ public partial class App : Application
         Services = services.BuildServiceProvider();
 
         Services.GetRequiredService<Db>().Migrate();
+
+        // Before any window exists, so the first frame is already in the chosen theme.
+        Services.GetRequiredService<IThemeService>().Initialize();
 
         // Start path priority: command-line argument, then last visited, then user profile.
         var settings = Services.GetRequiredService<AppSettings>();

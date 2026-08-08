@@ -79,6 +79,80 @@ tests: the multiset of file contents under the root is invariant under any move,
 the tree byte-for-byte). Two meta-tests assert those invariant checks can actually detect a lost or
 moved file. If you change this code, mutate a rule and confirm a test goes red.
 
+### Theming
+
+The app is themed edge to edge, VS Code Dark+ by default. **No colour literal belongs in XAML or
+C# any more** — everything goes through a named token.
+
+- **`BertBrowser.Core.Theming`** holds the whole model, because it is the part worth testing:
+  `ThemeToken` (the ~109 token keys plus editor metadata), `ThemeColor` (ARGB struct, hex parsing,
+  HSV, WCAG luminance), `ThemeDefinition`/`ThemeJson` (the on-disk format for user themes),
+  `ThemeCatalog` (the five built-ins **as C# data**, not files, so every shipped colour is visible
+  to xUnit), and `ThemeResolver`. Resolution **never throws**: an unknown token, a bad hex literal,
+  a missing or cyclic base theme each become a `ThemeIssue` and the caller still gets a complete
+  theme. Dark+ and Light+ are roots defining every token; Monokai, Solarized Dark and High Contrast
+  Dark are sparse sheets over Dark+, resolved through the same inheritance path a user's own theme
+  uses — so that path is exercised by everything we ship.
+- **`BertBrowser.App.Theming`** materialises it. `ThemeTokenDictionary` is a `ResourceDictionary`
+  holding one brush per token; `ThemeService` resolves a definition and recolours them.
+
+Four things here are load-bearing and easy to undo by accident:
+
+- **Brushes are recoloured in place, never replaced**, which is why `{StaticResource Theme.X.Y}`
+  works everywhere and nothing needs `DynamicResource` or rebinding. Consequently a token brush
+  **must never be frozen** — and WPF will try: a `ResourceDictionary` seals its `Freezable` values
+  when the `Application` adopts it. `ThemeTokenDictionary.ThemeBrush` sidesteps that by binding the
+  brush's `Color` to a holder, because a freezable carrying an expression reports
+  `CanFreeze == false`. Assigning `SolidColorBrush.Color` directly does not survive startup.
+- **`StaticResource` reaches a dictionary's own merged children, not its siblings.** A control
+  dictionary that merely sits next to the tokens in some parent's list resolves them to
+  `UnsetValue` and fails at load. So every file that names a `Theme.*` key merges `Theme/Tokens.xaml`
+  itself (the `Controls/*.xaml` do it via `Controls/Primitives.xaml`), and the instances share one
+  static set of brushes so it is still a single palette.
+- **An explicit `Style` replaces the implicit one.** Keyed button styles say
+  `BasedOn="{StaticResource {x:Type Button}}"` or they silently fall back to the Aero template.
+  Likewise there is deliberately **no `Foreground` setter on the implicit `TextBlock` style**: a
+  setter beats inheritance, which would repaint selected rows, the status bar and highlighted menu
+  items back to the body colour.
+- **`Colors` are value types and cannot be recoloured**, so the few consumers that need one (the
+  pinned-row `DropShadowEffect`) use `{DynamicResource Theme.X.Y.Value}`.
+
+Things that look done but aren't unless you check: `GridViewColumnHeader` needs `PART_HeaderGripper`
+(or column resize breaks silently) and a blank template for `Role=Padding` (or a classic strip shows
+after the last column); menu separators resolve through `MenuItem.SeparatorStyleKey`, not an
+implicit `Separator` style; `TextBox` needs explicit `CaretBrush`/`SelectionBrush`.
+`ThemeSystemColors` overrides the `SystemColors.*Key` entries as a net for anything not retemplated.
+`MessageBox` is OS-drawn and cannot be themed — use `Views/MessageDialog` instead.
+
+`Views/ThemedWindow` gives all five windows a `WindowChrome` title bar. It is a `Window` subclass,
+not just a style, because three things need the HWND: clamping a maximised window to the monitor
+work area (`WM_GETMINMAXINFO` — a fixed margin is DPI-wrong), answering `WM_NCHITTEST` with
+`HTMAXBUTTON` so Windows 11 offers snap layouts, and `DwmSetWindowAttribute` for the frame DWM still
+draws (its colours are `COLORREF`, i.e. BGR). `MainWindow` puts its navigation toolbar in the caption
+strip via `TitleBarContent`; anything interactive up there needs
+`WindowChrome.IsHitTestVisibleInChrome`.
+
+**An implicit style keys on the element's exact runtime type and never walks the base chain.** No
+window here *is* a `ThemedWindow` — they are all subclasses of one — so `Style TargetType="{x:Type
+v:ThemedWindow}"` reaches nothing by itself, and the failure is silent: every window falls back to
+the stock `Window` template, which means a native caption and `TitleBarContent` quietly dropped. The
+`ThemedWindow` constructor's `SetResourceReference(StyleProperty, typeof(ThemedWindow))` is what
+makes the subclasses pick the style up, and it is load-bearing. Testing this needs a *subclass* — a
+bare `new ThemedWindow()` matches its own implicit style and passes either way.
+
+Settings has an **Appearance** section that applies and persists immediately — deliberately outside
+the dialog's copy-then-commit contract, since a theme you cannot see until you press Save is not a
+theme you can choose. "Customise colours…" closes Settings and opens the **modeless**
+`ThemeEditorWindow`, which must not be modal or it would cover the file list you are judging the
+colours against. User themes live in `%USERPROFILE%\.bertbrowser\themes\*.json`; a theme that is
+temporarily missing falls back for the session **without rewriting `AppSettings.ThemeId`**.
+`ThemeId` is nullable: null means "never chosen", which is what lets a first launch honour a Windows
+high-contrast setting.
+
+`ThemeCatalogTests` is the guard worth keeping green — it asserts every built-in defines every
+token, parses, and clears WCAG contrast for body text, selected rows, the status bar and menu
+highlights. Mutate a colour toward its background and it goes red.
+
 ### Tabs and panes
 
 Several directories are open at once, so **nothing may reach for "the" current directory**. The

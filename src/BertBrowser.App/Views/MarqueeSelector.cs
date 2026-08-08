@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using System.Windows.Threading;
+using BertBrowser.Core.Theming;
 
 namespace BertBrowser.App.Views;
 
@@ -340,13 +341,23 @@ internal sealed class MarqueeSelector
     /// <summary>Draws the selection rectangle above the list without disturbing its layout.</summary>
     private sealed class MarqueeAdorner : Adorner
     {
-        private static readonly Brush FillBrush = Freeze(new SolidColorBrush(Color.FromArgb(0x33, 0x1C, 0x86, 0xD1)));
-        private static readonly Pen BorderPen = Freeze(new Pen(
-            Freeze(new SolidColorBrush(Color.FromRgb(0x1C, 0x86, 0xD1))), 1));
+        // Taken from the app palette rather than baked in, and deliberately not frozen: these are
+        // the shared theme brush instances, so recolouring them on a theme change repaints the
+        // band for free. Freezing — which the previous version did — would pin it to one theme.
+        private readonly Brush _fill;
+        private readonly Pen _border;
 
         private Rect _rect;
 
-        public MarqueeAdorner(UIElement adorned) : base(adorned) => IsHitTestVisible = false;
+        public MarqueeAdorner(UIElement adorned) : base(adorned)
+        {
+            IsHitTestVisible = false;
+            _fill = Resolve(ThemeToken.MarqueeFill, Color.FromArgb(0x33, 0x00, 0x7A, 0xCC));
+            _border = new Pen(Resolve(ThemeToken.MarqueeBorder, Color.FromRgb(0x00, 0x7A, 0xCC)), 1);
+        }
+
+        private static Brush Resolve(string token, Color fallback) =>
+            Application.Current?.TryFindResource(token) as Brush ?? new SolidColorBrush(fallback);
 
         public void SetRect(Rect rect)
         {
@@ -358,13 +369,7 @@ internal sealed class MarqueeSelector
         protected override void OnRender(DrawingContext drawingContext)
         {
             if (_rect.IsEmpty || _rect.Width <= 0 || _rect.Height <= 0) return;
-            drawingContext.DrawRectangle(FillBrush, BorderPen, _rect);
-        }
-
-        private static T Freeze<T>(T freezable) where T : Freezable
-        {
-            freezable.Freeze();
-            return freezable;
+            drawingContext.DrawRectangle(_fill, _border, _rect);
         }
     }
 }

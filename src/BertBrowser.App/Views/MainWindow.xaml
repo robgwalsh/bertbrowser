@@ -1,10 +1,12 @@
-<Window x:Class="BertBrowser.App.Views.MainWindow"
+<v:ThemedWindow x:Class="BertBrowser.App.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:BertBrowser.App.ViewModels"
         xmlns:v="clr-namespace:BertBrowser.App.Views"
         Title="BertBrowser" Width="1200" Height="750"
         WindowStartupLocation="CenterScreen"
+        Background="{StaticResource Theme.Window.Background}"
+        TextElement.Foreground="{StaticResource Theme.Text.Primary}"
         d:DataContext="{d:DesignInstance Type=vm:ShellViewModel}"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -45,62 +47,68 @@
         <KeyBinding Key="F6" Modifiers="Shift" Command="{Binding FocusPreviousPaneCommand}"/>
     </Window.InputBindings>
 
+    <!--
+      The window-wide toolbar lives in the title bar rather than in a strip of its own: the address
+      bar, search box, progress and error banner are all per directory now and live inside each
+      pane's DirectoryTabView, so this row held four buttons and a lot of empty space. Navigation
+      acts on the active pane.
+    -->
+    <v:ThemedWindow.TitleBarContent>
+        <DockPanel Margin="12,0,4,0" TextElement.Foreground="{StaticResource Theme.TitleBar.Foreground}">
+            <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                <Button Style="{StaticResource ToolbarButton}" ToolTip="Back (Alt+Left)"
+                        Command="{Binding ActiveTab.BackCommand}">
+                    <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE72B;"/>
+                </Button>
+                <Button Style="{StaticResource ToolbarButton}" ToolTip="Forward (Alt+Right)"
+                        Command="{Binding ActiveTab.ForwardCommand}">
+                    <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE72A;"/>
+                </Button>
+                <Button Style="{StaticResource ToolbarButton}" ToolTip="Up (Alt+Up)"
+                        Command="{Binding ActiveTab.UpCommand}">
+                    <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE74A;"/>
+                </Button>
+                <Button Style="{StaticResource ToolbarButton}" ToolTip="Refresh (F5)"
+                        Command="{Binding ActiveTab.RefreshCommand}">
+                    <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE72C;"/>
+                </Button>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                <ToggleButton Padding="8,3" Margin="2,0" MinWidth="28"
+                              IsChecked="{Binding ShowHiddenItems}"
+                              AutomationProperties.AutomationId="ShowHiddenToggle"
+                              AutomationProperties.Name="Show hidden items"
+                              ToolTip="Show hidden files and folders">
+                    <TextBlock>
+                        <TextBlock.Style>
+                            <!-- Eye when showing hidden items, eye-with-slash when not. -->
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource ToolbarIcon}">
+                                <Setter Property="Text" Value="&#xED1A;"/>
+                                <Style.Triggers>
+                                    <DataTrigger Value="True"
+                                                 Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=ToggleButton}}">
+                                        <Setter Property="Text" Value="&#xE7B3;"/>
+                                        <Setter Property="Foreground" Value="{StaticResource Theme.Toolbar.CheckedForeground}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </ToggleButton>
+                <Button Style="{StaticResource ToolbarButton}"
+                        ToolTip="Settings — appearance and custom context menu commands"
+                        Click="Settings_Click">
+                    <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE713;"/>
+                </Button>
+            </StackPanel>
+
+            <!-- Empty filler; the DockPanel's last child would otherwise stretch a button. -->
+            <Border/>
+        </DockPanel>
+    </v:ThemedWindow.TitleBarContent>
+
     <DockPanel>
-        <!-- Header: window-wide toolbar only. The address bar, search box, progress and error
-             banner are per directory now, and live inside each pane's DirectoryTabView. Navigation
-             stays here and acts on the active pane. -->
-        <Border DockPanel.Dock="Top" BorderBrush="#DDD" BorderThickness="0,0,0,1">
-            <DockPanel Margin="6,4">
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                    <Button Style="{StaticResource ToolbarButton}" ToolTip="Back (Alt+Left)"
-                            Command="{Binding ActiveTab.BackCommand}">
-                        <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE72B;"/>
-                    </Button>
-                    <Button Style="{StaticResource ToolbarButton}" ToolTip="Forward (Alt+Right)"
-                            Command="{Binding ActiveTab.ForwardCommand}">
-                        <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE72A;"/>
-                    </Button>
-                    <Button Style="{StaticResource ToolbarButton}" ToolTip="Up (Alt+Up)"
-                            Command="{Binding ActiveTab.UpCommand}">
-                        <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE74A;"/>
-                    </Button>
-                    <Button Style="{StaticResource ToolbarButton}" ToolTip="Refresh (F5)"
-                            Command="{Binding ActiveTab.RefreshCommand}">
-                        <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE72C;"/>
-                    </Button>
-                </StackPanel>
-
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
-                    <ToggleButton Padding="8,4" Margin="2,0" MinWidth="28"
-                                  IsChecked="{Binding ShowHiddenItems}"
-                                  AutomationProperties.AutomationId="ShowHiddenToggle"
-                                  AutomationProperties.Name="Show hidden items"
-                                  ToolTip="Show hidden files and folders">
-                        <TextBlock>
-                            <TextBlock.Style>
-                                <!-- Eye when showing hidden items, eye-with-slash when not. -->
-                                <Style TargetType="TextBlock" BasedOn="{StaticResource ToolbarIcon}">
-                                    <Setter Property="Text" Value="&#xED1A;"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Value="True"
-                                                     Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=ToggleButton}}">
-                                            <Setter Property="Text" Value="&#xE7B3;"/>
-                                            <Setter Property="Foreground" Value="#1C86D1"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
-                    </ToggleButton>
-                    <Button Style="{StaticResource ToolbarButton}"
-                            ToolTip="Settings — custom context menu commands"
-                            Click="Settings_Click">
-                        <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE713;"/>
-                    </Button>
-                </StackPanel>
-            </DockPanel>
-        </Border>
-
         <!-- Status bar -->
         <StatusBar DockPanel.Dock="Bottom">
             <StatusBar.ItemsPanel>
@@ -115,27 +123,27 @@
                  message has been replaced by something else. -->
             <StatusBarItem DockPanel.Dock="Left"
                            Visibility="{Binding UndoTransferDescription, Converter={StaticResource NullToCollapsed}}">
-                <TextBlock Text="{Binding UndoTransferDescription}" Foreground="#1C86D1" Margin="10,0,0,0"/>
+                <TextBlock Text="{Binding UndoTransferDescription}" Foreground="{StaticResource Theme.Text.Link}" Margin="10,0,0,0"/>
             </StatusBarItem>
             <!-- Current file-list selection (blank when nothing is selected). -->
             <StatusBarItem DockPanel.Dock="Left"
                            Visibility="{Binding ActiveTab.SelectionSummary, Converter={StaticResource NullToCollapsed}}">
-                <TextBlock Text="{Binding ActiveTab.SelectionSummary}" Foreground="#555" Margin="10,0,0,0"/>
+                <TextBlock Text="{Binding ActiveTab.SelectionSummary}" Foreground="{StaticResource Theme.Text.Secondary}" Margin="10,0,0,0"/>
             </StatusBarItem>
             <!-- Background MFT indexing progress (blank when idle). -->
             <StatusBarItem DockPanel.Dock="Left"
                            Visibility="{Binding IndexingStatus, Converter={StaticResource NullToCollapsed}}">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Style="{StaticResource ToolbarIcon}" FontSize="12" Text="&#xE9D9;"
-                               Foreground="#1C86D1" Margin="10,0,4,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding IndexingStatus}" Foreground="#1C86D1" VerticalAlignment="Center"/>
+                               Foreground="{StaticResource Theme.Text.Link}" Margin="10,0,4,0" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding IndexingStatus}" Foreground="{StaticResource Theme.Text.Link}" VerticalAlignment="Center"/>
                 </StackPanel>
             </StatusBarItem>
             <!-- Thumbnail size: min = details list, dragging right grows thumbnails. -->
             <StatusBarItem DockPanel.Dock="Right">
                 <StackPanel Orientation="Horizontal" ToolTip="Thumbnail size — drag left for the details list">
                     <TextBlock Style="{StaticResource ToolbarIcon}" FontSize="13" Text="&#xE8FD;"
-                               Margin="0,0,6,0" Foreground="#666" VerticalAlignment="Center"/>
+                               Margin="0,0,6,0" Foreground="{StaticResource Theme.Text.Secondary}" VerticalAlignment="Center"/>
                     <Slider x:Name="ThumbSlider" Width="130" Minimum="0" Maximum="1"
                             VerticalAlignment="Center"
                             Value="{Binding ActiveTab.FileList.ThumbnailScale, Mode=TwoWay}"
@@ -152,7 +160,7 @@
             </Grid.ColumnDefinitions>
 
             <!-- Left sidebar: drives/devices (top, fills rest) + bookmarks (below, only as tall as needed) -->
-            <Grid Grid.Column="0" Background="White">
+            <Grid Grid.Column="0" Background="{StaticResource Theme.Surface.Background}">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
@@ -160,10 +168,10 @@
 
                 <!-- Bookmarks (below the drive list; sized to content) -->
                 <DockPanel Grid.Row="1">
-                    <Border DockPanel.Dock="Top" BorderBrush="#EEE" BorderThickness="0,1,0,0">
+                    <Border DockPanel.Dock="Top" BorderBrush="{StaticResource Theme.Border.Subtle}" BorderThickness="0,1,0,0">
                         <TextBlock Text="BOOKMARKS" Style="{StaticResource SidebarHeader}"/>
                     </Border>
-                    <TextBlock DockPanel.Dock="Top" Margin="10,0,10,8" Foreground="#AAA" FontSize="11"
+                    <TextBlock DockPanel.Dock="Top" Margin="10,0,10,8" Foreground="{StaticResource Theme.Text.Muted}" FontSize="11"
                                TextWrapping="Wrap" Text="Right-click a file or folder to bookmark it."
                                Visibility="{Binding Bookmarks.HasBookmarks, Converter={StaticResource InverseBoolToVisibility}}"/>
                     <ScrollViewer MaxHeight="260" VerticalScrollBarVisibility="Auto"
@@ -203,7 +211,7 @@
                                     </Border>
                                     <DataTemplate.Triggers>
                                         <Trigger SourceName="BmRow" Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="BmRow" Property="Background" Value="{StaticResource RowHoverBrush}"/>
+                                            <Setter TargetName="BmRow" Property="Background" Value="{StaticResource Theme.List.HoverBackground}"/>
                                         </Trigger>
                                     </DataTemplate.Triggers>
                                 </DataTemplate>
@@ -217,7 +225,7 @@
                     <TextBlock DockPanel.Dock="Top" Text="DRIVES &amp; DEVICES" Style="{StaticResource SidebarHeader}"/>
                     <Grid>
             <TreeView x:Name="FolderTree" ItemsSource="{Binding Tree.Roots}" BorderThickness="0"
-                      Background="White" Padding="0,2"
+                      Background="{StaticResource Theme.Surface.Background}" Padding="0,2"
                       ItemContainerStyle="{StaticResource FolderTreeItemStyle}"
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                       VirtualizingPanel.IsVirtualizing="False"
@@ -273,20 +281,24 @@
                              click away from collapsing. DataContext (the current node) and
                              visibility are driven from code-behind on scroll. -->
                         <Border x:Name="PinnedRow" VerticalAlignment="Top" Visibility="Collapsed"
-                                Background="White" BorderBrush="#DDDDDD" BorderThickness="0,0,0,1"
+                                Background="{StaticResource Theme.Surface.Background}" BorderBrush="{StaticResource Theme.Border.Default}" BorderThickness="0,0,0,1"
                                 MinHeight="26" SnapsToDevicePixels="True" Cursor="Hand"
                                 MouseLeftButtonUp="PinnedRow_Click"
                                 ToolTip="Collapse the current folder">
                             <Border.Effect>
-                                <DropShadowEffect Color="#000000" Opacity="0.15"
-                                                  BlurRadius="4" ShadowDepth="1" Direction="270"/>
+                                <!-- A Color, not a Brush, so it cannot be recoloured in place —
+                                     this is one of the few sites that needs DynamicResource. -->
+                                <DropShadowEffect Color="{DynamicResource Theme.Shadow.Color.Value}"
+                                                  Opacity="{Binding Color, RelativeSource={RelativeSource Self},
+                                                                    Converter={StaticResource ColorAlphaToOpacity}}"
+                                                  BlurRadius="5" ShadowDepth="1" Direction="270"/>
                             </Border.Effect>
                             <Grid Margin="{Binding Depth, Converter={StaticResource DepthToIndent}}">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="18"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <Path Data="M 0,0 L 4.5,4.5 L 9,0" Stroke="#555555" StrokeThickness="1.2"
+                                <Path Data="M 0,0 L 4.5,4.5 L 9,0" Stroke="{StaticResource Theme.Tree.ChevronForeground}" StrokeThickness="1.2"
                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 <DockPanel Grid.Column="1" Margin="0,0,4,0">
                                     <Image DockPanel.Dock="Left" Source="{Binding Icon}"
@@ -301,11 +313,11 @@
                 </DockPanel>
             </Grid>
 
-            <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="#EEE"/>
+            <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch"/>
 
             <!-- Panes. Built in code: the arrangement is a tree of grids and splitters, which
                  XAML cannot express declaratively (ColumnDefinitions are not bindable). -->
             <Border x:Name="PaneHostSite" Grid.Column="2"/>
         </Grid>
     </DockPanel>
-</Window>
+</v:ThemedWindow>

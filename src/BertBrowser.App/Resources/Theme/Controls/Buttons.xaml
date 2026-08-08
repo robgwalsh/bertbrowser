@@ -1,0 +1,171 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="Primitives.xaml"/>
+    </ResourceDictionary.MergedDictionaries>
+    <!--
+      Flat buttons with a themed focus ring in place of Windows' dotted rectangle, which is
+      invisible on a dark background.
+
+      Note for anything that sets Style explicitly: an explicit Style REPLACES the implicit one, so
+      keyed button styles elsewhere in the app must say BasedOn="{StaticResource {x:Type Button}}"
+      or they fall back to the stock Aero template and look classic again.
+    -->
+
+    <Style TargetType="Button">
+        <Setter Property="Background" Value="{StaticResource Theme.Button.SecondaryBackground}"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.Button.SecondaryForeground}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Theme.Border.Default}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="12,4"/>
+        <Setter Property="MinHeight" Value="26"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource ThemeFocusVisual}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="2" SnapsToDevicePixels="True">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          RecognizesAccessKey="True"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.Button.SecondaryHoverBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.Button.SecondaryPressedBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsDefaulted" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush"
+                                    Value="{StaticResource Theme.Border.Focus}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.Button.DisabledBackground}"/>
+                            <Setter TargetName="Bd" Property="BorderBrush"
+                                    Value="{StaticResource Theme.Border.Subtle}"/>
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource Theme.Button.DisabledForeground}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- The affirmative button in a dialog: Save, Replace, Keep both. -->
+    <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+        <Setter Property="Background" Value="{StaticResource Theme.Accent.Background}"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.Accent.Foreground}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Theme.Accent.Background}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="2" SnapsToDevicePixels="True">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          RecognizesAccessKey="True"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.Accent.HoverBackground}"/>
+                            <Setter TargetName="Bd" Property="BorderBrush"
+                                    Value="{StaticResource Theme.Accent.HoverBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.Accent.PressedBackground}"/>
+                            <Setter TargetName="Bd" Property="BorderBrush"
+                                    Value="{StaticResource Theme.Accent.PressedBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.Button.DisabledBackground}"/>
+                            <Setter TargetName="Bd" Property="BorderBrush"
+                                    Value="{StaticResource Theme.Border.Subtle}"/>
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource Theme.Button.DisabledForeground}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="ToggleButton">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.Toolbar.Foreground}"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="8,4"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource ThemeFocusVisual}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="2" SnapsToDevicePixels="True">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          RecognizesAccessKey="True"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.Toolbar.HoverBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource Theme.Button.DisabledForeground}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Only reached outside a ScrollBar (which supplies its own); keeps stray repeat buttons flat. -->
+    <Style TargetType="RepeatButton">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.Text.Primary}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RepeatButton">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.Toolbar.HoverBackground}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>

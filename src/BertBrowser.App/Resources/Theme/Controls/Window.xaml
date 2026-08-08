@@ -1,0 +1,188 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+                    xmlns:v="clr-namespace:BertBrowser.App.Views">
+
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="Primitives.xaml"/>
+    </ResourceDictionary.MergedDictionaries>
+
+    <!-- 46x32 is the shell's own caption-button metric; matching it is what makes the buttons feel
+         native rather than merely present. -->
+    <Style x:Key="CaptionButton" TargetType="Button">
+        <Setter Property="Width" Value="46"/>
+        <Setter Property="Height" Value="32"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.TitleBar.Foreground}"/>
+        <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+        <Setter Property="FontSize" Value="10"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.TitleBar.ButtonHoverBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.TitleBar.ButtonPressedBackground}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--
+      The maximise button is reported to Windows as HTMAXBUTTON so that hovering it opens the
+      Windows 11 snap-layout flyout. That takes it out of WPF's mouse tracking, so ThemedWindow
+      tracks the hover itself and the template reads it back through IsMaximizeHovered.
+    -->
+    <Style x:Key="CaptionMaximizeButton" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <DataTrigger Value="True"
+                                     Binding="{Binding IsMaximizeHovered,
+                                                       RelativeSource={RelativeSource AncestorType=v:ThemedWindow}}">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.TitleBar.ButtonHoverBackground}"/>
+                        </DataTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="CaptionCloseButton" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                        <ContentPresenter x:Name="Glyph" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.TitleBar.CloseHoverBackground}"/>
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource Theme.TitleBar.CloseHoverForeground}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.8"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="{x:Type v:ThemedWindow}">
+        <Setter Property="Background" Value="{StaticResource Theme.Window.Background}"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.Text.Primary}"/>
+        <Setter Property="TextElement.Foreground" Value="{StaticResource Theme.Text.Primary}"/>
+        <Setter Property="WindowChrome.WindowChrome">
+            <Setter.Value>
+                <!--
+                  AllowsTransparency is deliberately NOT used: it drops the window to software
+                  rendering and loses the system drop shadow. A non-zero GlassFrameThickness keeps
+                  DWM drawing the shadow and the Windows 11 rounded corners while
+                  UseAeroCaptionButtons=False hands the caption to us.
+                -->
+                <shell:WindowChrome CaptionHeight="32"
+                                    ResizeBorderThickness="6"
+                                    CornerRadius="0"
+                                    GlassFrameThickness="0,0,0,1"
+                                    UseAeroCaptionButtons="False"/>
+            </Setter.Value>
+        </Setter>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type v:ThemedWindow}">
+                    <Border x:Name="Root" Background="{TemplateBinding Background}"
+                            BorderBrush="{StaticResource Theme.TitleBar.Border}" BorderThickness="1">
+                        <DockPanel>
+                            <Grid x:Name="TitleBar" DockPanel.Dock="Top" Height="32"
+                                  Background="{StaticResource Theme.TitleBar.Background}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <Image x:Name="TitleIcon" Source="{TemplateBinding Icon}"
+                                       Width="16" Height="16"
+                                       Margin="10,0,0,0" VerticalAlignment="Center"/>
+
+                                <TextBlock x:Name="TitleText" Grid.Column="1" Text="{TemplateBinding Title}"
+                                           Margin="10,0" VerticalAlignment="Center" FontSize="12"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{StaticResource Theme.TitleBar.Foreground}"/>
+
+                                <!-- Anything interactive up here has to opt back into hit testing,
+                                     or WindowChrome treats it as caption and starts a drag. -->
+                                <ContentPresenter Grid.Column="2" VerticalAlignment="Center"
+                                                  Content="{TemplateBinding TitleBarContent}"
+                                                  WindowChrome.IsHitTestVisibleInChrome="True"/>
+
+                                <StackPanel Grid.Column="3" Orientation="Horizontal"
+                                            WindowChrome.IsHitTestVisibleInChrome="True">
+                                    <Button x:Name="PART_Minimize" Style="{StaticResource CaptionButton}"
+                                            Content="&#xE921;" ToolTip="Minimise"
+                                            AutomationProperties.Name="Minimise"/>
+                                    <Button x:Name="PART_Maximize" Style="{StaticResource CaptionMaximizeButton}"
+                                            Content="&#xE922;" ToolTip="Maximise"
+                                            AutomationProperties.Name="Maximise"/>
+                                    <Button x:Name="PART_Close" Style="{StaticResource CaptionCloseButton}"
+                                            Content="&#xE8BB;" ToolTip="Close"
+                                            AutomationProperties.Name="Close"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- AdornerDecorator so the marquee selection and drag adorners still
+                                 have a layer to draw on inside a templated window. -->
+                            <AdornerDecorator>
+                                <ContentPresenter/>
+                            </AdornerDecorator>
+                        </DockPanel>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="Icon" Value="{x:Null}">
+                            <Setter TargetName="TitleIcon" Property="Visibility" Value="Collapsed"/>
+                        </Trigger>
+                        <Trigger Property="WindowState" Value="Maximized">
+                            <Setter TargetName="Root" Property="BorderThickness" Value="0"/>
+                            <Setter TargetName="PART_Maximize" Property="Content" Value="&#xE923;"/>
+                            <Setter TargetName="PART_Maximize" Property="ToolTip" Value="Restore"/>
+                        </Trigger>
+                        <Trigger Property="IsActive" Value="False">
+                            <Setter TargetName="TitleBar" Property="Background"
+                                    Value="{StaticResource Theme.TitleBar.InactiveBackground}"/>
+                            <Setter TargetName="TitleText" Property="Foreground"
+                                    Value="{StaticResource Theme.TitleBar.InactiveForeground}"/>
+                        </Trigger>
+                        <!-- A dialog that cannot be resized should not offer the buttons that do it. -->
+                        <Trigger Property="ResizeMode" Value="NoResize">
+                            <Setter TargetName="PART_Minimize" Property="Visibility" Value="Collapsed"/>
+                            <Setter TargetName="PART_Maximize" Property="Visibility" Value="Collapsed"/>
+                        </Trigger>
+                        <Trigger Property="ResizeMode" Value="CanMinimize">
+                            <Setter TargetName="PART_Maximize" Property="Visibility" Value="Collapsed"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>

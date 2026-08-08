@@ -1,0 +1,13 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:t="clr-namespace:BertBrowser.App.Theming">
+    <!--
+      The colour palette. Every dictionary that says {StaticResource Theme.Something} must merge
+      THIS file, not merely sit beside it: StaticResource searches the declaring dictionary and its
+      own merged children, never its siblings. The instances all share one set of brushes, so
+      merging it repeatedly costs nothing and there is still exactly one palette.
+    -->
+    <ResourceDictionary.MergedDictionaries>
+        <t:ThemeTokenDictionary/>
+    </ResourceDictionary.MergedDictionaries>
+</ResourceDictionary>

@@ -1,3 +1,4 @@
+using BertBrowser.App.Views;
 using System.Windows;
 using Velopack;
 using Velopack.Sources;
@@ -46,11 +47,12 @@ public sealed class UpdateService : IUpdateService
 
             var version = update.TargetFullRelease.Version;
             var restartNow = await Application.Current.Dispatcher.InvokeAsync(() =>
-                MessageBox.Show(
+                MessageDialog.Show(
+                    Application.Current.MainWindow,
                     $"BertBrowser {version} has been downloaded and will be installed when you close the app.\n\nRestart now to update immediately?",
                     "Update ready",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Information) == MessageBoxResult.Yes);
+                    MessageDialogKind.Information,
+                    showCancel: true));
 
             if (restartNow)
                 _manager.ApplyUpdatesAndRestart(update);

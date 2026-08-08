@@ -208,7 +208,9 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
     public bool IsHidden { get; }
 
     /// <summary>Dimmed like Explorer when hidden.</summary>
-    public double IconOpacity => IsHidden ? 0.45 : 1.0;
+    // 0.55, not the 0.45 this used to be: against a dark window the lower value reads as mud
+    // rather than as a dimmed icon, and it still looks clearly dimmed on a light theme.
+    public double IconOpacity => IsHidden ? 0.55 : 1.0;
 
     public System.Windows.Media.ImageSource? Icon =>
         _icon ??= FullPath.Length > 0 ? Interop.ShellIcons.GetIcon(FullPath, isDirectory: true) : null;

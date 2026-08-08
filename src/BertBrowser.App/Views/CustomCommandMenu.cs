@@ -1,7 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
 using BertBrowser.App.Services;
+using BertBrowser.Core.Theming;
 
 namespace BertBrowser.App.Views;
 
@@ -32,19 +32,19 @@ internal static class CustomCommandMenu
         var insertAt = menu.Items.IndexOf(anchor) + 1;
         foreach (var definition in applicable)
         {
+            // E8A7 = OpenInNewWindow: reads as "launch externally". Font and colour come from
+            // resources rather than literals so these runtime-built items match the ones declared
+            // in XAML and follow a theme change like everything else.
+            var icon = new TextBlock { Text = "", FontSize = 16 };
+            icon.SetResourceReference(TextBlock.FontFamilyProperty, "SymbolFont");
+            icon.SetResourceReference(TextBlock.ForegroundProperty, ThemeToken.MenuIconForeground);
+
             // "__" so underscores in names render instead of becoming access keys.
             var item = new MenuItem
             {
                 Header = definition.Name.Replace("_", "__"),
                 Tag = definition,
-                Icon = new TextBlock
-                {
-                    // E8A7 = OpenInNewWindow: reads as "launch externally".
-                    Text = "",
-                    FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
-                    FontSize = 16,
-                    Foreground = new SolidColorBrush(Color.FromRgb(0x44, 0x44, 0x44)),
-                },
+                Icon = icon,
             };
             item.Click += (_, _) => run(definition, targets);
             menu.Items.Insert(insertAt++, item);

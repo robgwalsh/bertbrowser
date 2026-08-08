@@ -3,7 +3,7 @@ using BertBrowser.App.ViewModels;
 
 namespace BertBrowser.App.Views;
 
-public partial class PropertiesDialog : Window
+public partial class PropertiesDialog : ThemedWindow
 {
     public PropertiesDialog(PropertiesViewModel vm)
     {

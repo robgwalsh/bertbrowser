@@ -12,7 +12,7 @@
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Padding" Value="6,2"/>
-            <Setter Property="Foreground" Value="#555"/>
+            <Setter Property="Foreground" Value="{StaticResource Theme.Text.Secondary}"/>
             <Setter Property="FontFamily" Value="{StaticResource SymbolFont}"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="Template">
@@ -24,7 +24,8 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowHoverBrush}"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.Toolbar.HoverBackground}"/>
+                                <Setter Property="Foreground" Value="{StaticResource Theme.Text.Primary}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.35"/>
@@ -36,23 +37,16 @@
         </Style>
     </UserControl.Resources>
 
-    <!-- The active pane is outlined so it's obvious which of several open directories the next
-         keystroke lands in. -->
-    <Border BorderThickness="1" Background="White">
-        <Border.Style>
-            <Style TargetType="Border">
-                <Setter Property="BorderBrush" Value="#DDD"/>
-                <Style.Triggers>
-                    <DataTrigger Binding="{Binding IsActivePane}" Value="True">
-                        <Setter Property="BorderBrush" Value="#1C86D1"/>
-                    </DataTrigger>
-                </Style.Triggers>
-            </Style>
-        </Border.Style>
-
+    <!-- Panes are separated by a plain hairline, not an accent outline: which pane is active is
+         already legible from the focused row and the caret, and a blue box around the whole pane
+         reads as a modal border. -->
+    <Border BorderThickness="1" BorderBrush="{StaticResource Theme.Border.Default}"
+            Background="{StaticResource Theme.Window.Background}"
+            TextElement.Foreground="{StaticResource Theme.Text.Primary}">
         <DockPanel>
             <!-- Tab strip. Always shown, even with one tab: the "+" is how you discover tabs. -->
-            <Border DockPanel.Dock="Top" Background="#F3F3F3" BorderBrush="#E0E0E0"
+            <Border DockPanel.Dock="Top" Background="{StaticResource Theme.Tab.StripBackground}"
+                    BorderBrush="{StaticResource Theme.Tab.Border}"
                     BorderThickness="0,0,0,1">
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -70,8 +64,10 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Border MinWidth="90" MaxWidth="200" Margin="2,2,0,0"
-                                            CornerRadius="3,3,0,0" Padding="8,3"
+                                    <!-- Square, edge to edge, and the active tab is the same colour
+                                         as the content below it — the editor idiom, not the
+                                         rounded browser one. -->
+                                    <Border MinWidth="110" MaxWidth="220" Padding="10,5"
                                             PreviewMouseDown="TabHeader_PreviewMouseDown"
                                             ToolTip="{Binding CurrentPath}"
                                             Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ItemsControl}}">
@@ -92,13 +88,20 @@
                                         </Border.ContextMenu>
                                         <Border.Style>
                                             <Style TargetType="Border">
-                                                <Setter Property="Background" Value="Transparent"/>
+                                                <Setter Property="Background" Value="{StaticResource Theme.Tab.InactiveBackground}"/>
+                                                <Setter Property="TextElement.Foreground" Value="{StaticResource Theme.Tab.InactiveForeground}"/>
+                                                <Setter Property="BorderBrush" Value="{StaticResource Theme.Tab.Border}"/>
+                                                <Setter Property="BorderThickness" Value="0,2,1,0"/>
                                                 <Style.Triggers>
                                                     <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter Property="Background" Value="{StaticResource RowHoverBrush}"/>
+                                                        <Setter Property="Background" Value="{StaticResource Theme.Tab.HoverBackground}"/>
                                                     </Trigger>
                                                     <DataTrigger Binding="{Binding IsActive}" Value="True">
-                                                        <Setter Property="Background" Value="White"/>
+                                                        <Setter Property="Background" Value="{StaticResource Theme.Tab.ActiveBackground}"/>
+                                                        <Setter Property="TextElement.Foreground" Value="{StaticResource Theme.Tab.ActiveForeground}"/>
+                                                        <!-- Accent stripe along the top edge marks the active tab. -->
+                                                        <Setter Property="BorderBrush" Value="{StaticResource Theme.Tab.ActiveIndicator}"/>
+                                                        <Setter Property="BorderThickness" Value="0,2,0,0"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -122,7 +125,7 @@
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="4,0">
                         <Button Style="{StaticResource TabStripButton}" Content="&#xE710;"
                                 ToolTip="New tab (Ctrl+T)" Command="{Binding NewTabCommand}"/>
-                        <Border Width="1" Margin="4,5" Background="#D0D0D0"/>
+                        <Border Width="1" Margin="4,5" Background="{StaticResource Theme.Border.Subtle}"/>
                         <Button Style="{StaticResource TabStripButton}" Content="&#xE76F;"
                                 ToolTip="Split pane to the right (Ctrl+Alt+Right)"
                                 Command="{Binding SplitVerticalCommand}"/>

@@ -1,0 +1,40 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+      The small pieces more than one control dictionary needs. Everything in Controls/ merges this
+      one file and gets the tokens with it, which keeps the dependency graph a star rather than a
+      web — and StaticResource only reaches merged children, so the edges have to be explicit.
+    -->
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="../Tokens.xaml"/>
+    </ResourceDictionary.MergedDictionaries>
+
+    <!-- Replaces Windows' dotted focus rectangle, which is invisible on a dark background. -->
+    <Style x:Key="ThemeFocusVisual">
+        <Setter Property="Control.Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Rectangle Margin="1" SnapsToDevicePixels="True" StrokeThickness="1"
+                               Stroke="{StaticResource Theme.Border.Focus}"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--
+      A repeat button that renders nothing. Scrollbar and slider tracks need these to exist so that
+      clicking the track pages, but they must not be visible.
+    -->
+    <Style x:Key="ThemeInvisibleRepeatButton" TargetType="RepeatButton">
+        <Setter Property="OverridesDefaultStyle" Value="True"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RepeatButton">
+                    <Border Background="Transparent"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>

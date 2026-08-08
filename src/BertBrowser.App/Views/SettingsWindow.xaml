@@ -1,29 +1,56 @@
-<Window x:Class="BertBrowser.App.Views.SettingsWindow"
+<v:ThemedWindow x:Class="BertBrowser.App.Views.SettingsWindow"
+        xmlns:v="clr-namespace:BertBrowser.App.Views"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Settings" Width="620" Height="440"
-        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+        Title="Settings" Width="640" Height="560"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource Theme.Surface.Background}"
+        TextElement.Foreground="{StaticResource Theme.Text.Primary}">
     <DockPanel Margin="10">
+        <!--
+          Appearance sits outside the dialog's Save/Cancel contract on purpose: a theme you cannot
+          see until you press Save is not a theme you can choose. Picking one applies and persists
+          immediately, which is why the note below says so.
+        -->
+        <TextBlock DockPanel.Dock="Top" Text="Appearance" FontWeight="SemiBold" Margin="0,0,0,6"/>
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2">
+            <TextBlock Text="Theme" VerticalAlignment="Center" Margin="0,0,12,0"/>
+            <Button DockPanel.Dock="Right" Content="Customise colours…" Margin="8,0,0,0"
+                    Click="CustomiseTheme_Click"
+                    ToolTip="Edit any colour in this theme and save it as your own"/>
+            <ComboBox ItemsSource="{Binding Appearance.Themes}" DisplayMemberPath="Name"
+                      SelectedItem="{Binding Appearance.SelectedTheme, Mode=TwoWay}"
+                      AutomationProperties.AutomationId="ThemePicker"
+                      AutomationProperties.Name="Theme"/>
+        </DockPanel>
+        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{StaticResource Theme.Text.Secondary}"
+                   Margin="0,4,0,4"
+                   Text="Appearance changes apply straight away — they are not held until you press Save."/>
+        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,12"
+                   Foreground="{StaticResource Theme.Warning.Foreground}"
+                   Text="{Binding Appearance.IssueText}"
+                   Visibility="{Binding Appearance.IssueText, Converter={StaticResource NullToCollapsed}}"/>
+
         <!-- General options -->
         <TextBlock DockPanel.Dock="Top" Text="General" FontWeight="SemiBold" Margin="0,0,0,4"/>
         <CheckBox DockPanel.Dock="Top" Content="Show hidden items" Margin="0,0,0,2"
                   IsChecked="{Binding ShowHiddenItems}"/>
-        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="Gray" Margin="0,0,0,10"
+        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{StaticResource Theme.Text.Secondary}" Margin="0,0,0,10"
                    Text="Show hidden files and folders in listings and search results (dimmed, like Explorer)."/>
 
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2">
             <TextBlock Text="Vertical scroll speed" VerticalAlignment="Center"/>
             <TextBlock DockPanel.Dock="Right" Text="{Binding ScrollSpeedText}" VerticalAlignment="Center"
-                       HorizontalAlignment="Right" MinWidth="36" Foreground="#555"/>
+                       HorizontalAlignment="Right" MinWidth="36" Foreground="{StaticResource Theme.Text.Secondary}"/>
             <Slider Margin="12,0,8,0" VerticalAlignment="Center" Minimum="1" Maximum="6"
                     TickFrequency="0.5" IsSnapToTickEnabled="True"
                     Value="{Binding ScrollSpeed, Mode=TwoWay}"/>
         </DockPanel>
-        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="Gray" Margin="0,0,0,12"
+        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{StaticResource Theme.Text.Secondary}" Margin="0,0,0,12"
                    Text="How fast the mouse wheel scrolls the file list (1× = system default)."/>
 
         <TextBlock DockPanel.Dock="Top" Text="Custom context menu commands" FontWeight="SemiBold"/>
-        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="Gray" Margin="0,4,0,10"
+        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{StaticResource Theme.Text.Secondary}" Margin="0,4,0,10"
                    Text="These commands appear in the right-click menu of the file list and folder tree. In Arguments, {path}, {name} and {dir} expand per item — quote tokens that may contain spaces, e.g. &quot;{path}&quot;. Blank arguments default to the quoted full path."/>
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
@@ -102,4 +129,4 @@
             </Grid>
         </Grid>
     </DockPanel>
-</Window>
+</v:ThemedWindow>

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using BertBrowser.App.Services;
+using BertBrowser.App.Theming;
 
 namespace BertBrowser.App.ViewModels;
 
@@ -64,8 +65,15 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public string ScrollSpeedText => $"{ScrollSpeed:0.0}×";
 
-    public SettingsViewModel(AppSettings settings)
+    /// <summary>
+    /// Theme selection and editing. Unlike everything else here it applies live rather than on
+    /// Save — see the note in the dialog.
+    /// </summary>
+    public AppearanceViewModel Appearance { get; }
+
+    public SettingsViewModel(AppSettings settings, IThemeService theme)
     {
+        Appearance = new AppearanceViewModel(theme);
         _settings = settings;
         ShowHiddenItems = settings.ShowHiddenItems;
         ScrollSpeed = settings.ScrollSpeedMultiplier;

@@ -132,7 +132,6 @@ internal sealed class PaneLayoutHost : ContentControl
     {
         var splitter = new GridSplitter
         {
-            Background = System.Windows.Media.Brushes.Transparent,
             ShowsPreview = false,
             ResizeBehavior = GridResizeBehavior.PreviousAndNext,
             ResizeDirection = vertical ? GridResizeDirection.Columns : GridResizeDirection.Rows,
@@ -140,6 +139,9 @@ internal sealed class PaneLayoutHost : ContentControl
             VerticalAlignment = VerticalAlignment.Stretch,
             Cursor = vertical ? System.Windows.Input.Cursors.SizeWE : System.Windows.Input.Cursors.SizeNS,
         };
+        // Same style as the sidebar splitter in XAML, so a code-built sash is themed like the rest.
+        splitter.SetResourceReference(FrameworkElement.StyleProperty, "PaneSplitterStyle");
+
         if (vertical) Grid.SetColumn(splitter, slot);
         else Grid.SetRow(splitter, slot);
 

@@ -4,7 +4,7 @@ using Microsoft.Win32;
 
 namespace BertBrowser.App.Views;
 
-public partial class SettingsWindow : Window
+public partial class SettingsWindow : ThemedWindow
 {
     private readonly SettingsViewModel _vm;
 
@@ -23,8 +23,25 @@ public partial class SettingsWindow : Window
         }
         else
         {
-            MessageBox.Show(this, error, "Settings", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageDialog.Show(this, error ?? "", "Settings", MessageDialogKind.Warning);
         }
+    }
+
+    /// <summary>
+    /// The editor is modeless so its changes can be judged against the file list, which means this
+    /// dialog has to get out of the way: it commits what is pending and closes.
+    /// </summary>
+    private void CustomiseTheme_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_vm.TrySave(out var error))
+        {
+            MessageDialog.Show(this, error ?? "", "Settings", MessageDialogKind.Warning);
+            return;
+        }
+
+        var editor = new ThemeEditorWindow(_vm.Appearance) { Owner = Application.Current?.MainWindow };
+        DialogResult = true;
+        editor.Show();
     }
 
     private void Browse_Click(object sender, RoutedEventArgs e)

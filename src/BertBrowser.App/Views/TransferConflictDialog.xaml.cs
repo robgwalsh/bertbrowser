@@ -7,7 +7,7 @@ namespace BertBrowser.App.Views;
 /// <summary>Asks how to settle destination names that are already taken. The chosen
 /// <see cref="ConflictResolution"/> applies to every conflicting item in the drop; closing or
 /// cancelling leaves <see cref="Resolution"/> null and the drop is abandoned entirely.</summary>
-public partial class TransferConflictDialog : Window
+public partial class TransferConflictDialog : ThemedWindow
 {
     /// <summary>Null when the user cancelled.</summary>
     public ConflictResolution? Resolution { get; private set; }

@@ -3,11 +3,19 @@
                     xmlns:conv="clr-namespace:BertBrowser.App.Converters"
                     xmlns:v="clr-namespace:BertBrowser.App.Views">
 
+    <!-- Merged, not merely listed alongside in App.xaml: StaticResource resolves against a
+         dictionary's own merged children, never its siblings. -->
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="Theme/Tokens.xaml"/>
+    </ResourceDictionary.MergedDictionaries>
+
     <conv:BoolToVisibilityConverter x:Key="BoolToVisibility"/>
     <conv:BoolToVisibilityConverter x:Key="InverseBoolToVisibility" Invert="True"/>
     <conv:InverseBoolConverter x:Key="InverseBool"/>
     <conv:NullToCollapsedConverter x:Key="NullToCollapsed"/>
     <conv:DepthToIndentConverter x:Key="DepthToIndent" IndentSize="16"/>
+    <conv:ColorAlphaToOpacityConverter x:Key="ColorAlphaToOpacity"/>
+    <conv:ColorToBrushConverter x:Key="ColorToBrush"/>
 
     <!--
       Windows-native icon glyphs. Segoe Fluent Icons is the Windows 11 shell font;
@@ -17,20 +25,48 @@
     -->
     <FontFamily x:Key="SymbolFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
-    <!-- Shared row colors so the folder tree and the file list highlight identically. -->
-    <SolidColorBrush x:Key="RowHoverBrush" Color="#E5F3FB"/>
-    <SolidColorBrush x:Key="RowSelectedBrush" Color="#CBE8F6"/>
-    <SolidColorBrush x:Key="RowSelectedHoverBrush" Color="#BEE0F2"/>
-    <SolidColorBrush x:Key="RowSelectedInactiveBrush" Color="#E9E9E9"/>
-    <!-- The folder a drag is currently hovering: stronger than selection, so the drop target is
-         unmistakable before the button is released. -->
-    <SolidColorBrush x:Key="DropTargetBrush" Color="#B3DDF7"/>
-    <SolidColorBrush x:Key="DropTargetBorderBrush" Color="#1C86D1"/>
+    <!--
+      Colours come from the theme (Resources/Theme/Theme.xaml), which is merged ahead of this file
+      in App.xaml. The Theme.* brushes are shared, mutable instances: switching themes recolours
+      them in place, so nothing here needs DynamicResource.
+    -->
 
-    <Style x:Key="ToolbarButton" TargetType="Button">
+    <!--
+      Every keyed Button style below is BasedOn the implicit one on purpose: an explicit Style
+      replaces the implicit style outright, so without this they would fall back to WPF's default
+      template and look classic again next to everything else.
+    -->
+    <Style x:Key="ToolbarButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
         <Setter Property="Padding" Value="8,4"/>
         <Setter Property="Margin" Value="2,0"/>
         <Setter Property="MinWidth" Value="28"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.Toolbar.Foreground}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                            CornerRadius="3" SnapsToDevicePixels="True">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.Toolbar.HoverBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- Icon glyph inside a toolbar button; inherits the button's Foreground. -->
@@ -45,38 +81,39 @@
     <Style x:Key="MenuIcon" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource SymbolFont}"/>
         <Setter Property="FontSize" Value="16"/>
-        <Setter Property="Foreground" Value="#444"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.Menu.IconForeground}"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
         <Setter Property="HorizontalAlignment" Value="Center"/>
     </Style>
 
-    <Style x:Key="BreadcrumbButton" TargetType="Button">
+    <Style x:Key="BreadcrumbButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
         <Setter Property="Padding" Value="4,2"/>
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Margin" Value="0"/>
+        <Setter Property="MinWidth" Value="0"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.Text.Primary}"/>
         <Setter Property="Cursor" Value="Hand"/>
     </Style>
 
     <!-- Rounded toolbar field, shared by the address bar and the search box. -->
     <Style x:Key="FieldBorder" TargetType="Border">
-        <Setter Property="Background" Value="White"/>
-        <Setter Property="BorderBrush" Value="#BBB"/>
+        <Setter Property="Background" Value="{StaticResource Theme.Input.Background}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Theme.Input.Border}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="4"/>
         <Setter Property="Height" Value="28"/>
         <Style.Triggers>
             <Trigger Property="IsKeyboardFocusWithin" Value="True">
-                <Setter Property="BorderBrush" Value="#1C86D1"/>
+                <Setter Property="BorderBrush" Value="{StaticResource Theme.Border.Focus}"/>
             </Trigger>
         </Style.Triggers>
     </Style>
 
     <!-- ✕ inside the search box; hidden while the box is empty. -->
-    <Style x:Key="SearchClearButton" TargetType="Button">
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="BorderThickness" Value="0"/>
+    <Style x:Key="SearchClearButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Foreground" Value="#666"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.Text.Secondary}"/>
+        <Setter Property="Margin" Value="0"/>
+        <Setter Property="MinWidth" Value="0"/>
         <Setter Property="Padding" Value="6,0"/>
         <Style.Triggers>
             <DataTrigger Binding="{Binding SearchText}" Value="">
@@ -94,16 +131,16 @@
                 <ControlTemplate TargetType="ToggleButton">
                     <Border Background="Transparent" Width="16" Height="16">
                         <Path x:Name="Glyph" Data="M 0,0 L 4.5,4.5 L 0,9"
-                              Stroke="#8A8A8A" StrokeThickness="1.2"
+                              Stroke="{StaticResource Theme.Tree.ChevronForeground}" StrokeThickness="1.2"
                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="Glyph" Property="Data" Value="M 0,0 L 4.5,4.5 L 9,0"/>
-                            <Setter TargetName="Glyph" Property="Stroke" Value="#555555"/>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Glyph" Property="Stroke" Value="#1C86D1"/>
+                            <Setter TargetName="Glyph" Property="Stroke"
+                                    Value="{StaticResource Theme.Tree.ChevronHoverForeground}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -113,7 +150,7 @@
 
     <!-- Section header above each sidebar group (Bookmarks, Drives & devices). -->
     <Style x:Key="SidebarHeader" TargetType="TextBlock">
-        <Setter Property="Foreground" Value="#888"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.Text.Muted}"/>
         <Setter Property="FontSize" Value="11"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Padding" Value="10,8,10,4"/>
@@ -159,28 +196,30 @@
                             <Setter TargetName="Expander" Property="Visibility" Value="Hidden"/>
                         </Trigger>
                         <Trigger SourceName="Bd" Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowHoverBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.HoverBackground}"/>
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.SelectedBackground}"/>
+                            <Setter Property="Foreground" Value="{StaticResource Theme.List.SelectedForeground}"/>
                         </Trigger>
                         <MultiTrigger>
                             <MultiTrigger.Conditions>
                                 <Condition Property="IsSelected" Value="True"/>
                                 <Condition SourceName="Bd" Property="IsMouseOver" Value="True"/>
                             </MultiTrigger.Conditions>
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedHoverBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.SelectedHoverBackground}"/>
                         </MultiTrigger>
                         <MultiTrigger>
                             <MultiTrigger.Conditions>
                                 <Condition Property="IsSelected" Value="True"/>
                                 <Condition Property="Selector.IsSelectionActive" Value="False"/>
                             </MultiTrigger.Conditions>
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedInactiveBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.SelectedInactiveBackground}"/>
+                            <Setter Property="Foreground" Value="{StaticResource Theme.List.SelectedInactiveForeground}"/>
                         </MultiTrigger>
                         <!-- Last, so hovering a drag over a folder always wins over selection. -->
                         <Trigger Property="v:DropTarget.IsActive" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource DropTargetBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.DropBackground}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -204,29 +243,31 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowHoverBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.HoverBackground}"/>
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.SelectedBackground}"/>
+                            <Setter Property="Foreground" Value="{StaticResource Theme.List.SelectedForeground}"/>
                         </Trigger>
                         <MultiTrigger>
                             <MultiTrigger.Conditions>
                                 <Condition Property="IsSelected" Value="True"/>
                                 <Condition Property="IsMouseOver" Value="True"/>
                             </MultiTrigger.Conditions>
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedHoverBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.SelectedHoverBackground}"/>
                         </MultiTrigger>
                         <MultiTrigger>
                             <MultiTrigger.Conditions>
                                 <Condition Property="IsSelected" Value="True"/>
                                 <Condition Property="Selector.IsSelectionActive" Value="False"/>
                             </MultiTrigger.Conditions>
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedInactiveBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.SelectedInactiveBackground}"/>
+                            <Setter Property="Foreground" Value="{StaticResource Theme.List.SelectedInactiveForeground}"/>
                         </MultiTrigger>
                         <!-- Last, so hovering a drag over a row always wins over selection. -->
                         <Trigger Property="v:DropTarget.IsActive" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource DropTargetBrush}"/>
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource DropTargetBorderBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.DropBackground}"/>
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Theme.List.DropBorder}"/>
                             <Setter TargetName="Bd" Property="BorderThickness" Value="1"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
@@ -249,11 +290,15 @@
     <DataTemplate x:Key="ThumbTileTemplate">
         <StackPanel Margin="6,6,6,2"
                     Width="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}">
-            <Image Source="{Binding Thumbnail}" Opacity="{Binding IconOpacity}"
-                   Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
-                   RenderOptions.BitmapScalingMode="HighQuality"
-                   Width="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}"
-                   Height="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}"/>
+            <!-- Shell thumbnails are authored for a light background; the tile behind them keeps a
+                 transparent PNG or a pale photo from dissolving into a dark window. -->
+            <Border Background="{StaticResource Theme.Thumbnail.TileBackground}" CornerRadius="2"
+                    Width="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}"
+                    Height="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}">
+                <Image Source="{Binding Thumbnail}" Opacity="{Binding IconOpacity}"
+                       Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       RenderOptions.BitmapScalingMode="HighQuality"/>
+            </Border>
             <TextBlock Text="{Binding Name}" TextWrapping="Wrap" TextAlignment="Center"
                        Margin="0,4,0,0" MaxHeight="32" TextTrimming="CharacterEllipsis"/>
         </StackPanel>
@@ -274,9 +319,11 @@
                 <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
                            TextTrimming="CharacterEllipsis"/>
             </StackPanel>
-            <TextBlock Grid.Column="1" Text="{Binding SizeDisplay}" Foreground="#555"
+            <!-- Dimmed by opacity rather than a fixed colour, so it stays secondary against the
+                 row's own background whether the row is plain, hovered or selected. -->
+            <TextBlock Grid.Column="1" Text="{Binding SizeDisplay}" Opacity="0.7"
                        HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"/>
-            <TextBlock Grid.Column="2" Text="{Binding ModifiedDisplay}" Foreground="#555"
+            <TextBlock Grid.Column="2" Text="{Binding ModifiedDisplay}" Opacity="0.7"
                        VerticalAlignment="Center" Margin="0,0,8,0"/>
         </Grid>
     </DataTemplate>
@@ -296,28 +343,30 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowHoverBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.HoverBackground}"/>
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.SelectedBackground}"/>
+                            <Setter Property="Foreground" Value="{StaticResource Theme.List.SelectedForeground}"/>
                         </Trigger>
                         <MultiTrigger>
                             <MultiTrigger.Conditions>
                                 <Condition Property="IsSelected" Value="True"/>
                                 <Condition Property="IsMouseOver" Value="True"/>
                             </MultiTrigger.Conditions>
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedHoverBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.SelectedHoverBackground}"/>
                         </MultiTrigger>
                         <MultiTrigger>
                             <MultiTrigger.Conditions>
                                 <Condition Property="IsSelected" Value="True"/>
                                 <Condition Property="Selector.IsSelectionActive" Value="False"/>
                             </MultiTrigger.Conditions>
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedInactiveBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.SelectedInactiveBackground}"/>
+                            <Setter Property="Foreground" Value="{StaticResource Theme.List.SelectedInactiveForeground}"/>
                         </MultiTrigger>
                         <!-- Last, so a drag hovering a tile always wins over selection. -->
                         <Trigger Property="v:DropTarget.IsActive" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource DropTargetBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.DropBackground}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

@@ -1,0 +1,282 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="Primitives.xaml"/>
+    </ResourceDictionary.MergedDictionaries>
+
+    <!--
+      TextBox. CaretBrush and SelectionBrush are set explicitly and deliberately: WPF's defaults are
+      a black caret and the Windows selection blue, both of which vanish on a dark field.
+      SelectionTextBrush is not optional here: at SelectionOpacity="1" the selection is an opaque
+      rectangle painted over the run, and the glyphs are only drawn on top of it when this brush is
+      set. Leave it unset and selected text disappears entirely rather than merely dimming.
+    -->
+    <Style TargetType="TextBox">
+        <Setter Property="Background" Value="{StaticResource Theme.Input.Background}"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.Input.Foreground}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Theme.Input.Border}"/>
+        <Setter Property="CaretBrush" Value="{StaticResource Theme.Input.Caret}"/>
+        <Setter Property="SelectionBrush" Value="{StaticResource Theme.Input.SelectionBackground}"/>
+        <Setter Property="SelectionTextBrush" Value="{StaticResource Theme.Input.SelectionForeground}"/>
+        <Setter Property="SelectionOpacity" Value="1"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="5,3"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="2" SnapsToDevicePixels="True">
+                        <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
+                                      Margin="{TemplateBinding Padding}"
+                                      HorizontalScrollBarVisibility="Hidden"
+                                      VerticalScrollBarVisibility="Hidden"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush"
+                                    Value="{StaticResource Theme.Border.Focus}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{StaticResource Theme.Text.Disabled}"/>
+                        </Trigger>
+                        <Trigger Property="IsReadOnly" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource Theme.Text.Secondary}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--
+      CheckBox, including the indeterminate state: the Properties dialog shows a filled square when
+      a multi-item selection disagrees about an attribute, and Apply leaves that bit alone.
+    -->
+    <Style TargetType="CheckBox">
+        <Setter Property="Foreground" Value="{StaticResource Theme.Text.Primary}"/>
+        <Setter Property="Background" Value="{StaticResource Theme.CheckBox.Background}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Theme.CheckBox.Border}"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource ThemeFocusVisual}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <StackPanel Orientation="Horizontal" Background="Transparent">
+                        <Border x:Name="Box" Width="16" Height="16" CornerRadius="2"
+                                VerticalAlignment="Center" SnapsToDevicePixels="True"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1">
+                            <Grid>
+                                <!-- Drawn as geometry rather than a font glyph so it stays crisp
+                                     at every DPI and doesn't depend on the icon font. -->
+                                <Path x:Name="Tick" Visibility="Collapsed"
+                                      Data="M 2.5,6.5 L 5.5,9.5 L 11,3.5"
+                                      Stroke="{StaticResource Theme.CheckBox.Glyph}" StrokeThickness="1.6"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      StrokeLineJoin="Round"/>
+                                <Rectangle x:Name="Dash" Visibility="Collapsed"
+                                           Width="8" Height="8" RadiusX="1" RadiusY="1"
+                                           Fill="{StaticResource Theme.CheckBox.Glyph}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                        <ContentPresenter Margin="7,0,0,0" VerticalAlignment="Center"
+                                          RecognizesAccessKey="True"/>
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Tick" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="Box" Property="Background"
+                                    Value="{StaticResource Theme.CheckBox.CheckedBackground}"/>
+                            <Setter TargetName="Box" Property="BorderBrush"
+                                    Value="{StaticResource Theme.CheckBox.CheckedBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="{x:Null}">
+                            <Setter TargetName="Dash" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="Box" Property="Background"
+                                    Value="{StaticResource Theme.CheckBox.CheckedBackground}"/>
+                            <Setter TargetName="Box" Property="BorderBrush"
+                                    Value="{StaticResource Theme.CheckBox.CheckedBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Box" Property="BorderBrush"
+                                    Value="{StaticResource Theme.Border.Focus}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{StaticResource Theme.Text.Disabled}"/>
+                            <Setter TargetName="Box" Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="ThemeComboToggle" TargetType="ToggleButton">
+        <Setter Property="OverridesDefaultStyle" Value="True"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="ClickMode" Value="Press"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Bd" Background="{StaticResource Theme.Input.Background}"
+                            BorderBrush="{StaticResource Theme.Input.Border}"
+                            BorderThickness="1" CornerRadius="2" SnapsToDevicePixels="True">
+                        <Path x:Name="Arrow" HorizontalAlignment="Right" VerticalAlignment="Center"
+                              Margin="0,0,9,0" Data="M 0,0 L 4,4 L 8,0"
+                              Stroke="{StaticResource Theme.Text.Secondary}" StrokeThickness="1.3"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Arrow" Property="Stroke"
+                                    Value="{StaticResource Theme.Text.Primary}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush"
+                                    Value="{StaticResource Theme.Border.Focus}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="ComboBoxItem">
+        <Setter Property="Foreground" Value="{StaticResource Theme.Menu.Foreground}"/>
+        <Setter Property="Padding" Value="8,5"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBoxItem">
+                    <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsHighlighted" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.Menu.HoverBackground}"/>
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource Theme.Menu.HoverForeground}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource Theme.Menu.DisabledForeground}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- The app's first ComboBox arrives with the theme picker, so this is written from scratch.
+         Non-editable only: nothing here needs a typable combo. -->
+    <Style TargetType="ComboBox">
+        <Setter Property="Foreground" Value="{StaticResource Theme.Input.Foreground}"/>
+        <Setter Property="Background" Value="{StaticResource Theme.Input.Background}"/>
+        <Setter Property="MinHeight" Value="26"/>
+        <Setter Property="Padding" Value="8,3,26,3"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource ThemeFocusVisual}"/>
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBox">
+                    <Grid>
+                        <ToggleButton x:Name="PART_Toggle" Style="{StaticResource ThemeComboToggle}"
+                                      IsChecked="{Binding IsDropDownOpen, Mode=TwoWay,
+                                                          RelativeSource={RelativeSource TemplatedParent}}"/>
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          Content="{TemplateBinding SelectionBoxItem}"
+                                          ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                          ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                          VerticalAlignment="Center" IsHitTestVisible="False"/>
+                        <Popup x:Name="PART_Popup" Placement="Bottom" AllowsTransparency="True"
+                               Focusable="False" PopupAnimation="None"
+                               IsOpen="{TemplateBinding IsDropDownOpen}">
+                            <Border Background="{StaticResource Theme.Menu.Background}"
+                                    BorderBrush="{StaticResource Theme.Menu.Border}"
+                                    BorderThickness="1" Margin="0,2,0,0" SnapsToDevicePixels="True"
+                                    MinWidth="{Binding ActualWidth, ElementName=PART_Toggle}"
+                                    MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                </ScrollViewer>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{StaticResource Theme.Text.Disabled}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="ThemeSliderThumb" TargetType="Thumb">
+        <Setter Property="OverridesDefaultStyle" Value="True"/>
+        <Setter Property="Width" Value="12"/>
+        <Setter Property="Height" Value="12"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Ellipse x:Name="Knob" Fill="{StaticResource Theme.Slider.Thumb}"/>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Knob" Property="Fill"
+                                    Value="{StaticResource Theme.Slider.ThumbHover}"/>
+                        </Trigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="Knob" Property="Fill"
+                                    Value="{StaticResource Theme.Slider.ThumbHover}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Both sliders in the app (thumbnail size, scroll speed) are horizontal, so only that
+         orientation is templated; a vertical one would fall back to the stock look. -->
+    <Style TargetType="Slider">
+        <Setter Property="MinHeight" Value="20"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource ThemeFocusVisual}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Slider">
+                    <Grid Background="Transparent">
+                        <Border Height="3" CornerRadius="2" VerticalAlignment="Center"
+                                Background="{StaticResource Theme.Slider.Track}"/>
+                        <Track x:Name="PART_Track">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="Slider.DecreaseLarge" Focusable="False"
+                                              Style="{StaticResource ThemeInvisibleRepeatButton}"/>
+                            </Track.DecreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb Style="{StaticResource ThemeSliderThumb}"/>
+                            </Track.Thumb>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="Slider.IncreaseLarge" Focusable="False"
+                                              Style="{StaticResource ThemeInvisibleRepeatButton}"/>
+                            </Track.IncreaseRepeatButton>
+                        </Track>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>

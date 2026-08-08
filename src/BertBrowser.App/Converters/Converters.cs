@@ -38,6 +38,35 @@ public sealed class NullToCollapsedConverter : IValueConverter
 }
 
 /// <summary>
+/// A <see cref="System.Windows.Media.Color"/> as a brush, for swatches in the theme editor whose
+/// colour comes from a view model rather than from the palette.
+/// </summary>
+public sealed class ColorToBrushConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is System.Windows.Media.Color color
+            ? new System.Windows.Media.SolidColorBrush(color)
+            : System.Windows.Media.Brushes.Transparent;
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>
+/// A colour's alpha channel as an opacity. <see cref="System.Windows.Media.Effects.DropShadowEffect"/>
+/// ignores the alpha of its <c>Color</c> and takes strength from <c>Opacity</c> instead, so the
+/// shadow token carries its strength in the alpha and this hands it to the right property.
+/// </summary>
+public sealed class ColorAlphaToOpacityConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is System.Windows.Media.Color color ? color.A / 255.0 : 1.0;
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>
 /// Tree nesting depth to a left margin, so indentation lives inside the row and the
 /// row's highlight/hit area can span the full width of the tree panel.
 /// </summary>

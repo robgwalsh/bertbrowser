@@ -1,3 +1,5 @@
+using BertBrowser.App.Theming;
+using Microsoft.Extensions.DependencyInjection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -9,7 +11,7 @@ using BertBrowser.Core.Layout;
 
 namespace BertBrowser.App.Views;
 
-public partial class MainWindow : Window
+public partial class MainWindow : ThemedWindow
 {
     private readonly ShellViewModel _shell;
     private readonly BertBrowser.App.Services.AppSettings _settings;
@@ -104,7 +106,7 @@ public partial class MainWindow : Window
 
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
-        var vm = new SettingsViewModel(_settings);
+        var vm = new SettingsViewModel(_settings, App.Services.GetRequiredService<IThemeService>());
         if (new SettingsWindow(vm) { Owner = this }.ShowDialog() == true)
         {
             // Sync the toolbar toggle to a "Show hidden items" change made in the dialog; its

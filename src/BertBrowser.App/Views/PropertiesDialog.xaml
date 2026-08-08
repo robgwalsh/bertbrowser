@@ -1,11 +1,14 @@
-<Window x:Class="BertBrowser.App.Views.PropertiesDialog"
+<v:ThemedWindow x:Class="BertBrowser.App.Views.PropertiesDialog"
+        xmlns:v="clr-namespace:BertBrowser.App.Views"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="{Binding Title}" Width="500" Height="640" MinWidth="400" MinHeight="440"
-        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource Theme.Surface.Background}"
+        TextElement.Foreground="{StaticResource Theme.Text.Primary}">
     <Window.Resources>
         <Style x:Key="PropName" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#666"/>
+            <Setter Property="Foreground" Value="{StaticResource Theme.Text.Secondary}"/>
             <Setter Property="Margin" Value="0,3,12,3"/>
             <Setter Property="VerticalAlignment" Value="Top"/>
         </Style>
@@ -27,7 +30,7 @@
                        VerticalAlignment="Center" TextWrapping="Wrap"/>
         </StackPanel>
 
-        <Border DockPanel.Dock="Top" Background="#FFF4E5" BorderBrush="#E6C079" BorderThickness="1"
+        <Border DockPanel.Dock="Top" Background="{StaticResource Theme.Warning.Background}" BorderBrush="{StaticResource Theme.Warning.Border}" BorderThickness="1"
                 CornerRadius="3" Padding="8,6" Margin="0,0,0,8"
                 Visibility="{Binding ErrorMessage, Converter={StaticResource NullToCollapsed}}">
             <TextBlock Text="{Binding ErrorMessage}" TextWrapping="Wrap"/>
@@ -91,7 +94,7 @@
                                         Command="{Binding ApplyAttributesCommand}"
                                         ToolTip="{Binding AttributesHint}"/>
                             </StackPanel>
-                            <TextBlock Foreground="#666" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
+                            <TextBlock Foreground="{StaticResource Theme.Text.Secondary}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
                                        Text="A filled box means the selected items differ; click it through to a checked or cleared state to apply that to all of them."
                                        Visibility="{Binding IsMultiple, Converter={StaticResource BoolToVisibility}}"/>
                         </StackPanel>
@@ -126,7 +129,7 @@
                                  Visibility="{Binding FolderCountsDisplay, Converter={StaticResource NullToCollapsed}}"/>
 
                         <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SizeComputedDisplay, Mode=OneWay}"
-                                 Style="{StaticResource PropValue}" Foreground="#666" FontSize="11"
+                                 Style="{StaticResource PropValue}" Foreground="{StaticResource Theme.Text.Secondary}" FontSize="11"
                                  Visibility="{Binding SizeComputedDisplay, Converter={StaticResource NullToCollapsed}}"/>
 
                         <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Vertical" Margin="0,4,0,0">
@@ -139,7 +142,7 @@
                             <StackPanel Orientation="Vertical" Margin="0,6,0,0"
                                         Visibility="{Binding IsCalculating, Converter={StaticResource BoolToVisibility}}">
                                 <ProgressBar IsIndeterminate="True" Height="4" Margin="0,0,0,4"/>
-                                <TextBlock Text="{Binding ScanProgressText}" Foreground="#666" FontSize="11"/>
+                                <TextBlock Text="{Binding ScanProgressText}" Foreground="{StaticResource Theme.Text.Secondary}" FontSize="11"/>
                             </StackPanel>
                         </StackPanel>
                     </Grid>
@@ -151,7 +154,7 @@
                     <StackPanel>
                         <ProgressBar IsIndeterminate="True" Height="4" Margin="0,2,0,6"
                                      Visibility="{Binding IsLoadingDetails, Converter={StaticResource BoolToVisibility}}"/>
-                        <TextBlock Text="No additional metadata" Foreground="#999"
+                        <TextBlock Text="No additional metadata" Foreground="{StaticResource Theme.Text.Muted}"
                                    Visibility="{Binding ShowNoMetadata, Converter={StaticResource BoolToVisibility}}"/>
                         <ItemsControl ItemsSource="{Binding DetailProperties}" Grid.IsSharedSizeScope="True">
                             <ItemsControl.ItemTemplate>
@@ -172,4 +175,4 @@
             </StackPanel>
         </ScrollViewer>
     </DockPanel>
-</Window>
+</v:ThemedWindow>

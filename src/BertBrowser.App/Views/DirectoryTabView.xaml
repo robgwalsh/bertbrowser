@@ -46,7 +46,7 @@
                                     <StackPanel Orientation="Horizontal">
                                         <Button Style="{StaticResource BreadcrumbButton}" Content="{Binding Name}"
                                                 Click="BreadcrumbSegment_Click" Tag="{Binding FullPath}"/>
-                                        <TextBlock Text="›" VerticalAlignment="Center" Foreground="Gray"/>
+                                        <TextBlock Text="›" VerticalAlignment="Center" Foreground="{StaticResource Theme.Text.Muted}"/>
                                     </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -78,7 +78,7 @@
                     </ToggleButton>
                     <TextBlock DockPanel.Dock="Left" FontFamily="{StaticResource SymbolFont}"
                                Text="&#xE721;" FontSize="13" Margin="8,0,6,0"
-                               VerticalAlignment="Center" Foreground="#666"/>
+                               VerticalAlignment="Center" Foreground="{StaticResource Theme.Text.Secondary}"/>
                     <Button DockPanel.Dock="Right" ToolTip="Clear search (Esc)"
                             Command="{Binding ClearSearchCommand}"
                             Style="{StaticResource SearchClearButton}">
@@ -95,7 +95,7 @@
                                  Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                                  KeyDown="SearchBox_KeyDown"
                                  ToolTip="Search files and folders — whole PC or this folder (Ctrl+F)"/>
-                        <TextBlock Text="Search files and folders" Foreground="Gray" Margin="4,0,0,0"
+                        <TextBlock Text="Search files and folders" Foreground="{StaticResource Theme.Text.Placeholder}" Margin="4,0,0,0"
                                    VerticalAlignment="Center" IsHitTestVisible="False">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
@@ -120,9 +120,9 @@
         </Grid>
 
         <!-- Error banner -->
-        <Border DockPanel.Dock="Top" Background="#FFF4E5" Padding="8,4"
+        <Border DockPanel.Dock="Top" Background="{StaticResource Theme.Warning.Background}" Padding="8,4"
                 Visibility="{Binding FileList.ErrorMessage, Converter={StaticResource NullToCollapsed}}">
-            <TextBlock Text="{Binding FileList.ErrorMessage}" Foreground="#8A6D3B" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding FileList.ErrorMessage}" Foreground="{StaticResource Theme.Warning.Foreground}" TextWrapping="Wrap"/>
         </Border>
 
         <Grid>
@@ -209,7 +209,7 @@
                             <GridViewColumnHeader Content="Folder" Tag="RelativePath"/>
                             <GridViewColumn.CellTemplate>
                                 <DataTemplate>
-                                    <TextBlock Text="{Binding RelativePath}" Foreground="Gray"/>
+                                    <TextBlock Text="{Binding RelativePath}" Opacity="0.7"/>
                                 </DataTemplate>
                             </GridViewColumn.CellTemplate>
                         </GridViewColumn>
@@ -250,7 +250,7 @@
             <!-- Inline empty state for searches with no hits -->
             <TextBlock IsHitTestVisible="False"
                        HorizontalAlignment="Center" VerticalAlignment="Center"
-                       FontSize="14" Foreground="Gray"
+                       FontSize="14" Foreground="{StaticResource Theme.Text.Muted}"
                        Text="{Binding FileList.EmptyMessage}"
                        Visibility="{Binding FileList.EmptyMessage, Converter={StaticResource NullToCollapsed}}"/>
         </Grid>

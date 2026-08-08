@@ -24,6 +24,16 @@ public sealed class AppSettings
 
     public List<CustomCommandDefinition> CustomCommands { get; set; } = new();
 
+    /// <summary>Active theme: a built-in id ("dark-plus", "light-plus", …) or one of the user's own
+    /// themes from <see cref="AppPaths.ThemesDir"/>. Null means the user has never picked one, which
+    /// is what lets the first launch honour a Windows high-contrast setting instead of overriding
+    /// it — so this stays nullable rather than defaulting to "dark-plus".</summary>
+    public string? ThemeId { get; set; }
+
+    /// <summary>Per-token colour tweaks, keyed by theme id and then by token. Kept per theme so
+    /// switching away and back doesn't discard the edits made to either one.</summary>
+    public Dictionary<string, Dictionary<string, string>> ThemeOverrides { get; set; } = new();
+
     private static string FilePath => AppPaths.SettingsPath;
 
     public static AppSettings Load()
