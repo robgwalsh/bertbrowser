@@ -121,6 +121,10 @@ Things that look done but aren't unless you check: `GridViewColumnHeader` needs 
 (or column resize breaks silently) and a blank template for `Role=Padding` (or a classic strip shows
 after the last column); menu separators resolve through `MenuItem.SeparatorStyleKey`, not an
 implicit `Separator` style; `TextBox` needs explicit `CaretBrush`/`SelectionBrush`.
+A retemplated `ComboBox` needs `ItemTemplate`, **not** `DisplayMemberPath`: the closed box renders
+`SelectionBoxItemTemplate`, which WPF derives from `ItemTemplate` alone — the `DisplayMemberPath`
+fallback lives in the stock presenter and disappears with the stock template, leaving the box showing
+the item's `ToString()`. The theme pickers share `ThemeNameTemplate` from `Resources/Styles.xaml`.
 `ThemeSystemColors` overrides the `SystemColors.*Key` entries as a net for anything not retemplated.
 `MessageBox` is OS-drawn and cannot be themed — use `Views/MessageDialog` instead.
 

@@ -19,8 +19,10 @@
     <DockPanel Margin="12">
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
             <TextBlock DockPanel.Dock="Left" Text="Theme" VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <ComboBox ItemsSource="{Binding Themes}" DisplayMemberPath="Name"
+            <!-- ItemTemplate, not DisplayMemberPath — see ThemeNameTemplate in Styles.xaml. -->
+            <ComboBox ItemsSource="{Binding Themes}"
                       SelectedItem="{Binding SelectedTheme, Mode=TwoWay}"
+                      ItemTemplate="{StaticResource ThemeNameTemplate}"
                       AutomationProperties.Name="Theme"/>
         </DockPanel>
 

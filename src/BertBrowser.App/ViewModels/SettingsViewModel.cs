@@ -47,11 +47,42 @@ public sealed partial class CustomCommandItemViewModel : ObservableObject
     };
 }
 
+/// <summary>A page of the Settings dialog, i.e. one entry in its left-hand navigation list.</summary>
+public enum SettingsCategory
+{
+    General,
+    Appearance,
+    Commands,
+}
+
+/// <summary>One row of the navigation list. <see cref="Glyph"/> is a Segoe Fluent Icons codepoint.</summary>
+public sealed class SettingsCategoryViewModel
+{
+    public SettingsCategoryViewModel(SettingsCategory id, string name, string glyph)
+    {
+        Id = id;
+        Name = name;
+        Glyph = glyph;
+    }
+
+    public SettingsCategory Id { get; }
+
+    public string Name { get; }
+
+    public string Glyph { get; }
+}
+
 public sealed partial class SettingsViewModel : ObservableObject
 {
     private readonly AppSettings _settings;
 
     public ObservableCollection<CustomCommandItemViewModel> Commands { get; }
+
+    /// <summary>The navigation list on the left; exactly one page is shown at a time.</summary>
+    public IReadOnlyList<SettingsCategoryViewModel> Categories { get; }
+
+    [ObservableProperty]
+    private SettingsCategoryViewModel _selectedCategory;
 
     [ObservableProperty]
     private CustomCommandItemViewModel? _selectedCommand;
@@ -73,6 +104,14 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public SettingsViewModel(AppSettings settings, IThemeService theme)
     {
+        Categories = new[]
+        {
+            new SettingsCategoryViewModel(SettingsCategory.General, "General", "\uE713"),
+            new SettingsCategoryViewModel(SettingsCategory.Appearance, "Appearance", "\uE790"),
+            new SettingsCategoryViewModel(SettingsCategory.Commands, "Commands", "\uE8A7"),
+        };
+        _selectedCategory = Categories[0];
+
         Appearance = new AppearanceViewModel(theme);
         _settings = settings;
         ShowHiddenItems = settings.ShowHiddenItems;
@@ -99,19 +138,31 @@ public sealed partial class SettingsViewModel : ObservableObject
         SelectedCommand = Commands.Count > 0 ? Commands[Math.Min(index, Commands.Count - 1)] : null;
     }
 
+    /// <summary>Brings a page to the front — the only way to point at something now that the
+    /// dialog shows one category at a time.</summary>
+    public void ShowCategory(SettingsCategory category)
+    {
+        SelectedCategory = Categories.First(c => c.Id == category);
+    }
+
     /// <summary>Validates and persists all commands to settings.json.</summary>
     public bool TrySave(out string? error)
     {
         foreach (var command in Commands)
         {
+            string? problem = null;
             if (string.IsNullOrWhiteSpace(command.Name) || string.IsNullOrWhiteSpace(command.Command))
+                problem = "Every command needs a name and a program.";
+            else if (!command.AppliesToFiles && !command.AppliesToDirectories)
+                problem = $"'{command.Name}' must apply to files, folders, or both.";
+
+            if (problem is not null)
             {
-                error = "Every command needs a name and a program.";
-                return false;
-            }
-            if (!command.AppliesToFiles && !command.AppliesToDirectories)
-            {
-                error = $"'{command.Name}' must apply to files, folders, or both.";
+                // The offending command may be on a page the user cannot see, so go there first —
+                // otherwise the message names a field that is nowhere on screen.
+                SelectedCommand = command;
+                ShowCategory(SettingsCategory.Commands);
+                error = problem;
                 return false;
             }
         }

@@ -33,6 +33,8 @@ public partial class SettingsWindow : ThemedWindow
     /// </summary>
     private void CustomiseTheme_Click(object sender, RoutedEventArgs e)
     {
+        // TrySave puts the offending command on screen itself, which is what makes leaving the
+        // Appearance page acceptable here.
         if (!_vm.TrySave(out var error))
         {
             MessageDialog.Show(this, error ?? "", "Settings", MessageDialogKind.Warning);

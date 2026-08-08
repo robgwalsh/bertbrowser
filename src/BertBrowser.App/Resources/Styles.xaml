@@ -26,6 +26,17 @@
     <FontFamily x:Key="SymbolFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
     <!--
+      The theme picker's rows, in Settings and in the theme editor. This has to be an ItemTemplate
+      rather than DisplayMemberPath: a ComboBox renders its closed state from
+      SelectionBoxItemTemplate, and WPF only derives that from ItemTemplate. DisplayMemberPath is
+      honoured by the stock template's presenter alone, so under our own template (Theme/Controls/
+      Inputs.xaml) the closed box falls back to ToString() and shows the type name.
+    -->
+    <DataTemplate x:Key="ThemeNameTemplate">
+        <TextBlock Text="{Binding Name}"/>
+    </DataTemplate>
+
+    <!--
       Colours come from the theme (Resources/Theme/Theme.xaml), which is merged ahead of this file
       in App.xaml. The Theme.* brushes are shared, mutable instances: switching themes recolours
       them in place, so nothing here needs DynamicResource.

@@ -2,131 +2,237 @@
         xmlns:v="clr-namespace:BertBrowser.App.Views"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Settings" Width="640" Height="560"
+        xmlns:vm="clr-namespace:BertBrowser.App.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}"
+        Title="Settings" Width="740" Height="560" MinWidth="580" MinHeight="420"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{StaticResource Theme.Surface.Background}"
         TextElement.Foreground="{StaticResource Theme.Text.Primary}">
-    <DockPanel Margin="10">
-        <!--
-          Appearance sits outside the dialog's Save/Cancel contract on purpose: a theme you cannot
-          see until you press Save is not a theme you can choose. Picking one applies and persists
-          immediately, which is why the note below says so.
-        -->
-        <TextBlock DockPanel.Dock="Top" Text="Appearance" FontWeight="SemiBold" Margin="0,0,0,6"/>
-        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2">
-            <TextBlock Text="Theme" VerticalAlignment="Center" Margin="0,0,12,0"/>
-            <Button DockPanel.Dock="Right" Content="Customise colours…" Margin="8,0,0,0"
-                    Click="CustomiseTheme_Click"
-                    ToolTip="Edit any colour in this theme and save it as your own"/>
-            <ComboBox ItemsSource="{Binding Appearance.Themes}" DisplayMemberPath="Name"
-                      SelectedItem="{Binding Appearance.SelectedTheme, Mode=TwoWay}"
-                      AutomationProperties.AutomationId="ThemePicker"
-                      AutomationProperties.Name="Theme"/>
-        </DockPanel>
-        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{StaticResource Theme.Text.Secondary}"
-                   Margin="0,4,0,4"
-                   Text="Appearance changes apply straight away — they are not held until you press Save."/>
-        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,12"
-                   Foreground="{StaticResource Theme.Warning.Foreground}"
-                   Text="{Binding Appearance.IssueText}"
-                   Visibility="{Binding Appearance.IssueText, Converter={StaticResource NullToCollapsed}}"/>
+    <v:ThemedWindow.Resources>
+        <Style x:Key="PageHeading" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,0,14"/>
+        </Style>
 
-        <!-- General options -->
-        <TextBlock DockPanel.Dock="Top" Text="General" FontWeight="SemiBold" Margin="0,0,0,4"/>
-        <CheckBox DockPanel.Dock="Top" Content="Show hidden items" Margin="0,0,0,2"
-                  IsChecked="{Binding ShowHiddenItems}"/>
-        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{StaticResource Theme.Text.Secondary}" Margin="0,0,0,10"
-                   Text="Show hidden files and folders in listings and search results (dimmed, like Explorer)."/>
+        <!-- The explanatory line under a control. -->
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Foreground" Value="{StaticResource Theme.Text.Secondary}"/>
+            <Setter Property="Margin" Value="0,4,0,16"/>
+        </Style>
 
-        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2">
-            <TextBlock Text="Vertical scroll speed" VerticalAlignment="Center"/>
-            <TextBlock DockPanel.Dock="Right" Text="{Binding ScrollSpeedText}" VerticalAlignment="Center"
-                       HorizontalAlignment="Right" MinWidth="36" Foreground="{StaticResource Theme.Text.Secondary}"/>
-            <Slider Margin="12,0,8,0" VerticalAlignment="Center" Minimum="1" Maximum="6"
-                    TickFrequency="0.5" IsSnapToTickEnabled="True"
-                    Value="{Binding ScrollSpeed, Mode=TwoWay}"/>
-        </DockPanel>
-        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{StaticResource Theme.Text.Secondary}" Margin="0,0,0,12"
-                   Text="How fast the mouse wheel scrolls the file list (1× = system default)."/>
+        <Style x:Key="NavItem" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+            <Setter Property="Padding" Value="10,7"/>
+        </Style>
+    </v:ThemedWindow.Resources>
 
-        <TextBlock DockPanel.Dock="Top" Text="Custom context menu commands" FontWeight="SemiBold"/>
-        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{StaticResource Theme.Text.Secondary}" Margin="0,4,0,10"
-                   Text="These commands appear in the right-click menu of the file list and folder tree. In Arguments, {path}, {name} and {dir} expand per item — quote tokens that may contain spaces, e.g. &quot;{path}&quot;. Blank arguments default to the quoted full path."/>
+    <DockPanel>
+        <Border DockPanel.Dock="Bottom" Padding="14,10"
+                Background="{StaticResource Theme.Surface.Background}"
+                BorderThickness="0,1,0,0" BorderBrush="{StaticResource Theme.Border.Subtle}">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Save" Padding="16,4" Margin="0,0,6,0" IsDefault="True" Click="Save_Click"/>
+                <Button Content="Cancel" Padding="16,4" IsCancel="True"/>
+            </StackPanel>
+        </Border>
 
-        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
-            <Button Content="Save" Padding="16,4" Margin="0,0,6,0" IsDefault="True" Click="Save_Click"/>
-            <Button Content="Cancel" Padding="16,4" IsCancel="True"/>
-        </StackPanel>
+        <!-- Navigation. One page is visible at a time; the pages themselves are below. -->
+        <Border DockPanel.Dock="Left" Width="172"
+                Background="{StaticResource Theme.Surface.Background}"
+                BorderThickness="0,0,1,0" BorderBrush="{StaticResource Theme.Border.Subtle}">
+            <ListBox ItemsSource="{Binding Categories}"
+                     SelectedItem="{Binding SelectedCategory, Mode=TwoWay}"
+                     Background="Transparent" BorderThickness="0" Margin="0,8,0,0"
+                     ItemContainerStyle="{StaticResource NavItem}"
+                     AutomationProperties.AutomationId="SettingsCategoryList"
+                     AutomationProperties.Name="Settings categories">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal">
+                            <!-- Only the glyph gets the symbol font; the label would be tofu. -->
+                            <TextBlock Text="{Binding Glyph}" FontFamily="{StaticResource SymbolFont}"
+                                       FontSize="15" Width="24" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Border>
 
-        <Grid>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="200"/>
-                <ColumnDefinition Width="12"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
+        <Border Background="{StaticResource Theme.Window.Background}">
+            <Grid Margin="18,16,18,16">
 
-            <!-- Command list -->
-            <DockPanel Grid.Column="0">
-                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
-                    <Button Content="Add" Padding="12,3" Margin="0,0,6,0" Command="{Binding AddCommand}"/>
-                    <Button Content="Remove" Padding="12,3" Command="{Binding RemoveCommand}"/>
+                <!-- General -->
+                <StackPanel>
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedCategory.Id}"
+                                             Value="{x:Static vm:SettingsCategory.General}">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <TextBlock Text="General" Style="{StaticResource PageHeading}"/>
+
+                    <CheckBox Content="Show hidden items" IsChecked="{Binding ShowHiddenItems}"/>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Show hidden files and folders in listings and search results (dimmed, like Explorer)."/>
+
+                    <DockPanel>
+                        <TextBlock Text="Vertical scroll speed" VerticalAlignment="Center"/>
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding ScrollSpeedText}" VerticalAlignment="Center"
+                                   HorizontalAlignment="Right" MinWidth="36"
+                                   Foreground="{StaticResource Theme.Text.Secondary}"/>
+                        <Slider Margin="12,0,8,0" VerticalAlignment="Center" Minimum="1" Maximum="6"
+                                TickFrequency="0.5" IsSnapToTickEnabled="True"
+                                Value="{Binding ScrollSpeed, Mode=TwoWay}"/>
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="How fast the mouse wheel scrolls the file list (1× = system default)."/>
                 </StackPanel>
-                <ListBox ItemsSource="{Binding Commands}" SelectedItem="{Binding SelectedCommand, Mode=TwoWay}">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding Name}" Margin="2"/>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-            </DockPanel>
 
-            <!-- Editor for the selected command -->
-            <Grid Grid.Column="2" VerticalAlignment="Top">
-                <Grid.Style>
-                    <Style TargetType="Grid">
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding SelectedCommand}" Value="{x:Null}">
-                                <Setter Property="IsEnabled" Value="False"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </Grid.Style>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
+                <!--
+                  Appearance sits outside the dialog's Save/Cancel contract on purpose: a theme you
+                  cannot see until you press Save is not a theme you can choose. Picking one applies
+                  and persists immediately, which is why the note below says so.
+                -->
+                <StackPanel>
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedCategory.Id}"
+                                             Value="{x:Static vm:SettingsCategory.Appearance}">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
 
-                <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                <TextBox Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
-                         VerticalContentAlignment="Center"
-                         Text="{Binding SelectedCommand.Name, UpdateSourceTrigger=PropertyChanged}"/>
+                    <TextBlock Text="Appearance" Style="{StaticResource PageHeading}"/>
 
-                <TextBlock Grid.Row="1" Grid.Column="0" Text="Program:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                <TextBox Grid.Row="1" Grid.Column="1" Margin="0,0,6,8"
-                         VerticalContentAlignment="Center"
-                         Text="{Binding SelectedCommand.Command, UpdateSourceTrigger=PropertyChanged}"/>
-                <Button Grid.Row="1" Grid.Column="2" Content="…" Width="28" Margin="0,0,0,8"
-                        ToolTip="Browse for a program" Click="Browse_Click"/>
-
-                <TextBlock Grid.Row="2" Grid.Column="0" Text="Arguments:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                <TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
-                         VerticalContentAlignment="Center"
-                         ToolTip="{}{path} = full path, {name} = file name, {dir} = parent directory"
-                         Text="{Binding SelectedCommand.Arguments, UpdateSourceTrigger=PropertyChanged}"/>
-
-                <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal">
-                    <CheckBox Content="Show for files" IsChecked="{Binding SelectedCommand.AppliesToFiles}"
-                              Margin="0,0,16,0"/>
-                    <CheckBox Content="Show for folders" IsChecked="{Binding SelectedCommand.AppliesToDirectories}"/>
+                    <DockPanel>
+                        <TextBlock Text="Theme" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                        <Button DockPanel.Dock="Right" Content="Customise colours…" Margin="8,0,0,0"
+                                Click="CustomiseTheme_Click"
+                                ToolTip="Edit any colour in this theme and save it as your own"/>
+                        <!-- ItemTemplate, not DisplayMemberPath: the themed ComboBox template drives
+                             its closed state from SelectionBoxItemTemplate, which WPF only fills in
+                             from ItemTemplate. With DisplayMemberPath the box shows ToString(). -->
+                        <ComboBox ItemsSource="{Binding Appearance.Themes}"
+                                  SelectedItem="{Binding Appearance.SelectedTheme, Mode=TwoWay}"
+                                  ItemTemplate="{StaticResource ThemeNameTemplate}"
+                                  AutomationProperties.AutomationId="ThemePicker"
+                                  AutomationProperties.Name="Theme"/>
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Appearance changes apply straight away — they are not held until you press Save."/>
+                    <TextBlock TextWrapping="Wrap" Margin="0,0,0,12"
+                               Foreground="{StaticResource Theme.Warning.Foreground}"
+                               Text="{Binding Appearance.IssueText}"
+                               Visibility="{Binding Appearance.IssueText, Converter={StaticResource NullToCollapsed}}"/>
                 </StackPanel>
+
+                <!-- Custom context menu commands -->
+                <DockPanel>
+                    <DockPanel.Style>
+                        <Style TargetType="DockPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedCategory.Id}"
+                                             Value="{x:Static vm:SettingsCategory.Commands}">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DockPanel.Style>
+
+                    <TextBlock DockPanel.Dock="Top" Text="Custom context menu commands"
+                               Style="{StaticResource PageHeading}" Margin="0,0,0,4"/>
+                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,12"
+                               Foreground="{StaticResource Theme.Text.Secondary}"
+                               Text="These commands appear in the right-click menu of the file list and folder tree. In Arguments, {path}, {name} and {dir} expand per item — quote tokens that may contain spaces, e.g. &quot;{path}&quot;. Blank arguments default to the quoted full path."/>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Command list -->
+                        <DockPanel Grid.Column="0">
+                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+                                <Button Content="Add" Padding="12,3" Margin="0,0,6,0" Command="{Binding AddCommand}"/>
+                                <Button Content="Remove" Padding="12,3" Command="{Binding RemoveCommand}"/>
+                            </StackPanel>
+                            <ListBox ItemsSource="{Binding Commands}" SelectedItem="{Binding SelectedCommand, Mode=TwoWay}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Name}" Margin="2"/>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+
+                        <!-- Editor for the selected command -->
+                        <Grid Grid.Column="2" VerticalAlignment="Top">
+                            <Grid.Style>
+                                <Style TargetType="Grid">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedCommand}" Value="{x:Null}">
+                                            <Setter Property="IsEnabled" Value="False"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Style>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                            <TextBox Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
+                                     VerticalContentAlignment="Center"
+                                     Text="{Binding SelectedCommand.Name, UpdateSourceTrigger=PropertyChanged}"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Program:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" Margin="0,0,6,8"
+                                     VerticalContentAlignment="Center"
+                                     Text="{Binding SelectedCommand.Command, UpdateSourceTrigger=PropertyChanged}"/>
+                            <Button Grid.Row="1" Grid.Column="2" Content="…" Width="28" Margin="0,0,0,8"
+                                    ToolTip="Browse for a program" Click="Browse_Click"/>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Arguments:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                            <TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
+                                     VerticalContentAlignment="Center"
+                                     ToolTip="{}{path} = full path, {name} = file name, {dir} = parent directory"
+                                     Text="{Binding SelectedCommand.Arguments, UpdateSourceTrigger=PropertyChanged}"/>
+
+                            <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal">
+                                <CheckBox Content="Show for files" IsChecked="{Binding SelectedCommand.AppliesToFiles}"
+                                          Margin="0,0,16,0"/>
+                                <CheckBox Content="Show for folders" IsChecked="{Binding SelectedCommand.AppliesToDirectories}"/>
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </DockPanel>
             </Grid>
-        </Grid>
+        </Border>
     </DockPanel>
 </v:ThemedWindow>

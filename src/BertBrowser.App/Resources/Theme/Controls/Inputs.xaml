@@ -176,7 +176,12 @@
     </Style>
 
     <!-- The app's first ComboBox arrives with the theme picker, so this is written from scratch.
-         Non-editable only: nothing here needs a typable combo. -->
+         Non-editable only: nothing here needs a typable combo.
+
+         Consumers must set ItemTemplate, not DisplayMemberPath. The closed box below renders
+         SelectionBoxItemTemplate, which WPF derives from ItemTemplate only; the DisplayMemberPath
+         fallback lives in the stock presenter and is lost the moment the template is replaced, so
+         the box would silently show the item's ToString(). -->
     <Style TargetType="ComboBox">
         <Setter Property="Foreground" Value="{StaticResource Theme.Input.Foreground}"/>
         <Setter Property="Background" Value="{StaticResource Theme.Input.Background}"/>
