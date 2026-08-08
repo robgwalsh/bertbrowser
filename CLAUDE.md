@@ -87,12 +87,15 @@ C# any more** — everything goes through a named token.
 - **`BertBrowser.Core.Theming`** holds the whole model, because it is the part worth testing:
   `ThemeToken` (the ~109 token keys plus editor metadata), `ThemeColor` (ARGB struct, hex parsing,
   HSV, WCAG luminance), `ThemeDefinition`/`ThemeJson` (the on-disk format for user themes),
-  `ThemeCatalog` (the five built-ins **as C# data**, not files, so every shipped colour is visible
+  `ThemeCatalog` (the built-ins **as C# data**, not files, so every shipped colour is visible
   to xUnit), and `ThemeResolver`. Resolution **never throws**: an unknown token, a bad hex literal,
   a missing or cyclic base theme each become a `ThemeIssue` and the caller still gets a complete
-  theme. Dark+ and Light+ are roots defining every token; Monokai, Solarized Dark and High Contrast
-  Dark are sparse sheets over Dark+, resolved through the same inheritance path a user's own theme
-  uses — so that path is exercised by everything we ship.
+  theme. Dark+ and Light+ are roots defining every token; everything else (Tokyo Night, Catppuccin
+  Mocha, Dracula, Nord, Gruvbox Dark, Synthwave, Monokai, Solarized Dark and High Contrast Dark over
+  Dark+; Catppuccin Latte over Light+) is a sparse sheet, resolved through the same inheritance path
+  a user's own theme uses — so that path is exercised by everything we ship. A new built-in is a
+  definition plus an entry in `BuiltIns`, and `ThemeCatalogTests` runs the whole contrast suite over
+  it, so a palette's published colours often need darkening before they clear AA against white text.
 - **`BertBrowser.App.Theming`** materialises it. `ThemeTokenDictionary` is a `ResourceDictionary`
   holding one brush per token; `ThemeService` resolves a definition and recolours them.
 
