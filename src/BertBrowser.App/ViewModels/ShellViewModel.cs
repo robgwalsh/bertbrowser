@@ -1,12 +1,10 @@
-using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using BertBrowser.App.Services;
-using BertBrowser.Core.Data;
-using BertBrowser.Core.Models;
+using BertBrowser.Core.Layout;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Mft;
@@ -14,20 +12,21 @@ using BertBrowser.Core.Services.Transfer;
 
 namespace BertBrowser.App.ViewModels;
 
-public sealed record BreadcrumbSegment(string Name, string FullPath);
-
-public sealed partial class ShellViewModel : ObservableObject
+/// <summary>
+/// The application shell: everything shared by every open directory. The directories themselves
+/// live in <see cref="DirectoryTabViewModel"/>s — this owns the one folder tree, the one bookmark
+/// list, the browse settings, the transfer/undo slot, and knows which tab is active so the window
+/// chrome can follow it.
+/// </summary>
+public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 {
-    private readonly IDirectorySizeService _sizeService;
     private readonly ISearchService _searchService;
     private readonly IFileTransferService _fileTransfer;
     private readonly IMftIndexService _mftIndex;
     private readonly AppSettings _settings;
     private readonly TransferPlanner _transferPlanner;
     private readonly TransferExecutor _transferExecutor;
-
-    /// <summary>Reflects the current "Show hidden items" setting (may change while running).</summary>
-    private bool IncludeHidden => ShowHiddenItems;
+    private readonly PaneFactory _factory;
 
     /// <summary>"Show hidden items" browse setting, toggled from the toolbar and the Settings
     /// dialog. Mirrors <see cref="AppSettings.ShowHiddenItems"/>; hidden files/folders — and now
@@ -40,104 +39,69 @@ public sealed partial class ShellViewModel : ObservableObject
         _settings.ShowHiddenItems = value;
         _settings.Save();
         Bookmarks.SetShowHidden(value);
-        _ = RefreshViewAsync();
+        _ = RefreshAllTabsAsync();
     }
 
-    private readonly Stack<string> _backStack = new();
-    private readonly Stack<string> _forwardStack = new();
-    private CancellationTokenSource _navigationCts = new();
-    private CancellationTokenSource _searchDebounceCts = new();
-
-    public FileListViewModel FileList { get; }
     public FolderTreeViewModel Tree { get; }
     public BookmarksViewModel Bookmarks { get; }
 
-    /// <summary>Raised after navigation so the view can select and scroll to a specific
-    /// file (e.g. when a bookmarked file is opened).</summary>
-    public event Action<string>? RevealFileRequested;
+    /// <summary>How the open panes divide the window. Rebuilt by the view whenever
+    /// <see cref="LayoutChanged"/> fires — never on plain navigation.</summary>
+    public ILayoutNode<PaneViewModel> Layout { get; private set; }
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(BreadcrumbSegments), nameof(CanGoUp))]
-    private string _currentPath = "";
+    /// <summary>Raised after a split or a close, i.e. only when the arrangement itself changed.</summary>
+    public event Action? LayoutChanged;
 
-    [ObservableProperty]
-    private string _statusText = "Ready";
+    /// <summary>Asks the view to put real keyboard focus in a pane, after a split or an F6.</summary>
+    public event Action<PaneViewModel>? PaneFocusRequested;
 
-    /// <summary>"N items selected (size)" for the file-list selection; empty when nothing is
-    /// selected. Kept beside <see cref="StatusText"/> so a selection never overwrites the
-    /// navigation/search message.</summary>
+    /// <summary>The pane the window chrome (toolbar, status bar, folder tree) follows.</summary>
     [ObservableProperty]
-    private string _selectionSummary = "";
+    private PaneViewModel _activePane;
 
-    [ObservableProperty]
-    private string _searchText = "";
-
-    /// <summary>Search scope: true = whole PC (the MFT global index), false = the current
-    /// folder subtree. Defaults to whole-PC, the point of the MFT index.</summary>
-    [ObservableProperty]
-    private bool _searchGlobal = true;
+    /// <summary>The directory the window chrome follows: the visible tab of the active pane.</summary>
+    public DirectoryTabViewModel ActiveTab => ActivePane.ActiveTab!;
 
     /// <summary>MFT indexing state for the status bar ("Indexing C:…"); empty when idle.</summary>
     [ObservableProperty]
     private string _indexingStatus = "";
 
-    partial void OnSearchGlobalChanged(bool value)
-    {
-        if (SearchQuery.Parse(SearchText) is not null)
-            _ = RefreshViewAsync();
-    }
-
-    public bool CanGoBack => _backStack.Count > 0;
-    public bool CanGoForward => _forwardStack.Count > 0;
-    public bool CanGoUp => CurrentPath.Length > 0 && Path.GetDirectoryName(CurrentPath) is not null;
-
-    public IReadOnlyList<BreadcrumbSegment> BreadcrumbSegments
-    {
-        get
-        {
-            var segments = new List<BreadcrumbSegment>();
-            if (CurrentPath.Length == 0) return segments;
-
-            var root = Path.GetPathRoot(CurrentPath)!;
-            segments.Add(new BreadcrumbSegment(root.TrimEnd('\\'), root));
-            var rest = CurrentPath[root.Length..];
-            var acc = root;
-            foreach (var part in rest.Split('\\', StringSplitOptions.RemoveEmptyEntries))
-            {
-                acc = Path.Combine(acc, part);
-                segments.Add(new BreadcrumbSegment(part, acc));
-            }
-            return segments;
-        }
-    }
+    /// <summary>Raised when the active tab's folder changes (or a different tab or pane becomes
+    /// active), so the window can reveal it in the folder tree. Only ever raised for the active
+    /// tab, which is what stops several open directories fighting over the tree's selection and
+    /// scroll position.</summary>
+    public event Action<string>? ActiveLocationChanged;
 
     public ShellViewModel(
         IFileSystemService fileSystem,
-        IDirectorySizeService sizeService,
         ISearchService searchService,
         IFileTransferService fileTransfer,
         IBookmarkService bookmarkService,
         IMftIndexService mftIndex,
-        DirSizeRepository dirSizeRepository,
         TransferPlanner transferPlanner,
         TransferExecutor transferExecutor,
+        PaneFactory factory,
         AppSettings settings)
     {
-        _sizeService = sizeService;
         _searchService = searchService;
         _fileTransfer = fileTransfer;
         _mftIndex = mftIndex;
         _transferPlanner = transferPlanner;
         _transferExecutor = transferExecutor;
+        _factory = factory;
         _settings = settings;
         _showHiddenItems = settings.ShowHiddenItems; // seed the field so the ctor doesn't refresh
 
-        FileList = new FileListViewModel(fileSystem, dirSizeRepository);
-        FileList.PropertyChanged += OnFileListPropertyChanged;
         Tree = new FolderTreeViewModel(fileSystem);
         Bookmarks = new BookmarksViewModel(bookmarkService);
 
-        Tree.DirectorySelected += path => _ = NavigateToAsync(path);
+        _activePane = new PaneViewModel(_factory, this);
+        _activePane.AddTab("");
+        _activePane.IsActivePane = true;
+        _activePane.PropertyChanged += OnActivePanePropertyChanged;
+        Layout = new LayoutLeaf<PaneViewModel>(_activePane);
+
+        Tree.DirectorySelected += path => _ = ActiveTab.NavigateToAsync(path);
         _searchService.IndexRefreshed += OnIndexRefreshed;
         _mftIndex.IndexRefreshed += OnMftIndexRefreshed;
         _mftIndex.StatusChanged += OnMftStatusChanged;
@@ -156,10 +120,186 @@ public sealed partial class ShellViewModel : ObservableObject
         await Tree.LoadDrivesAsync();
 
         var start = StartPath ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        await NavigateToAsync(start);
+        await ActiveTab.NavigateToAsync(start);
 
         // Portable devices can be slow to enumerate; append them after the first view loads.
         await Tree.LoadDevicesAsync();
+    }
+
+    // --- Panes and layout (IPaneHost) ---
+
+    partial void OnActivePaneChanged(PaneViewModel? oldValue, PaneViewModel newValue)
+    {
+        if (oldValue is not null)
+        {
+            oldValue.IsActivePane = false;
+            oldValue.PropertyChanged -= OnActivePanePropertyChanged;
+        }
+        newValue.IsActivePane = true;
+        newValue.PropertyChanged += OnActivePanePropertyChanged;
+        OnPropertyChanged(nameof(ActiveTab));
+        if (newValue.ActiveTab is { } tab)
+            ActiveLocationChanged?.Invoke(tab.CurrentPath);
+    }
+
+    private void OnActivePanePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PaneViewModel.ActiveTab)) return;
+        // Every window-chrome binding hangs off ActiveTab, so switching tabs has to look like the
+        // shell's own property changed.
+        OnPropertyChanged(nameof(ActiveTab));
+    }
+
+    public void ActivatePane(PaneViewModel pane)
+    {
+        if (ReferenceEquals(pane, ActivePane)) return;
+        ActivePane = pane;
+    }
+
+    public bool CanClosePane => LayoutTree.Leaves(Layout).Skip(1).Any();
+
+    public void SplitPane(PaneViewModel pane, SplitOrientation orientation, string? path)
+    {
+        if (LayoutTree.FindLeaf(Layout, pane) is not { } leaf) return;
+
+        var created = new PaneViewModel(_factory, this);
+        created.AddTab(path ?? pane.ActiveTab?.CurrentPath ?? "");
+
+        Layout = LayoutTree.Split(Layout, leaf, orientation, created, out _);
+        LayoutChanged?.Invoke();
+        ActivatePane(created);
+        PaneFocusRequested?.Invoke(created);
+    }
+
+    public void ClosePane(PaneViewModel pane)
+    {
+        if (LayoutTree.FindLeaf(Layout, pane) is not { } leaf) return;
+        // Refused for the last pane: the window always shows a directory.
+        if (LayoutTree.Close(Layout, leaf) is not { } layout) return;
+
+        Layout = layout;
+
+        // Move off the pane before tearing it down: ActiveTab reads through ActivePane, and every
+        // window-chrome binding reads through ActiveTab.
+        var wasActive = ReferenceEquals(pane, ActivePane);
+        if (wasActive)
+            ActivePane = LayoutTree.Leaves(Layout).First().Value;
+
+        pane.Dispose();
+        LayoutChanged?.Invoke();
+
+        // After the rebuild, so the pane taking over already has a view to focus.
+        if (wasActive) PaneFocusRequested?.Invoke(ActivePane);
+    }
+
+    public void NotifyLocation(PaneViewModel pane, DirectoryTabViewModel tab)
+    {
+        if (!ReferenceEquals(pane, ActivePane) || !ReferenceEquals(tab, pane.ActiveTab)) return;
+        ActiveLocationChanged?.Invoke(tab.CurrentPath);
+    }
+
+    [RelayCommand]
+    private void FocusNextPane() => StepPane(1);
+
+    [RelayCommand]
+    private void FocusPreviousPane() => StepPane(-1);
+
+    private void StepPane(int step)
+    {
+        if (LayoutTree.FindLeaf(Layout, ActivePane) is not { } leaf) return;
+        var next = LayoutTree.NextLeaf(Layout, leaf, step).Value;
+        if (ReferenceEquals(next, ActivePane)) return;
+        ActivatePane(next);
+        PaneFocusRequested?.Invoke(next);
+    }
+
+    /// <summary>Opens a folder in another tab of the active pane. Background by convention: the
+    /// point of a new tab is usually to come back to it, not to leave where you are.</summary>
+    public void OpenInNewTab(string path, bool activate = false)
+    {
+        if (path.Length == 0) return;
+        ActivePane.AddTab(path, activate);
+    }
+
+    /// <summary>Opens a folder beside (or below) the active pane, in a pane of its own.</summary>
+    public void OpenInNewPane(string path, SplitOrientation orientation)
+    {
+        if (path.Length == 0) return;
+        SplitPane(ActivePane, orientation, path);
+    }
+
+    /// <summary>Asks the window to reveal <paramref name="directory"/> in the folder tree. Ignored
+    /// for anything but the active tab, so a background load never moves the tree.</summary>
+    public void RequestTreeReveal(DirectoryTabViewModel tab, string directory)
+    {
+        if (!ReferenceEquals(tab, ActiveTab) || directory.Length == 0) return;
+        TreeRevealRequested?.Invoke(directory);
+    }
+
+    /// <summary>Reveal a folder in the tree without changing what is being browsed (the file list's
+    /// single-item selection mirrors into the tree).</summary>
+    public event Action<string>? TreeRevealRequested;
+
+    /// <summary>Routes a shell-level message (transfer, clipboard, bookmarks) to the status bar,
+    /// which shows whichever tab is in front.</summary>
+    public void SetStatus(string message) => ActiveTab.StatusText = message;
+
+    // --- Fan-out over every open directory ---
+
+    /// <summary>Every pane, in the order they appear on screen.</summary>
+    public IEnumerable<PaneViewModel> AllPanes => LayoutTree.Leaves(Layout).Select(l => l.Value);
+
+    /// <summary>Every open tab, in every pane.</summary>
+    public IEnumerable<DirectoryTabViewModel> AllTabs => AllPanes.SelectMany(p => p.Tabs);
+
+    /// <summary>The visible tab of each pane — what the user can actually see right now.</summary>
+    public IEnumerable<DirectoryTabViewModel> VisibleTabs =>
+        AllPanes.Select(p => p.ActiveTab).OfType<DirectoryTabViewModel>();
+
+    public async Task RefreshAllTabsAsync()
+    {
+        foreach (var tab in AllTabs.ToList())
+            await tab.RefreshViewAsync();
+    }
+
+    /// <summary>Reloads every tab currently showing one of <paramref name="directories"/> — the
+    /// point being that a move from one open folder to another has to update both of them, not
+    /// just the one the drag started in.</summary>
+    public async Task RefreshTabsShowingAsync(
+        IEnumerable<string> directories, bool includeDescendants = false)
+    {
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var directory in directories)
+        {
+            if (string.IsNullOrWhiteSpace(directory)) continue;
+            try
+            {
+                keys.Add(PathKey.Canonicalize(directory));
+            }
+            catch (ArgumentException)
+            {
+                // Not a usable path (a deleted root, a device path) — nothing can be showing it.
+            }
+        }
+        if (keys.Count == 0) return;
+
+        // Snapshotted: a refresh can await, and tabs may be opened or closed while it does.
+        foreach (var tab in AllTabs.ToList())
+        {
+            if (tab.CurrentPath.Length == 0) continue;
+            string key;
+            try
+            {
+                key = PathKey.Canonicalize(tab.CurrentPath);
+            }
+            catch (ArgumentException)
+            {
+                continue;
+            }
+
+            if (keys.Contains(key) || (includeDescendants && keys.Any(k => PathKey.IsUnder(key, k))))
+                await tab.RefreshViewAsync();
+        }
     }
 
     // --- Bookmarks ---
@@ -174,17 +314,14 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             if (!Directory.Exists(bookmark.FullPath))
             {
-                StatusText = $"Folder not found: {bookmark.FullPath}";
+                SetStatus($"Folder not found: {bookmark.FullPath}");
                 return;
             }
-            await NavigateToAsync(bookmark.FullPath);
+            await ActiveTab.NavigateToAsync(bookmark.FullPath);
             return;
         }
 
-        var parent = Path.GetDirectoryName(bookmark.FullPath);
-        if (parent is null) return;
-        await NavigateToAsync(parent);
-        RevealFileRequested?.Invoke(bookmark.FullPath);
+        await ActiveTab.RevealFileAsync(bookmark.FullPath);
     }
 
     public async Task RemoveBookmarkAsync(BookmarkItemViewModel? bookmark)
@@ -207,240 +344,21 @@ public sealed partial class ShellViewModel : ObservableObject
             else
                 await Bookmarks.RemoveAsync(fullPath);
         }
-        StatusText = anyMissing
+        SetStatus(anyMissing
             ? $"Bookmarked {entries.Count} item(s)"
-            : $"Removed {entries.Count} bookmark(s)";
+            : $"Removed {entries.Count} bookmark(s)");
     }
 
-    [RelayCommand]
-    public async Task NavigateToAsync(string path)
-    {
-        if (path.Equals(CurrentPath, StringComparison.OrdinalIgnoreCase)) return;
-        if (!Directory.Exists(path))
-        {
-            StatusText = $"Folder not found: {path}";
-            return;
-        }
+    // --- Background index callbacks ---
 
-        path = ResolveInaccessibleJunction(path);
-        if (path.Equals(CurrentPath, StringComparison.OrdinalIgnoreCase)) return;
-
-        if (CurrentPath.Length > 0)
-            _backStack.Push(CurrentPath);
-        _forwardStack.Clear();
-
-        await SetPathAndLoadAsync(path);
-    }
-
-    /// <summary>
-    /// Windows' legacy compatibility junctions (<c>My Documents</c>, <c>Cookies</c>,
-    /// <c>Application Data</c>, <c>Recent</c>, …) carry an explicit deny-list ACL on the
-    /// reparse point itself so apps can't traverse the old shell path — listing them throws
-    /// "Access is denied" even elevated. The deny is on the junction, not its target, so when a
-    /// junction can't be listed directly we follow the reparse point to its real target (which
-    /// <em>is</em> accessible) and browse there instead. Normal, listable junctions are left at
-    /// their own path.
-    /// </summary>
-    private static string ResolveInaccessibleJunction(string path)
-    {
-        try
-        {
-            var info = new DirectoryInfo(path);
-            if ((info.Attributes & FileAttributes.ReparsePoint) == 0)
-                return path; // ordinary directory — nothing to follow
-
-            try
-            {
-                using var probe = Directory.EnumerateFileSystemEntries(path).GetEnumerator();
-                probe.MoveNext();
-                return path; // listable junction — browse in place
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return info.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? path;
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return path; // give up gracefully; the normal load path will report any error
-        }
-    }
-
-    [RelayCommand(CanExecute = nameof(CanGoBack))]
-    private async Task BackAsync()
-    {
-        _forwardStack.Push(CurrentPath);
-        await SetPathAndLoadAsync(_backStack.Pop());
-    }
-
-    [RelayCommand(CanExecute = nameof(CanGoForward))]
-    private async Task ForwardAsync()
-    {
-        _backStack.Push(CurrentPath);
-        await SetPathAndLoadAsync(_forwardStack.Pop());
-    }
-
-    [RelayCommand(CanExecute = nameof(CanGoUp))]
-    private async Task UpAsync()
-    {
-        var parent = Path.GetDirectoryName(CurrentPath);
-        if (parent is not null)
-            await NavigateToAsync(parent);
-    }
-
-    [RelayCommand]
-    private async Task RefreshAsync() => await RefreshViewAsync();
-
-    // --- Per-directory thumbnail zoom ---
-
-    private bool _suppressThumbnailPersist;
-
-    /// <summary>Persist the slider position for the directory the user changed it in, so tile
-    /// vs. list (and the zoom level) is remembered per folder. Zero (details) drops the entry.</summary>
-    private void OnFileListPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName != nameof(FileListViewModel.ThumbnailScale)) return;
-        if (_suppressThumbnailPersist || CurrentPath.Length == 0) return;
-
-        var key = PathKey.Canonicalize(CurrentPath);
-        if (FileList.ThumbnailScale > 0)
-            _settings.DirectoryThumbnailScales[key] = FileList.ThumbnailScale;
-        else
-            _settings.DirectoryThumbnailScales.Remove(key);
-    }
-
-    /// <summary>Restores the saved zoom for <paramref name="path"/> (details if none) without
-    /// counting the programmatic change as a user edit to persist.</summary>
-    private void ApplyDirectoryThumbnailScale(string path)
-    {
-        var scale = _settings.DirectoryThumbnailScales.TryGetValue(PathKey.Canonicalize(path), out var s) ? s : 0;
-        _suppressThumbnailPersist = true;
-        FileList.ThumbnailScale = scale;
-        _suppressThumbnailPersist = false;
-    }
-
-    private async Task SetPathAndLoadAsync(string path)
-    {
-        ClearSearchState(); // navigating exits search mode, like Explorer
-        CurrentPath = path;
-        ApplyDirectoryThumbnailScale(path); // restore this folder's tile/list preference
-        BackCommand.NotifyCanExecuteChanged();
-        ForwardCommand.NotifyCanExecuteChanged();
-        UpCommand.NotifyCanExecuteChanged();
-        await RefreshViewAsync();
-    }
-
-    private async Task RefreshViewAsync()
-    {
-        if (CurrentPath.Length == 0) return;
-
-        _navigationCts.Cancel();
-        _navigationCts = new CancellationTokenSource();
-        var ct = _navigationCts.Token;
-
-        try
-        {
-            if (SearchQuery.Parse(SearchText) is not null)
-            {
-                await RunSearchAsync(ct);
-            }
-            else
-            {
-                await FileList.LoadDirectoryAsync(CurrentPath, IncludeHidden, ct);
-                if (!ct.IsCancellationRequested)
-                    StatusText = $"{FileList.Items.Count} item(s)";
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-    }
-
-    // --- Search ---
-
-    private bool _suppressSearchRefresh;
-
-    partial void OnSearchTextChanged(string value)
-    {
-        _searchDebounceCts.Cancel();
-        if (_suppressSearchRefresh) return;
-        _searchDebounceCts = new CancellationTokenSource();
-        _ = DebouncedSearchAsync(_searchDebounceCts.Token);
-    }
-
-    private async Task DebouncedSearchAsync(CancellationToken ct)
-    {
-        try
-        {
-            await Task.Delay(200, ct);
-            await RefreshViewAsync();
-        }
-        catch (OperationCanceledException)
-        {
-            // superseded by further typing or navigation
-        }
-    }
-
-    private async Task RunSearchAsync(CancellationToken ct)
-    {
-        var queryText = SearchText;
-        FileList.BeginSearch();
-
-        SearchOutcome? outcome;
-        // Search never surfaces hidden files/folders, regardless of the "Show hidden items"
-        // browse setting — hidden entries are index noise (AppData, system junk) that bury the
-        // results a search is actually for.
-        if (SearchGlobal)
-        {
-            // Whole-PC: served straight from the MFT index, no live streaming.
-            StatusText = $"Searching this PC for '{queryText}'…";
-            outcome = await _searchService.SearchAllAsync(queryText, ct, includeHidden: false);
-        }
-        else
-        {
-            StatusText = $"Searching for '{queryText}'…";
-            // Progress is constructed on the UI thread, so batches marshal back to it.
-            var progress = new Progress<IReadOnlyList<SearchHit>>(batch =>
-            {
-                if (ct.IsCancellationRequested) return;
-                FileList.AppendSearchHits(batch);
-                StatusText = $"{FileList.Items.Count} result(s) so far for '{queryText}'…";
-            });
-            outcome = await _searchService.SearchAsync(CurrentPath, queryText, ct, progress, includeHidden: false);
-        }
-
-        if (outcome is null || ct.IsCancellationRequested) return;
-
-        // Global hits come from MFT rows with no size/timestamp, so hydrate them from disk.
-        await FileList.CompleteSearchAsync(outcome, queryText, hydrateMetadata: SearchGlobal, ct);
-        if (ct.IsCancellationRequested) return;
-
-        var scope = SearchGlobal ? "this PC" : CurrentPath;
-        var suffix = outcome.Source switch
-        {
-            SearchResultSource.LiveScan => " — indexing in background…",
-            SearchResultSource.StaleIndex => " — refreshing index…",
-            _ when SearchGlobal && outcome.RefreshPending => " — indexing drives…",
-            _ => " — indexed",
-        };
-        var truncated = outcome.Truncated ? " (showing first 1,000)" : "";
-        StatusText = $"{outcome.Hits.Count} result(s) for '{queryText}' in {scope}{truncated}{suffix}";
-    }
-
-    /// <summary>A volume's MFT index just finished: re-run an active whole-PC search, or — in
-    /// normal browsing — refresh the folder sizes now that <c>dir_size_cache</c> is populated.</summary>
+    /// <summary>Only the visible tabs act on this: folder sizes are cheap per tab but not per tab
+    /// times per pane, and a hidden tab catches up the moment it is brought to the front.</summary>
     private void OnMftIndexRefreshed(string rootKey)
     {
         Application.Current?.Dispatcher.InvokeAsync(() =>
         {
-            if (SearchQuery.Parse(SearchText) is not null)
-            {
-                if (SearchGlobal) _ = RefreshViewAsync();
-            }
-            else
-            {
-                _ = FileList.RefreshDirSizesAsync(CancellationToken.None);
-            }
+            foreach (var tab in AllTabs.ToList())
+                tab.OnMftIndexRefreshed();
         });
     }
 
@@ -449,95 +367,13 @@ public sealed partial class ShellViewModel : ObservableObject
         Application.Current?.Dispatcher.InvokeAsync(() => IndexingStatus = _mftIndex.StatusText);
     }
 
-    [RelayCommand]
-    private async Task ClearSearchAsync()
-    {
-        ClearSearchState();
-        await RefreshViewAsync();
-    }
-
-    /// <summary>Resets the search box without triggering the debounced refresh.</summary>
-    private void ClearSearchState()
-    {
-        _searchDebounceCts.Cancel();
-        if (SearchText.Length > 0)
-        {
-            _suppressSearchRefresh = true;
-            SearchText = "";
-            _suppressSearchRefresh = false;
-        }
-    }
-
-    /// <summary>A background (re)crawl finished; re-run the search against the fresh index.</summary>
     private void OnIndexRefreshed(string rootKey)
     {
-        if (CurrentPath.Length == 0 || SearchQuery.Parse(SearchText) is null) return;
-
-        var currentKey = PathKey.Canonicalize(CurrentPath);
-        if (!currentKey.Equals(rootKey, StringComparison.Ordinal) && !PathKey.IsUnder(currentKey, rootKey))
-            return;
-
-        Application.Current?.Dispatcher.InvokeAsync(() => _ = RefreshViewAsync());
-    }
-
-    [RelayCommand]
-    private void OpenItem(FileItemViewModel? item)
-    {
-        if (item is null) return;
-
-        if (item.IsDirectory)
+        Application.Current?.Dispatcher.InvokeAsync(() =>
         {
-            _ = NavigateToAsync(item.FullPath);
-            return;
-        }
-
-        try
-        {
-            Process.Start(new ProcessStartInfo(item.FullPath) { UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            StatusText = $"Cannot open: {ex.Message}";
-        }
-    }
-
-    /// <summary>Compute (or refresh) the recursive content size of the given directories.</summary>
-    [RelayCommand]
-    private async Task ComputeSizeAsync(IList<FileItemViewModel>? items)
-    {
-        if (items is null) return;
-        var dirs = items.Where(i => i.IsDirectory).ToList();
-        if (dirs.Count == 0) return;
-
-        foreach (var dir in dirs)
-            dir.IsSizeComputing = true;
-
-        try
-        {
-            foreach (var dir in dirs)
-            {
-                try
-                {
-                    var result = await _sizeService.ComputeAsync(dir.FullPath, CancellationToken.None);
-                    if (result is not null)
-                    {
-                        dir.SizeBytes = result.SizeBytes;
-                        dir.SizeIncomplete = result.Incomplete;
-                        dir.SizeComputedUtc = result.ComputedUtc;
-                    }
-                }
-                finally
-                {
-                    dir.IsSizeComputing = false;
-                }
-            }
-            StatusText = "Size scan complete";
-        }
-        finally
-        {
-            foreach (var dir in dirs)
-                dir.IsSizeComputing = false;
-        }
+            foreach (var tab in AllTabs.ToList())
+                tab.OnIndexRefreshed(rootKey);
+        });
     }
 
     // --- Clipboard (copy / cut / paste) ---
@@ -559,16 +395,17 @@ public sealed partial class ShellViewModel : ObservableObject
         }
         catch (System.Runtime.InteropServices.ExternalException ex)
         {
-            StatusText = $"Clipboard error: {ex.Message}";
+            SetStatus($"Clipboard error: {ex.Message}");
             return;
         }
-        StatusText = $"{paths.Count} item(s) {(cut ? "cut" : "copied")}";
+        SetStatus($"{paths.Count} item(s) {(cut ? "cut" : "copied")}");
     }
 
     [RelayCommand]
     private async Task PasteAsync()
     {
-        if (CurrentPath.Length == 0) return;
+        var destination = ActiveTab.CurrentPath;
+        if (destination.Length == 0) return;
 
         (IReadOnlyList<string> Paths, bool IsCut)? clip;
         try
@@ -577,14 +414,13 @@ public sealed partial class ShellViewModel : ObservableObject
         }
         catch (System.Runtime.InteropServices.ExternalException ex)
         {
-            StatusText = $"Clipboard error: {ex.Message}";
+            SetStatus($"Clipboard error: {ex.Message}");
             return;
         }
         if (clip is null) return;
         var (paths, isCut) = clip.Value;
 
-        var destination = CurrentPath;
-        StatusText = isCut ? "Moving…" : "Copying…";
+        SetStatus(isCut ? "Moving…" : "Copying…");
 
         var errors = new List<string>();
         var pasted = 0;
@@ -626,11 +462,14 @@ public sealed partial class ShellViewModel : ObservableObject
             }
         }
 
-        await RefreshViewAsync();
+        // A cut empties its source folders too, so every tab showing one of them is now wrong.
+        var affected = paths.Select(Path.GetDirectoryName).OfType<string>().Append(destination);
+        await RefreshTabsShowingAsync(affected);
+
         var verb = isCut ? "Moved" : "Copied";
-        StatusText = errors.Count > 0
+        SetStatus(errors.Count > 0
             ? $"{verb} {pasted} item(s); {errors.Count} failed — {errors[0]}"
-            : $"{verb} {pasted} item(s)";
+            : $"{verb} {pasted} item(s)");
     }
 
     /// <summary>Runs a user-defined command once per selected item it applies to.</summary>
@@ -652,13 +491,13 @@ public sealed partial class ShellViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                StatusText = $"'{command.Name}' failed: {ex.Message}";
+                SetStatus($"'{command.Name}' failed: {ex.Message}");
                 return;
             }
         }
 
         if (matched.Count > 0)
-            StatusText = $"Ran '{command.Name}' on {matched.Count} item(s)";
+            SetStatus($"Ran '{command.Name}' on {matched.Count} item(s)");
     }
 
     // --- Drag-and-drop transfers ---
@@ -682,8 +521,8 @@ public sealed partial class ShellViewModel : ObservableObject
     public TransferPlan PlanDrop(IReadOnlyList<string> sources, string destination, TransferVerb verb) =>
         _transferPlanner.Plan(sources, destination, verb);
 
-    /// <summary>Carries out a planned drop off the UI thread, then refreshes the list and the tree
-    /// nodes on both sides of the transfer.</summary>
+    /// <summary>Carries out a planned drop off the UI thread, then refreshes the tree nodes and
+    /// every open tab on both sides of the transfer.</summary>
     public async Task ExecuteDropAsync(
         TransferPlan plan, IReadOnlyDictionary<string, ConflictResolution>? resolutions)
     {
@@ -694,12 +533,12 @@ public sealed partial class ShellViewModel : ObservableObject
         try
         {
             var verbing = plan.Verb == TransferVerb.Move ? "Moving" : "Copying";
-            StatusText = $"{verbing} {plan.Transfers.Count:N0} item(s)…";
+            SetStatus($"{verbing} {plan.Transfers.Count:N0} item(s)…");
 
             var progress = new Progress<TransferProgress>(p =>
-                StatusText = p.CurrentName.Length > 0
+                SetStatus(p.CurrentName.Length > 0
                     ? $"{verbing} {p.Done + 1:N0} of {p.Total:N0} — {p.CurrentName}"
-                    : StatusText);
+                    : ActiveTab.StatusText));
 
             var outcome = await Task.Run(
                 () => _transferExecutor.Execute(plan, resolutions, CancellationToken.None, progress));
@@ -713,7 +552,7 @@ public sealed partial class ShellViewModel : ObservableObject
             }
 
             await RefreshAfterTransferAsync(plan, outcome);
-            StatusText = DescribeOutcome(plan, outcome);
+            SetStatus(DescribeOutcome(plan, outcome));
         }
         finally
         {
@@ -731,7 +570,7 @@ public sealed partial class ShellViewModel : ObservableObject
         UndoTransferCommand.NotifyCanExecuteChanged();
         try
         {
-            StatusText = "Undoing…";
+            SetStatus("Undoing…");
             var result = await Task.Run(() => _transferExecutor.Undo(outcome));
 
             // The record is spent either way: a partial undo must not be replayed.
@@ -741,13 +580,14 @@ public sealed partial class ShellViewModel : ObservableObject
             var directories = outcome.Completed
                 .SelectMany(c => new[] { Path.GetDirectoryName(c.SourcePath), Path.GetDirectoryName(c.FinalPath) })
                 .Append(outcome.DestinationDirectory)
-                .OfType<string>();
+                .OfType<string>()
+                .ToList();
             await Tree.RefreshDirectoriesAsync(directories);
-            await RefreshViewAsync();
+            await RefreshTabsShowingAsync(directories);
 
-            StatusText = result.Failed.Count == 0
+            SetStatus(result.Failed.Count == 0
                 ? $"Undone — {result.Restored:N0} item(s) put back"
-                : $"Put back {result.Restored:N0} item(s); {result.Failed.Count:N0} could not be restored — {result.Failed[0].Message}";
+                : $"Put back {result.Restored:N0} item(s); {result.Failed.Count:N0} could not be restored — {result.Failed[0].Message}");
         }
         finally
         {
@@ -774,9 +614,10 @@ public sealed partial class ShellViewModel : ObservableObject
         var directories = outcome.Completed
             .Select(c => Path.GetDirectoryName(c.SourcePath))
             .Append(plan.DestinationDirectory)
-            .OfType<string>();
+            .OfType<string>()
+            .ToList();
         await Tree.RefreshDirectoriesAsync(directories);
-        await RefreshViewAsync();
+        await RefreshTabsShowingAsync(directories);
     }
 
     private static string DescribeOutcome(TransferPlan plan, TransferOutcome outcome)
@@ -815,7 +656,7 @@ public sealed partial class ShellViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                StatusText = $"Cannot open terminal: {ex.Message}";
+                SetStatus($"Cannot open terminal: {ex.Message}");
             }
         }
     }
@@ -851,10 +692,10 @@ public sealed partial class ShellViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                StatusText = $"Cannot open VS Code: {ex.Message}";
+                SetStatus($"Cannot open VS Code: {ex.Message}");
                 return;
             }
         }
-        StatusText = "VS Code not found. Install it, or add 'code' to your PATH.";
+        SetStatus("VS Code not found. Install it, or add 'code' to your PATH.");
     }
 }

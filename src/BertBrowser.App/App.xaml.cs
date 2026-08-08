@@ -49,6 +49,7 @@ public partial class App : Application
         services.AddSingleton<IMftIndexService, MftIndexService>();
         services.AddSingleton<ISearchService, SearchService>();
         services.AddSingleton<IUpdateService, UpdateService>();
+        services.AddSingleton<PaneFactory>();
         services.AddSingleton<ShellViewModel>();
         services.AddSingleton<MainWindow>();
         Services = services.BuildServiceProvider();

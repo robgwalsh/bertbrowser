@@ -79,16 +79,76 @@ tests: the multiset of file contents under the root is invariant under any move,
 the tree byte-for-byte). Two meta-tests assert those invariant checks can actually detect a lost or
 moved file. If you change this code, mutate a rule and confirm a test goes red.
 
-### App shell
+### Tabs and panes
 
-`ShellViewModel` is the root VM composing `FileListViewModel`, `FolderTreeViewModel`, and `BookmarksViewModel`, and owns navigation (back/forward stacks, breadcrumbs) with a `CancellationTokenSource` per navigation. The file list has two modes: normal directory listing, or — while the search box has a query — a flattened result list (`FileListViewModel.IsFlattened`) that also shows each hit's folder relative to the search root.
+Several directories are open at once, so **nothing may reach for "the" current directory**. The
+hierarchy is:
 
-The file list is a multi-select (`Extended`) `ListView`. Ctrl/Shift/Ctrl+A come from WPF; `Views/MarqueeSelector` adds the rubber band — pressing on empty space and dragging sweeps a rectangle (drawn as an `Adorner`) that selects everything it touches, with edge auto-scroll. It only hit-tests *realized* containers, so it pins the drag origin to the row it landed on and recomputes the anchor from that row's live position, treating the anchor as off-screen once it virtualizes away. Selection-driven work (folder-tree reveal, status-bar summary) must therefore tolerate churn: the tree reveal is skipped while `MarqueeSelector.IsDragging`, and the summary is coalesced to one dispatcher pass. `PropertiesViewModel` takes a whole `IReadOnlyList<PropertiesTarget>` — with several targets it shows aggregates and three-state attribute checkboxes (indeterminate = the items disagree, and Apply leaves that bit alone).
+- **`DirectoryTabViewModel`** — one browsable directory, and the unit everything else repeats.
+  Owns `CurrentPath`, the back/forward stacks, a `CancellationTokenSource` per navigation, the
+  search box state (text, scope, 200 ms debounce), `StatusText`, `SelectionSummary`, its
+  `FileListViewModel`, and the navigation/open/compute-size commands. It has no reference to the
+  shell: `IncludeHidden` reads `AppSettings.ShowHiddenItems` directly, and `SelectedItems` is
+  mirrored out of the `ListView` so nothing has to reach into a view to find the selection. Tabs are
+  closable, so unlike the shell they `Dispose()` — cancel in flight work and unsubscribe.
+- **`PaneViewModel`** — a tab strip over several tabs, one visible (`ActiveTab`). Asks
+  **`IPaneHost`** (implemented by `ShellViewModel`) for anything involving its neighbours, so layout
+  mutation lives in exactly one place.
+- **`ShellViewModel`** — everything shared: the folder tree, bookmarks, browse settings, MFT status,
+  the transfer/undo slot, the clipboard, and the layout. `ActiveTab => ActivePane.ActiveTab` is what
+  the window chrome binds through; it raises `PropertyChanged` for it when either the pane or its
+  tab changes.
+- **`BertBrowser.Core.Layout.LayoutTree`** — the pane arrangement, pure and unit-tested
+  (`LayoutTreeTests`). A node is a pane or a split (orientation + children + star weights).
+  Its invariants are the point: splitting inside a parent of the same orientation appends a sibling
+  rather than nesting, closing collapses a split left with one child and flattens a same-orientation
+  nested one, no split ends a mutation with fewer than two children, and the last pane can't be
+  closed. If you change it, mutate a rule and confirm a test goes red.
 
-`Views/FileDragDropController` drags that selection onto a folder row or a tree node to move it
-(Ctrl to copy), using a private `BertBrowser.FileItems` data format so drops stay in-app. Two
-details matter: pressing an already-selected row **defers** WPF's collapse-to-one-item selection to
-mouse-up, or a multi-item drag would carry one item; and the plan computed while hovering is only
-advisory — the drop always re-plans from scratch before writing.
+Views mirror that: `Views/DirectoryTabView` (address bar, search box, `ListView` + its `GridView`
+and `ContextMenu`), `Views/FilePaneView` (tab strip + a `Grid` holding **every** tab's view, only
+one `Visible`), and `Views/PaneLayoutHost` (nested `Grid`s + `GridSplitter`s, built in code because
+`ColumnDefinitions` aren't bindable and the splitters aren't items of any collection).
+
+Three things are easy to get wrong here:
+
+- **A `GridView` and a `ContextMenu` are element instances and cannot be shared between
+  `ListView`s** — they are declared inline in `DirectoryTabView.xaml`. Styles and `DataTemplate`s
+  *can* be shared, which is why the thumbnail-view resources live in `Resources/Styles.xaml`.
+- **A `TabControl` would be wrong.** It has one `ContentPresenter` and rebuilds the content on every
+  switch; the file list's selection and scroll position live in the `ListView`, so switching tabs
+  would lose both and re-realize the whole virtualized list.
+- **Background work must not steal focus.** `FileListViewModel.Items` is replaced wholesale on every
+  load and the view focuses the list on that change, so `DirectoryTabView.FocusFileList` is gated on
+  `Tab.IsActive && IsKeyboardFocusWithin` — otherwise a directory finishing its load in one pane
+  yanks the caret out of another pane's search box.
+
+Anything that changes a directory on disk must **fan out**: `ShellViewModel.RefreshTabsShowingAsync`
+reloads every tab showing one of the affected folders (matched via `PathKey`, never string
+comparison), and `RefreshAllTabsAsync` covers a settings change. Transfers, undo, and paste all go
+through it — a move from one open folder to another has to update both, not just the pane the drag
+started in.
+
+Keyboard: window `InputBindings` bind through `ActivePane`/`ActiveTab` (navigation, Ctrl+T/W/Tab,
+Ctrl+1..9, Ctrl+Alt+arrow to split, Ctrl+Shift+W, F6 to cycle panes). Anything that could collide
+with typing stays in a `PreviewKeyDown` with a focus guard: Ctrl+Z at the window (skipped when
+`Keyboard.FocusedElement is TextBoxBase` — there is one search box and one path box *per tab* now),
+and Ctrl+C/X/V and Alt+Enter in `DirectoryTabView` gated on its own list having focus. Plain Tab
+stays WPF focus traversal.
+
+The file list has two modes: normal directory listing, or — while the search box has a query — a flattened result list (`FileListViewModel.IsFlattened`) that also shows each hit's folder relative to the search root.
+
+The file list is a multi-select (`Extended`) `ListView`. Ctrl/Shift/Ctrl+A come from WPF; `Views/MarqueeSelector` adds the rubber band — pressing on empty space and dragging sweeps a rectangle (drawn as an `Adorner`) that selects everything it touches, with edge auto-scroll. It only hit-tests *realized* containers, so it pins the drag origin to the row it landed on and recomputes the anchor from that row's live position, treating the anchor as off-screen once it virtualizes away. Selection-driven work (folder-tree reveal, status-bar summary) must therefore tolerate churn: the tree reveal is skipped while `MarqueeSelector.IsDragging`, and the summary is coalesced to one dispatcher pass. The tree is shared by every pane, so reveals are routed through `ShellViewModel.RequestTreeReveal`/`ActiveLocationChanged`, which drop anything not from the active tab and are debounced in the window — that single-writer rule is what stops open panes fighting over the tree's selection, expansion and scroll position. `PropertiesViewModel` takes a whole `IReadOnlyList<PropertiesTarget>` — with several targets it shows aggregates and three-state attribute checkboxes (indeterminate = the items disagree, and Apply leaves that bit alone).
+
+Drag-and-drop is split three ways, and the split is load-bearing. `Views/DropPipeline` holds the
+shared decide/highlight/execute logic; `Views/FileDragDropController` is attached **per tab** (drag
+source + list drop target), which is what makes dragging between panes work — it resolves an
+empty-space drop against its *own* tab's directory; and `Views/TreeDropTarget` is attached **once**
+by the window, because the folder tree is shared and a per-pane controller hooking its `Drop` would
+plan and carry out the same transfer once per open pane. Drops use a private `BertBrowser.FileItems`
+data format so they stay in-app. Two further details matter: pressing an already-selected row
+**defers** WPF's collapse-to-one-item selection to mouse-up, or a multi-item drag would carry one
+item; and the plan computed while hovering is only advisory — the drop always re-plans from scratch
+before writing.
 
 The left sidebar has two sections: **Bookmarks** (top, sized to content) and **Drives & devices** (below, fills the rest). `FolderTreeViewModel.Roots` is `ObservableCollection<ISidebarNode>` mixing browsable `DirectoryNodeViewModel` drives (expandable tree) with `PortableDeviceNodeViewModel` leaves — MTP phones/cameras enumerated off-thread via `Interop.PortableDevices` (Shell.Application COM on an STA thread) that open in Explorer on double-click, since their contents aren't a filesystem path. Bookmarks persist in the `bookmark` table via `BookmarkRepository`/`IBookmarkService`; the file-list and tree context menus toggle them (`ShellViewModel.ToggleBookmarksAsync`), and `BookmarksViewModel` keeps an in-memory key set so the menu can label Bookmark/Remove without a DB hit.

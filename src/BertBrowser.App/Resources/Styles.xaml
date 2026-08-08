@@ -234,4 +234,94 @@
             </Setter.Value>
         </Setter>
     </Style>
+
+    <!--
+      Thumbnail (tile) view for the file list: a wrap of square previews with the name beneath.
+      The tile and image size track FileList.ThumbnailSize so the footer slider resizes them live.
+      App-level rather than per-window because every pane's file list looks these up by name from
+      its own ApplyViewMode() — a Style/DataTemplate/ItemsPanelTemplate can be shared across
+      controls, unlike the GridView and ContextMenu, which stay inline per list.
+    -->
+    <ItemsPanelTemplate x:Key="ThumbPanel">
+        <WrapPanel Orientation="Horizontal"/>
+    </ItemsPanelTemplate>
+
+    <DataTemplate x:Key="ThumbTileTemplate">
+        <StackPanel Margin="6,6,6,2"
+                    Width="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}">
+            <Image Source="{Binding Thumbnail}" Opacity="{Binding IconOpacity}"
+                   Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
+                   RenderOptions.BitmapScalingMode="HighQuality"
+                   Width="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}"
+                   Height="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}"/>
+            <TextBlock Text="{Binding Name}" TextWrapping="Wrap" TextAlignment="Center"
+                       Margin="0,4,0,0" MaxHeight="32" TextTrimming="CharacterEllipsis"/>
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Full-width row for folders / non-media files, shown above the tiles. Its width
+         tracks the scroll viewport so each row takes a whole line in the WrapPanel. -->
+    <DataTemplate x:Key="ThumbRowTemplate">
+        <Grid Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ScrollContentPresenter}}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="90"/>
+                <ColumnDefinition Width="150"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" Margin="6,3">
+                <Image Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,6,0"
+                       Opacity="{Binding IconOpacity}"/>
+                <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+            <TextBlock Grid.Column="1" Text="{Binding SizeDisplay}" Foreground="#555"
+                       HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <TextBlock Grid.Column="2" Text="{Binding ModifiedDisplay}" Foreground="#555"
+                       VerticalAlignment="Center" Margin="0,0,8,0"/>
+        </Grid>
+    </DataTemplate>
+
+    <v:ThumbnailTemplateSelector x:Key="ThumbOrRowSelector"
+                                 TileTemplate="{StaticResource ThumbTileTemplate}"
+                                 RowTemplate="{StaticResource ThumbRowTemplate}"/>
+
+    <Style x:Key="ThumbItemStyle" TargetType="ListViewItem">
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListViewItem">
+                    <Border x:Name="Bd" Background="Transparent" CornerRadius="3"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowHoverBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedBrush}"/>
+                        </Trigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsSelected" Value="True"/>
+                                <Condition Property="IsMouseOver" Value="True"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedHoverBrush}"/>
+                        </MultiTrigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsSelected" Value="True"/>
+                                <Condition Property="Selector.IsSelectionActive" Value="False"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedInactiveBrush}"/>
+                        </MultiTrigger>
+                        <!-- Last, so a drag hovering a tile always wins over selection. -->
+                        <Trigger Property="v:DropTarget.IsActive" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource DropTargetBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 </ResourceDictionary>

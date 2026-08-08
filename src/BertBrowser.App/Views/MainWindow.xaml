@@ -10,125 +10,64 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d">
     <Window.InputBindings>
-        <KeyBinding Key="Back" Command="{Binding BackCommand}"/>
-        <KeyBinding Key="Left" Modifiers="Alt" Command="{Binding BackCommand}"/>
-        <KeyBinding Key="Right" Modifiers="Alt" Command="{Binding ForwardCommand}"/>
-        <KeyBinding Key="Up" Modifiers="Alt" Command="{Binding UpCommand}"/>
-        <KeyBinding Key="F5" Command="{Binding RefreshCommand}"/>
+        <KeyBinding Key="Back" Command="{Binding ActiveTab.BackCommand}"/>
+        <KeyBinding Key="Left" Modifiers="Alt" Command="{Binding ActiveTab.BackCommand}"/>
+        <KeyBinding Key="Right" Modifiers="Alt" Command="{Binding ActiveTab.ForwardCommand}"/>
+        <KeyBinding Key="Up" Modifiers="Alt" Command="{Binding ActiveTab.UpCommand}"/>
+        <KeyBinding Key="F5" Command="{Binding ActiveTab.RefreshCommand}"/>
         <!-- Ctrl+Z is handled in code-behind, not bound here: a window-level binding would take it
-             away from the search and path boxes, where it must still undo typing. -->
+             away from the search and path boxes, where it must still undo typing. Ctrl+C/X/V and
+             Alt+Enter likewise belong to whichever pane has focus, so they live in DirectoryTabView. -->
+
+        <!-- Tabs. Routed through ActivePane, so they act on the pane the user is working in. -->
+        <KeyBinding Key="T" Modifiers="Ctrl" Command="{Binding ActivePane.NewTabCommand}"/>
+        <KeyBinding Key="W" Modifiers="Ctrl" Command="{Binding ActivePane.CloseTabCommand}"/>
+        <KeyBinding Key="Tab" Modifiers="Ctrl" Command="{Binding ActivePane.NextTabCommand}"/>
+        <KeyBinding Key="Tab" Modifiers="Ctrl+Shift" Command="{Binding ActivePane.PreviousTabCommand}"/>
+        <!-- The parameter is a string because that is all KeyBinding supplies; "8" means "last". -->
+        <KeyBinding Key="D1" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="0"/>
+        <KeyBinding Key="D2" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="1"/>
+        <KeyBinding Key="D3" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="2"/>
+        <KeyBinding Key="D4" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="3"/>
+        <KeyBinding Key="D5" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="4"/>
+        <KeyBinding Key="D6" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="5"/>
+        <KeyBinding Key="D7" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="6"/>
+        <KeyBinding Key="D8" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="7"/>
+        <KeyBinding Key="D9" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="8"/>
+
+        <!-- Panes. Ctrl+Alt+arrow rather than Ctrl+Shift+arrow, which extends a list selection.
+             Plain Tab stays WPF's focus traversal — it has to keep working inside the search and
+             path boxes — so pane cycling is F6. -->
+        <KeyBinding Key="Right" Modifiers="Ctrl+Alt" Command="{Binding ActivePane.SplitVerticalCommand}"/>
+        <KeyBinding Key="Down" Modifiers="Ctrl+Alt" Command="{Binding ActivePane.SplitHorizontalCommand}"/>
+        <KeyBinding Key="W" Modifiers="Ctrl+Shift" Command="{Binding ActivePane.ClosePaneCommand}"/>
+        <KeyBinding Key="F6" Command="{Binding FocusNextPaneCommand}"/>
+        <KeyBinding Key="F6" Modifiers="Shift" Command="{Binding FocusPreviousPaneCommand}"/>
     </Window.InputBindings>
 
-    <Window.Resources>
-        <!-- Thumbnail (tile) view: a wrap of square previews with the name beneath. The tile
-             and image size track FileList.ThumbnailSize so the footer slider resizes them live. -->
-        <ItemsPanelTemplate x:Key="ThumbPanel">
-            <WrapPanel Orientation="Horizontal"/>
-        </ItemsPanelTemplate>
-
-        <DataTemplate x:Key="ThumbTileTemplate">
-            <StackPanel Margin="6,6,6,2"
-                        Width="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}">
-                <Image Source="{Binding Thumbnail}" Opacity="{Binding IconOpacity}"
-                       Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
-                       RenderOptions.BitmapScalingMode="HighQuality"
-                       Width="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}"
-                       Height="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}"/>
-                <TextBlock Text="{Binding Name}" TextWrapping="Wrap" TextAlignment="Center"
-                           Margin="0,4,0,0" MaxHeight="32" TextTrimming="CharacterEllipsis"/>
-            </StackPanel>
-        </DataTemplate>
-
-        <!-- Full-width row for folders / non-media files, shown above the tiles. Its width
-             tracks the scroll viewport so each row takes a whole line in the WrapPanel. -->
-        <DataTemplate x:Key="ThumbRowTemplate">
-            <Grid Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ScrollContentPresenter}}">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="90"/>
-                    <ColumnDefinition Width="150"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Orientation="Horizontal" Margin="6,3">
-                    <Image Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,6,0"
-                           Opacity="{Binding IconOpacity}"/>
-                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis"/>
-                </StackPanel>
-                <TextBlock Grid.Column="1" Text="{Binding SizeDisplay}" Foreground="#555"
-                           HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                <TextBlock Grid.Column="2" Text="{Binding ModifiedDisplay}" Foreground="#555"
-                           VerticalAlignment="Center" Margin="0,0,8,0"/>
-            </Grid>
-        </DataTemplate>
-
-        <v:ThumbnailTemplateSelector x:Key="ThumbOrRowSelector"
-                                     TileTemplate="{StaticResource ThumbTileTemplate}"
-                                     RowTemplate="{StaticResource ThumbRowTemplate}"/>
-
-        <Style x:Key="ThumbItemStyle" TargetType="ListViewItem">
-            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ListViewItem">
-                        <Border x:Name="Bd" Background="Transparent" CornerRadius="3"
-                                SnapsToDevicePixels="True">
-                            <ContentPresenter HorizontalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowHoverBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedBrush}"/>
-                            </Trigger>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsSelected" Value="True"/>
-                                    <Condition Property="IsMouseOver" Value="True"/>
-                                </MultiTrigger.Conditions>
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedHoverBrush}"/>
-                            </MultiTrigger>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsSelected" Value="True"/>
-                                    <Condition Property="Selector.IsSelectionActive" Value="False"/>
-                                </MultiTrigger.Conditions>
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedInactiveBrush}"/>
-                            </MultiTrigger>
-                            <!-- Last, so a drag hovering a tile always wins over selection. -->
-                            <Trigger Property="v:DropTarget.IsActive" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource DropTargetBrush}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-    </Window.Resources>
-
     <DockPanel>
-        <!-- Header: toolbar, error banner -->
+        <!-- Header: window-wide toolbar only. The address bar, search box, progress and error
+             banner are per directory now, and live inside each pane's DirectoryTabView. Navigation
+             stays here and acts on the active pane. -->
         <Border DockPanel.Dock="Top" BorderBrush="#DDD" BorderThickness="0,0,0,1">
-            <StackPanel>
             <DockPanel Margin="6,4">
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
                     <Button Style="{StaticResource ToolbarButton}" ToolTip="Back (Alt+Left)"
-                            Command="{Binding BackCommand}">
+                            Command="{Binding ActiveTab.BackCommand}">
                         <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE72B;"/>
                     </Button>
                     <Button Style="{StaticResource ToolbarButton}" ToolTip="Forward (Alt+Right)"
-                            Command="{Binding ForwardCommand}">
+                            Command="{Binding ActiveTab.ForwardCommand}">
                         <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE72A;"/>
                     </Button>
                     <Button Style="{StaticResource ToolbarButton}" ToolTip="Up (Alt+Up)"
-                            Command="{Binding UpCommand}">
+                            Command="{Binding ActiveTab.UpCommand}">
                         <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE74A;"/>
                     </Button>
                     <Button Style="{StaticResource ToolbarButton}" ToolTip="Refresh (F5)"
-                            Command="{Binding RefreshCommand}">
+                            Command="{Binding ActiveTab.RefreshCommand}">
                         <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE72C;"/>
                     </Button>
-                    <Separator Margin="4,2"/>
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
@@ -159,104 +98,7 @@
                         <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE713;"/>
                     </Button>
                 </StackPanel>
-
-                <!-- Breadcrumb / editable path + search -->
-                <Grid Margin="6,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="300"/>
-                    </Grid.ColumnDefinitions>
-
-                    <!-- Address bar: same rounded field chrome as the search box. -->
-                    <Border Style="{StaticResource FieldBorder}" Padding="6,0">
-                        <Grid>
-                            <ItemsControl x:Name="Breadcrumb" ItemsSource="{Binding BreadcrumbSegments}"
-                                          VerticalAlignment="Center"
-                                          MouseLeftButtonUp="Breadcrumb_EmptyClick" Background="Transparent">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <StackPanel Orientation="Horizontal"/>
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <StackPanel Orientation="Horizontal">
-                                            <Button Style="{StaticResource BreadcrumbButton}" Content="{Binding Name}"
-                                                    Click="BreadcrumbSegment_Click" Tag="{Binding FullPath}"/>
-                                            <TextBlock Text="›" VerticalAlignment="Center" Foreground="Gray"/>
-                                        </StackPanel>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                            <TextBox x:Name="PathBox" Visibility="Collapsed" VerticalAlignment="Center"
-                                     BorderThickness="0" Background="Transparent"
-                                     KeyDown="PathBox_KeyDown" LostFocus="PathBox_LostFocus"/>
-                        </Grid>
-                    </Border>
-
-                    <!-- Local search that doesn't suck: files & folders under the current directory. -->
-                    <Border Grid.Column="1" Style="{StaticResource FieldBorder}" Margin="8,0,0,0">
-                        <DockPanel>
-                            <ToggleButton DockPanel.Dock="Left" IsChecked="{Binding SearchGlobal}"
-                                          VerticalAlignment="Center" Margin="4,0,2,0" Padding="8,2"
-                                          ToolTip="Search scope — the whole PC (MFT index) or just this folder">
-                                <ToggleButton.Style>
-                                    <Style TargetType="ToggleButton">
-                                        <Setter Property="Content" Value="This folder"/>
-                                        <Style.Triggers>
-                                            <Trigger Property="IsChecked" Value="True">
-                                                <Setter Property="Content" Value="This PC"/>
-                                            </Trigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </ToggleButton.Style>
-                            </ToggleButton>
-                            <TextBlock DockPanel.Dock="Left" FontFamily="{StaticResource SymbolFont}"
-                                       Text="&#xE721;" FontSize="13" Margin="8,0,6,0"
-                                       VerticalAlignment="Center" Foreground="#666"/>
-                            <Button DockPanel.Dock="Right" ToolTip="Clear search (Esc)"
-                                    Command="{Binding ClearSearchCommand}"
-                                    Style="{StaticResource SearchClearButton}">
-                                <TextBlock FontFamily="{StaticResource SymbolFont}" Text="&#xE711;" FontSize="12"/>
-                            </Button>
-                            <Grid>
-                                <TextBox x:Name="SearchBox" BorderThickness="0" Background="Transparent"
-                                         VerticalContentAlignment="Center"
-                                         AutomationProperties.Name="Search this folder"
-                                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                                         KeyDown="SearchBox_KeyDown"
-                                         ToolTip="Search files and folders — whole PC or this folder (Ctrl+F)"/>
-                                <TextBlock Text="Search files and folders" Foreground="Gray" Margin="4,0,0,0"
-                                           VerticalAlignment="Center" IsHitTestVisible="False">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding SearchText}" Value="">
-                                                    <Setter Property="Visibility" Value="Visible"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                            </Grid>
-                        </DockPanel>
-                    </Border>
-                </Grid>
             </DockPanel>
-
-            <!-- Activity indicator: search / directory load in progress (fixed height, no layout shift) -->
-            <Grid Height="3" Margin="6,1,6,0">
-                <ProgressBar IsIndeterminate="True" BorderThickness="0"
-                             Visibility="{Binding FileList.IsLoading, Converter={StaticResource BoolToVisibility}}"/>
-            </Grid>
-
-            <!-- Error banner -->
-            <Border Background="#FFF4E5" Padding="8,4"
-                    Visibility="{Binding FileList.ErrorMessage, Converter={StaticResource NullToCollapsed}}">
-                <TextBlock Text="{Binding FileList.ErrorMessage}" Foreground="#8A6D3B" TextWrapping="Wrap"/>
-            </Border>
-            </StackPanel>
         </Border>
 
         <!-- Status bar -->
@@ -267,7 +109,7 @@
                 </ItemsPanelTemplate>
             </StatusBar.ItemsPanel>
             <StatusBarItem DockPanel.Dock="Left">
-                <TextBlock Text="{Binding StatusText}"/>
+                <TextBlock Text="{Binding ActiveTab.StatusText}"/>
             </StatusBarItem>
             <!-- Sticks around after a drop so the way back stays visible once the result
                  message has been replaced by something else. -->
@@ -277,8 +119,8 @@
             </StatusBarItem>
             <!-- Current file-list selection (blank when nothing is selected). -->
             <StatusBarItem DockPanel.Dock="Left"
-                           Visibility="{Binding SelectionSummary, Converter={StaticResource NullToCollapsed}}">
-                <TextBlock Text="{Binding SelectionSummary}" Foreground="#555" Margin="10,0,0,0"/>
+                           Visibility="{Binding ActiveTab.SelectionSummary, Converter={StaticResource NullToCollapsed}}">
+                <TextBlock Text="{Binding ActiveTab.SelectionSummary}" Foreground="#555" Margin="10,0,0,0"/>
             </StatusBarItem>
             <!-- Background MFT indexing progress (blank when idle). -->
             <StatusBarItem DockPanel.Dock="Left"
@@ -296,7 +138,7 @@
                                Margin="0,0,6,0" Foreground="#666" VerticalAlignment="Center"/>
                     <Slider x:Name="ThumbSlider" Width="130" Minimum="0" Maximum="1"
                             VerticalAlignment="Center"
-                            Value="{Binding FileList.ThumbnailScale, Mode=TwoWay}"
+                            Value="{Binding ActiveTab.FileList.ThumbnailScale, Mode=TwoWay}"
                             AutomationProperties.Name="Thumbnail size"/>
                 </StackPanel>
             </StatusBarItem>
@@ -334,6 +176,14 @@
                                             MouseLeftButtonUp="BookmarkRow_MouseUp" ToolTip="{Binding FullPath}">
                                         <Border.ContextMenu>
                                             <ContextMenu>
+                                                <MenuItem Header="Open in new tab" Click="BookmarkOpenInNewTab_Click">
+                                                    <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8A7;"/></MenuItem.Icon>
+                                                </MenuItem>
+                                                <MenuItem Header="Open in new pane">
+                                                    <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8B0;"/></MenuItem.Icon>
+                                                    <MenuItem Header="To the right" Click="BookmarkOpenInPaneRight_Click"/>
+                                                    <MenuItem Header="Below" Click="BookmarkOpenInPaneBelow_Click"/>
+                                                </MenuItem>
                                                 <MenuItem Header="Open" Click="BookmarkOpen_Click">
                                                     <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8E5;"/></MenuItem.Icon>
                                                 </MenuItem>
@@ -377,6 +227,15 @@
                       ContextMenuOpening="FolderTree_ContextMenuOpening">
                 <TreeView.ContextMenu>
                     <ContextMenu>
+                        <MenuItem Header="Open in new tab" Click="TreeOpenInNewTab_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8A7;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="Open in new pane">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8B0;"/></MenuItem.Icon>
+                            <MenuItem Header="To the right" Click="TreeOpenInPaneRight_Click"/>
+                            <MenuItem Header="Below" Click="TreeOpenInPaneBelow_Click"/>
+                        </MenuItem>
+                        <Separator/>
                         <MenuItem Header="Open in Terminal" Click="TreeOpenTerminal_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE756;"/></MenuItem.Icon>
                         </MenuItem>
@@ -444,123 +303,9 @@
 
             <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="#EEE"/>
 
-            <!-- File list -->
-            <ListView x:Name="FileListView" Grid.Column="2"
-                          ItemsSource="{Binding FileList.Items}"
-                          BorderThickness="0"
-                          IsTextSearchEnabled="False"
-                          SelectionMode="Extended"
-                          VirtualizingPanel.IsVirtualizing="True"
-                          VirtualizingPanel.VirtualizationMode="Recycling"
-                          ScrollViewer.IsDeferredScrollingEnabled="False"
-                          GridViewColumnHeader.Click="FileList_HeaderClick"
-                          MouseDoubleClick="FileList_DoubleClick"
-                          PreviewMouseRightButtonDown="FileList_PreviewMouseRightButtonDown"
-                          SelectionChanged="FileList_SelectionChanged"
-                          TextInput="FileList_TextInput"
-                          KeyDown="FileList_KeyDown"
-                          PreviewMouseWheel="Scroll_PreviewMouseWheel"
-                          ContextMenuOpening="FileList_ContextMenuOpening">
-                    <ListView.ItemContainerStyle>
-                        <StaticResource ResourceKey="FileRowStyle"/>
-                    </ListView.ItemContainerStyle>
-                    <ListView.ContextMenu>
-                        <ContextMenu>
-                            <MenuItem Header="Open" Click="ContextOpen_Click">
-                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8E5;"/></MenuItem.Icon>
-                            </MenuItem>
-                            <MenuItem Header="Open in Terminal" Click="ContextOpenTerminal_Click">
-                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE756;"/></MenuItem.Icon>
-                            </MenuItem>
-                            <MenuItem Header="Open in VS Code" Click="ContextOpenVSCode_Click">
-                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE943;"/></MenuItem.Icon>
-                            </MenuItem>
-                            <Separator/>
-                            <MenuItem x:Name="CutMenuItem" Header="Cut" InputGestureText="Ctrl+X" Click="ContextCut_Click">
-                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C6;"/></MenuItem.Icon>
-                            </MenuItem>
-                            <MenuItem x:Name="CopyMenuItem" Header="Copy" InputGestureText="Ctrl+C" Click="ContextCopy_Click">
-                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C8;"/></MenuItem.Icon>
-                            </MenuItem>
-                            <MenuItem x:Name="PasteMenuItem" Header="Paste" InputGestureText="Ctrl+V" Click="ContextPaste_Click">
-                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE77F;"/></MenuItem.Icon>
-                            </MenuItem>
-                            <Separator/>
-                            <MenuItem Header="Compute size" Click="ContextComputeSize_Click">
-                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE1D0;"/></MenuItem.Icon>
-                            </MenuItem>
-                            <MenuItem x:Name="BookmarkMenuItem" Header="Bookmark" Click="ContextBookmark_Click">
-                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE734;"/></MenuItem.Icon>
-                            </MenuItem>
-                            <Separator x:Name="CustomCommandsSeparator" Visibility="Collapsed"/>
-                            <Separator/>
-                            <MenuItem Header="Properties…" InputGestureText="Alt+Enter" Click="ContextProperties_Click">
-                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE946;"/></MenuItem.Icon>
-                            </MenuItem>
-                        </ContextMenu>
-                    </ListView.ContextMenu>
-                    <ListView.View>
-                        <GridView x:Name="DetailsView">
-                            <GridViewColumn Width="320" x:Name="NameColumn">
-                                <GridViewColumnHeader Content="Name" Tag="Name"/>
-                                <GridViewColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <StackPanel Orientation="Horizontal">
-                                            <Image Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,6,0"
-                                                   Opacity="{Binding IconOpacity}"/>
-                                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
-                                        </StackPanel>
-                                    </DataTemplate>
-                                </GridViewColumn.CellTemplate>
-                            </GridViewColumn>
-                            <GridViewColumn Width="220" x:Name="RelPathColumn">
-                                <GridViewColumnHeader Content="Folder" Tag="RelativePath"/>
-                                <GridViewColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding RelativePath}" Foreground="Gray"/>
-                                    </DataTemplate>
-                                </GridViewColumn.CellTemplate>
-                            </GridViewColumn>
-                            <GridViewColumn Width="110">
-                                <GridViewColumnHeader Content="Size" Tag="Size"/>
-                                <GridViewColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <Grid>
-                                            <TextBlock Text="{Binding SizeDisplay}" HorizontalAlignment="Right"
-                                                       ToolTip="{Binding SizeTooltip}"
-                                                       Visibility="{Binding IsSizeComputing, Converter={StaticResource InverseBoolToVisibility}}"/>
-                                            <ProgressBar IsIndeterminate="True" Height="10" Width="70"
-                                                         Visibility="{Binding IsSizeComputing, Converter={StaticResource BoolToVisibility}}"/>
-                                        </Grid>
-                                    </DataTemplate>
-                                </GridViewColumn.CellTemplate>
-                            </GridViewColumn>
-                            <GridViewColumn Width="120">
-                                <GridViewColumnHeader Content="Type" Tag="Type"/>
-                                <GridViewColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding TypeName}"/>
-                                    </DataTemplate>
-                                </GridViewColumn.CellTemplate>
-                            </GridViewColumn>
-                            <GridViewColumn Width="140">
-                                <GridViewColumnHeader Content="Modified" Tag="Modified"/>
-                                <GridViewColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding ModifiedDisplay}"/>
-                                    </DataTemplate>
-                                </GridViewColumn.CellTemplate>
-                            </GridViewColumn>
-                        </GridView>
-                    </ListView.View>
-            </ListView>
-
-            <!-- Inline empty state for searches with no hits -->
-            <TextBlock Grid.Column="2" IsHitTestVisible="False"
-                       HorizontalAlignment="Center" VerticalAlignment="Center"
-                       FontSize="14" Foreground="Gray"
-                       Text="{Binding FileList.EmptyMessage}"
-                       Visibility="{Binding FileList.EmptyMessage, Converter={StaticResource NullToCollapsed}}"/>
+            <!-- Panes. Built in code: the arrangement is a tree of grids and splitters, which
+                 XAML cannot express declaratively (ColumnDefinitions are not bindable). -->
+            <Border x:Name="PaneHostSite" Grid.Column="2"/>
         </Grid>
     </DockPanel>
 </Window>

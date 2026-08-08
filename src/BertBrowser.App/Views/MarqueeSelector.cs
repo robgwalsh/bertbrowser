@@ -121,8 +121,8 @@ internal sealed class MarqueeSelector
     {
         IsDragging = true;
         _itemsHost = FindItemsHost(_list);
-        _scroller = FindDescendant<ScrollViewer>(_list);
-        _viewport = FindDescendant<ScrollContentPresenter>(_list);
+        _scroller = VisualTreeUtil.FindDescendant<ScrollViewer>(_list);
+        _viewport = VisualTreeUtil.FindDescendant<ScrollContentPresenter>(_list);
         _originHorizontalOffset = _scroller?.HorizontalOffset ?? 0;
         _initialSelection = _list.SelectedItems.Cast<object>().ToArray();
         _hits.Clear();
@@ -319,7 +319,7 @@ internal sealed class MarqueeSelector
     /// column header, or a scroll bar.</summary>
     private bool IsEmptySpace(DependencyObject? source)
     {
-        for (var d = source; d is not null; d = ParentOf(d))
+        for (var d = source; d is not null; d = VisualTreeUtil.ParentOf(d))
         {
             if (d is ListViewItem or GridViewColumnHeader or ScrollBar or Thumb) return false;
             if (ReferenceEquals(d, _list)) break;
@@ -327,26 +327,12 @@ internal sealed class MarqueeSelector
         return true;
     }
 
-    private static DependencyObject? ParentOf(DependencyObject d) =>
-        d is Visual or Visual3D ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d);
-
     private static Panel? FindItemsHost(DependencyObject root)
     {
         if (root is Panel { IsItemsHost: true } panel) return panel;
         for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
         {
             if (FindItemsHost(VisualTreeHelper.GetChild(root, i)) is { } found) return found;
-        }
-        return null;
-    }
-
-    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
-    {
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
-        {
-            var child = VisualTreeHelper.GetChild(root, i);
-            if (child is T match) return match;
-            if (FindDescendant<T>(child) is { } nested) return nested;
         }
         return null;
     }
