@@ -101,10 +101,19 @@ public class ThemedWindow : Window
 
         // A dialog that says it cannot be resized must not become resizable just because we took
         // over the frame — WindowChrome's resize border does not consult ResizeMode.
+        //
+        // The chrome must be replaced, not adjusted: it arrives from a Setter in the shared style,
+        // which means it is both sealed — assigning to it throws "in a read-only state", and the
+        // window then fails to open at all — and shared, so a successful assignment would have
+        // taken the resize border off every other window too. A clone set locally on this window
+        // beats the setter and belongs to nobody else.
         if (ResizeMode is ResizeMode.NoResize or ResizeMode.CanMinimize &&
-            WindowChrome.GetWindowChrome(this) is { } chrome)
+            WindowChrome.GetWindowChrome(this) is { } chrome &&
+            chrome.ResizeBorderThickness != default)
         {
-            chrome.ResizeBorderThickness = new Thickness(0);
+            var own = (WindowChrome)chrome.Clone();
+            own.ResizeBorderThickness = default;
+            WindowChrome.SetWindowChrome(this, own);
         }
     }
 

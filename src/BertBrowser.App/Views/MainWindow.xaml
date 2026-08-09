@@ -176,11 +176,11 @@
             <StatusBarItem DockPanel.Dock="Left">
                 <TextBlock Text="{Binding ActiveTab.StatusText}"/>
             </StatusBarItem>
-            <!-- Sticks around after a drop so the way back stays visible once the result
-                 message has been replaced by something else. -->
+            <!-- Sticks around after a move or a rename so the way back stays visible once the
+                 result message has been replaced by something else. -->
             <StatusBarItem DockPanel.Dock="Left"
-                           Visibility="{Binding UndoTransferDescription, Converter={StaticResource NullToCollapsed}}">
-                <TextBlock Text="{Binding UndoTransferDescription}" Foreground="{StaticResource Theme.Text.Link}" Margin="10,0,0,0"/>
+                           Visibility="{Binding UndoDescription, Converter={StaticResource NullToCollapsed}}">
+                <TextBlock Text="{Binding UndoDescription}" Foreground="{StaticResource Theme.Text.Link}" Margin="10,0,0,0"/>
             </StatusBarItem>
             <!-- Current file-list selection (blank when nothing is selected). -->
             <StatusBarItem DockPanel.Dock="Left"

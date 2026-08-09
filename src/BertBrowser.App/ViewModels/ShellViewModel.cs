@@ -9,6 +9,7 @@ using BertBrowser.Core.Layout;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Mft;
+using BertBrowser.Core.Services.Rename;
 using BertBrowser.Core.Services.Transfer;
 
 namespace BertBrowser.App.ViewModels;
@@ -27,6 +28,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private readonly AppSettings _settings;
     private readonly TransferPlanner _transferPlanner;
     private readonly TransferExecutor _transferExecutor;
+    private readonly RenamePlanner _renamePlanner;
+    private readonly RenameExecutor _renameExecutor;
     private readonly PaneFactory _factory;
 
     /// <summary>"Show hidden items" browse setting, toggled from the toolbar and the Settings
@@ -120,6 +123,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         DirSizeRepository dirSizes,
         TransferPlanner transferPlanner,
         TransferExecutor transferExecutor,
+        RenamePlanner renamePlanner,
+        RenameExecutor renameExecutor,
         PaneFactory factory,
         AppSettings settings)
     {
@@ -128,6 +133,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         _mftIndex = mftIndex;
         _transferPlanner = transferPlanner;
         _transferExecutor = transferExecutor;
+        _renamePlanner = renamePlanner;
+        _renameExecutor = renameExecutor;
         _factory = factory;
         _settings = settings;
         _showHiddenItems = settings.ShowHiddenItems; // seed the field so the ctor doesn't refresh
@@ -529,6 +536,131 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             : $"{verb} {pasted} item(s)");
     }
 
+    // --- Rename ---
+
+    /// <summary>Works out what renaming these to this pattern would produce, without changing
+    /// anything — the rename dialog asks on every keystroke so it can preview and refuse.</summary>
+    public RenamePlan PlanRename(IReadOnlyList<RenameSource> sources, string pattern) =>
+        _renamePlanner.Plan(sources, pattern);
+
+    /// <summary>Carries out a rename the dialog already planned, then refreshes the tree and every
+    /// tab showing an affected folder — a selection made in a search result can span several. The
+    /// outcome comes back so the view can report whatever failed.</summary>
+    /// <remarks>The plan is advisory in the same way a drop plan is: it was built while the dialog
+    /// was open, and the executor checks every name against live disk state before it writes.</remarks>
+    public async Task<RenameOutcome> RenameAsync(RenamePlan plan)
+    {
+        // Shares the transfer flag: a rename and a drop both move things about, and Ctrl+Z must not
+        // reach the previous operation's undo record while either is still running.
+        if (IsTransferring || !plan.HasWork) return RenameOutcome.Empty;
+
+        IsTransferring = true;
+        UndoCommand.NotifyCanExecuteChanged();
+        try
+        {
+            SetStatus($"Renaming {plan.Work.Count:N0} item(s)…");
+            var outcome = await Task.Run(() => _renameExecutor.Execute(plan));
+
+            RetireUndoable();
+            if (outcome.CanUndo)
+            {
+                _undoableRename = outcome;
+                UndoDescription = $"Ctrl+Z: undo rename of {outcome.Completed.Count:N0} item(s)";
+            }
+
+            await RefreshAfterRenameAsync(outcome.Completed, plan.Renames);
+
+            var status = $"Renamed {outcome.Completed.Count:N0} item(s)";
+            if (outcome.Failed.Count > 0)
+                status += $"; {outcome.Failed.Count:N0} failed — {outcome.Failed[0].Message}";
+            else if (outcome.CanUndo) status += " — Ctrl+Z to undo";
+            SetStatus(status);
+            return outcome;
+        }
+        finally
+        {
+            IsTransferring = false;
+            UndoCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>Reverses the last rename, then refreshes exactly as the rename itself did.</summary>
+    private async Task UndoRenameAsync(RenameOutcome outcome)
+    {
+        IsTransferring = true;
+        UndoCommand.NotifyCanExecuteChanged();
+        try
+        {
+            SetStatus("Undoing…");
+            var result = await Task.Run(() => _renameExecutor.Undo(outcome));
+
+            // Spent either way: a partial undo must not be replayed.
+            _undoableRename = null;
+            UndoDescription = "";
+
+            await RefreshAfterRenameAsync(result.Completed, RenameExecutor.UndoPlan(outcome).Renames);
+
+            SetStatus(result.Failed.Count == 0
+                ? $"Undone — {result.Completed.Count:N0} name(s) put back"
+                : $"Put back {result.Completed.Count:N0} name(s); {result.Failed.Count:N0} could not be — {result.Failed[0].Message}");
+        }
+        finally
+        {
+            IsTransferring = false;
+            UndoCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    private async Task RefreshAfterRenameAsync(
+        IReadOnlyList<CompletedRename> completed, IReadOnlyList<PlannedRename> attempted)
+    {
+        var directories = attempted
+            .Select(r => Path.GetDirectoryName(r.SourcePath))
+            .OfType<string>()
+            .ToList();
+        await Tree.RefreshDirectoriesAsync(directories);
+        await RefreshTabsShowingAsync(directories);
+        await FollowRenamedFoldersAsync(completed);
+    }
+
+    /// <summary>Moves any tab that was sitting inside a renamed folder over to its new path. Without
+    /// this a pane browsing the folder — or something below it — would be left pointing at a name
+    /// that no longer exists, which a refresh can only turn into an error.</summary>
+    private async Task FollowRenamedFoldersAsync(IReadOnlyList<CompletedRename> completed)
+    {
+        foreach (var rename in completed)
+        {
+            if (!rename.IsDirectory) continue;
+
+            var from = PathKey.NormalizeDisplay(rename.SourcePath);
+            var fromKey = PathKey.Canonicalize(from);
+
+            foreach (var tab in AllTabs.ToList())
+            {
+                if (tab.CurrentPath.Length == 0) continue;
+                string key;
+                string current;
+                try
+                {
+                    current = PathKey.NormalizeDisplay(tab.CurrentPath);
+                    key = PathKey.Canonicalize(current);
+                }
+                catch (ArgumentException)
+                {
+                    continue;
+                }
+
+                // Canonicalizing only changes case, so the old path's length indexes into the
+                // tab's own path exactly as it does into the key.
+                if (key == fromKey)
+                    await tab.NavigateToAsync(rename.FinalPath);
+                else if (PathKey.IsUnder(key, fromKey))
+                    await tab.NavigateToAsync(
+                        Path.Combine(rename.FinalPath, current[from.Length..].TrimStart('\\')));
+            }
+        }
+    }
+
     /// <summary>Runs a user-defined command once per selected item it applies to.</summary>
     public void RunCustomCommand(CustomCommandDefinition command, IReadOnlyList<(string FullPath, bool IsDirectory)> targets)
     {
@@ -559,19 +691,24 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
     // --- Drag-and-drop transfers ---
 
-    /// <summary>The last completed move, kept so Ctrl+Z can put it back. Retiring it commits any
-    /// entries a Replace displaced into staging.</summary>
+    /// <summary>The one-level undo slot: whichever of a move or a rename happened last, and only
+    /// one of the two is ever set. Retiring a transfer commits any entries a Replace displaced into
+    /// staging; a rename has nothing set aside, since its staging names are gone by the time it
+    /// finishes.</summary>
     private TransferOutcome? _undoableTransfer;
+
+    private RenameOutcome? _undoableRename;
 
     /// <summary>True while a drop is being carried out; blocks a second one from overlapping it.</summary>
     [ObservableProperty]
     private bool _isTransferring;
 
-    public bool CanUndoTransfer => _undoableTransfer?.CanUndo == true && !IsTransferring;
+    public bool CanUndo =>
+        (_undoableTransfer?.CanUndo == true || _undoableRename?.CanUndo == true) && !IsTransferring;
 
     /// <summary>"Undo move of 3 items" for the menu/tooltip; empty when there is nothing to undo.</summary>
     [ObservableProperty]
-    private string _undoTransferDescription = "";
+    private string _undoDescription = "";
 
     /// <summary>Works out what a drop would do, without changing anything. Called while the drag
     /// hovers, so the view can allow or refuse the drop and explain why.</summary>
@@ -586,7 +723,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         if (IsTransferring || !plan.HasWork) return;
 
         IsTransferring = true;
-        UndoTransferCommand.NotifyCanExecuteChanged();
+        UndoCommand.NotifyCanExecuteChanged();
         try
         {
             var verbing = plan.Verb == TransferVerb.Move ? "Moving" : "Copying";
@@ -600,12 +737,11 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             var outcome = await Task.Run(
                 () => _transferExecutor.Execute(plan, resolutions, CancellationToken.None, progress));
 
-            RetireUndoableTransfer();
+            RetireUndoable();
             if (outcome.CanUndo)
             {
                 _undoableTransfer = outcome;
-                UndoTransferDescription =
-                    $"Ctrl+Z: undo move of {outcome.Completed.Count:N0} item(s)";
+                UndoDescription = $"Ctrl+Z: undo move of {outcome.Completed.Count:N0} item(s)";
             }
 
             await RefreshAfterTransferAsync(plan, outcome);
@@ -614,17 +750,23 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         finally
         {
             IsTransferring = false;
-            UndoTransferCommand.NotifyCanExecuteChanged();
+            UndoCommand.NotifyCanExecuteChanged();
         }
     }
 
-    [RelayCommand(CanExecute = nameof(CanUndoTransfer))]
-    private async Task UndoTransferAsync()
+    /// <summary>Reverses the last move or rename — whichever the undo slot holds.</summary>
+    [RelayCommand(CanExecute = nameof(CanUndo))]
+    private async Task UndoAsync()
     {
-        if (_undoableTransfer is not { } outcome) return;
+        // A rename can only be in the slot if it happened after any transfer, and vice versa.
+        if (_undoableRename is { } rename) await UndoRenameAsync(rename);
+        else if (_undoableTransfer is { } transfer) await UndoTransferAsync(transfer);
+    }
 
+    private async Task UndoTransferAsync(TransferOutcome outcome)
+    {
         IsTransferring = true;
-        UndoTransferCommand.NotifyCanExecuteChanged();
+        UndoCommand.NotifyCanExecuteChanged();
         try
         {
             SetStatus("Undoing…");
@@ -632,7 +774,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
             // The record is spent either way: a partial undo must not be replayed.
             _undoableTransfer = null;
-            UndoTransferDescription = "";
+            UndoDescription = "";
 
             var directories = outcome.Completed
                 .SelectMany(c => new[] { Path.GetDirectoryName(c.SourcePath), Path.GetDirectoryName(c.FinalPath) })
@@ -649,7 +791,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         finally
         {
             IsTransferring = false;
-            UndoTransferCommand.NotifyCanExecuteChanged();
+            UndoCommand.NotifyCanExecuteChanged();
         }
     }
 
@@ -657,13 +799,14 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// Drops the pending undo record. Anything a Replace displaced into staging is deleted at this
     /// point and not before: up until now Ctrl+Z could have brought it back.
     /// </summary>
-    public void RetireUndoableTransfer()
+    public void RetireUndoable()
     {
         if (_undoableTransfer is { } outcome)
             TransferExecutor.CommitStaging(outcome);
         _undoableTransfer = null;
-        UndoTransferDescription = "";
-        UndoTransferCommand.NotifyCanExecuteChanged();
+        _undoableRename = null;
+        UndoDescription = "";
+        UndoCommand.NotifyCanExecuteChanged();
     }
 
     private async Task RefreshAfterTransferAsync(TransferPlan plan, TransferOutcome outcome)

@@ -69,15 +69,57 @@ a thin facade over it, so there is exactly one implementation to audit. It is sp
   `ERROR_NOT_SAME_DEVICE` — any other `IOException` is a real failure and must surface.
 
 Undo (Ctrl+Z, one level) reverses the last move and restores anything a Replace displaced.
-`ShellViewModel.RetireUndoableTransfer` is what finally commits a replacement, so staged data
-outlives the undo record by exactly one operation. Copy has no Replace and no undo: it is defined
-as purely additive.
+`ShellViewModel.RetireUndoable` is what finally commits a replacement, so staged data outlives the
+undo record by exactly one operation. Copy has no Replace and no undo: it is defined as purely
+additive. The undo slot is **shared with rename** — one level, whichever happened last — so both
+sides call `RetireUndoable` before claiming it, and `IsTransferring` gates both.
 
 Tests are the point of this design — `TransferPlannerTests` (rules, fake filesystem),
 `TransferExecutorTests` (real files, contents asserted), and `TransferRoundTripTests` (property
 tests: the multiset of file contents under the root is invariant under any move, and undo restores
 the tree byte-for-byte). Two meta-tests assert those invariant checks can actually detect a lost or
 moved file. If you change this code, mutate a rule and confirm a test goes red.
+
+### Rename
+
+`Core/Services/Rename` is split the same way and for the same reason. F2 or the context menu opens
+`Views/RenameDialog` over the selection; one item takes the typed text as its whole name, several
+are **numbered** — "Holiday" over three photos gives `Holiday 1.jpg`, `Holiday 2.png`,
+`Holiday 3.jpg`, each keeping its own extension (a folder has none, so `My.Project` is not treated
+as having one). The count follows the order the *list* shows, not the order rows were clicked.
+
+- **`RenamePattern`** is the naming and legal-name rule, pure and shared: the dialog previews every
+  keystroke with the same function the rename obeys, so a preview cannot drift from the result.
+- **`RenamePlanner`** decides, touching nothing, through **`IRenameProbe`**. Nothing may land on a
+  taken name — but a name held by *another selected item* is fair game, since that item is about to
+  vacate it, which is what makes rotating or shifting a numbered set work. Only if it really is
+  leaving: a second pass drops anyone aiming at an item whose own rename was refused, and repeats,
+  because one refusal can doom another.
+- **`RenameExecutor`** writes, re-checking each name against live disk state first (the plan is
+  built while the dialog is open). Nothing is ever overwritten — both moves are the non-replacing
+  overloads. An item whose current name *another* item wants is moved to a `.bertbrowser-rename-*`
+  name first, so the second pass only writes into empty space; a failure there puts it back, and if
+  even that fails the staged path is named in the error rather than left silently. A case-only
+  rename needs none of this — .NET 8 handles it directly.
+
+A rename is its own inverse, so **undo is the same execution with every path swapped**
+(`RenameExecutor.Undo` runs `UndoPlan` back through `Execute`) — which is what makes undoing a
+rotation, or a batch that shifted a numbered set along, go through exactly the staging the forward
+direction did. It shares the one-level undo slot with transfers (see above), and an old name that
+has since been taken is reported rather than overwritten.
+
+A selected folder and something inside it are both renameable in a flattened search result, so the
+planner refuses the inner one (`InsideARenamedFolder`): renaming the folder first would move the
+other item's path out from under it.
+
+The dialog refuses the whole rename while any item is rejected, rather than half-doing a batch, and
+reports per-item failures afterwards in a `MessageDialog`. `ShellViewModel.RenameAsync` fans out
+like a transfer does, plus `FollowRenamedFoldersAsync`: a tab sitting inside a folder that was just
+renamed is re-pointed at the new path instead of being left on a name that no longer exists.
+
+Tests: `RenamePatternTests` (naming and validation), `RenamePlannerTests` (rules, fake filesystem),
+`RenameExecutorTests` (real files, contents asserted, undo included, with a meta-test that the
+"nothing stranded" check can fail). Mutate a rule and confirm a test goes red.
 
 ### Theming
 
@@ -143,6 +185,14 @@ work area (`WM_GETMINMAXINFO` — a fixed margin is DPI-wrong), answering `WM_NC
 draws (its colours are `COLORREF`, i.e. BGR). `MainWindow` puts its navigation toolbar in the caption
 strip via `TitleBarContent`; anything interactive up there needs
 `WindowChrome.IsHitTestVisibleInChrome`.
+
+**The `WindowChrome` from that style is sealed and shared.** It arrives from a `Setter`, so assigning
+to any of its properties throws "in a read-only state" — and since a `Setter` value is one instance
+handed to every window, an assignment that *did* work would change all of them. `OnApplyTemplate`
+therefore **clones** it to drop the resize border on a `NoResize` dialog. This failure mode is nasty:
+it throws from `Window.Show`, so the window never opens, and a caller that discarded the `Task`
+(`_ = SomethingAsync()`) shows nothing at all — which is what "the menu item does nothing" looks
+like.
 
 **An implicit style keys on the element's exact runtime type and never walks the base chain.** No
 window here *is* a `ThemedWindow` — they are all subclasses of one — so `Style TargetType="{x:Type
@@ -220,7 +270,8 @@ Ctrl+1..9, Ctrl+Alt+arrow to split, Ctrl+Shift+W, F6 to cycle panes). Anything t
 with typing stays in a `PreviewKeyDown` with a focus guard: Ctrl+Z at the window (skipped when
 `Keyboard.FocusedElement is TextBoxBase` — there is one search box and one path box *per tab* now),
 and Ctrl+C/X/V and Alt+Enter in `DirectoryTabView` gated on its own list having focus. Plain Tab
-stays WPF focus traversal.
+stays WPF focus traversal. F2 (rename) is on the file list's own `KeyDown`, which is enough — it
+never fires while a search or path box has the caret.
 
 The file list has two modes: normal directory listing, or — while the search box has a query — a flattened result list (`FileListViewModel.IsFlattened`) that also shows each hit's folder relative to the search root.
 

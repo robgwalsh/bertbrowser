@@ -166,6 +166,10 @@
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE77F;"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator/>
+                        <MenuItem x:Name="RenameMenuItem" Header="Rename…" InputGestureText="F2"
+                                  Click="ContextRename_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8AC;"/></MenuItem.Icon>
+                        </MenuItem>
                         <MenuItem Header="Compute size" Click="ContextComputeSize_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE1D0;"/></MenuItem.Icon>
                         </MenuItem>

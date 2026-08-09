@@ -46,6 +46,8 @@ public partial class App : Application
         services.AddSingleton<IFileTransferService, FileTransferService>();
         services.AddSingleton<BertBrowser.Core.Services.Transfer.TransferPlanner>();
         services.AddSingleton<BertBrowser.Core.Services.Transfer.TransferExecutor>();
+        services.AddSingleton<BertBrowser.Core.Services.Rename.RenamePlanner>();
+        services.AddSingleton<BertBrowser.Core.Services.Rename.RenameExecutor>();
         services.AddSingleton<IBookmarkService, BookmarkService>();
         services.AddSingleton<IndexCrawler>();
         services.AddSingleton<IIndexWatcherService, IndexWatcherService>();

@@ -8,6 +8,7 @@ using BertBrowser.App.Services;
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.Rename;
 
 namespace BertBrowser.App.Views;
 
@@ -240,10 +241,10 @@ public partial class DirectoryTabView : UserControl
         }
     }
 
-    /// <summary>Updates the status-bar selection summary and mirrors a single-item selection into
-    /// the folder tree (the item's own folder for directories, its parent for files). Multi-selection
-    /// has no one folder to reveal, and a rubber-band drag churns the selection every frame, so both
-    /// skip the tree work.</summary>
+    /// <summary>Updates the status-bar selection summary and mirrors a single selected *directory*
+    /// into the folder tree. Selecting a file reveals nothing: its folder is already the one the tree
+    /// is sitting on, so scrolling for it is pure churn. Multi-selection has no one folder to reveal,
+    /// and a rubber-band drag churns the selection every frame, so both skip the tree work.</summary>
     private void FileList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         // Mirrored out synchronously so the shell and the window's key handlers never have to reach
@@ -252,9 +253,9 @@ public partial class DirectoryTabView : UserControl
         QueueSelectionSummary();
 
         if (_marquee.IsDragging || FileListView.SelectedItems.Count != 1) return;
-        if (FileListView.SelectedItem is not FileItemViewModel item) return;
+        if (FileListView.SelectedItem is not FileItemViewModel { IsDirectory: true } item) return;
 
-        var dir = item.IsDirectory ? item.FullPath : Path.GetDirectoryName(item.FullPath);
+        var dir = item.FullPath;
         if (string.IsNullOrEmpty(dir)) return;
 
         // Dropped by the shell unless this is the active tab, so a background pane can never move
@@ -330,12 +331,18 @@ public partial class DirectoryTabView : UserControl
             Tab.OpenItemCommand.Execute(item);
     }
 
-    /// <summary>Enter opens the selected item, like double-click.</summary>
+    /// <summary>Enter opens the selected item, like double-click; F2 renames the selection, as
+    /// everywhere else in Windows.</summary>
     private void FileList_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && FileListView.SelectedItem is FileItemViewModel item)
         {
             Tab.OpenItemCommand.Execute(item);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.F2 && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            _ = RenameSelectionAsync();
             e.Handled = true;
         }
     }
@@ -443,6 +450,9 @@ public partial class DirectoryTabView : UserControl
         OpenInNewTabMenuItem.IsEnabled = OpenInNewPaneMenuItem.IsEnabled = folders > 0;
         OpenInNewTabMenuItem.Header = folders > 1 ? $"Open {folders} folders in new tabs" : "Open in new tab";
 
+        RenameMenuItem.IsEnabled = selection.Count > 0;
+        RenameMenuItem.Header = selection.Count > 1 ? $"Rename {selection.Count} items…" : "Rename…";
+
         BookmarkMenuItem.IsEnabled = selection.Count > 0;
         // "Remove bookmark" only when every selected item is already bookmarked.
         var allBookmarked = selection.Count > 0 && selection.All(i => _shell.Bookmarks.IsBookmarked(i.FullPath));
@@ -504,6 +514,50 @@ public partial class DirectoryTabView : UserControl
 
     private void ContextPaste_Click(object sender, RoutedEventArgs e) =>
         _shell.PasteCommand.Execute(null);
+
+    private void ContextRename_Click(object sender, RoutedEventArgs e) => _ = RenameSelectionAsync();
+
+    /// <summary>Renames the selection, in the order the list shows it — which is the order a
+    /// numbered rename counts in, so "Holiday 1" is the one nearest the top.</summary>
+    private async Task RenameSelectionAsync()
+    {
+        var selection = SelectedFileItems();
+        if (selection.Count == 0) return;
+
+        // SelectedItems is in the order things were clicked, which is not the order they are read in.
+        var ordered = Tab.FileList.Items
+            .Where(selection.Contains)
+            .Select(i => new RenameSource(i.FullPath, i.IsDirectory))
+            .ToList();
+
+        var owner = Window.GetWindow(this);
+        if (RenameDialog.Show(owner, ordered, _shell.PlanRename) is not { } plan) return;
+
+        var outcome = await _shell.RenameAsync(plan);
+
+        // The shell has reloaded this list by now, so the rows are new objects: re-select what was
+        // renamed rather than leaving the user with nothing selected where their files used to be.
+        SelectPaths(outcome.Completed.Select(c => c.FinalPath));
+
+        if (outcome.Failed.Count == 0) return;
+
+        MessageDialog.Show(owner, string.Join("\n\n", outcome.Failed.Select(f => f.Message)),
+            "Rename", MessageDialogKind.Warning);
+    }
+
+    private void SelectPaths(IEnumerable<string> paths)
+    {
+        var wanted = paths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (wanted.Count == 0) return;
+
+        FileListView.SelectedItems.Clear();
+        foreach (var obj in FileListView.Items)
+        {
+            if (obj is FileItemViewModel vm && wanted.Contains(vm.FullPath))
+                FileListView.SelectedItems.Add(vm);
+        }
+        if (FileListView.SelectedItem is { } first) FileListView.ScrollIntoView(first);
+    }
 
     private void ContextComputeSize_Click(object sender, RoutedEventArgs e) =>
         Tab.ComputeSizeCommand.Execute(SelectedFileItems());

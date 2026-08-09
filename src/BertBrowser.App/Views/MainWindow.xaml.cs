@@ -44,7 +44,7 @@ public partial class MainWindow : ThemedWindow
             SaveWindowSettings();
             // The pending undo is gone once we exit, so commit whatever a Replace set aside rather
             // than leaving hidden staging folders behind.
-            _shell.RetireUndoableTransfer();
+            _shell.RetireUndoable();
         };
     }
 
@@ -180,14 +180,14 @@ public partial class MainWindow : ThemedWindow
             _layoutHost.ActivePaneView?.FocusSearchBox();
             e.Handled = true;
         }
-        // Undo the last drag-and-drop move. Skipped while any text box has focus so Ctrl+Z still
+        // Undo the last move or rename. Skipped while any text box has focus so Ctrl+Z still
         // undoes typing there — and there is one search box and one path box per open tab now, so
         // the test has to be about the focused element rather than about named controls.
         else if (e.Key == Key.Z && Keyboard.Modifiers == ModifierKeys.Control &&
             Keyboard.FocusedElement is not TextBoxBase)
         {
-            if (_shell.UndoTransferCommand.CanExecute(null))
-                _shell.UndoTransferCommand.Execute(null);
+            if (_shell.UndoCommand.CanExecute(null))
+                _shell.UndoCommand.Execute(null);
             e.Handled = true;
         }
         base.OnPreviewKeyDown(e);
