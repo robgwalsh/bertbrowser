@@ -150,7 +150,7 @@ public class ByteSizeFormatterTests
     [InlineData(1536, "1.5 KB")]
     [InlineData(1048576, "1 MB")]
     [InlineData(1469006, "1.4 MB")]
-    [InlineData(1073741824, "1 GB")]
+    [InlineData(1073741824, "1.000 GB")]
     public void Format_HumanReadable(long bytes, string expected) =>
         Assert.Equal(expected, ByteSizeFormatter.Format(bytes));
 }
