@@ -36,6 +36,7 @@ public partial class MainWindow : ThemedWindow
         _shell.ActiveLocationChanged += OnActiveLocationChanged;
         _shell.TreeRevealRequested += OnTreeRevealRequested;
         _shell.PaneFocusRequested += OnPaneFocusRequested;
+        _shell.GlobalSearchFocusRequested += FocusGlobalSearchBox;
 
         Loaded += async (_, _) => await _shell.InitializeAsync();
         Closing += (_, _) =>
@@ -113,8 +114,39 @@ public partial class MainWindow : ThemedWindow
             // setter refreshes the list and re-filters bookmarks. (Custom-command menus rebuild
             // on every open, so they need no refresh.)
             _shell.ShowHiddenItems = _settings.ShowHiddenItems;
+            _shell.RefreshTileAspect();
         }
     }
+
+    // --- Whole-PC search (header) ---
+
+    /// <summary>Puts the caret in the header field and selects whatever query is already there, so
+    /// opening it again immediately overtypes the last search. Deferred one dispatcher pass: the
+    /// field only became visible with this same property change, and an invisible element can't
+    /// take focus.</summary>
+    private void FocusGlobalSearchBox() =>
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+        {
+            GlobalSearchBox.Focus();
+            GlobalSearchBox.SelectAll();
+        });
+
+    private void GlobalSearchBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+
+        // Clear first: collapsing is refused while the search is live, and this is the gesture that
+        // ends it. Focus goes back to the list, which is what the results were showing.
+        _shell.ActiveTab.ClearSearchCommand.Execute(null);
+        _shell.CollapseGlobalSearchCommand.Execute(null);
+        _layoutHost.ActivePaneView?.FocusActiveTabList();
+        e.Handled = true;
+    }
+
+    /// <summary>Clicking away tidies the field back into its button — but only when it is empty,
+    /// which <see cref="ShellViewModel.CollapseGlobalSearchCommand"/> enforces.</summary>
+    private void GlobalSearchBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) =>
+        _shell.CollapseGlobalSearchCommand.Execute(null);
 
     private void Scroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
@@ -135,9 +167,15 @@ public partial class MainWindow : ThemedWindow
     /// <c>ActivePane</c> in XAML.</summary>
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
-        // Focusing search is window-wide so it works from the sidebar too; which box it lands in
-        // is decided by which pane is active.
-        if ((e.Key == Key.F || e.Key == Key.E) && Keyboard.Modifiers == ModifierKeys.Control)
+        // Focusing search is window-wide so it works from the sidebar too. Ctrl+F is the active
+        // pane's folder-local box; Ctrl+Shift+F opens the header's whole-PC one, which would
+        // otherwise be reachable only with the mouse.
+        if (e.Key == Key.F && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
+        {
+            _shell.ExpandGlobalSearchCommand.Execute(null);
+            e.Handled = true;
+        }
+        else if ((e.Key == Key.F || e.Key == Key.E) && Keyboard.Modifiers == ModifierKeys.Control)
         {
             _layoutHost.ActivePaneView?.FocusSearchBox();
             e.Handled = true;
@@ -252,6 +290,12 @@ public partial class MainWindow : ThemedWindow
     /// tab or pane came to the front. Only the active one ever reaches here.</summary>
     private void OnActiveLocationChanged(string path)
     {
+        // Navigating ends any search, so tidy the header field back into its button rather than
+        // leaving an empty box open — unless the caret is still in it, which means the user opened
+        // it and is about to type. (Collapsing is refused outright while a search is still live.)
+        if (!GlobalSearchBox.IsKeyboardFocusWithin)
+            _shell.CollapseGlobalSearchCommand.Execute(null);
+
         // Navigating anywhere but the clicked row retires its anchor: from here on the reveal is
         // free to position the tree, and a much later return to that folder mustn't snap back to
         // a viewport offset the row held during some earlier click.

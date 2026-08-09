@@ -224,6 +224,17 @@ stays WPF focus traversal.
 
 The file list has two modes: normal directory listing, or — while the search box has a query — a flattened result list (`FileListViewModel.IsFlattened`) that also shows each hit's folder relative to the search root.
 
+Thumbnail (tile) view is the footer zoom slider: `ThumbnailScale` 0 keeps the details list, anything
+above switches to tiles whose **width** is `ThumbnailSize`. The height is `ThumbnailTileHeight`, that
+width through `AppSettings.TileAspectRatio` — so the slider means the same thing at every shape. The
+ratio is a `BertBrowser.Core.Models.AspectRatio` (parsed, not a raw string, and covered by
+`AspectRatioTests`) because it is a hand-editable line of settings.json: `Parse` **never throws**, and
+anything unusable — including a default-constructed `0:0`, which a struct always permits — resolves to
+4:3 rather than handing WPF a `NaN` height. The Settings picker lists `AspectRatio.Presets` plus the
+current value if it isn't one of them, or saving would silently discard a ratio typed in by hand. It
+is a global setting, so `ShellViewModel.RefreshTileAspect` fans it out to every open list after the
+dialog commits; it only re-lays-out, so unlike the other browse settings it reloads nothing.
+
 The file list is a multi-select (`Extended`) `ListView`. Ctrl/Shift/Ctrl+A come from WPF; `Views/MarqueeSelector` adds the rubber band — pressing on empty space and dragging sweeps a rectangle (drawn as an `Adorner`) that selects everything it touches, with edge auto-scroll. It only hit-tests *realized* containers, so it pins the drag origin to the row it landed on and recomputes the anchor from that row's live position, treating the anchor as off-screen once it virtualizes away. Selection-driven work (folder-tree reveal, status-bar summary) must therefore tolerate churn: the tree reveal is skipped while `MarqueeSelector.IsDragging`, and the summary is coalesced to one dispatcher pass. The tree is shared by every pane, so reveals are routed through `ShellViewModel.RequestTreeReveal`/`ActiveLocationChanged`, which drop anything not from the active tab and are debounced in the window — that single-writer rule is what stops open panes fighting over the tree's selection, expansion and scroll position. `PropertiesViewModel` takes a whole `IReadOnlyList<PropertiesTarget>` — with several targets it shows aggregates and three-state attribute checkboxes (indeterminate = the items disagree, and Apply leaves that bit alone).
 
 Drag-and-drop is split three ways, and the split is load-bearing. `Views/DropPipeline` holds the
@@ -238,3 +249,26 @@ item; and the plan computed while hovering is only advisory — the drop always 
 before writing.
 
 The left sidebar has two sections: **Bookmarks** (top, sized to content) and **Drives & devices** (below, fills the rest). `FolderTreeViewModel.Roots` is `ObservableCollection<ISidebarNode>` mixing browsable `DirectoryNodeViewModel` drives (expandable tree) with `PortableDeviceNodeViewModel` leaves — MTP phones/cameras enumerated off-thread via `Interop.PortableDevices` (Shell.Application COM on an STA thread) that open in Explorer on double-click, since their contents aren't a filesystem path. Bookmarks persist in the `bookmark` table via `BookmarkRepository`/`IBookmarkService`; the file-list and tree context menus toggle them (`ShellViewModel.ToggleBookmarksAsync`), and `BookmarksViewModel` keeps an in-memory key set so the menu can label Bookmark/Remove without a DB hit.
+
+Both sections honour "Show hidden items", and both filter rather than re-query: `BookmarksViewModel`
+keeps every bookmark in `_all`, `DirectoryNodeViewModel` keeps every loaded child in `_allChildren`,
+and the collection the view binds is the filtered projection — so `ShellViewModel`'s toggle re-filters
+in memory and a subtree that was hidden comes back with its expansion state intact. The expander is
+part of it: `IFileSystemService.ProbeSubdirectories` answers *any* and *any non-hidden* from one scan,
+so a folder whose only subfolders are hidden doesn't offer an expander that opens onto nothing, and
+the answer flips with the setting without touching disk again.
+
+Each tree row shows its recursive size, small and dimmed, right of the name. **Nothing scans for it**:
+a folder's number is a batched `DirSizeRepository.GetMany` over the siblings just populated, reading
+the `dir_size_cache` rows the MFT pass already wrote for every directory on the volume, and a drive
+root's is `TotalSize - TotalFreeSpace` (its own cache row would miss whatever sits outside the walked
+tree). Unknown means blank, never zero — that is what a non-NTFS volume or a still-indexing one looks
+like, which is why `ShellViewModel.OnMftIndexRefreshed` calls `FolderTreeViewModel.RefreshSizesAsync`
+once for the shared tree: an already-expanded subtree fills in without being collapsed and reopened.
+The size text is dimmed with `Opacity`, not a muted brush, so it stays legible on a selected row whose
+foreground it inherits. Because that text is right-aligned, the tree can't let a scrollbar take
+layout space: `SidebarTreeStyle` (in `Controls/Lists.xaml`) retemplates the `ScrollViewer` so the bar
+**overlays** a gutter the rows always leave — the tree's right `Padding`, which must stay equal to the
+`ScrollBar` style's 12px width. The pinned row carries the same 12px as a `Margin`, since it sits
+outside the scroll area. That style is vertical-only on purpose; a tree that scrolls sideways would
+clip with no bar to reach the rest.

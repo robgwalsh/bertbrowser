@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using BertBrowser.App.Services;
 using BertBrowser.App.Theming;
+using BertBrowser.Core.Models;
 
 namespace BertBrowser.App.ViewModels;
 
@@ -96,6 +97,14 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public string ScrollSpeedText => $"{ScrollSpeed:0.0}×";
 
+    /// <summary>Tile shapes offered by the picker. Seeded from <see cref="AspectRatio.Presets"/>,
+    /// plus whatever the settings file already holds if it isn't one of them — otherwise a ratio
+    /// typed in by hand would be silently replaced the first time this dialog is saved.</summary>
+    public IReadOnlyList<AspectRatio> TileAspectOptions { get; }
+
+    [ObservableProperty]
+    private AspectRatio _tileAspect;
+
     /// <summary>
     /// Theme selection and editing. Unlike everything else here it applies live rather than on
     /// Save — see the note in the dialog.
@@ -116,6 +125,12 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settings = settings;
         ShowHiddenItems = settings.ShowHiddenItems;
         ScrollSpeed = settings.ScrollSpeedMultiplier;
+
+        TileAspect = AspectRatio.Parse(settings.TileAspectRatio);
+        TileAspectOptions = AspectRatio.Presets.Contains(TileAspect)
+            ? AspectRatio.Presets
+            : AspectRatio.Presets.Append(TileAspect).ToList();
+
         Commands = new ObservableCollection<CustomCommandItemViewModel>(
             settings.CustomCommands.Select(d => new CustomCommandItemViewModel(d)));
         SelectedCommand = Commands.FirstOrDefault();
@@ -170,6 +185,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settings.CustomCommands = Commands.Select(c => c.ToDefinition()).ToList();
         _settings.ShowHiddenItems = ShowHiddenItems;
         _settings.ScrollSpeedMultiplier = ScrollSpeed;
+        _settings.TileAspectRatio = TileAspect.ToString();
         _settings.Save();
         error = null;
         return true;

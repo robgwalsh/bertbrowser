@@ -133,6 +133,21 @@
         </Style.Triggers>
     </Style>
 
+    <!-- The same ✕ for the header's whole-PC field. Not BasedOn SearchClearButton: that one's
+         trigger names SearchText, which the shell (the header's DataContext) hasn't got. -->
+    <Style x:Key="GlobalSearchClearButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.Text.Secondary}"/>
+        <Setter Property="Margin" Value="0"/>
+        <Setter Property="MinWidth" Value="0"/>
+        <Setter Property="Padding" Value="6,0"/>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding ActiveTab.GlobalSearchText}" Value="">
+                <Setter Property="Visibility" Value="Collapsed"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
     <!-- Explorer-style chevron expander for the folder tree. -->
     <Style x:Key="TreeExpanderStyle" TargetType="ToggleButton">
         <Setter Property="Focusable" Value="False"/>
@@ -288,8 +303,9 @@
     </Style>
 
     <!--
-      Thumbnail (tile) view for the file list: a wrap of square previews with the name beneath.
-      The tile and image size track FileList.ThumbnailSize so the footer slider resizes them live.
+      Thumbnail (tile) view for the file list: a wrap of previews with the name beneath.
+      Tile width tracks FileList.ThumbnailSize so the footer slider resizes them live; the height
+      is FileList.ThumbnailTileHeight, i.e. that width through the configured aspect ratio.
       App-level rather than per-window because every pane's file list looks these up by name from
       its own ApplyViewMode() — a Style/DataTemplate/ItemsPanelTemplate can be shared across
       controls, unlike the GridView and ContextMenu, which stay inline per list.
@@ -305,7 +321,7 @@
                  transparent PNG or a pale photo from dissolving into a dark window. -->
             <Border Background="{StaticResource Theme.Thumbnail.TileBackground}" CornerRadius="2"
                     Width="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}"
-                    Height="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}">
+                    Height="{Binding DataContext.FileList.ThumbnailTileHeight, RelativeSource={RelativeSource AncestorType=ListView}}">
                 <Image Source="{Binding Thumbnail}" Opacity="{Binding IconOpacity}"
                        Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
                        RenderOptions.BitmapScalingMode="HighQuality"/>

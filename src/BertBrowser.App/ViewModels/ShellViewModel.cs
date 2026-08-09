@@ -4,6 +4,7 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using BertBrowser.App.Services;
+using BertBrowser.Core.Data;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
@@ -39,6 +40,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         _settings.ShowHiddenItems = value;
         _settings.Save();
         Bookmarks.SetShowHidden(value);
+        Tree.SetShowHidden(value);
         _ = RefreshAllTabsAsync();
     }
 
@@ -66,6 +68,43 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     [ObservableProperty]
     private string _indexingStatus = "";
 
+    // --- Whole-PC search (header) ---
+
+    /// <summary>Whether the header's whole-PC search shows its text field or the square button it
+    /// collapses to. Window state rather than tab state: it is one control in the title bar, while
+    /// the query behind it belongs to whichever tab is active (<c>ActiveTab.GlobalSearchText</c>),
+    /// since that is the list the hits land in.</summary>
+    [ObservableProperty]
+    private bool _isGlobalSearchExpanded;
+
+    /// <summary>Asks the view to put the caret in the header search field and select what's there.
+    /// Expanding is a view-model decision; moving focus is the one part it can't do itself.</summary>
+    public event Action? GlobalSearchFocusRequested;
+
+    [RelayCommand]
+    private void ExpandGlobalSearch()
+    {
+        IsGlobalSearchExpanded = true;
+        GlobalSearchFocusRequested?.Invoke();
+    }
+
+    /// <summary>Collapses back to the button — refused while a whole-PC search is live, because the
+    /// field is then the only thing saying what the file list is showing.</summary>
+    [RelayCommand]
+    private void CollapseGlobalSearch()
+    {
+        if (ActivePane.ActiveTab is { GlobalSearchText.Length: > 0 }) return;
+        IsGlobalSearchExpanded = false;
+    }
+
+    /// <summary>Keeps the field open when the tab (or pane) coming to the front has a whole-PC
+    /// search of its own, so switching to it doesn't hide the query producing its listing.</summary>
+    private void SyncGlobalSearchExpansion()
+    {
+        if (ActivePane.ActiveTab is { GlobalSearchText.Length: > 0 })
+            IsGlobalSearchExpanded = true;
+    }
+
     /// <summary>Raised when the active tab's folder changes (or a different tab or pane becomes
     /// active), so the window can reveal it in the folder tree. Only ever raised for the active
     /// tab, which is what stops several open directories fighting over the tree's selection and
@@ -78,6 +117,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         IFileTransferService fileTransfer,
         IBookmarkService bookmarkService,
         IMftIndexService mftIndex,
+        DirSizeRepository dirSizes,
         TransferPlanner transferPlanner,
         TransferExecutor transferExecutor,
         PaneFactory factory,
@@ -92,7 +132,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         _settings = settings;
         _showHiddenItems = settings.ShowHiddenItems; // seed the field so the ctor doesn't refresh
 
-        Tree = new FolderTreeViewModel(fileSystem);
+        Tree = new FolderTreeViewModel(fileSystem, dirSizes);
         Bookmarks = new BookmarksViewModel(bookmarkService);
 
         _activePane = new PaneViewModel(_factory, this);
@@ -116,6 +156,9 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         Bookmarks.SetShowHidden(ShowHiddenItems);
         await Bookmarks.LoadAsync();
 
+        // Before the drives load: the setting decides what each node's expander probe reports.
+        Tree.SetShowHidden(ShowHiddenItems);
+
         // Drives are enumerated off-thread; the roots must exist before the first reveal.
         await Tree.LoadDrivesAsync();
 
@@ -138,6 +181,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         newValue.IsActivePane = true;
         newValue.PropertyChanged += OnActivePanePropertyChanged;
         OnPropertyChanged(nameof(ActiveTab));
+        SyncGlobalSearchExpansion();
         if (newValue.ActiveTab is { } tab)
             ActiveLocationChanged?.Invoke(tab.CurrentPath);
     }
@@ -148,6 +192,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         // Every window-chrome binding hangs off ActiveTab, so switching tabs has to look like the
         // shell's own property changed.
         OnPropertyChanged(nameof(ActiveTab));
+        SyncGlobalSearchExpansion();
     }
 
     public void ActivatePane(PaneViewModel pane)
@@ -262,6 +307,14 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             await tab.RefreshViewAsync();
     }
 
+    /// <summary>Re-reads the tile aspect ratio into every open list after Settings commits one.
+    /// It changes only how the tiles are laid out, so it fans out without reloading anything.</summary>
+    public void RefreshTileAspect()
+    {
+        foreach (var tab in AllTabs.ToList())
+            tab.FileList.RefreshTileAspect();
+    }
+
     /// <summary>Reloads every tab currently showing one of <paramref name="directories"/> — the
     /// point being that a move from one open folder to another has to update both of them, not
     /// just the one the drag started in.</summary>
@@ -359,6 +412,10 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         {
             foreach (var tab in AllTabs.ToList())
                 tab.OnMftIndexRefreshed();
+
+            // The tree is shared, so it refreshes once here rather than per tab: this is when
+            // the folder sizes beside its names first exist.
+            _ = Tree.RefreshSizesAsync();
         });
     }
 

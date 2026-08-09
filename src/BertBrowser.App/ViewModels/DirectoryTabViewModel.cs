@@ -56,13 +56,27 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     [ObservableProperty]
     private string _selectionSummary = "";
 
+    /// <summary>This tab's own search box, which is <em>always</em> scoped to the current folder's
+    /// subtree. Whole-PC search is a separate field in the window header, so neither box has a mode
+    /// the user has to notice before typing.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ActiveSearchText), nameof(IsGlobalSearch))]
     private string _searchText = "";
 
-    /// <summary>Search scope: true = whole PC (the MFT global index), false = the current
-    /// folder subtree. Defaults to whole-PC, the point of the MFT index.</summary>
+    /// <summary>The header's whole-PC query (the MFT global index). Held per tab, not per window,
+    /// because the hits land in <em>this</em> tab's file list — the header field just binds through
+    /// the active tab. Exclusive with <see cref="SearchText"/>: filling one empties the other.</summary>
     [ObservableProperty]
-    private bool _searchGlobal = true;
+    [NotifyPropertyChangedFor(nameof(ActiveSearchText), nameof(IsGlobalSearch))]
+    private string _globalSearchText = "";
+
+    /// <summary>The query actually driving the listing: the whole-PC one when it has text,
+    /// otherwise the tab's own.</summary>
+    public string ActiveSearchText => GlobalSearchText.Length > 0 ? GlobalSearchText : SearchText;
+
+    /// <summary>True when the listing is being driven by the header's whole-PC field rather than
+    /// by this tab's folder-local box.</summary>
+    public bool IsGlobalSearch => GlobalSearchText.Length > 0;
 
     /// <summary>True while this is the visible tab of its pane. Gates work that must not happen
     /// for a background tab — most importantly stealing keyboard focus when a load completes.</summary>
@@ -119,7 +133,7 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         _sizeService = sizeService;
         _settings = settings;
 
-        FileList = new FileListViewModel(fileSystem, dirSizeRepository);
+        FileList = new FileListViewModel(fileSystem, dirSizeRepository, settings);
         FileList.PropertyChanged += OnFileListPropertyChanged;
     }
 
@@ -235,7 +249,7 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
 
         try
         {
-            if (SearchQuery.Parse(SearchText) is not null)
+            if (SearchQuery.Parse(ActiveSearchText) is not null)
             {
                 await RunSearchAsync(ct);
             }
@@ -296,14 +310,33 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     {
         _searchDebounceCts.Cancel();
         if (_suppressSearchRefresh) return;
-        _searchDebounceCts = new CancellationTokenSource();
-        _ = DebouncedSearchAsync(_searchDebounceCts.Token);
+        if (value.Length > 0) Suppressed(() => GlobalSearchText = "");
+        QueueSearch();
     }
 
-    partial void OnSearchGlobalChanged(bool value)
+    partial void OnGlobalSearchTextChanged(string value)
     {
-        if (SearchQuery.Parse(SearchText) is not null)
-            _ = RefreshViewAsync();
+        _searchDebounceCts.Cancel();
+        if (_suppressSearchRefresh) return;
+        if (value.Length > 0) Suppressed(() => SearchText = "");
+        QueueSearch();
+    }
+
+    /// <summary>Runs a change to the search boxes without its handler queueing a search of its own —
+    /// used to empty the box the user isn't typing in, since only one query is ever live.</summary>
+    private void Suppressed(Action change)
+    {
+        _suppressSearchRefresh = true;
+        change();
+        _suppressSearchRefresh = false;
+    }
+
+    /// <summary>Restarts the 200 ms debounce. Shared by both boxes, since only one of them holds
+    /// the live query.</summary>
+    private void QueueSearch()
+    {
+        _searchDebounceCts = new CancellationTokenSource();
+        _ = DebouncedSearchAsync(_searchDebounceCts.Token);
     }
 
     private async Task DebouncedSearchAsync(CancellationToken ct)
@@ -321,14 +354,15 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
 
     private async Task RunSearchAsync(CancellationToken ct)
     {
-        var queryText = SearchText;
+        var queryText = ActiveSearchText;
+        var global = IsGlobalSearch;
         FileList.BeginSearch();
 
         SearchOutcome? outcome;
         // Search never surfaces hidden files/folders, regardless of the "Show hidden items"
         // browse setting — hidden entries are index noise (AppData, system junk) that bury the
         // results a search is actually for.
-        if (SearchGlobal)
+        if (global)
         {
             // Whole-PC: served straight from the MFT index, no live streaming.
             StatusText = $"Searching this PC for '{queryText}'…";
@@ -350,15 +384,15 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         if (outcome is null || ct.IsCancellationRequested) return;
 
         // Global hits come from MFT rows with no size/timestamp, so hydrate them from disk.
-        await FileList.CompleteSearchAsync(outcome, queryText, hydrateMetadata: SearchGlobal, ct);
+        await FileList.CompleteSearchAsync(outcome, queryText, hydrateMetadata: global, ct);
         if (ct.IsCancellationRequested) return;
 
-        var scope = SearchGlobal ? "this PC" : CurrentPath;
+        var scope = global ? "this PC" : CurrentPath;
         var suffix = outcome.Source switch
         {
             SearchResultSource.LiveScan => " — indexing in background…",
             SearchResultSource.StaleIndex => " — refreshing index…",
-            _ when SearchGlobal && outcome.RefreshPending => " — indexing drives…",
+            _ when global && outcome.RefreshPending => " — indexing drives…",
             _ => " — indexed",
         };
         var truncated = outcome.Truncated ? " (showing first 1,000)" : "";
@@ -372,19 +406,19 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         await RefreshViewAsync();
     }
 
-    /// <summary>Resets the search box without triggering the debounced refresh.</summary>
+    /// <summary>Resets both search boxes without triggering the debounced refresh.</summary>
     private void ClearSearchState()
     {
         _searchDebounceCts.Cancel();
-        if (SearchText.Length > 0)
+        if (SearchText.Length == 0 && GlobalSearchText.Length == 0) return;
+        Suppressed(() =>
         {
-            _suppressSearchRefresh = true;
             SearchText = "";
-            _suppressSearchRefresh = false;
-        }
+            GlobalSearchText = "";
+        });
     }
 
-    public bool HasActiveSearch => SearchQuery.Parse(SearchText) is not null;
+    public bool HasActiveSearch => SearchQuery.Parse(ActiveSearchText) is not null;
 
     // --- Index callbacks (fanned out to every tab by the shell) ---
 
@@ -398,7 +432,7 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     {
         if (HasActiveSearch)
         {
-            if (SearchGlobal) _ = RefreshViewAsync();
+            if (IsGlobalSearch) _ = RefreshViewAsync();
         }
         else if (IsActive)
         {

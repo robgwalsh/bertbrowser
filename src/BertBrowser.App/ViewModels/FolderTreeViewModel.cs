@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using BertBrowser.App.Interop;
+using BertBrowser.Core.Data;
+using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
 
@@ -16,10 +18,27 @@ public sealed class FolderTreeViewModel
     public event Action<string>? DirectorySelected;
 
     private readonly IFileSystemService _fileSystem;
+    private readonly DirSizeRepository _dirSizes;
 
-    public FolderTreeViewModel(IFileSystemService fileSystem)
+    /// <summary>The "Show hidden items" browse setting, mirrored here because every node consults
+    /// it. Defaults to off, matching <see cref="BertBrowser.App.Services.AppSettings.ShowHiddenItems"/>.</summary>
+    internal bool ShowHidden { get; private set; }
+
+    public FolderTreeViewModel(IFileSystemService fileSystem, DirSizeRepository dirSizes)
     {
         _fileSystem = fileSystem;
+        _dirSizes = dirSizes;
+    }
+
+    /// <summary>Applies the "Show hidden items" setting to the whole tree. Hidden folders are kept
+    /// in each node's unfiltered child list rather than discarded, so toggling this re-filters in
+    /// memory — no re-enumeration, and expansion state survives a round trip.</summary>
+    public void SetShowHidden(bool showHidden)
+    {
+        if (ShowHidden == showHidden) return;
+        ShowHidden = showHidden;
+        foreach (var root in Roots.OfType<DirectoryNodeViewModel>())
+            root.ApplyHiddenFilter();
     }
 
     /// <summary>Enumerates ready drives off the UI thread and adds them as expandable roots.
@@ -36,7 +55,9 @@ public sealed class FolderTreeViewModel
                 var label = string.IsNullOrEmpty(drive.VolumeLabel)
                     ? drive.Name.TrimEnd('\\')
                     : $"{drive.VolumeLabel} ({drive.Name.TrimEnd('\\')})";
-                return new DirectoryNodeViewModel(this, drive.RootDirectory.FullName, label);
+                var node = new DirectoryNodeViewModel(this, drive.RootDirectory.FullName, label);
+                node.SizeBytes = UsedBytes(drive); // set before the node is live; no UI thread needed
+                return node;
             })
             .ToList());
 
@@ -53,7 +74,108 @@ public sealed class FolderTreeViewModel
             Roots.Add(new PortableDeviceNodeViewModel(device));
     }
 
-    internal bool HasSubdirectories(string path) => _fileSystem.HasSubdirectories(path);
+    internal SubdirectoryPresence ProbeSubdirectories(string path) => _fileSystem.ProbeSubdirectories(path);
+
+    // --- Sizes shown beside each name ---
+
+    /// <summary>Fills in the size beside each of <paramref name="nodes"/> from the directory size
+    /// cache, which the MFT indexer populates for every directory on every NTFS volume — so this
+    /// is one indexed lookup, never a scan. Directories the cache doesn't know (non-NTFS volumes,
+    /// a volume still indexing) simply show nothing rather than a wrong or stale number.</summary>
+    internal async Task HydrateSizesAsync(IReadOnlyList<DirectoryNodeViewModel> nodes)
+    {
+        if (nodes.Count == 0) return;
+        var paths = nodes.Select(n => n.FullPath).Where(p => p.Length > 0).ToList();
+        if (paths.Count == 0) return;
+
+        var cache = await Task.Run(() => _dirSizes.GetMany(paths));
+        ApplySizes(nodes, cache);
+    }
+
+    /// <summary>Re-reads the size of every node the tree has loaded: drives from the volume's used
+    /// space, folders from the cache. Called when a volume finishes indexing, which is when those
+    /// numbers first exist — an expanded tree fills in without being collapsed and reopened.</summary>
+    public async Task RefreshSizesAsync()
+    {
+        var roots = Roots.OfType<DirectoryNodeViewModel>().ToList();
+        var loaded = new List<DirectoryNodeViewModel>();
+        foreach (var root in roots)
+            CollectLoaded(root, loaded);
+
+        var rootPaths = roots.Select(r => r.FullPath).ToList();
+        var childPaths = loaded.Select(n => n.FullPath).Where(p => p.Length > 0).ToList();
+
+        // Both the DriveInfo reads (which block on network/optical volumes) and the DB query
+        // stay off the UI thread.
+        var (used, cache) = await Task.Run(() => (
+            rootPaths.Select(UsedBytes).ToList(),
+            _dirSizes.GetMany(childPaths)));
+
+        for (var i = 0; i < roots.Count; i++)
+        {
+            if (used[i] is { } bytes)
+                roots[i].SizeBytes = bytes;
+        }
+        ApplySizes(loaded, cache);
+    }
+
+    private static void ApplySizes(
+        IEnumerable<DirectoryNodeViewModel> nodes, IReadOnlyDictionary<string, DirSizeResult> cache)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.FullPath.Length == 0) continue;
+
+            string key;
+            try
+            {
+                key = PathKey.Canonicalize(node.FullPath);
+            }
+            catch (ArgumentException)
+            {
+                continue;
+            }
+
+            if (!cache.TryGetValue(key, out var result)) continue;
+            node.SizeBytes = result.SizeBytes;
+            node.SizeIncomplete = result.Incomplete;
+        }
+    }
+
+    private static void CollectLoaded(DirectoryNodeViewModel node, List<DirectoryNodeViewModel> into)
+    {
+        // Walks the loaded children, not the visible ones: a subtree hidden by the "Show hidden
+        // items" setting still has to be right for when the setting comes back on.
+        foreach (var child in node.LoadedChildren)
+        {
+            into.Add(child);
+            CollectLoaded(child, into);
+        }
+    }
+
+    /// <summary>A drive root's size is its volume's used space — instant, and the only honest
+    /// answer for a root, whose own cache entry would exclude whatever lives outside the
+    /// directory tree the indexer walks.</summary>
+    private static long? UsedBytes(string root)
+    {
+        try
+        {
+            return UsedBytes(new DriveInfo(root));
+        }
+        catch (ArgumentException) { return null; }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
+
+    private static long? UsedBytes(DriveInfo drive)
+    {
+        try
+        {
+            return drive.IsReady ? drive.TotalSize - drive.TotalFreeSpace : null;
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
 
     /// <summary>Enumerates immediate subdirectories as <see cref="DirectoryInfo"/> objects, whose
     /// <c>Attributes</c> come pre-populated from the directory scan — so the child nodes' hidden
@@ -127,9 +249,10 @@ public sealed class FolderTreeViewModel
             return; // its subtree was just rebuilt from disk
         }
 
-        // Only descend where a target could still live.
+        // Only descend where a target could still live. Walks the loaded children rather than the
+        // visible ones: a hidden subtree still has to be accurate for when the setting comes back on.
         if (!keys.Any(k => PathKey.IsUnder(k, key))) return;
-        foreach (var child in node.Children.ToList())
+        foreach (var child in node.LoadedChildren.ToList())
             await RefreshMatchingAsync(child, keys);
     }
 
@@ -196,7 +319,15 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
 
     private readonly FolderTreeViewModel? _tree;
     private Task? _populateTask;
+    private bool _isPopulated;
     private System.Windows.Media.ImageSource? _icon;
+
+    /// <summary>Every child read from disk, hidden ones included. <see cref="Children"/> is this
+    /// list filtered by the "Show hidden items" setting, so the setting can flip without a rescan.</summary>
+    private readonly List<DirectoryNodeViewModel> _allChildren = new();
+
+    private readonly bool _hasSubdirectories;
+    private readonly bool _hasVisibleSubdirectories;
 
     public string FullPath { get; }
     public string Name { get; }
@@ -215,6 +346,8 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
     public System.Windows.Media.ImageSource? Icon =>
         _icon ??= FullPath.Length > 0 ? Interop.ShellIcons.GetIcon(FullPath, isDirectory: true) : null;
 
+    /// <summary>What the tree shows under this node: the populated children minus hidden ones while
+    /// "Show hidden items" is off, or the lazy-load placeholder if it hasn't been expanded yet.</summary>
     public ObservableCollection<DirectoryNodeViewModel> Children { get; } = new();
 
     [ObservableProperty]
@@ -222,6 +355,24 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
 
     [ObservableProperty]
     private bool _isSelected;
+
+    /// <summary>Recursive content size, shown small and dimmed to the right of the name: the
+    /// cached total for a folder, the volume's used space for a drive root. Null means "not
+    /// known" — the row shows nothing rather than a zero it can't stand behind.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SizeText))]
+    private long? _sizeBytes;
+
+    /// <summary>Some of the subtree was inaccessible when the size was computed; marked with a
+    /// trailing <c>*</c> exactly as the file list's Size column does.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SizeText))]
+    private bool _sizeIncomplete;
+
+    public string SizeText =>
+        SizeBytes is { } bytes
+            ? ByteSizeFormatter.Format(bytes) + (SizeIncomplete ? " *" : "")
+            : "";
 
     private DirectoryNodeViewModel()
     {
@@ -251,8 +402,47 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
         Name = displayName ?? (fileName.Length > 0 ? fileName : fullPath);
         IsHidden = isHidden;
 
-        if (tree.HasSubdirectories(fullPath))
-            Children.Add(Placeholder);
+        // Both answers come from one scan, so the expander can follow the hidden setting later
+        // without touching disk again — a folder whose only subfolders are hidden must not offer
+        // an expander that opens onto nothing.
+        var presence = tree.ProbeSubdirectories(fullPath);
+        _hasSubdirectories = presence.Any;
+        _hasVisibleSubdirectories = presence.AnyVisible;
+        RebuildChildren();
+    }
+
+    /// <summary>Every loaded child, hidden ones included — what a refresh walks.</summary>
+    internal IReadOnlyList<DirectoryNodeViewModel> LoadedChildren => _allChildren;
+
+    private bool ShowHidden => _tree?.ShowHidden ?? true;
+
+    private bool IsChildVisible(DirectoryNodeViewModel child) => ShowHidden || !child.IsHidden;
+
+    /// <summary>Re-applies the hidden filter to this node and everything already loaded beneath it.
+    /// Walks <see cref="_allChildren"/>, not <see cref="Children"/>, so a subtree that was filtered
+    /// out keeps its own expansion state and comes back intact.</summary>
+    internal void ApplyHiddenFilter()
+    {
+        RebuildChildren();
+        foreach (var child in _allChildren)
+            child.ApplyHiddenFilter();
+    }
+
+    private void RebuildChildren()
+    {
+        Children.Clear();
+        if (!_isPopulated)
+        {
+            if (ShowHidden ? _hasSubdirectories : _hasVisibleSubdirectories)
+                Children.Add(Placeholder);
+            return;
+        }
+
+        foreach (var child in _allChildren)
+        {
+            if (IsChildVisible(child))
+                Children.Add(child);
+        }
     }
 
     /// <summary>Hidden attribute for a directory path; false for drive roots and anything we can't stat.</summary>
@@ -323,8 +513,16 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
             .Select(info => new DirectoryNodeViewModel(_tree, info, depth: Depth + 1))
             .ToList());
 
-        Children.Clear();
-        foreach (var child in children)
-            Children.Add(child);
+        // Hidden children are kept here and filtered out of Children, not dropped: that is what
+        // makes toggling "Show hidden items" free.
+        _allChildren.Clear();
+        _allChildren.AddRange(children);
+        _isPopulated = true;
+        RebuildChildren();
+
+        // One batched lookup for the whole sibling set, after the rows are on screen. It is an
+        // indexed read of a table the MFT pass already filled, so it costs a fraction of the
+        // directory enumeration above.
+        await _tree!.HydrateSizesAsync(children);
     }
 }

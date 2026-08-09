@@ -22,6 +22,12 @@ public sealed class AppSettings
     /// <summary>Mouse-wheel vertical scroll speed multiplier (1 = OS default). Defaults to 2×.</summary>
     public double ScrollSpeedMultiplier { get; set; } = 2.0;
 
+    /// <summary>Shape of a thumbnail tile as "width:height" — the zoom slider sets the width and
+    /// this decides the height. Anything unparseable falls back to 4:3 (see
+    /// <see cref="BertBrowser.Core.Models.AspectRatio"/>), so hand-editing this can't break the
+    /// view; the settings picker offers the common shapes but any "W:H" works.</summary>
+    public string TileAspectRatio { get; set; } = BertBrowser.Core.Models.AspectRatio.Default.ToString();
+
     public List<CustomCommandDefinition> CustomCommands { get; set; } = new();
 
     /// <summary>Active theme: a built-in id ("dark-plus", "light-plus", …) or one of the user's own

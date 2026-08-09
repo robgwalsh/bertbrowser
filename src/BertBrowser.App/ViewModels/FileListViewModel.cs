@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using BertBrowser.App.Interop;
+using BertBrowser.App.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Models;
@@ -21,6 +22,10 @@ public sealed partial class FileListViewModel : ObservableObject
 {
     private readonly IFileSystemService _fileSystem;
     private readonly DirSizeRepository _dirSizeRepository;
+
+    // Read directly rather than through the shell, like the tab's IncludeHidden: a file list is
+    // per tab and per pane, and nothing global should have to reach down into it.
+    private readonly AppSettings _settings;
 
     [ObservableProperty]
     private bool _isLoading;
@@ -50,10 +55,10 @@ public sealed partial class FileListViewModel : ObservableObject
     private const double DeadZone = 0.05;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ThumbnailSize), nameof(IsThumbnailView))]
+    [NotifyPropertyChangedFor(nameof(ThumbnailSize), nameof(ThumbnailTileHeight), nameof(IsThumbnailView))]
     private double _thumbnailScale;
 
-    /// <summary>Effective tile size in pixels (0 = details list).</summary>
+    /// <summary>Effective tile width in pixels (0 = details list).</summary>
     public double ThumbnailSize
     {
         get
@@ -63,6 +68,24 @@ public sealed partial class FileListViewModel : ObservableObject
             var t = (ThumbnailScale - DeadZone) / (1 - DeadZone);
             return MinThumbnail + t * (MaxThumbnail - MinThumbnail);
         }
+    }
+
+    /// <summary>Tile height for the current width, from the configured aspect ratio. The width is
+    /// what the zoom slider drives, so a taller ratio grows the tile downwards rather than
+    /// shrinking it — the slider keeps meaning the same thing at every shape.</summary>
+    public double ThumbnailTileHeight => _tileAspect.HeightFor(ThumbnailSize);
+
+    /// <summary>Parsed once and cached: this is read by every visible tile's height binding.</summary>
+    private AspectRatio _tileAspect;
+
+    /// <summary>Re-reads the tile aspect ratio after the Settings dialog commits one. Every open
+    /// list needs telling — the setting is global, and the shell fans it out.</summary>
+    public void RefreshTileAspect()
+    {
+        var aspect = AspectRatio.Parse(_settings.TileAspectRatio);
+        if (aspect == _tileAspect) return;
+        _tileAspect = aspect;
+        OnPropertyChanged(nameof(ThumbnailTileHeight));
     }
 
     public bool IsThumbnailView => ThumbnailSize > 0;
@@ -85,10 +108,13 @@ public sealed partial class FileListViewModel : ObservableObject
     [ObservableProperty]
     private ObservableCollection<FileItemViewModel> _items = new();
 
-    public FileListViewModel(IFileSystemService fileSystem, DirSizeRepository dirSizeRepository)
+    public FileListViewModel(
+        IFileSystemService fileSystem, DirSizeRepository dirSizeRepository, AppSettings settings)
     {
         _fileSystem = fileSystem;
         _dirSizeRepository = dirSizeRepository;
+        _settings = settings;
+        _tileAspect = AspectRatio.Parse(settings.TileAspectRatio);
     }
 
     /// <summary>Normal browsing: direct children of <paramref name="path"/>.</summary>

@@ -164,6 +164,66 @@
         <Setter Property="SnapsToDevicePixels" Value="True"/>
     </Style>
 
+    <!--
+      The sidebar's folder tree, whose scrollbar floats over a gutter the rows always leave for it
+      rather than taking layout space when it appears. With the stock template the viewport narrows
+      by the bar's width the moment a subtree expands past the bottom of the panel, and every row's
+      right-aligned content (the folder sizes) jumps sideways — twitching again on collapse. Here the
+      gutter is the TreeView's right Padding, which is inside the scroll area and therefore constant,
+      so the content never moves and the bar has somewhere empty to sit.
+
+      Vertical only, by design: this tree disables horizontal scrolling, so a horizontal bar in the
+      template would never show. Give this style to a tree that scrolls sideways and the content
+      would clip with no way to reach it.
+    -->
+    <Style x:Key="SidebarTreeStyle" TargetType="TreeView" BasedOn="{StaticResource {x:Type TreeView}}">
+        <!-- Stated here rather than inherited from the OS theme style, which an explicit Style is
+             one setter away from making irrelevant. The attached defaults are Visible, so the
+             template bindings below would otherwise resolve to a permanently visible bar. -->
+        <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TreeView">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            SnapsToDevicePixels="True">
+                        <!-- The two visibilities stay template-bound so the attached
+                             ScrollViewer.*ScrollBarVisibility set on the TreeView still applies. -->
+                        <ScrollViewer Focusable="False" CanContentScroll="False"
+                                      Padding="{TemplateBinding Padding}"
+                                      HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                      VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}">
+                            <ScrollViewer.Template>
+                                <ControlTemplate TargetType="ScrollViewer">
+                                    <Grid>
+                                        <!-- Padding as the presenter's margin: it bounds the content
+                                             whether or not the bar is showing. -->
+                                        <ScrollContentPresenter x:Name="PART_ScrollContentPresenter"
+                                                                Margin="{TemplateBinding Padding}"
+                                                                CanContentScroll="{TemplateBinding CanContentScroll}"/>
+                                        <!-- Same cell, so it overlays the gutter instead of
+                                             displacing the content. Width comes from the ScrollBar
+                                             style; the Padding above must match it. -->
+                                        <ScrollBar x:Name="PART_VerticalScrollBar" Orientation="Vertical"
+                                                   HorizontalAlignment="Right"
+                                                   Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"
+                                                   Maximum="{TemplateBinding ScrollableHeight}"
+                                                   ViewportSize="{TemplateBinding ViewportHeight}"
+                                                   Value="{Binding VerticalOffset, Mode=OneWay,
+                                                                   RelativeSource={RelativeSource TemplatedParent}}"/>
+                                    </Grid>
+                                </ControlTemplate>
+                            </ScrollViewer.Template>
+                            <ItemsPresenter/>
+                        </ScrollViewer>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style TargetType="GroupBox">
         <Setter Property="Foreground" Value="{StaticResource Theme.Text.Primary}"/>
         <Setter Property="BorderBrush" Value="{StaticResource Theme.Border.Default}"/>

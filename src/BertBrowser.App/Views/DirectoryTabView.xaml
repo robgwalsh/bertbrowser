@@ -58,24 +58,12 @@
                 </Grid>
             </Border>
 
-            <!-- Local search that doesn't suck: files & folders under the current directory. -->
+            <!-- Local search that doesn't suck: files & folders under the current directory, and
+                 nothing else. Whole-PC search is the header's field, so there is no scope toggle
+                 here and no mode to read before typing. -->
             <Border Grid.Column="1" Style="{StaticResource FieldBorder}" Margin="6,0,0,0"
                     Width="280" MinWidth="150">
                 <DockPanel>
-                    <ToggleButton DockPanel.Dock="Left" IsChecked="{Binding SearchGlobal}"
-                                  VerticalAlignment="Center" Margin="4,0,2,0" Padding="8,2"
-                                  ToolTip="Search scope — the whole PC (MFT index) or just this folder">
-                        <ToggleButton.Style>
-                            <Style TargetType="ToggleButton">
-                                <Setter Property="Content" Value="This folder"/>
-                                <Style.Triggers>
-                                    <Trigger Property="IsChecked" Value="True">
-                                        <Setter Property="Content" Value="This PC"/>
-                                    </Trigger>
-                                </Style.Triggers>
-                            </Style>
-                        </ToggleButton.Style>
-                    </ToggleButton>
                     <TextBlock DockPanel.Dock="Left" FontFamily="{StaticResource SymbolFont}"
                                Text="&#xE721;" FontSize="13" Margin="8,0,6,0"
                                VerticalAlignment="Center" Foreground="{StaticResource Theme.Text.Secondary}"/>
@@ -94,8 +82,8 @@
                                  AutomationProperties.Name="Search this folder"
                                  Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                                  KeyDown="SearchBox_KeyDown"
-                                 ToolTip="Search files and folders — whole PC or this folder (Ctrl+F)"/>
-                        <TextBlock Text="Search files and folders" Foreground="{StaticResource Theme.Text.Placeholder}" Margin="4,0,0,0"
+                                 ToolTip="Search this folder and everything under it (Ctrl+F)"/>
+                        <TextBlock Text="Search this folder" Foreground="{StaticResource Theme.Text.Placeholder}" Margin="4,0,0,0"
                                    VerticalAlignment="Center" IsHitTestVisible="False">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">

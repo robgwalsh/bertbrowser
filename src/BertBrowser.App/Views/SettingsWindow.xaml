@@ -97,6 +97,24 @@
                     </DockPanel>
                     <TextBlock Style="{StaticResource Hint}"
                                Text="How fast the mouse wheel scrolls the file list (1× = system default)."/>
+
+                    <DockPanel>
+                        <TextBlock Text="Tile aspect ratio" VerticalAlignment="Center"/>
+                        <!-- ItemTemplate rather than DisplayMemberPath, for the reason spelled out
+                             on the theme picker: the retemplated box renders its closed state from
+                             SelectionBoxItemTemplate, which WPF derives from ItemTemplate alone. -->
+                        <ComboBox DockPanel.Dock="Right" MinWidth="110" HorizontalAlignment="Right"
+                                  ItemsSource="{Binding TileAspectOptions}"
+                                  SelectedItem="{Binding TileAspect, Mode=TwoWay}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Shape of the tiles in thumbnail view, as width:height. The zoom slider under the file list sets the tile width; this sets the height."/>
                 </StackPanel>
 
                 <!--
