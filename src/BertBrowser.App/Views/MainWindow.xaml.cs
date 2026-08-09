@@ -8,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Layout;
+using BertBrowser.Core.Services.Delete;
 
 namespace BertBrowser.App.Views;
 
@@ -42,8 +43,9 @@ public partial class MainWindow : ThemedWindow
         Closing += (_, _) =>
         {
             SaveWindowSettings();
-            // The pending undo is gone once we exit, so commit whatever a Replace set aside rather
-            // than leaving hidden staging folders behind.
+            // The pending undo is gone once we exit, so commit what is still being held — whatever
+            // a Replace set aside, and whatever the last delete was holding on to — rather than
+            // leaving hidden staging folders behind.
             _shell.RetireUndoable();
         };
     }
@@ -554,6 +556,34 @@ public partial class MainWindow : ThemedWindow
     {
         if (_treeContextNode is { } node)
             _ = _shell.ToggleBookmarksAsync([(node.FullPath, true)]);
+    }
+
+    private void TreeDelete_Click(object sender, RoutedEventArgs e)
+    {
+        if (_treeContextNode is { } node) _ = DeleteTreeFolderAsync(node.FullPath);
+    }
+
+    /// <summary>Deletes a folder picked out of the tree. Goes through exactly the same plan,
+    /// confirmation and undo slot as the file list's own delete — the tree is just another way of
+    /// naming the folder. There is no permanent variant here: a drive root is one careless click
+    /// away in this list, so the reversible one is the only one offered.</summary>
+    private async Task DeleteTreeFolderAsync(string path)
+    {
+        var plan = _shell.PlanDelete([new DeleteSource(path, IsDirectory: true)], permanent: false);
+        if (!plan.HasWork)
+        {
+            if (plan.Problems is { Count: > 0 } problems)
+                MessageDialog.Show(this, string.Join("\n\n", problems.Select(p => p.Message)),
+                    "Delete", MessageDialogKind.Warning);
+            return;
+        }
+
+        if (!DeleteDialog.Confirm(this, plan, _shell.SurveyDelete)) return;
+
+        var outcome = await _shell.DeleteAsync(plan);
+        if (outcome.Failed.Count > 0)
+            MessageDialog.Show(this, string.Join("\n\n", outcome.Failed.Select(f => f.Message)),
+                "Delete", MessageDialogKind.Warning);
     }
 
     private void TreeOpenInNewTab_Click(object sender, RoutedEventArgs e)

@@ -121,6 +121,63 @@ Tests: `RenamePatternTests` (naming and validation), `RenamePlannerTests` (rules
 `RenameExecutorTests` (real files, contents asserted, undo included, with a meta-test that the
 "nothing stranded" check can fail). Mutate a rule and confirm a test goes red.
 
+### Delete
+
+`Core/Services/Delete` is split the same way again, and rests on one idea: **an ordinary delete does
+not erase anything.** Each item is *moved* into a hidden holding folder — a rename, so a hundred
+gigabytes costs what one file costs — and stays there intact until the delete can no longer be
+undone. That is what makes Ctrl+Z restore a directory tree byte for byte rather than best-effort.
+Shift+Delete is the other path: erase in place, no holding, no undo, and the confirmation says so in
+a red banner rather than in a footnote.
+
+- **`DeletePlanner`** decides, touching nothing, through **`IDeleteProbe`**. It refuses drive roots
+  and a small set of **`ProtectedLocations`** (Windows, Program Files, ProgramData, the profile
+  root) — *the folders themselves, never their contents*, because this app runs elevated for its MFT
+  index and the usual "Windows will stop you" backstop is not there. An item selected together with
+  a folder above it is dropped as a **benign** no-op (`InsideADeletedFolder`): it is being deleted,
+  just as part of its ancestor. The protected set is constructor-injected so the rule is testable
+  without depending on where Windows happens to be installed.
+- **`DeleteSurveyor`** measures — files, folders, bytes — so the confirmation can say what is going
+  rather than how many rows were selected. It skips reparse points instead of following them (a
+  junction is the one entry deleting it removes) and marks a result `Incomplete` rather than
+  throwing, so the totals are honest about being a floor. It is cancellable and nothing depends on
+  it: a delete whose survey never finished deletes exactly the same items.
+- **`DeleteExecutor`** writes, re-applying the planner's rules against live disk state first. The
+  holding folder is `<volume root>\.bertbrowser-trash\delete-<id>`, hidden — at the volume root so a
+  move is a rename, one place per disk, and sweepable later. `Directory.Move` reporting
+  `ERROR_NOT_SAME_DEVICE` (a mount point part-way down the path) is the one case that falls back to
+  a `.bertbrowser-deleted-*` folder beside the item, which cannot be on another volume.
+
+Three things here are load-bearing:
+
+- **`CommitStaging` is what actually erases**, and `ShellViewModel.RetireUndoable` is the only
+  caller — so held data outlives the undo record by exactly one operation, the same contract a
+  Replace's staging has. `MainWindow.Closing` retires too, or a session would end with its last
+  delete still on disk. The undo slot is now three-way (move / rename / delete), one level, whichever
+  happened last.
+- **`IsStagingDirectory` is the guard on every recursive delete in this file.** A path only qualifies
+  if it is named the way this class names holding folders. Mutate it to return true and
+  `CommittingRefusesAnythingThatIsNotAHoldingFolder` deletes a real folder and goes red — that is
+  the check standing between a mangled outcome and `Directory.Delete(recursive: true)` on anything.
+- **A crash leaves holding folders behind**, so `PurgeAbandonedStaging` sweeps every ready volume at
+  startup — but only batches over a day old, so a second copy of the app running right now keeps its
+  pending undo.
+
+`Views/DeleteDialog` is the confirmation: every item with its icon, the folder it is leaving, and
+what it amounts to, filling in as the survey walks. Cancel is the **default** button — nothing
+destructive should be one stray Enter away — and the planner's refusals are shown in the dialog
+rather than turning into a silently shorter delete. Delete/Shift+Delete are on the file list's own
+`KeyDown` beside F2; the folder tree's context menu offers the reversible delete only, since a drive
+root is one careless click away in that list. `ShellViewModel.DeleteAsync` fans out like a transfer
+does, plus `LeaveDeletedFoldersAsync`: a tab sitting inside a folder that was just deleted is moved
+up to where that folder was, rather than left on a path that no longer exists.
+
+Tests: `DeletePlannerTests` (rules, fake filesystem), `DeleteExecutorTests` (real files, restored
+trees compared file-by-file against a pre-delete snapshot, with meta-tests that the comparison
+notices a missing file and changed contents), `DeleteSurveyorTests` (counts and bytes). The executor
+takes a `stagingRoot` purely so tests do not create folders at the root of a real disk. Mutate a rule
+and confirm a test goes red.
+
 ### Theming
 
 The app is themed edge to edge, VS Code Dark+ by default. **No colour literal belongs in XAML or

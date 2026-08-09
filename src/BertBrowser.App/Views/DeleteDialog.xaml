@@ -1,0 +1,85 @@
+<v:ThemedWindow x:Class="BertBrowser.App.Views.DeleteDialog"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:v="clr-namespace:BertBrowser.App.Views"
+                Title="Delete" Width="560" Height="440" MinWidth="420" MinHeight="300"
+                WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+                Background="{StaticResource Theme.Surface.Background}"
+                TextElement.Foreground="{StaticResource Theme.Text.Primary}">
+    <!-- Resizable, unlike the other dialogs: the list is the point of this one, and a selection
+         can be long enough that being able to make the window taller is worth more than a fixed
+         shape. -->
+    <DockPanel Margin="16">
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+            <TextBlock x:Name="Glyph" DockPanel.Dock="Left" FontSize="22" Margin="0,0,12,0"
+                       VerticalAlignment="Top" FontFamily="{StaticResource SymbolFont}"
+                       Foreground="{StaticResource Theme.Warning.Foreground}"/>
+            <StackPanel>
+                <TextBlock x:Name="HeadingText" FontSize="15" TextWrapping="Wrap"/>
+                <!-- Fills in as the survey walks the tree: how much is going matters more than how
+                     many rows were selected. -->
+                <TextBlock x:Name="TotalsText" Margin="0,3,0,0" TextWrapping="Wrap"
+                           Foreground="{StaticResource Theme.Text.Secondary}"/>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- Buttons: Cancel is the default, so Enter and Escape both back out. Nothing destructive
+             should be one stray keystroke away. -->
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="CancelButton" Content="Cancel" MinWidth="88" Margin="0,0,8,0"
+                    IsCancel="True" IsDefault="True"/>
+            <Button x:Name="DeleteButton" Content="Delete" MinWidth="88"
+                    Style="{StaticResource PrimaryButton}" Click="Delete_Click"/>
+        </StackPanel>
+
+        <TextBlock x:Name="UndoHint" DockPanel.Dock="Bottom" Margin="0,10,0,0" TextWrapping="Wrap"
+                   FontSize="11" Foreground="{StaticResource Theme.Text.Secondary}"/>
+
+        <!-- Anything the planner refused, so a delete that quietly covers fewer items than were
+             selected says so before it runs rather than afterwards. -->
+        <Border x:Name="ProblemBanner" DockPanel.Dock="Bottom" Visibility="Collapsed"
+                Margin="0,10,0,0" Padding="10,7" CornerRadius="3"
+                Background="{StaticResource Theme.Warning.Background}"
+                BorderBrush="{StaticResource Theme.Warning.Border}" BorderThickness="1">
+            <TextBlock x:Name="ProblemText" TextWrapping="Wrap"
+                       Foreground="{StaticResource Theme.Warning.Foreground}"/>
+        </Border>
+
+        <Border x:Name="PermanentBanner" DockPanel.Dock="Top" Visibility="Collapsed"
+                Margin="0,0,0,10" Padding="10,7" CornerRadius="3"
+                Background="{StaticResource Theme.Error.Background}"
+                BorderBrush="{StaticResource Theme.Error.Border}" BorderThickness="1">
+            <TextBlock Text="This cannot be undone. These items are erased, not set aside — nothing will bring them back."
+                       TextWrapping="Wrap" Foreground="{StaticResource Theme.Error.Foreground}"/>
+        </Border>
+
+        <Border BorderBrush="{StaticResource Theme.Border.Default}" BorderThickness="1" CornerRadius="3">
+            <ListBox x:Name="ItemList" BorderThickness="0" Background="Transparent"
+                     Focusable="False" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="2,3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Image Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,8,0"
+                                   VerticalAlignment="Top" SnapsToDevicePixels="True"/>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Text="{Binding Location}" FontSize="11"
+                                           Foreground="{StaticResource Theme.Text.Secondary}"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="2" Text="{Binding Detail}" Margin="10,0,0,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{StaticResource Theme.Text.Secondary}"/>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Border>
+    </DockPanel>
+</v:ThemedWindow>

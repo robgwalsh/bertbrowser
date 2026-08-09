@@ -48,6 +48,9 @@ public partial class App : Application
         services.AddSingleton<BertBrowser.Core.Services.Transfer.TransferExecutor>();
         services.AddSingleton<BertBrowser.Core.Services.Rename.RenamePlanner>();
         services.AddSingleton<BertBrowser.Core.Services.Rename.RenameExecutor>();
+        services.AddSingleton<BertBrowser.Core.Services.Delete.DeletePlanner>();
+        services.AddSingleton<BertBrowser.Core.Services.Delete.DeleteExecutor>();
+        services.AddSingleton<BertBrowser.Core.Services.Delete.DeleteSurveyor>();
         services.AddSingleton<IBookmarkService, BookmarkService>();
         services.AddSingleton<IndexCrawler>();
         services.AddSingleton<IIndexWatcherService, IndexWatcherService>();
@@ -80,6 +83,13 @@ public partial class App : Application
         Services.GetRequiredService<IMftIndexService>().Start();
 
         _ = Task.Run(() => Services.GetRequiredService<IUpdateService>().CheckAndStageUpdateAsync());
+
+        // A delete holds its items until the undo record is retired, which normally happens by the
+        // time the app closes. A crash leaves them behind, so sweep up anything a previous session
+        // abandoned — only batches over a day old, so a second copy running right now keeps its
+        // pending undo.
+        _ = Task.Run(() => BertBrowser.Core.Services.Delete.DeleteExecutor
+            .PurgeAbandonedStaging(TimeSpan.FromDays(1)));
     }
 
     protected override void OnExit(ExitEventArgs e)

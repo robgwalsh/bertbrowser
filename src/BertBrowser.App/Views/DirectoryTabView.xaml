@@ -170,6 +170,17 @@
                                   Click="ContextRename_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8AC;"/></MenuItem.Icon>
                         </MenuItem>
+                        <!-- Both spelled out rather than one entry that changes with Shift: a menu
+                             whose meaning depends on a key you are not holding while you read it is
+                             the wrong place to hide "cannot be undone". -->
+                        <MenuItem x:Name="DeleteMenuItem" Header="Delete…" InputGestureText="Del"
+                                  Click="ContextDelete_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE74D;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem x:Name="DeletePermanentlyMenuItem" Header="Delete permanently…"
+                                  InputGestureText="Shift+Del" Click="ContextDeletePermanently_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE74B;"/></MenuItem.Icon>
+                        </MenuItem>
                         <MenuItem Header="Compute size" Click="ContextComputeSize_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE1D0;"/></MenuItem.Icon>
                         </MenuItem>

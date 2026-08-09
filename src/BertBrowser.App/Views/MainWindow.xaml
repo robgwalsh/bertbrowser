@@ -314,6 +314,9 @@
                         <MenuItem x:Name="TreeBookmarkMenuItem" Header="Bookmark" Click="TreeBookmark_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE734;"/></MenuItem.Icon>
                         </MenuItem>
+                        <MenuItem x:Name="TreeDeleteMenuItem" Header="Delete…" Click="TreeDelete_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE74D;"/></MenuItem.Icon>
+                        </MenuItem>
                         <Separator x:Name="TreeCustomCommandsSeparator" Visibility="Collapsed"/>
                         <Separator/>
                         <MenuItem Header="Properties…" Click="TreeProperties_Click">

@@ -8,6 +8,7 @@ using BertBrowser.App.Services;
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.Rename;
 
 namespace BertBrowser.App.Views;
@@ -331,8 +332,9 @@ public partial class DirectoryTabView : UserControl
             Tab.OpenItemCommand.Execute(item);
     }
 
-    /// <summary>Enter opens the selected item, like double-click; F2 renames the selection, as
-    /// everywhere else in Windows.</summary>
+    /// <summary>Enter opens the selected item, like double-click; F2 renames the selection and
+    /// Delete removes it, as everywhere else in Windows. Shift+Delete is the Explorer convention
+    /// for erasing outright instead of setting aside.</summary>
     private void FileList_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && FileListView.SelectedItem is FileItemViewModel item)
@@ -343,6 +345,11 @@ public partial class DirectoryTabView : UserControl
         else if (e.Key == Key.F2 && Keyboard.Modifiers == ModifierKeys.None)
         {
             _ = RenameSelectionAsync();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Delete && Keyboard.Modifiers is ModifierKeys.None or ModifierKeys.Shift)
+        {
+            _ = DeleteSelectionAsync(permanent: Keyboard.Modifiers == ModifierKeys.Shift);
             e.Handled = true;
         }
     }
@@ -453,6 +460,9 @@ public partial class DirectoryTabView : UserControl
         RenameMenuItem.IsEnabled = selection.Count > 0;
         RenameMenuItem.Header = selection.Count > 1 ? $"Rename {selection.Count} items…" : "Rename…";
 
+        DeleteMenuItem.IsEnabled = DeletePermanentlyMenuItem.IsEnabled = selection.Count > 0;
+        DeleteMenuItem.Header = selection.Count > 1 ? $"Delete {selection.Count} items…" : "Delete…";
+
         BookmarkMenuItem.IsEnabled = selection.Count > 0;
         // "Remove bookmark" only when every selected item is already bookmarked.
         var allBookmarked = selection.Count > 0 && selection.All(i => _shell.Bookmarks.IsBookmarked(i.FullPath));
@@ -557,6 +567,48 @@ public partial class DirectoryTabView : UserControl
                 FileListView.SelectedItems.Add(vm);
         }
         if (FileListView.SelectedItem is { } first) FileListView.ScrollIntoView(first);
+    }
+
+    private void ContextDelete_Click(object sender, RoutedEventArgs e) =>
+        _ = DeleteSelectionAsync(permanent: false);
+
+    private void ContextDeletePermanently_Click(object sender, RoutedEventArgs e) =>
+        _ = DeleteSelectionAsync(permanent: true);
+
+    /// <summary>Deletes the selection, after showing exactly what that comes to.</summary>
+    /// <remarks>The plan is built before the confirmation and handed straight to the executor, so
+    /// the items the user was shown are the items that go — and the executor re-checks every one of
+    /// them against disk, because the dialog may have sat open for a while.</remarks>
+    private async Task DeleteSelectionAsync(bool permanent)
+    {
+        var selection = SelectedFileItems();
+        if (selection.Count == 0) return;
+
+        // In the order the list shows them, so the confirmation reads down the screen.
+        var ordered = Tab.FileList.Items
+            .Where(selection.Contains)
+            .Select(i => new DeleteSource(i.FullPath, i.IsDirectory))
+            .ToList();
+
+        var owner = Window.GetWindow(this);
+        var plan = _shell.PlanDelete(ordered, permanent);
+
+        if (!plan.HasWork)
+        {
+            // Nothing survived the rules — say why rather than appearing to do nothing.
+            if (plan.Problems is { Count: > 0 } problems)
+                MessageDialog.Show(owner, string.Join("\n\n", problems.Select(p => p.Message)),
+                    "Delete", MessageDialogKind.Warning);
+            return;
+        }
+
+        if (!DeleteDialog.Confirm(owner, plan, _shell.SurveyDelete)) return;
+
+        var outcome = await _shell.DeleteAsync(plan);
+        if (outcome.Failed.Count == 0) return;
+
+        MessageDialog.Show(owner, string.Join("\n\n", outcome.Failed.Select(f => f.Message)),
+            "Delete", MessageDialogKind.Warning);
     }
 
     private void ContextComputeSize_Click(object sender, RoutedEventArgs e) =>

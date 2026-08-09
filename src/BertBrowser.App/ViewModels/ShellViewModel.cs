@@ -8,6 +8,7 @@ using BertBrowser.Core.Data;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Services.Rename;
 using BertBrowser.Core.Services.Transfer;
@@ -30,6 +31,9 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private readonly TransferExecutor _transferExecutor;
     private readonly RenamePlanner _renamePlanner;
     private readonly RenameExecutor _renameExecutor;
+    private readonly DeletePlanner _deletePlanner;
+    private readonly DeleteExecutor _deleteExecutor;
+    private readonly DeleteSurveyor _deleteSurveyor;
     private readonly PaneFactory _factory;
 
     /// <summary>"Show hidden items" browse setting, toggled from the toolbar and the Settings
@@ -125,6 +129,9 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         TransferExecutor transferExecutor,
         RenamePlanner renamePlanner,
         RenameExecutor renameExecutor,
+        DeletePlanner deletePlanner,
+        DeleteExecutor deleteExecutor,
+        DeleteSurveyor deleteSurveyor,
         PaneFactory factory,
         AppSettings settings)
     {
@@ -135,6 +142,9 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         _transferExecutor = transferExecutor;
         _renamePlanner = renamePlanner;
         _renameExecutor = renameExecutor;
+        _deletePlanner = deletePlanner;
+        _deleteExecutor = deleteExecutor;
+        _deleteSurveyor = deleteSurveyor;
         _factory = factory;
         _settings = settings;
         _showHiddenItems = settings.ShowHiddenItems; // seed the field so the ctor doesn't refresh
@@ -661,6 +671,146 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         }
     }
 
+    // --- Delete ---
+
+    /// <summary>Works out what deleting these would take with it, without changing anything — the
+    /// confirmation dialog shows exactly this plan, and the executor is handed the same one.</summary>
+    public DeletePlan PlanDelete(IReadOnlyList<DeleteSource> sources, bool permanent) =>
+        _deletePlanner.Plan(sources, permanent);
+
+    /// <summary>Measures a plan for the confirmation dialog. Off the UI thread and cancellable: a
+    /// folder holding a hundred thousand files takes a moment to add up, and closing the dialog
+    /// must not wait for it.</summary>
+    public DeleteSurvey SurveyDelete(
+        DeletePlan plan, CancellationToken ct, IProgress<DeleteMeasurement>? progress) =>
+        _deleteSurveyor.Survey(plan, ct, progress);
+
+    /// <summary>Carries out a delete the dialog already confirmed, then refreshes the tree and
+    /// every tab showing an affected folder. The outcome comes back so the view can report whatever
+    /// failed.</summary>
+    /// <remarks>The plan is advisory in the same way a drop plan is: it was built before the
+    /// confirmation was answered, and the executor re-checks every item against live disk state.</remarks>
+    public async Task<DeleteOutcome> DeleteAsync(DeletePlan plan)
+    {
+        // Shares the transfer flag with moves and renames: Ctrl+Z must not reach the previous
+        // operation's undo record while any of them is still running.
+        if (IsTransferring || !plan.HasWork) return DeleteOutcome.Empty(plan.Permanent);
+
+        IsTransferring = true;
+        UndoCommand.NotifyCanExecuteChanged();
+        try
+        {
+            SetStatus($"Deleting {plan.Deletions.Count:N0} item(s)…");
+
+            var progress = new Progress<DeleteProgress>(p =>
+                SetStatus(p.CurrentName.Length > 0
+                    ? $"Deleting {p.Done + 1:N0} of {p.Total:N0} — {p.CurrentName}"
+                    : ActiveTab.StatusText));
+
+            var outcome = await Task.Run(
+                () => _deleteExecutor.Execute(plan, CancellationToken.None, progress));
+
+            RetireUndoable();
+            if (outcome.CanUndo)
+            {
+                _undoableDelete = outcome;
+                UndoDescription = $"Ctrl+Z: undo delete of {outcome.Deleted.Count:N0} item(s)";
+            }
+
+            // Vacate first: a tab still pointing inside a folder that has gone would otherwise be
+            // reloaded onto a missing path and flash an error on its way out of it.
+            await LeaveDeletedFoldersAsync(outcome.Deleted);
+            await RefreshAfterDeleteAsync(plan);
+
+            var status = $"Deleted {outcome.Deleted.Count:N0} item(s)";
+            if (outcome.Failed.Count > 0)
+                status += $"; {outcome.Failed.Count:N0} failed — {outcome.Failed[0].Message}";
+            else if (outcome.CanUndo) status += " — Ctrl+Z to undo";
+            SetStatus(status);
+            return outcome;
+        }
+        finally
+        {
+            IsTransferring = false;
+            UndoCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>Puts the last delete back, then refreshes exactly as the delete itself did.</summary>
+    private async Task UndoDeleteAsync(DeleteOutcome outcome)
+    {
+        IsTransferring = true;
+        UndoCommand.NotifyCanExecuteChanged();
+        try
+        {
+            SetStatus("Undoing…");
+            var result = await Task.Run(() => _deleteExecutor.Undo(outcome));
+
+            // Spent either way: a partial undo must not be replayed. Whatever could not be put back
+            // is still held, and goes when the next operation retires this record.
+            _undoableDelete = null;
+            UndoDescription = "";
+
+            var directories = outcome.Deleted
+                .Select(d => Path.GetDirectoryName(d.SourcePath))
+                .OfType<string>()
+                .ToList();
+            await Tree.RefreshDirectoriesAsync(directories);
+            await RefreshTabsShowingAsync(directories);
+
+            SetStatus(result.Failed.Count == 0
+                ? $"Undone — {result.Restored:N0} item(s) put back"
+                : $"Put back {result.Restored:N0} item(s); {result.Failed.Count:N0} could not be — {result.Failed[0].Message}");
+        }
+        finally
+        {
+            IsTransferring = false;
+            UndoCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>Reloads the folders the items vanished from. Driven by the plan rather than the
+    /// outcome, so a folder whose delete failed is refreshed too — the failure may well be that
+    /// something already moved.</summary>
+    private async Task RefreshAfterDeleteAsync(DeletePlan plan)
+    {
+        var directories = plan.Deletions.Select(d => d.ParentPath).Where(p => p.Length > 0).ToList();
+        await Tree.RefreshDirectoriesAsync(directories);
+        await RefreshTabsShowingAsync(directories);
+    }
+
+    /// <summary>Moves any tab that was sitting inside a deleted folder up to where that folder was.
+    /// Without this a pane browsing it — or something below it — would be left pointing at a path
+    /// that no longer exists, which a refresh can only turn into an error.</summary>
+    private async Task LeaveDeletedFoldersAsync(IReadOnlyList<DeletedItem> deleted)
+    {
+        foreach (var item in deleted)
+        {
+            if (!item.IsDirectory) continue;
+
+            var goneKey = PathKey.Canonicalize(item.SourcePath);
+            var parent = Path.GetDirectoryName(PathKey.NormalizeDisplay(item.SourcePath));
+            if (string.IsNullOrEmpty(parent)) continue;
+
+            foreach (var tab in AllTabs.ToList())
+            {
+                if (tab.CurrentPath.Length == 0) continue;
+                string key;
+                try
+                {
+                    key = PathKey.Canonicalize(tab.CurrentPath);
+                }
+                catch (ArgumentException)
+                {
+                    continue;
+                }
+
+                if (key == goneKey || PathKey.IsUnder(key, goneKey))
+                    await tab.NavigateToAsync(parent);
+            }
+        }
+    }
+
     /// <summary>Runs a user-defined command once per selected item it applies to.</summary>
     public void RunCustomCommand(CustomCommandDefinition command, IReadOnlyList<(string FullPath, bool IsDirectory)> targets)
     {
@@ -691,20 +841,24 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
     // --- Drag-and-drop transfers ---
 
-    /// <summary>The one-level undo slot: whichever of a move or a rename happened last, and only
-    /// one of the two is ever set. Retiring a transfer commits any entries a Replace displaced into
-    /// staging; a rename has nothing set aside, since its staging names are gone by the time it
-    /// finishes.</summary>
+    /// <summary>The one-level undo slot: whichever of a move, a rename or a delete happened last,
+    /// and only one of the three is ever set. Retiring is not free for two of them — a transfer
+    /// commits any entries a Replace displaced into staging, and a delete erases what it was
+    /// holding — so it goes through <see cref="RetireUndoable"/> rather than being overwritten.
+    /// A rename has nothing set aside: its staging names are gone by the time it finishes.</summary>
     private TransferOutcome? _undoableTransfer;
 
     private RenameOutcome? _undoableRename;
+
+    private DeleteOutcome? _undoableDelete;
 
     /// <summary>True while a drop is being carried out; blocks a second one from overlapping it.</summary>
     [ObservableProperty]
     private bool _isTransferring;
 
     public bool CanUndo =>
-        (_undoableTransfer?.CanUndo == true || _undoableRename?.CanUndo == true) && !IsTransferring;
+        (_undoableTransfer?.CanUndo == true || _undoableRename?.CanUndo == true ||
+            _undoableDelete?.CanUndo == true) && !IsTransferring;
 
     /// <summary>"Undo move of 3 items" for the menu/tooltip; empty when there is nothing to undo.</summary>
     [ObservableProperty]
@@ -754,12 +908,13 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         }
     }
 
-    /// <summary>Reverses the last move or rename — whichever the undo slot holds.</summary>
+    /// <summary>Reverses the last move, rename or delete — whichever the undo slot holds.</summary>
     [RelayCommand(CanExecute = nameof(CanUndo))]
     private async Task UndoAsync()
     {
-        // A rename can only be in the slot if it happened after any transfer, and vice versa.
+        // At most one of these is ever set: each operation retires the slot before claiming it.
         if (_undoableRename is { } rename) await UndoRenameAsync(rename);
+        else if (_undoableDelete is { } deletion) await UndoDeleteAsync(deletion);
         else if (_undoableTransfer is { } transfer) await UndoTransferAsync(transfer);
     }
 
@@ -796,15 +951,19 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     }
 
     /// <summary>
-    /// Drops the pending undo record. Anything a Replace displaced into staging is deleted at this
-    /// point and not before: up until now Ctrl+Z could have brought it back.
+    /// Drops the pending undo record. This is the moment data actually goes: anything a Replace
+    /// displaced into staging, and everything a delete has been holding, is erased here and not
+    /// before — up until now Ctrl+Z could have brought it back.
     /// </summary>
     public void RetireUndoable()
     {
         if (_undoableTransfer is { } outcome)
             TransferExecutor.CommitStaging(outcome);
+        if (_undoableDelete is { } deletion)
+            DeleteExecutor.CommitStaging(deletion);
         _undoableTransfer = null;
         _undoableRename = null;
+        _undoableDelete = null;
         UndoDescription = "";
         UndoCommand.NotifyCanExecuteChanged();
     }

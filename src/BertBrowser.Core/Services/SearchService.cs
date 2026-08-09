@@ -3,6 +3,7 @@ using System.Diagnostics;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
+using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.Mft;
 
 namespace BertBrowser.Core.Services;
@@ -61,6 +62,14 @@ public sealed class SearchService : ISearchService, IDisposable
         _mft = mft;
     }
 
+    /// <summary>Drops hits that live in a delete's holding folder. They are still on disk — that is
+    /// the whole point, so Ctrl+Z can put them back — but they have been deleted as far as the user
+    /// is concerned, and search saying otherwise reads as a delete that silently failed.</summary>
+    private static IReadOnlyList<SearchHit> Visible(IReadOnlyList<SearchHit> hits) =>
+        hits.Any(h => DeleteExecutor.IsHeldPath(h.DisplayPath))
+            ? hits.Where(h => !DeleteExecutor.IsHeldPath(h.DisplayPath)).ToList()
+            : hits;
+
     public async Task<SearchOutcome?> SearchAllAsync(string queryText, CancellationToken ct, bool includeHidden = true)
     {
         var query = SearchQuery.Parse(queryText);
@@ -72,7 +81,8 @@ public sealed class SearchService : ISearchService, IDisposable
 
         // While volumes are still enumerating the results are partial; the ViewModel re-queries
         // on IMftIndexService.IndexRefreshed.
-        return new SearchOutcome(hits, truncated, SearchResultSource.Index, RefreshPending: _mft.IsBuilding);
+        return new SearchOutcome(
+            Visible(hits), truncated, SearchResultSource.Index, RefreshPending: _mft.IsBuilding);
     }
 
     public async Task<SearchOutcome?> SearchAsync(
@@ -102,7 +112,7 @@ public sealed class SearchService : ISearchService, IDisposable
             var (hits, truncated) = await Task.Run(
                 () => _repository.Search(rootPath, query, MaxResults, includeHidden), ct).ConfigureAwait(false);
             return new SearchOutcome(
-                hits, truncated,
+                Visible(hits), truncated,
                 fresh ? SearchResultSource.Index : SearchResultSource.StaleIndex,
                 RefreshPending: !fresh);
         }
@@ -125,6 +135,8 @@ public sealed class SearchService : ISearchService, IDisposable
         {
             if (!query.Matches(entry.Name))
                 return true;
+            if (DeleteExecutor.IsHeldPath(entry.DisplayPath))
+                return true; // deleted, just not committed yet
             if (hits.Count >= MaxResults)
             {
                 truncated = true;
