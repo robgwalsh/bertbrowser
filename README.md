@@ -34,6 +34,8 @@ dotnet run --project src/BertBrowser.App -- C:\Some\Dir   # launch at a specific
 
 Note that warnings are treated as errors across the solution (`Directory.Build.props`), so a clean build is a warning-free build.
 
+See [docs/build-and-release.md](docs/build-and-release.md) for packaging, the tag-driven release workflow, and how updates reach installed copies.
+
 ## Data locations
 
 | What | Where |
