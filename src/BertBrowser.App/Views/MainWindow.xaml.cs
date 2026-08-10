@@ -609,7 +609,7 @@ public partial class MainWindow : ThemedWindow
     private void FolderTree_DoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (FolderTree.SelectedItem is PortableDeviceNodeViewModel device)
-            BertBrowser.App.Interop.PortableDevices.OpenInExplorer(device.Device);
+            _shell.OpenPortableDevice(device.Device);
     }
 
     // The clicked row and its expansion state at mouse-down, captured before selecting the row

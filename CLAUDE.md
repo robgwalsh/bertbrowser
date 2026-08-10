@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-bertbrowser is a Windows-only WPF file browser (net8.0-windows) with global MFT-backed search and cached recursive directory sizes, backed by a local SQLite database.
+bertbrowser is a Windows-only WPF file browser (net10.0-windows) with global MFT-backed search and cached recursive directory sizes, backed by a local SQLite database.
 
 ## Commands
 
@@ -22,7 +22,7 @@ If a build fails with MSB3021/MSB3026 because a running BertBrowser instance loc
 
 ## Structure
 
-- `src/BertBrowser.Core` — plain net8.0, no UI dependencies: SQLite persistence, path canonicalization, search/size services. This is the only project with tests; keep anything testable here rather than in the App.
+- `src/BertBrowser.Core` — plain net10.0, no UI dependencies: SQLite persistence, path canonicalization, search/size services. This is the only project with tests; keep anything testable here rather than in the App.
 - `src/BertBrowser.App` — WPF shell. MVVM via CommunityToolkit.Mvvm source generators (`[ObservableProperty]`, `[RelayCommand]` on `partial` classes), DI via `Microsoft.Extensions.DependencyInjection`. The composition root is `App.xaml.cs` (`App.Services`): register new services/repositories there.
 - `tests/BertBrowser.Core.Tests` — xUnit; tests create real SQLite databases and directory trees under `%TEMP%`.
 
@@ -100,7 +100,7 @@ as having one). The count follows the order the *list* shows, not the order rows
   overloads. An item whose current name *another* item wants is moved to a `.bertbrowser-rename-*`
   name first, so the second pass only writes into empty space; a failure there puts it back, and if
   even that fails the staged path is named in the error rather than left silently. A case-only
-  rename needs none of this — .NET 8 handles it directly.
+  rename needs none of this — .NET handles it directly.
 
 A rename is its own inverse, so **undo is the same execution with every path swapped**
 (`RenameExecutor.Undo` runs `UndoPlan` back through `Execute`) — which is what makes undoing a
@@ -177,6 +177,55 @@ trees compared file-by-file against a pre-delete snapshot, with meta-tests that 
 notices a missing file and changed contents), `DeleteSurveyorTests` (counts and bytes). The executor
 takes a `stagingRoot` purely so tests do not create folders at the root of a real disk. Mutate a rule
 and confirm a test goes red.
+
+### Launching other programs
+
+**Nothing in this app calls `Process.Start` any more** — there is exactly one, inside
+`ProcessLauncher`, and a `git grep` finding a second one is a bug. The reason is that this process
+holds an administrator token for the MFT, and a child started directly inherits it *with no prompt*:
+double-clicking a downloaded `.exe` would run it as administrator. The split is three ways:
+
+- **`Interop/ShellLauncher`** is the mechanism, and the trick is that it does not launch anything.
+  `explorer.exe` already runs at the user's own integrity level and publishes its automation object
+  as `ShellWindows`; reaching that gets an `IShellDispatch2` **living in explorer's process**, and
+  asking *it* to `ShellExecute` makes explorer the parent, so the child gets explorer's token. This
+  is also what makes elevation honest: `runas` from *this* process would elevate silently — we
+  already hold the token — while from medium-integrity explorer it is a real request and Windows
+  prompts.
+- **`Services/ProcessLauncher`** (`IProcessLauncher`, DI) is the policy, and the policy is one
+  sentence: **nothing starts elevated unless the user chose it.** When the shell can't be reached it
+  refuses and asks rather than falling back to the elevated launch that was the original problem.
+- **`Core/Services/ExecutablePath`** resolves a program name to a full path *before* the handover.
+
+Four things here are load-bearing:
+
+- **The COM interfaces are hand-declared and every method ahead of the one we call must be present**,
+  in vtable order, or the call lands on the wrong slot — which is an access violation, not a
+  catchable exception. `ShellWindows` has eight members before `FindWindowSW`; `IShellBrowser` and
+  `IShellView` each derive from `IOleWindow` and have twelve before the one we use.
+- **Resolving first is not a nicety.** `ShellExecute` returns `void` — no handle, no exit code, no
+  "not found". "Open in Terminal" used to discover that Windows Terminal was missing by letting
+  `Process.Start` *throw* and falling through to PowerShell in the `catch`; with the throw gone, a
+  null resolve is that signal. It also decides *what* runs here rather than leaving a bare `code` for
+  an elevated process to look up. `ExecutablePathTests` covers it — including that a path which
+  isn't fully qualified is never probed, since that would resolve against the working directory.
+- **A timeout is its own outcome** (`ShellLaunchResult.Unresponsive`), distinct from "unavailable",
+  and nothing may be retried after it: the shell may still be mid-launch, so offering an alternative
+  would start the thing twice.
+- **`AllowSetForegroundWindow`** hands foreground rights to explorer before the call. Without it the
+  launched window — and the UAC prompt, which explorer owns rather than us — opens *behind*
+  BertBrowser.
+
+Elevation is offered three ways: the file list's **Run as administrator** item (one file only),
+Ctrl+Shift+double-click / Ctrl+Shift+Enter, and a per-command checkbox on custom commands. The
+plain-Enter arm of `FileList_KeyDown` needs its modifier guard or it swallows Ctrl+Shift+Enter
+first, and the double-click handler resolves the row **under the cursor** rather than
+`SelectedItem`, because Ctrl+Shift has already told an `Extended` `ListView` to range-extend. The
+folder tree deliberately has no elevated entry — a drive root is one careless click away there.
+
+The shell chain can't be unit-tested; it was verified with a scratch harness that compiles
+`ShellLauncher.cs` directly and compares the integrity level of a child launched each way
+(`Process.Start` → High, shell route → Medium). Rebuild that harness rather than trusting a fake.
 
 ### Theming
 
@@ -267,6 +316,18 @@ colours against. User themes live in `%USERPROFILE%\.bertbrowser\themes\*.json`;
 temporarily missing falls back for the session **without rewriting `AppSettings.ThemeId`**.
 `ThemeId` is nullable: null means "never chosen", which is what lets a first launch honour a Windows
 high-contrast setting.
+
+**A theme's id is also its filename, and an imported theme's id is untrusted input.** The app runs
+elevated, and `Path.Combine` discards its first argument entirely when the second is rooted — so an
+imported `"id": "C:\\Windows\\Temp\\evil"` would have written there rather than into the themes
+folder. `BertBrowser.Core.Theming.ThemeId` (not `AppSettings.ThemeId`, which is unrelated) is the
+single rule: `IsSafe` decides whether a string may become a filename — one path segment, no
+traversal, no DOS device name, nothing Windows silently rewrites like a trailing dot or space — and
+`Unique` manufactures a safe id from a display name, falling back rather than ever returning
+something `IsSafe` rejects. `UserThemeStore.PathFor` throws on an unsafe id instead of resolving it,
+`TrySave`/`TryDelete`/`Load` check first so untrusted input is reported rather than thrown on, and
+`ThemeService.TryImport` keeps an imported id **only** if `IsSafe` passes. `ThemeIdTests` covers it;
+mutate `IsSafe` to accept and the traversal theories go red.
 
 `ThemeCatalogTests` is the guard worth keeping green — it asserts every built-in defines every
 token, parses, and clears WCAG contrast for body text, selected rows, the status bar and menu

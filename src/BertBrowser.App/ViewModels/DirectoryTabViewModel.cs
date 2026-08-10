@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using BertBrowser.App.Services;
@@ -21,6 +20,7 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
 {
     private readonly ISearchService _searchService;
     private readonly IDirectorySizeService _sizeService;
+    private readonly IProcessLauncher _launcher;
     private readonly AppSettings _settings;
 
     private readonly Stack<string> _backStack = new();
@@ -127,11 +127,13 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         DirSizeRepository dirSizeRepository,
         ISearchService searchService,
         IDirectorySizeService sizeService,
-        AppSettings settings)
+        AppSettings settings,
+        IProcessLauncher launcher)
     {
         _searchService = searchService;
         _sizeService = sizeService;
         _settings = settings;
+        _launcher = launcher;
 
         FileList = new FileListViewModel(fileSystem, dirSizeRepository, settings);
         FileList.PropertyChanged += OnFileListPropertyChanged;
@@ -476,24 +478,27 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     // --- Item actions ---
 
     [RelayCommand]
-    private void OpenItem(FileItemViewModel? item)
+    private void OpenItem(FileItemViewModel? item) => Open(item, elevated: false);
+
+    /// <summary>
+    /// Opens <paramref name="item"/> — navigating if it is a folder, otherwise handing it to the
+    /// shell to launch. <paramref name="elevated"/> asks for administrator rights, which is a real
+    /// UAC prompt; see <see cref="IProcessLauncher"/> for why it is one rather than a silent
+    /// inheritance of ours.
+    /// </summary>
+    public void Open(FileItemViewModel? item, bool elevated)
     {
         if (item is null) return;
 
         if (item.IsDirectory)
         {
+            // "Run this folder as administrator" means nothing; navigate as usual.
             _ = NavigateToAsync(item.FullPath);
             return;
         }
 
-        try
-        {
-            Process.Start(new ProcessStartInfo(item.FullPath) { UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            StatusText = $"Cannot open: {ex.Message}";
-        }
+        if (_launcher.Launch(item.FullPath, elevated: elevated) is { } message)
+            StatusText = message;
     }
 
     /// <summary>Compute (or refresh) the recursive content size of the given directories.</summary>

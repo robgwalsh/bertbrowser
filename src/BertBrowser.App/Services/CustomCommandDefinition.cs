@@ -13,4 +13,12 @@ public sealed class CustomCommandDefinition
 
     public bool AppliesToFiles { get; set; } = true;
     public bool AppliesToDirectories { get; set; }
+
+    /// <summary>
+    /// Run this command as administrator, with a UAC prompt each time. Off by default, which is
+    /// also what an older <c>settings.json</c> without this property deserializes to — so commands
+    /// configured before this existed keep running as the ordinary user, which is the safe way
+    /// round.
+    /// </summary>
+    public bool RunElevated { get; set; }
 }

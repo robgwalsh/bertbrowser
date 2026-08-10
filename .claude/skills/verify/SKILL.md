@@ -10,7 +10,7 @@ description: Build, launch, and drive BertBrowser (WPF) for end-to-end verificat
 ```powershell
 dotnet build bertbrowser.sln            # TreatWarningsAsErrors: any warning fails
 # exe name is BertBrowser.exe (not BertBrowser.App.exe):
-src\BertBrowser.App\bin\Debug\net8.0-windows\BertBrowser.exe "<start-directory>"
+src\BertBrowser.App\bin\Debug\net10.0-windows\BertBrowser.exe "<start-directory>"
 ```
 
 Point the start-directory argument at a throwaway tree under `%TEMP%` — the app

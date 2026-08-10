@@ -25,6 +25,9 @@ public sealed partial class CustomCommandItemViewModel : ObservableObject
     [ObservableProperty]
     private bool _appliesToDirectories;
 
+    [ObservableProperty]
+    private bool _runElevated;
+
     public CustomCommandItemViewModel()
     {
     }
@@ -36,6 +39,7 @@ public sealed partial class CustomCommandItemViewModel : ObservableObject
         Arguments = definition.Arguments;
         AppliesToFiles = definition.AppliesToFiles;
         AppliesToDirectories = definition.AppliesToDirectories;
+        RunElevated = definition.RunElevated;
     }
 
     public CustomCommandDefinition ToDefinition() => new()
@@ -45,6 +49,7 @@ public sealed partial class CustomCommandItemViewModel : ObservableObject
         Arguments = Arguments.Trim(),
         AppliesToFiles = AppliesToFiles,
         AppliesToDirectories = AppliesToDirectories,
+        RunElevated = RunElevated,
     };
 }
 

@@ -7,7 +7,7 @@ rest.** Everything below is the detail behind that.
 
 | For | Install |
 |---|---|
-| Building and testing | [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) |
+| Building and testing | [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) |
 | Building an installer locally | `dotnet tool install -g vpk` (Velopack CLI) |
 | Publishing a release | Nothing — GitHub Actions does it |
 | Updating the winget package by hand | `winget install wingetcreate` |
@@ -27,7 +27,9 @@ Two things about this build worth knowing:
   warning-free build. A warning that CI hits is a failed release, not a nag.
 - **The app manifest requests `requireAdministrator`.** Reading the NTFS MFT needs it, so launching
   triggers UAC — including from `dotnet run` and from the IDE. Only the *app* needs elevation;
-  building, testing and packaging do not.
+  building, testing and packaging do not, and neither do the programs it launches (see
+  [SECURITY.md](../SECURITY.md) — children go out through the desktop shell at the user's own
+  integrity level).
 
 If a build fails with MSB3021/MSB3026 because a running instance is holding `bin\Debug`, kill it and
 rebuild:

@@ -132,7 +132,7 @@ public sealed class ThemeService : IThemeService
             return false;
         }
 
-        var id = UserThemeStore.UniqueId(name, _available.Select(t => t.Id));
+        var id = ThemeId.Unique(name, _available.Select(t => t.Id));
 
         // Baked flat rather than left as a diff against the theme it started from: a saved theme
         // should not change because a future release retunes Dark+.
@@ -168,10 +168,15 @@ public sealed class ThemeService : IThemeService
                 return false;
 
             // Rename rather than overwrite: importing must never silently replace a theme the user
-            // already has, and a built-in id would shadow something we ship.
-            var id = ThemeCatalog.Find(parsed!.Id) is null && !_available.Any(t => string.Equals(t.Id, parsed.Id, StringComparison.OrdinalIgnoreCase))
-                ? parsed.Id
-                : UserThemeStore.UniqueId(parsed.Name, _available.Select(t => t.Id));
+            // already has, and a built-in id would shadow something we ship. The id also becomes a
+            // filename, and this one came out of a file someone else wrote — so keeping it is
+            // conditional on ThemeId.IsSafe, or an id like "C:\Windows\Temp\evil" would land there
+            // instead of in the themes folder.
+            var keepId = ThemeId.IsSafe(parsed!.Id) &&
+                ThemeCatalog.Find(parsed.Id) is null &&
+                !_available.Any(t => string.Equals(t.Id, parsed.Id, StringComparison.OrdinalIgnoreCase));
+
+            var id = keepId ? parsed.Id : ThemeId.Unique(parsed.Name, _available.Select(t => t.Id));
 
             var definition = new ThemeDefinition
             {

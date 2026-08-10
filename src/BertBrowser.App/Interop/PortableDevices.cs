@@ -1,5 +1,6 @@
-using System.Diagnostics;
+using System.IO;
 using System.Threading;
+using BertBrowser.App.Services;
 
 namespace BertBrowser.App.Interop;
 
@@ -68,13 +69,18 @@ public static class PortableDevices
         }
     }
 
-    /// <summary>Opens the device in a Windows Explorer window.</summary>
-    public static void OpenInExplorer(PortableDevice device)
+    /// <summary>Opens the device in a Windows Explorer window. Goes through
+    /// <paramref name="launcher"/> like every other launch in this app, so it does not hand
+    /// Explorer this process's administrator token.</summary>
+    public static string? OpenInExplorer(PortableDevice device, IProcessLauncher launcher)
     {
-        if (device.ShellPath.Length == 0) return;
-        Process.Start(new ProcessStartInfo("explorer.exe", $"\"{device.ShellPath}\"")
-        {
-            UseShellExecute = true,
-        });
+        if (device.ShellPath.Length == 0) return null;
+
+        // The full path rather than the bare name: this process is elevated and must not resolve
+        // "explorer.exe" through a search path.
+        var explorer = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+
+        return launcher.Launch(explorer, $"\"{device.ShellPath}\"");
     }
 }

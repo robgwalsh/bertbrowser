@@ -1,8 +1,8 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using BertBrowser.App.Interop;
 using BertBrowser.App.Services;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Layout;
@@ -24,6 +24,7 @@ namespace BertBrowser.App.ViewModels;
 public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 {
     private readonly ISearchService _searchService;
+    private readonly IProcessLauncher _launcher;
     private readonly IFileTransferService _fileTransfer;
     private readonly IMftIndexService _mftIndex;
     private readonly AppSettings _settings;
@@ -133,8 +134,10 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         DeleteExecutor deleteExecutor,
         DeleteSurveyor deleteSurveyor,
         PaneFactory factory,
-        AppSettings settings)
+        AppSettings settings,
+        IProcessLauncher launcher)
     {
+        _launcher = launcher;
         _searchService = searchService;
         _fileTransfer = fileTransfer;
         _mftIndex = mftIndex;
@@ -818,25 +821,32 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             .Where(t => t.IsDirectory ? command.AppliesToDirectories : command.AppliesToFiles)
             .ToList();
 
-        foreach (var (fullPath, isDirectory) in matched)
+        if (matched.Count == 0) return;
+
+        // Resolved once, up front: a program that isn't there is one message, not one per selected
+        // item. Resolving also decides *which* program runs here rather than leaving a bare name
+        // for the shell to look up — see ExecutablePath.
+        if (_launcher.Resolve(command.Command) is not { } program)
         {
-            try
-            {
-                Process.Start(new ProcessStartInfo(command.Command, CommandTemplate.Expand(command.Arguments, fullPath))
-                {
-                    UseShellExecute = true,
-                    WorkingDirectory = isDirectory ? fullPath : Path.GetDirectoryName(fullPath) ?? "",
-                });
-            }
-            catch (Exception ex)
-            {
-                SetStatus($"'{command.Name}' failed: {ex.Message}");
-                return;
-            }
+            SetStatus($"'{command.Name}' failed: '{command.Command}' was not found.");
+            return;
         }
 
-        if (matched.Count > 0)
-            SetStatus($"Ran '{command.Name}' on {matched.Count} item(s)");
+        foreach (var (fullPath, isDirectory) in matched)
+        {
+            var message = _launcher.Launch(
+                program,
+                CommandTemplate.Expand(command.Arguments, fullPath),
+                isDirectory ? fullPath : Path.GetDirectoryName(fullPath) ?? "",
+                command.RunElevated);
+
+            if (message is null) continue;
+
+            SetStatus($"'{command.Name}' failed: {message}");
+            return;
+        }
+
+        SetStatus($"Ran '{command.Name}' on {matched.Count} item(s)");
     }
 
     // --- Drag-and-drop transfers ---
@@ -999,62 +1009,58 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         var dir = isDirectory ? fullPath : Path.GetDirectoryName(fullPath);
         if (string.IsNullOrEmpty(dir)) return;
 
-        try
+        // Resolved, not attempted — see OpenInVSCode: a shell launch cannot report "not installed",
+        // so a null resolve is what the old catch block used to be.
+        if (_launcher.Resolve("wt.exe") is { } terminal)
         {
-            Process.Start(new ProcessStartInfo("wt.exe", $"-d \"{dir}\"") { UseShellExecute = true });
+            if (_launcher.Launch(terminal, $"-d \"{dir}\"") is { } wtMessage)
+                SetStatus(wtMessage);
+            return;
         }
-        catch
+
+        if (_launcher.Resolve("powershell.exe") is not { } powershell)
         {
-            try
-            {
-                Process.Start(new ProcessStartInfo("powershell.exe")
-                {
-                    UseShellExecute = true,
-                    WorkingDirectory = dir,
-                });
-            }
-            catch (Exception ex)
-            {
-                SetStatus($"Cannot open terminal: {ex.Message}");
-            }
+            SetStatus("Cannot open terminal: neither Windows Terminal nor PowerShell was found.");
+            return;
         }
+
+        if (_launcher.Launch(powershell, workingDirectory: dir) is { } message)
+            SetStatus(message);
+    }
+
+    /// <summary>Opens an MTP/PTP device in Explorer — its contents are a shell namespace rather
+    /// than a path the in-app list can read.</summary>
+    public void OpenPortableDevice(PortableDevice device)
+    {
+        if (PortableDevices.OpenInExplorer(device, _launcher) is { } message)
+            SetStatus(message);
     }
 
     /// <summary>Opens the file or folder in VS Code. Uses the <c>code</c> launcher on PATH,
     /// then falls back to the standard user/system install locations of Code.exe.</summary>
     public void OpenInVSCode(string fullPath, bool isDirectory)
     {
-        try
+        // Each candidate is resolved rather than attempted: a launch through the shell reports
+        // nothing back, so "is VS Code installed?" has to be answered before anything is handed
+        // over. This is what the old catch-and-try-the-next-one did.
+        string?[] candidates =
+        [
+            _launcher.Resolve("code"),
+            _launcher.Resolve(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Programs", "Microsoft VS Code", "Code.exe")),
+            _launcher.Resolve(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                "Microsoft VS Code", "Code.exe")),
+        ];
+
+        if (candidates.FirstOrDefault(c => c is not null) is not { } exe)
         {
-            Process.Start(new ProcessStartInfo("code", $"\"{fullPath}\"") { UseShellExecute = true });
+            SetStatus("VS Code not found. Install it, or add 'code' to your PATH.");
             return;
         }
-        catch
-        {
-            // 'code' not on PATH — try the well-known install locations.
-        }
 
-        string[] candidates =
-        [
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Programs", "Microsoft VS Code", "Code.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                "Microsoft VS Code", "Code.exe"),
-        ];
-        foreach (var exe in candidates)
-        {
-            if (!File.Exists(exe)) continue;
-            try
-            {
-                Process.Start(new ProcessStartInfo(exe, $"\"{fullPath}\"") { UseShellExecute = true });
-                return;
-            }
-            catch (Exception ex)
-            {
-                SetStatus($"Cannot open VS Code: {ex.Message}");
-                return;
-            }
-        }
-        SetStatus("VS Code not found. Install it, or add 'code' to your PATH.");
+        if (_launcher.Launch(exe, $"\"{fullPath}\"") is { } message)
+            SetStatus(message);
     }
 }

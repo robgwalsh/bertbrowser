@@ -1,11 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+    <!-- Microsoft.Data.Sqlite 10.0.10 still resolves the native SQLite to 2.1.11, which carries
+         GHSA-2m69-gcr7-jv3q (high). Pinning only the native library keeps the managed provider on
+         the version Microsoft.Data.Sqlite expects. Drop this once the dependency ships a fixed
+         lib.e_sqlite3 on its own; "dotnet list package" with the vulnerable and include-transitive
+         flags says when, and NuGetAudit fails the build if it regresses. -->
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.53.3" />
   </ItemGroup>
 
   <ItemGroup>

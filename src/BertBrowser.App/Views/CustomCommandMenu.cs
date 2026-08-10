@@ -32,10 +32,16 @@ internal static class CustomCommandMenu
         var insertAt = menu.Items.IndexOf(anchor) + 1;
         foreach (var definition in applicable)
         {
-            // E8A7 = OpenInNewWindow: reads as "launch externally". Font and colour come from
-            // resources rather than literals so these runtime-built items match the ones declared
-            // in XAML and follow a theme change like everything else.
-            var icon = new TextBlock { Text = "", FontSize = 16 };
+            // E8A7 = OpenInNewWindow: reads as "launch externally". EA18 is the shield, so a
+            // command that will ask for administrator rights says so in the menu rather than only
+            // when the prompt appears. Font and colour come from resources rather than literals so
+            // these runtime-built items match the ones declared in XAML and follow a theme change
+            // like everything else.
+            var icon = new TextBlock
+            {
+                Text = definition.RunElevated ? "" : "",
+                FontSize = 16,
+            };
             icon.SetResourceReference(TextBlock.FontFamilyProperty, "SymbolFont");
             icon.SetResourceReference(TextBlock.ForegroundProperty, ThemeToken.MenuIconForeground);
 

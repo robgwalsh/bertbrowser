@@ -140,7 +140,9 @@ non-fatal — searches on it fall back to the crawler. `StatusText` drives the "
 the status bar, and `IndexRefreshed` lets an already-open search re-query once a volume lands.
 
 **This is why the app requests `requireAdministrator`.** Opening `\\.\C:` for raw reads needs it.
-Nothing else in BertBrowser does.
+Nothing else in BertBrowser does — including the programs it launches, which are started by the
+desktop shell at your own integrity level rather than inheriting this one. See
+[SECURITY.md](../SECURITY.md).
 
 ## Maintain: the USN journal
 

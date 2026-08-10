@@ -222,6 +222,7 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
 
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" VerticalAlignment="Center" Margin="0,0,8,8"/>
@@ -247,6 +248,13 @@
                                           Margin="0,0,16,0"/>
                                 <CheckBox Content="Show for folders" IsChecked="{Binding SelectedCommand.AppliesToDirectories}"/>
                             </StackPanel>
+
+                            <!-- Its own row rather than beside the "show for" pair: those two say
+                                 where the command appears, this one says what it can do. -->
+                            <CheckBox Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0"
+                                      Content="Run as administrator"
+                                      ToolTip="Windows asks for confirmation each time this command runs."
+                                      IsChecked="{Binding SelectedCommand.RunElevated}"/>
                         </Grid>
                     </Grid>
                 </DockPanel>

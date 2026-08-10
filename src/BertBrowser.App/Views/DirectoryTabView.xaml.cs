@@ -326,20 +326,38 @@ public partial class DirectoryTabView : UserControl
         e.Handled = true;
     }
 
+    /// <summary>Explorer's convention: Ctrl+Shift turns an open into "run as administrator".</summary>
+    private static bool RunAsAdminHeld =>
+        Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift);
+
     private void FileList_DoubleClick(object sender, MouseButtonEventArgs e)
     {
+        // The row under the cursor, not the selection: Ctrl+Shift has already told an Extended
+        // ListView to range-extend, so SelectedItem is the far end of that range rather than the
+        // thing that was double-clicked.
+        if (VisualTreeUtil.FindAncestor<ListViewItem>(e.OriginalSource as DependencyObject)
+            is { DataContext: FileItemViewModel clicked })
+        {
+            Tab.Open(clicked, RunAsAdminHeld);
+            return;
+        }
+
         if (FileListView.SelectedItem is FileItemViewModel item)
-            Tab.OpenItemCommand.Execute(item);
+            Tab.Open(item, RunAsAdminHeld);
     }
 
-    /// <summary>Enter opens the selected item, like double-click; F2 renames the selection and
-    /// Delete removes it, as everywhere else in Windows. Shift+Delete is the Explorer convention
-    /// for erasing outright instead of setting aside.</summary>
+    /// <summary>Enter opens the selected item, like double-click; Ctrl+Shift+Enter opens it as
+    /// administrator. F2 renames the selection and Delete removes it, as everywhere else in
+    /// Windows. Shift+Delete is the Explorer convention for erasing outright instead of setting
+    /// aside.</summary>
     private void FileList_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter && FileListView.SelectedItem is FileItemViewModel item)
+        // The plain-Enter arm needs its modifier guard or it swallows Ctrl+Shift+Enter first.
+        if (e.Key == Key.Enter
+            && Keyboard.Modifiers is ModifierKeys.None or (ModifierKeys.Control | ModifierKeys.Shift)
+            && FileListView.SelectedItem is FileItemViewModel item)
         {
-            Tab.OpenItemCommand.Execute(item);
+            Tab.Open(item, RunAsAdminHeld);
             e.Handled = true;
         }
         else if (e.Key == Key.F2 && Keyboard.Modifiers == ModifierKeys.None)
@@ -457,6 +475,11 @@ public partial class DirectoryTabView : UserControl
         OpenInNewTabMenuItem.IsEnabled = OpenInNewPaneMenuItem.IsEnabled = folders > 0;
         OpenInNewTabMenuItem.Header = folders > 1 ? $"Open {folders} folders in new tabs" : "Open in new tab";
 
+        // Only ever one file: "run this folder as administrator" means nothing, and a whole
+        // selection of programs started elevated at once is not something to offer from a menu.
+        RunAsAdminMenuItem.IsEnabled =
+            selection.Count == 1 && !selection[0].IsDirectory;
+
         RenameMenuItem.IsEnabled = selection.Count > 0;
         RenameMenuItem.Header = selection.Count > 1 ? $"Rename {selection.Count} items…" : "Rename…";
 
@@ -477,6 +500,12 @@ public partial class DirectoryTabView : UserControl
     {
         if (FileListView.SelectedItem is FileItemViewModel item)
             Tab.OpenItemCommand.Execute(item);
+    }
+
+    private void ContextRunAsAdmin_Click(object sender, RoutedEventArgs e)
+    {
+        if (FileListView.SelectedItem is FileItemViewModel item)
+            Tab.Open(item, elevated: true);
     }
 
     /// <summary>Opening a whole selection of folders is capped: a stray Ctrl+A would otherwise

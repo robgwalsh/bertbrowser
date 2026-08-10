@@ -16,7 +16,19 @@ public sealed class UserThemeStore
 {
     public string Directory => AppPaths.ThemesDir;
 
-    public string PathFor(string id) => Path.Combine(Directory, id + ".json");
+    /// <summary>
+    /// The file a theme lives in. Refuses anything <see cref="ThemeId.IsSafe"/> rejects rather than
+    /// letting <see cref="Path.Combine(string, string)"/> quietly resolve it somewhere else — see
+    /// <see cref="ThemeId"/> for why that matters in an elevated process. Callers that handle
+    /// untrusted ids check first; reaching here with a bad one is a bug.
+    /// </summary>
+    public string PathFor(string id)
+    {
+        if (!ThemeId.IsSafe(id))
+            throw new ArgumentException($"'{id}' is not a usable theme id.", nameof(id));
+
+        return Path.Combine(Directory, id + ".json");
+    }
 
     /// <summary>
     /// Reads every theme in the folder. Files that don't parse are reported and skipped rather than
@@ -62,6 +74,16 @@ public sealed class UserThemeStore
                     continue;
                 }
 
+                // An id is a filename, so a theme dropped into the folder by hand could carry one
+                // that points outside it — refuse it here rather than let a later save or delete
+                // act on it. See ThemeId.
+                if (!ThemeId.IsSafe(theme.Id))
+                {
+                    problems.Add(new ThemeIssue(ThemeIssueSeverity.Warning, null,
+                        $"'{Path.GetFileName(file)}' has an unusable id ('{theme.Id}') and was skipped."));
+                    continue;
+                }
+
                 found.Add(theme);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -76,6 +98,12 @@ public sealed class UserThemeStore
 
     public bool TrySave(ThemeDefinition definition, string json, out string? error)
     {
+        if (!ThemeId.IsSafe(definition.Id))
+        {
+            error = $"'{definition.Id}' is not a usable theme id.";
+            return false;
+        }
+
         try
         {
             System.IO.Directory.CreateDirectory(Directory);
@@ -92,6 +120,12 @@ public sealed class UserThemeStore
 
     public bool TryDelete(string id, out string? error)
     {
+        if (!ThemeId.IsSafe(id))
+        {
+            error = $"'{id}' is not a usable theme id.";
+            return false;
+        }
+
         try
         {
             var path = PathFor(id);
@@ -103,32 +137,6 @@ public sealed class UserThemeStore
         {
             error = ex.Message;
             return false;
-        }
-    }
-
-    /// <summary>
-    /// Turns a display name into a filename-safe id, then suffixes it until it is unique among
-    /// <paramref name="taken"/> — so "My Theme" and "my theme!" can coexist.
-    /// </summary>
-    public static string UniqueId(string name, IEnumerable<string> taken)
-    {
-        var slug = new StringBuilder();
-        foreach (var c in name.Trim().ToLowerInvariant())
-        {
-            if (char.IsLetterOrDigit(c)) slug.Append(c);
-            else if (slug.Length > 0 && slug[^1] != '-') slug.Append('-');
-        }
-
-        var basis = slug.ToString().Trim('-');
-        if (basis.Length == 0) basis = "theme";
-
-        var used = new HashSet<string>(taken, StringComparer.OrdinalIgnoreCase);
-        if (!used.Contains(basis)) return basis;
-
-        for (var i = 2; ; i++)
-        {
-            var candidate = $"{basis}-{i}";
-            if (!used.Contains(candidate)) return candidate;
         }
     }
 }

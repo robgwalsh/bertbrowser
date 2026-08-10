@@ -20,10 +20,11 @@ public sealed class PaneFactory(
     DirSizeRepository dirSizeRepository,
     ISearchService searchService,
     IDirectorySizeService sizeService,
-    AppSettings settings)
+    AppSettings settings,
+    IProcessLauncher launcher)
 {
     public DirectoryTabViewModel CreateTab() =>
-        new(fileSystem, dirSizeRepository, searchService, sizeService, settings);
+        new(fileSystem, dirSizeRepository, searchService, sizeService, settings, launcher);
 
     /// <summary>A tab set up to look like <paramref name="source"/>: same sort order. History is
     /// deliberately not copied — the duplicate starts fresh.</summary>
