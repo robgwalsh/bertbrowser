@@ -11,6 +11,8 @@ An offline Windows 10/11 file browser built for my personal preferences.
 - **Split panes with tabs** - Infinite pane splitting and tabs per pane.
 - **Themes** - Rich theming system, with many pre-loaded themes.
 
+<img src="docs/images/main_screenshot.png" alt="BertBrowser main window" width="500">
+
 ## Install
 
 ```powershell
