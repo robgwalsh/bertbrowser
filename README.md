@@ -2,31 +2,23 @@
 
 [![Latest release](https://img.shields.io/github/v/release/robgwalsh/bertbrowser?label=release&color=1f6feb)](https://github.com/robgwalsh/bertbrowser/releases/latest)
 
-An offline Windows file browser built for my personal preferences.
+An offline Windows 10/11 file browser built for my personal preferences.
 
 - **Offline** - BertBrowser does not connect to the Internet except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates.
-- **Fast global search** - MFT indexing and USN journal tracking for fastest possible performance
+- **Fast global search** - MFT indexing and USN journal tracking for fastest possible performance.
 - **Directory sizes** — Show total size on directories, just like files.
-- **Fast media thumbnails** - Show thumbnails for media files without the sluggishness of Windows Explorer. Control thumbnail size and aspect ratio.
-- **Split panes with tabs** - Infinite pane splitting and tabs per pane
+- **Fast media thumbnails** - Snappy thumbnail rendering for media files. Adjustable thumbnail size and aspect ratio.
+- **Split panes with tabs** - Infinite pane splitting and tabs per pane.
 - **Themes** - Rich theming system, with many pre-loaded themes.
 
 ## Install
-
-No .NET or other prerequisites — the installer is self-contained (Windows 10/11, x64). It installs per-user (no admin prompt), and the app keeps itself up to date automatically.
-
-**winget:**
 
 ```powershell
 winget install RobWalsh.BertBrowser
 ```
 
-**Or directly:** grab `BertBrowser-win-Setup.exe` from the [latest release](https://github.com/robgwalsh/bertbrowser/releases/latest) and run it. There's also a `BertBrowser-win-Portable.zip` if you'd rather not install anything.
-
-## Requirements
-
-- Windows 10/11
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (to build; the app targets `net8.0-windows` / WPF)
+* **Or** grab the [latest installer](https://github.com/robgwalsh/bertbrowser/releases/download/v1.1.0/BertBrowser-win-Setup.exe) and run it.
+* **Or** download the [latest portable executable](https://github.com/robgwalsh/bertbrowser/releases/download/v1.1.0/BertBrowser-win-Portable.zip) if you'd rather not install anything.
 
 ## Building and running
 
