@@ -1,16 +1,15 @@
 # bertbrowser
 
-An offline Windows file browser built for my personal preferences. The overall design intent is **simplicity over customization**.
+[![Latest release](https://img.shields.io/github/v/release/robgwalsh/bertbrowser?label=release&color=1f6feb)](https://github.com/robgwalsh/bertbrowser/releases/latest)
 
-## What it does
+An offline Windows file browser built for my personal preferences.
 
-- **Browse** — Expected modern file browser features
-- **Search** - Fast global search using MFT indexing and USN journal tracking
-- **Directory sizes** — Show total size on directories, just like files
-
-## What it does not do
-
-- **Connect to the Internet** — except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates
+- **Offline** - BertBrowser does not connect to the Internet except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates.
+- **Fast global search** - MFT indexing and USN journal tracking for fastest possible performance
+- **Directory sizes** — Show total size on directories, just like files.
+- **Fast media thumbnails** - Show thumbnails for media files without the sluggishness of Windows Explorer. Control thumbnail size and aspect ratio.
+- **Split panes with tabs** - Infinite pane splitting and tabs per pane
+- **Themes** - Rich theming system, with many pre-loaded themes.
 
 ## Install
 
