@@ -4,14 +4,14 @@
 
 An offline Windows 10/11 file browser built for my personal preferences.
 
+<img src="docs/images/main_screenshot.png" alt="BertBrowser main window" width="500">
+
 - **Offline** - BertBrowser does not connect to the Internet except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates.
-- **Fast global search** - MFT indexing and USN journal tracking for fastest possible performance.
+- **[Fast global search](docs/search-indexing.md)** - MFT indexing and USN journal tracking for fastest possible performance.
 - **Directory sizes** — Show total size on directories, just like files.
-- **Fast media thumbnails** - Snappy thumbnail rendering for media files. Adjustable thumbnail size and aspect ratio.
+- **[Fast media thumbnails](docs/media-thumbnails.md)** - Snappy thumbnail rendering for media files. Adjustable thumbnail size and aspect ratio.
 - **Split panes with tabs** - Infinite pane splitting and tabs per pane.
 - **Themes** - Rich theming system, with many pre-loaded themes.
-
-<img src="docs/images/main_screenshot.png" alt="BertBrowser main window" width="500">
 
 ## Install
 
