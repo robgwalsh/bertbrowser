@@ -19,8 +19,8 @@ An offline Windows 10/11 file browser built for my personal preferences.
 winget install RobWalsh.BertBrowser
 ```
 
-* **Or** grab the [latest installer](https://github.com/robgwalsh/bertbrowser/releases/download/v1.1.0/BertBrowser-win-Setup.exe) and run it.
-* **Or** download the [latest portable executable](https://github.com/robgwalsh/bertbrowser/releases/download/v1.1.0/BertBrowser-win-Portable.zip) if you'd rather not install anything.
+* **Or** grab the [latest installer](https://github.com/robgwalsh/bertbrowser/releases/latest/download/BertBrowser-win-Setup.exe) and run it.
+* **Or** download the [latest portable executable](https://github.com/robgwalsh/bertbrowser/releases/latest/download/BertBrowser-win-Portable.zip) if you'd rather not install anything.
 
 ## Building and running
 

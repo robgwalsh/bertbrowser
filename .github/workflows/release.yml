@@ -48,3 +48,21 @@ jobs:
             --releaseName "BertBrowser ${{ steps.ver.outputs.version }}" `
             --tag ${{ github.ref_name }}
           if ($LASTEXITCODE -ne 0) { exit 1 }
+
+  # Opens a pull request at microsoft/winget-pkgs for the release the job above published.
+  # It builds the new manifest from the newest one already upstream, so whatever is published
+  # there is the template for every version after it - a wrong installer type or a stale URL
+  # propagates rather than being corrected. See docs/build-and-release.md.
+  # Needs a classic PAT with public_repo (secret WINGET_PAT) and a winget-pkgs fork on the account.
+  # A failure here does not affect the release itself; it can be re-run, or submitted by hand.
+  winget:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: RobWalsh.BertBrowser
+          installers-regex: 'Setup\.exe$'
+          release-tag: ${{ github.ref_name }}
+          release-notes-url: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+          token: ${{ secrets.WINGET_PAT }}

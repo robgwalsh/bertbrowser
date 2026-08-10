@@ -84,6 +84,8 @@ That push triggers `.github/workflows/release.yml`, which on `windows-latest`:
 6. `vpk upload github --publish` — creates the GitHub Release, tagged with the tag you pushed and
    named `BertBrowser <version>`, and uploads every asset.
 
+A second job then opens the [winget](#winget) pull request for the version just published.
+
 Watch it and confirm:
 
 ```powershell
@@ -173,21 +175,48 @@ The package is `RobWalsh.BertBrowser`, published in
 [`microsoft/winget-pkgs`](https://github.com/microsoft/winget-pkgs). A copy of what was submitted
 lives in `manifests/` in this repo.
 
-**winget is not automated, and it is not current.** Only 1.0.0 is published upstream. Because
-installed copies update themselves, winget lag only affects first-time installs — but
-`winget install RobWalsh.BertBrowser` hands new users an old build until a manifest is submitted for
-the new version.
+**This is automated.** The `winget` job in `release.yml` runs after the release is published and
+opens a pull request at `microsoft/winget-pkgs` for the new version. Nothing to do by hand; the PR
+is merged by winget's own validation pipeline, usually within a few hours.
 
-Two known problems with the published 1.0.0 manifest, worth fixing when the next version is
-submitted:
+The job needs two things, both already set up:
 
-- `InstallerType` is **`portable`**, pointing at the Velopack `Setup.exe`. It should be `exe`, with
-  `Silent: --silent`, `Scope: user`, and `AppsAndFeaturesEntries` matching the ARP entry Velopack
-  writes (DisplayName `BertBrowser`, Publisher `Rob Walsh`) — otherwise winget shims the installer
-  as if it were the app, and upgrade/uninstall don't line up with what's actually installed.
-- It has no `AppsAndFeaturesEntries`, so `winget upgrade` can't match the installed version.
+1. A fork of `microsoft/winget-pkgs` named exactly `winget-pkgs` under the account — the action
+   pushes manifest branches to it. Recreate with `gh repo fork microsoft/winget-pkgs --clone=false`.
+2. A **classic** PAT with only the `public_repo` scope, as the `WINGET_PAT` secret — fine-grained
+   PATs can't open PRs against repos you don't own. Create one
+   [here](https://github.com/settings/tokens/new?scopes=public_repo&description=winget-releaser),
+   then `gh secret set WINGET_PAT --repo robgwalsh/bertbrowser`. **A classic PAT expires**, and the
+   symptom is this job failing on a release that otherwise went fine.
 
-Submitting a new version by hand:
+A failure here never affects the release — the assets are already published and installed copies
+update themselves regardless. `gh run rerun <id>` is usually enough; winget lag only delays
+first-time installers.
+
+### The upstream manifest is the template for the next one
+
+The action generates each version's manifest from **the newest one already published upstream**,
+changing the version, URL and hash. So anything wrong up there propagates forward instead of being
+corrected, and anything worth having has to be put there once, by hand.
+
+That was done for 1.1.1, which is the baseline the automation now copies. The 1.0.0 manifest
+described the Velopack `Setup.exe` as `InstallerType: portable` — which makes winget shim the
+installer as if it were the app — and carried no `AppsAndFeaturesEntries`, so `winget upgrade`
+couldn't match an installed copy. 1.1.1 fixes both:
+
+- `InstallerType: exe`, `Scope: user` (per-user install into `%LOCALAPPDATA%`, no elevation),
+  `InstallerSwitches.Silent: --silent` (Velopack's flag), `UpgradeBehavior: install`.
+- `AppsAndFeaturesEntries` with `ProductCode: BertBrowser` — the HKCU uninstall key Velopack writes —
+  plus DisplayName `BertBrowser` and Publisher `Rob Walsh`. **No `DisplayVersion`**, deliberately:
+  Velopack's ARP version always equals the package version, so leaving it out lets winget compare
+  against `PackageVersion` rather than a field that would go stale on every automated update.
+- A filled-in locale manifest (publisher/package URLs, license URL, description, tags).
+
+A copy of each hand-authored submission lives in `manifests/` in this repo. It is a record, not a
+source — the automation reads the upstream copy. To change the published metadata, edit a manifest
+by hand and submit it as above; the next automated release then inherits the change.
+
+Submitting a version by hand (if the job is broken, or to change metadata):
 
 ```powershell
 wingetcreate update RobWalsh.BertBrowser --version 1.2.3 `
@@ -195,29 +224,8 @@ wingetcreate update RobWalsh.BertBrowser --version 1.2.3 `
   --submit
 ```
 
-To automate it instead, add this job to `.github/workflows/release.yml`:
-
-```yaml
-  winget:
-    needs: release
-    runs-on: windows-latest
-    steps:
-      - uses: vedantmgoyal9/winget-releaser@v2   # check for the current release tag
-        with:
-          identifier: RobWalsh.BertBrowser
-          installers-regex: 'Setup\.exe$'
-          token: ${{ secrets.WINGET_PAT }}
-```
-
-Two prerequisites for that job:
-
-1. A fork of `microsoft/winget-pkgs` named exactly `winget-pkgs` under your account — the action
-   pushes manifest branches to it. The first `wingetcreate` submission created this fork already;
-   otherwise `gh repo fork microsoft/winget-pkgs --clone=false`.
-2. A **classic** PAT with only the `public_repo` scope — fine-grained PATs can't open PRs against
-   repos you don't own. Create one
-   [here](https://github.com/settings/tokens/new?scopes=public_repo&description=winget-releaser),
-   then `gh secret set WINGET_PAT --repo robgwalsh/bertbrowser`.
+Validate anything hand-written before submitting — `winget validate --manifest <dir>` catches schema
+errors that would otherwise come back as a failed check on the PR.
 
 ## Release checklist
 
@@ -225,7 +233,8 @@ Two prerequisites for that job:
 - [ ] Working tree clean, `main` pushed
 - [ ] Pick the version (semver against the last tag)
 - [ ] `git tag vX.Y.Z && git push origin vX.Y.Z`
-- [ ] Workflow succeeds; release has six assets and a small delta
+- [ ] Both jobs succeed; release has six assets and a small delta
 - [ ] Release notes written and attached
 - [ ] Install or upgrade a real copy and launch it
-- [ ] Submit the winget manifest, if you're keeping it current
+- [ ] The winget PR is open at `microsoft/winget-pkgs` (the `winget` job opens it; nothing to do
+      unless it failed)
