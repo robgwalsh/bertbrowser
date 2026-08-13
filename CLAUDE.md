@@ -46,7 +46,15 @@ Repositories (`DirSizeRepository`, `FsIndexRepository`, `BookmarkRepository`) ar
 
 ### Directory sizes
 
-`DirectorySizeService` does an iterative post-order DFS so one scan caches results for the root **and every descendant** directory (`dir_size_cache`). It skips reparse points (junctions/symlinks) to avoid cycles and double-counting, flags results `incomplete` on access-denied instead of failing, limits concurrent scans to 2, and on cancellation writes nothing (cache keeps prior values).
+**Nothing walks the filesystem to size a folder.** Every number comes from `dir_size_cache`, which
+`MftDirectorySizeBuilder` fills for *every* directory on a volume as a side effect of the MFT index
+pass (see `docs/search-indexing.md`) — so sizes appear instantly and the app never has an on-demand
+recursive scan competing with the indexer. Readers (`FileListViewModel.HydrateDirSizesAsync`,
+`FolderTreeViewModel`, `PropertiesViewModel`) do a batched `DirSizeRepository.GetMany` and nothing
+else; a missing row means unknown and must render as blank or "not indexed", **never as zero** —
+that is what a non-NTFS volume or a still-indexing one looks like. The earlier on-demand
+`DirectorySizeService` (a .NET post-order DFS behind a "Compute size" menu item) is gone; do not
+reintroduce a scan-on-demand path.
 
 ### Transfers (move / copy / drag-and-drop)
 

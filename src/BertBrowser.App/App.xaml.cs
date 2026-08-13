@@ -42,7 +42,6 @@ public partial class App : Application
         services.AddSingleton<FsIndexRepository>();
         services.AddSingleton<BookmarkRepository>();
         services.AddSingleton<IFileSystemService, FileSystemService>();
-        services.AddSingleton<IDirectorySizeService, DirectorySizeService>();
         services.AddSingleton<IFileTransferService, FileTransferService>();
         services.AddSingleton<BertBrowser.Core.Services.Transfer.TransferPlanner>();
         services.AddSingleton<BertBrowser.Core.Services.Transfer.TransferExecutor>();

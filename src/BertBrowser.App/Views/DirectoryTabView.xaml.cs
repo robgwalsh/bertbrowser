@@ -640,9 +640,6 @@ public partial class DirectoryTabView : UserControl
             "Delete", MessageDialogKind.Warning);
     }
 
-    private void ContextComputeSize_Click(object sender, RoutedEventArgs e) =>
-        Tab.ComputeSizeCommand.Execute(SelectedFileItems());
-
     private void ContextBookmark_Click(object sender, RoutedEventArgs e)
     {
         var entries = SelectedFileItems().Select(i => (i.FullPath, i.IsDirectory)).ToList();

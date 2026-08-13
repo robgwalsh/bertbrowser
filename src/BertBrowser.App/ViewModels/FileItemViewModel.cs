@@ -46,9 +46,6 @@ public sealed partial class FileItemViewModel : ObservableObject
     private bool _sizeIncomplete;
 
     [ObservableProperty]
-    private bool _isSizeComputing;
-
-    [ObservableProperty]
     private DateTime? _sizeComputedUtc;
 
     private ImageSource? _icon;

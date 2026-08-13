@@ -116,7 +116,10 @@ for. Because the raw read sees every record regardless of ACLs, those results ar
 `incomplete`.
 
 Junctions and other reparse points have no MFT children under their own record, so they contribute
-nothing — matching the deliberate skip in the on-demand DFS scanner.
+nothing, which is what stops a junction being counted twice.
+
+This is the *only* source of directory sizes — there is no on-demand scanner to fall back on, so a
+directory with no row here reads as unknown rather than zero.
 
 ### Writing it down
 

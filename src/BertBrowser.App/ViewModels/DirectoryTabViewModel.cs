@@ -19,7 +19,6 @@ public sealed record BreadcrumbSegment(string Name, string FullPath);
 public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposable
 {
     private readonly ISearchService _searchService;
-    private readonly IDirectorySizeService _sizeService;
     private readonly IProcessLauncher _launcher;
     private readonly AppSettings _settings;
 
@@ -126,12 +125,10 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         IFileSystemService fileSystem,
         DirSizeRepository dirSizeRepository,
         ISearchService searchService,
-        IDirectorySizeService sizeService,
         AppSettings settings,
         IProcessLauncher launcher)
     {
         _searchService = searchService;
-        _sizeService = sizeService;
         _settings = settings;
         _launcher = launcher;
 
@@ -499,44 +496,5 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
 
         if (_launcher.Launch(item.FullPath, elevated: elevated) is { } message)
             StatusText = message;
-    }
-
-    /// <summary>Compute (or refresh) the recursive content size of the given directories.</summary>
-    [RelayCommand]
-    private async Task ComputeSizeAsync(IList<FileItemViewModel>? items)
-    {
-        if (items is null) return;
-        var dirs = items.Where(i => i.IsDirectory).ToList();
-        if (dirs.Count == 0) return;
-
-        foreach (var dir in dirs)
-            dir.IsSizeComputing = true;
-
-        try
-        {
-            foreach (var dir in dirs)
-            {
-                try
-                {
-                    var result = await _sizeService.ComputeAsync(dir.FullPath, CancellationToken.None);
-                    if (result is not null)
-                    {
-                        dir.SizeBytes = result.SizeBytes;
-                        dir.SizeIncomplete = result.Incomplete;
-                        dir.SizeComputedUtc = result.ComputedUtc;
-                    }
-                }
-                finally
-                {
-                    dir.IsSizeComputing = false;
-                }
-            }
-            StatusText = "Size scan complete";
-        }
-        finally
-        {
-            foreach (var dir in dirs)
-                dir.IsSizeComputing = false;
-        }
     }
 }

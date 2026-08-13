@@ -189,9 +189,6 @@
                                   InputGestureText="Shift+Del" Click="ContextDeletePermanently_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE74B;"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem Header="Compute size" Click="ContextComputeSize_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE1D0;"/></MenuItem.Icon>
-                        </MenuItem>
                         <MenuItem x:Name="BookmarkMenuItem" Header="Bookmark" Click="ContextBookmark_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE734;"/></MenuItem.Icon>
                         </MenuItem>
@@ -228,13 +225,8 @@
                             <GridViewColumnHeader Content="Size" Tag="Size"/>
                             <GridViewColumn.CellTemplate>
                                 <DataTemplate>
-                                    <Grid>
-                                        <TextBlock Text="{Binding SizeDisplay}" HorizontalAlignment="Right"
-                                                   ToolTip="{Binding SizeTooltip}"
-                                                   Visibility="{Binding IsSizeComputing, Converter={StaticResource InverseBoolToVisibility}}"/>
-                                        <ProgressBar IsIndeterminate="True" Height="10" Width="70"
-                                                     Visibility="{Binding IsSizeComputing, Converter={StaticResource BoolToVisibility}}"/>
-                                    </Grid>
+                                    <TextBlock Text="{Binding SizeDisplay}" HorizontalAlignment="Right"
+                                               ToolTip="{Binding SizeTooltip}"/>
                                 </DataTemplate>
                             </GridViewColumn.CellTemplate>
                         </GridViewColumn>

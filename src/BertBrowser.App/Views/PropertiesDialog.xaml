@@ -116,12 +116,12 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
-                            <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+                            <RowDefinition/><RowDefinition/><RowDefinition/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Size:" Style="{StaticResource PropName}"/>
                         <TextBox Grid.Row="0" Grid.Column="1" Style="{StaticResource PropValue}"
-                                 Text="{Binding FolderSizeDisplay, Mode=OneWay, TargetNullValue='Not yet calculated'}"/>
+                                 Text="{Binding FolderSizeDisplay, Mode=OneWay, TargetNullValue='Not indexed yet'}"/>
 
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Contains:" Style="{StaticResource PropName}"
                                    Visibility="{Binding FolderCountsDisplay, Converter={StaticResource NullToCollapsed}}"/>
@@ -131,20 +131,6 @@
                         <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SizeComputedDisplay, Mode=OneWay}"
                                  Style="{StaticResource PropValue}" Foreground="{StaticResource Theme.Text.Secondary}" FontSize="11"
                                  Visibility="{Binding SizeComputedDisplay, Converter={StaticResource NullToCollapsed}}"/>
-
-                        <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Vertical" Margin="0,4,0,0">
-                            <StackPanel Orientation="Horizontal">
-                                <Button Content="Calculate" Padding="12,2" Command="{Binding CalculateSizeCommand}"/>
-                                <Button Content="Cancel" Padding="12,2" Margin="8,0,0,0"
-                                        Command="{Binding CancelCalculateCommand}"
-                                        Visibility="{Binding IsCalculating, Converter={StaticResource BoolToVisibility}}"/>
-                            </StackPanel>
-                            <StackPanel Orientation="Vertical" Margin="0,6,0,0"
-                                        Visibility="{Binding IsCalculating, Converter={StaticResource BoolToVisibility}}">
-                                <ProgressBar IsIndeterminate="True" Height="4" Margin="0,0,0,4"/>
-                                <TextBlock Text="{Binding ScanProgressText}" Foreground="{StaticResource Theme.Text.Secondary}" FontSize="11"/>
-                            </StackPanel>
-                        </StackPanel>
                     </Grid>
                 </GroupBox>
 

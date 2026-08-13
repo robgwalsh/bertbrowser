@@ -1,6 +1,5 @@
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Data;
-using BertBrowser.Core.Services;
 using Microsoft.Extensions.DependencyInjection;
 using System.Windows;
 
@@ -17,7 +16,6 @@ internal static class PropertiesPrompt
         if (targets.Count == 0) return false;
 
         var vm = new PropertiesViewModel(targets,
-            App.Services.GetRequiredService<IDirectorySizeService>(),
             App.Services.GetRequiredService<DirSizeRepository>());
         new PropertiesDialog(vm) { Owner = Application.Current?.MainWindow }.ShowDialog();
         return vm.AttributesChanged;

@@ -10,6 +10,5 @@ public partial class PropertiesDialog : ThemedWindow
         InitializeComponent();
         DataContext = vm;
         Loaded += async (_, _) => await vm.LoadAsync();
-        Closed += (_, _) => vm.CancelPendingWork();
     }
 }

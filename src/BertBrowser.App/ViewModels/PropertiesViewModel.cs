@@ -11,21 +11,18 @@ namespace BertBrowser.App.ViewModels;
 /// <summary>One item the properties dialog was opened for.</summary>
 public readonly record struct PropertiesTarget(string FullPath, bool IsDirectory);
 
-/// <summary>Backing VM for <see cref="Views.PropertiesDialog"/>: fresh disk stat,
-/// cached/computed recursive folder size, and shell property-handler metadata. Handles a whole
+/// <summary>Backing VM for <see cref="Views.PropertiesDialog"/>: fresh disk stat, the indexed
+/// recursive folder size, and shell property-handler metadata. Handles a whole
 /// selection — with more than one target the per-item detail collapses to aggregates and the
 /// attribute checkboxes go three-state, so common bits can be flipped for everything at once.</summary>
 public sealed partial class PropertiesViewModel : ObservableObject
 {
-    private readonly IDirectorySizeService _sizeService;
     private readonly DirSizeRepository _sizeRepository;
     private readonly IReadOnlyList<PropertiesTarget> _targets;
 
     /// <summary>Live attributes of every target that still exists on disk, keyed by full path.
     /// Empty entries are targets that vanished; they're skipped by Apply.</summary>
     private readonly Dictionary<string, FileAttributes> _attributes = new(StringComparer.OrdinalIgnoreCase);
-
-    private CancellationTokenSource? _scanCts;
 
     public bool IsSingle => _targets.Count == 1;
     public bool IsMultiple => _targets.Count > 1;
@@ -86,7 +83,7 @@ public sealed partial class PropertiesViewModel : ObservableObject
 
     /// <summary>Nothing in the selection exists on disk any more.</summary>
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(ApplyAttributesCommand), nameof(CalculateSizeCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ApplyAttributesCommand))]
     private bool _isMissing;
 
     [ObservableProperty]
@@ -97,13 +94,6 @@ public sealed partial class PropertiesViewModel : ObservableObject
 
     [ObservableProperty]
     private string? _sizeComputedDisplay;
-
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(CalculateSizeCommand), nameof(CancelCalculateCommand))]
-    private bool _isCalculating;
-
-    [ObservableProperty]
-    private string? _scanProgressText;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowNoMetadata))]
@@ -118,21 +108,18 @@ public sealed partial class PropertiesViewModel : ObservableObject
     public PropertiesViewModel(
         string fullPath,
         bool isDirectory,
-        IDirectorySizeService sizeService,
         DirSizeRepository sizeRepository)
-        : this([new PropertiesTarget(fullPath, isDirectory)], sizeService, sizeRepository)
+        : this([new PropertiesTarget(fullPath, isDirectory)], sizeRepository)
     {
     }
 
     public PropertiesViewModel(
         IReadOnlyList<PropertiesTarget> targets,
-        IDirectorySizeService sizeService,
         DirSizeRepository sizeRepository)
     {
         if (targets.Count == 0) throw new ArgumentException("At least one target is required.", nameof(targets));
 
         _targets = targets;
-        _sizeService = sizeService;
         _sizeRepository = sizeRepository;
         HasDirectories = targets.Any(t => t.IsDirectory);
 
@@ -281,8 +268,10 @@ public sealed partial class PropertiesViewModel : ObservableObject
 
     private IEnumerable<string> SelectedDirectories => _targets.Where(t => t.IsDirectory).Select(t => t.FullPath);
 
-    /// <summary>Shows the cached recursive size, but only once every selected folder has one —
-    /// a partial total would silently understate the selection.</summary>
+    /// <summary>Shows the indexed recursive size, but only once every selected folder has one —
+    /// a partial total would silently understate the selection. Nothing scans here: the rows come
+    /// from the MFT pass, so an unindexed volume shows nothing rather than a stale or partial
+    /// number.</summary>
     private async Task LoadCachedFolderSizeAsync()
     {
         if (!HasDirectories) return;
@@ -293,52 +282,6 @@ public sealed partial class PropertiesViewModel : ObservableObject
 
         ApplySizeResults(cached.Select(c => c!).ToList());
     }
-
-    private bool CanCalculateSize => HasDirectories && !IsMissing && !IsCalculating;
-
-    [RelayCommand(CanExecute = nameof(CanCalculateSize))]
-    private async Task CalculateSizeAsync()
-    {
-        _scanCts = new CancellationTokenSource();
-        IsCalculating = true;
-        try
-        {
-            var dirs = SelectedDirectories.ToList();
-            var results = new List<DirSizeResult>();
-            var doneBytes = 0L;
-
-            foreach (var dir in dirs)
-            {
-                var label = dirs.Count > 1 ? $"{DisplayName(dir)} — " : "";
-                var settled = doneBytes;
-                var progress = new Progress<DirScanProgress>(p =>
-                    ScanProgressText =
-                        $"{label}scanning… {p.DirectoriesScanned:N0} folders, {ByteSizeFormatter.Format(settled + p.BytesSoFar)}");
-
-                var result = await _sizeService.ComputeAsync(dir, _scanCts.Token, progress);
-                if (result is null) return; // cancelled: keep whatever was displayed before
-                results.Add(result);
-                doneBytes += result.SizeBytes;
-            }
-
-            if (results.Count > 0)
-                ApplySizeResults(results);
-        }
-        catch (Exception ex)
-        {
-            ErrorMessage = $"Size scan failed: {ex.Message}";
-        }
-        finally
-        {
-            IsCalculating = false;
-            ScanProgressText = null;
-            _scanCts?.Dispose();
-            _scanCts = null;
-        }
-    }
-
-    [RelayCommand(CanExecute = nameof(IsCalculating))]
-    private void CancelCalculate() => _scanCts?.Cancel();
 
     private void ApplySizeResults(IReadOnlyList<DirSizeResult> results)
     {
@@ -416,9 +359,6 @@ public sealed partial class PropertiesViewModel : ObservableObject
         // Re-seed the checkboxes from what is actually on disk now.
         SyncAttributeChecks();
     }
-
-    /// <summary>Called when the dialog closes so an in-flight scan doesn't outlive it.</summary>
-    public void CancelPendingWork() => _scanCts?.Cancel();
 
     private sealed record StatSnapshot(
         bool IsDirectory, FileAttributes Attributes,
