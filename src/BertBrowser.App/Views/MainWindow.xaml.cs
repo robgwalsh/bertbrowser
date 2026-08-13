@@ -112,9 +112,9 @@ public partial class MainWindow : ThemedWindow
         var vm = new SettingsViewModel(_settings, App.Services.GetRequiredService<IThemeService>());
         if (new SettingsWindow(vm) { Owner = this }.ShowDialog() == true)
         {
-            // Sync the toolbar toggle to a "Show hidden items" change made in the dialog; its
-            // setter refreshes the list and re-filters bookmarks. (Custom-command menus rebuild
-            // on every open, so they need no refresh.)
+            // Push a "Show hidden items" change made in the dialog through the shell; its setter
+            // refreshes the list and re-filters bookmarks. (Custom-command menus rebuild on every
+            // open, so they need no refresh.)
             _shell.ShowHiddenItems = _settings.ShowHiddenItems;
             _shell.RefreshTileAspect();
         }
@@ -612,14 +612,15 @@ public partial class MainWindow : ThemedWindow
             _shell.OpenPortableDevice(device.Device);
     }
 
-    // The clicked row and its expansion state at mouse-down, captured before selecting the row
-    // navigates to it. Selecting sets the shell's CurrentPath synchronously, and the resulting
-    // RevealCurrentDirAsync auto-expands the current directory — so by mouse-up node.IsExpanded
-    // may already be true. FolderTreeItem_Click toggles from this pre-click value instead of the
-    // live one so the reveal-expand and the click-toggle don't fight (otherwise the first click
-    // would open then immediately collapse the folder).
+    // The clicked row with its expansion and selection state at mouse-down, captured before
+    // selecting the row navigates to it. Selecting sets the shell's CurrentPath synchronously, and
+    // the resulting RevealCurrentDirAsync auto-expands the current directory — so by mouse-up both
+    // node.IsExpanded and node.IsSelected may already be true. FolderTreeItem_Click reads these
+    // pre-click values rather than the live ones, so a folder the user just opened (or just
+    // navigated to) isn't mistaken for one that was already open and already current.
     private DirectoryNodeViewModel? _treeItemMouseDownNode;
     private bool _treeItemExpandedAtMouseDown;
+    private bool _treeItemSelectedAtMouseDown;
 
     // The row the user clicked, pinned to the viewport position it had at the moment of the click:
     // whatever the click sets off (selection, navigation reveal, expand/collapse reflow) the row
@@ -652,6 +653,7 @@ public partial class MainWindow : ThemedWindow
         {
             _treeItemMouseDownNode = dir;
             _treeItemExpandedAtMouseDown = dir.IsExpanded;
+            _treeItemSelectedAtMouseDown = dir.IsSelected;
         }
 
         // Mouse-down is the last moment the tree is still in its pre-click layout: this preview
@@ -662,25 +664,33 @@ public partial class MainWindow : ThemedWindow
         ScheduleTreeAnchorRestore();
     }
 
-    /// <summary>A single click on a folder row toggles its expansion (on top of selecting/
-    /// navigating), so the tree opens and closes without having to hit the small chevron. Applies
-    /// to every folder with children, drives included.</summary>
+    /// <summary>A single click on a folder row opens or closes it (on top of selecting/navigating),
+    /// so the tree works without having to hit the small chevron. Applies to every folder with
+    /// children, drives included. Which way it goes depends on where the click is taking you:
+    /// clicking an open folder you are <em>already in</em> closes it, but clicking an open folder
+    /// you are navigating <em>to</em> leaves it open — collapsing that one would be undone a beat
+    /// later by the reveal the same click kicks off, which looked like the folder shutting and
+    /// springing back open.</summary>
     private void FolderTreeItem_Click(object sender, MouseButtonEventArgs e)
     {
         if (sender is FrameworkElement { DataContext: DirectoryNodeViewModel node }
             && node.Children.Count > 0
             && ReferenceEquals(node, _treeItemMouseDownNode))
         {
-            // The row is already anchored (mouse-down); the toggle reflows the tree below it, and
-            // again when lazily-loaded children arrive. Re-pin after each so an offset clamp when
-            // collapsing near the bottom — or the reveal-scroll of a click that also navigates —
-            // can't slide the row off the cursor. Every restore targets the same offset, so the
-            // passes never fight.
-            node.IsExpanded = !_treeItemExpandedAtMouseDown;
+            var expand = !_treeItemExpandedAtMouseDown;
+            if (expand || _treeItemSelectedAtMouseDown)
+            {
+                // The row is already anchored (mouse-down); the expand/collapse reflows the tree
+                // below it, and again when lazily-loaded children arrive. Re-pin after each so an
+                // offset clamp when collapsing near the bottom — or the reveal-scroll of a click
+                // that also navigates — can't slide the row off the cursor. Every restore targets
+                // the same offset, so the passes never fight.
+                node.IsExpanded = expand;
 
-            ScheduleTreeAnchorRestore();
-            if (node.IsExpanded)
-                _ = RestoreTreeAnchorAfterPopulateAsync(node);
+                ScheduleTreeAnchorRestore();
+                if (expand)
+                    _ = RestoreTreeAnchorAfterPopulateAsync(node);
+            }
         }
         _treeItemMouseDownNode = null;
     }

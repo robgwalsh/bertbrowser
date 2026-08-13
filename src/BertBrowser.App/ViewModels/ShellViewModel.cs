@@ -37,9 +37,9 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private readonly DeleteSurveyor _deleteSurveyor;
     private readonly PaneFactory _factory;
 
-    /// <summary>"Show hidden items" browse setting, toggled from the toolbar and the Settings
-    /// dialog. Mirrors <see cref="AppSettings.ShowHiddenItems"/>; hidden files/folders — and now
-    /// hidden bookmarks — appear only while it is on.</summary>
+    /// <summary>"Show hidden items" browse setting, toggled from the Settings dialog. Mirrors
+    /// <see cref="AppSettings.ShowHiddenItems"/>; hidden files/folders — and now hidden
+    /// bookmarks — appear only while it is on.</summary>
     [ObservableProperty]
     private bool _showHiddenItems;
 
