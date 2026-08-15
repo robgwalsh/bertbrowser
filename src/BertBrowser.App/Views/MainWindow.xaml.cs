@@ -25,6 +25,10 @@ public partial class MainWindow : ThemedWindow
         _settings = settings;
         DataContext = shell;
 
+        // In the caption we draw ourselves, and in the taskbar and Alt-Tab with it. Set here rather
+        // than in XAML because the version is only known at runtime.
+        Title = $"BertBrowser {BertBrowser.App.Services.AppVersion.Display}".TrimEnd();
+
         _layoutHost = new PaneLayoutHost(shell, settings);
         PaneHostSite.Child = _layoutHost;
 
