@@ -59,6 +59,14 @@ public partial class DirectoryTabView : UserControl
     /// scrolls out of the address bar far more often than it used to.</summary>
     private void Tab_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(DirectoryTabViewModel.PendingSelection))
+        {
+            // The row may already be on screen — selecting something in the folder already open is
+            // the common case, and no reload is coming to trigger it later.
+            TryApplyPendingSelection(clearIfMissing: false);
+            return;
+        }
+
         if (e.PropertyName != nameof(DirectoryTabViewModel.CurrentPath)) return;
         _ = Dispatcher.InvokeAsync(BreadcrumbScroller.ScrollToRightEnd, DispatcherPriority.Loaded);
     }
@@ -84,7 +92,7 @@ public partial class DirectoryTabView : UserControl
         {
             // Before the focus call: selecting scrolls the list, and doing it the other way round
             // would move the caret off whatever was just brought into view.
-            ApplyPendingSelection();
+            TryApplyPendingSelection(clearIfMissing: true);
             FocusFileList();
         }
         else if (e.PropertyName == nameof(FileListViewModel.IsThumbnailView))
@@ -589,19 +597,40 @@ public partial class DirectoryTabView : UserControl
             "Rename", MessageDialogKind.Warning);
     }
 
-    /// <summary>Highlights whatever a <c>/select</c> request asked for, once the rows it names
-    /// exist. One-shot: an ordinary navigation afterwards must not keep re-selecting it.</summary>
-    private void ApplyPendingSelection()
+    /// <summary>
+    /// Highlights whatever a <c>/select</c> request asked for, as soon as the row it names exists.
+    /// </summary>
+    /// <param name="clearIfMissing">
+    /// True when the listing has just been replaced — the load this selection was waiting for has
+    /// happened, so a row that is still not there is never coming and the request is spent. False
+    /// when only the request itself arrived: the rows on screen may still belong to the previous
+    /// folder, and giving up on them would lose the selection the navigation is about to make
+    /// possible.
+    /// </param>
+    /// <remarks>
+    /// Deferred, and that is load-bearing. Both signals arrive <em>before</em> the
+    /// <see cref="ListView"/>'s <c>ItemsSource</c> binding has caught up with the view model's new
+    /// collection — WPF updates bindings at <see cref="DispatcherPriority.DataBind"/> — so selecting
+    /// straight away searches the folder that was showing a moment ago and silently finds nothing.
+    /// </remarks>
+    private void TryApplyPendingSelection(bool clearIfMissing)
     {
-        if (Tab.PendingSelection is not { Length: > 0 } path) return;
-        Tab.PendingSelection = null;
-        SelectPaths([path]);
+        if (Tab.PendingSelection is not { Length: > 0 }) return;
+
+        _ = Dispatcher.InvokeAsync(
+            () =>
+            {
+                if (Tab.PendingSelection is not { Length: > 0 } path) return;
+                if (SelectPaths([path]) || clearIfMissing) Tab.PendingSelection = null;
+            },
+            DispatcherPriority.Background);
     }
 
-    private void SelectPaths(IEnumerable<string> paths)
+    /// <summary>Selects the given paths. False when none of them are in the list.</summary>
+    private bool SelectPaths(IEnumerable<string> paths)
     {
         var wanted = paths.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (wanted.Count == 0) return;
+        if (wanted.Count == 0) return false;
 
         FileListView.SelectedItems.Clear();
         foreach (var obj in FileListView.Items)
@@ -609,7 +638,10 @@ public partial class DirectoryTabView : UserControl
             if (obj is FileItemViewModel vm && wanted.Contains(vm.FullPath))
                 FileListView.SelectedItems.Add(vm);
         }
-        if (FileListView.SelectedItem is { } first) FileListView.ScrollIntoView(first);
+        if (FileListView.SelectedItem is not { } first) return false;
+
+        FileListView.ScrollIntoView(first);
+        return true;
     }
 
     private void ContextDelete_Click(object sender, RoutedEventArgs e) =>

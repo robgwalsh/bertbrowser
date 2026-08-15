@@ -315,21 +315,25 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             {
                 case OpenIn.NewTab:
                     tab = ActivePane.AddTab(directory, activate: true);
+                    tab.PendingSelection = selection;
                     break;
 
                 case OpenIn.NewPane:
                     SplitPane(ActivePane, SplitOrientation.Vertical, directory);
                     tab = ActiveTab; // SplitPane activates the pane it just created
+                    tab.PendingSelection = selection;
                     break;
 
                 default:
                     tab = ActiveTab;
+                    // Set before navigating, not after: the listing that arrives is the one the
+                    // selection belongs to, and by the time an await here returns the view has
+                    // already been told about it. When the tab is *already* showing this folder
+                    // there is no reload at all, and setting it is the only signal there will be.
+                    tab.PendingSelection = selection;
                     await tab.NavigateToAsync(directory);
                     break;
             }
-
-            // Applied by the view once the listing it belongs to has finished loading.
-            tab.PendingSelection = selection;
         }
     }
 

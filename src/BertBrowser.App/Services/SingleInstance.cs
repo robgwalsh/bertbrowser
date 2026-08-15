@@ -159,20 +159,34 @@ public sealed class SingleInstance : IDisposable
             security);
     }
 
-    /// <summary>The DACL should already have refused anyone else; this is the belt to its braces,
-    /// and it costs nothing.</summary>
+    /// <summary>
+    /// The DACL should already have refused anyone else; this is the belt to its braces.
+    /// </summary>
+    /// <remarks>
+    /// <b>The two names are not in the same form.</b> <c>GetImpersonationUserName</c> returns the
+    /// bare account ("Rob"), while <c>WindowsIdentity.Name</c> is qualified
+    /// ("DESKTOP-K0BI3BS\Rob"). Comparing them whole never matches, which fails closed — every
+    /// hand-off silently dropped, the app quietly starting a second copy instead. So compare the
+    /// account portion, which is the part both forms actually agree on.
+    /// </remarks>
     private static bool IsOurOwnUser(NamedPipeServerStream server)
     {
         try
         {
-            return server.GetImpersonationUserName()
-                .Equals(WindowsIdentity.GetCurrent().Name, StringComparison.OrdinalIgnoreCase);
+            return SameAccount(server.GetImpersonationUserName(), WindowsIdentity.GetCurrent().Name);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException)
         {
+            // Indeterminate. The DACL is the real gate, but an unreadable client identity is
+            // anomalous enough to refuse rather than wave through.
             return false;
         }
     }
+
+    private static bool SameAccount(string left, string right) =>
+        AccountPart(left).Equals(AccountPart(right), StringComparison.OrdinalIgnoreCase);
+
+    private static string AccountPart(string name) => name[(name.LastIndexOf('\\') + 1)..];
 
     /// <summary>
     /// One bounded line. A peer that never sends a newline, or sends without end, gets cut off at

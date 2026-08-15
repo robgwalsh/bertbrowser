@@ -98,12 +98,19 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     }
 
     /// <summary>
-    /// An item to highlight once the next listing has loaded, then forgotten. Set by
-    /// <c>ShellViewModel.OpenRequestAsync</c> for Explorer's <c>/select</c>, and consumed by
-    /// <c>DirectoryTabView</c> — the selection lives in the <c>ListView</c>, so the view is the only
-    /// thing that can apply it, and only once the rows it names actually exist.
+    /// An item to highlight, then forgotten. Set by <c>ShellViewModel.OpenRequestAsync</c> for
+    /// Explorer's <c>/select</c>, and consumed by <c>DirectoryTabView</c> — the selection lives in
+    /// the <c>ListView</c>, so the view is the only thing that can apply it, and only once the rows
+    /// it names actually exist.
     /// </summary>
-    public string? PendingSelection { get; set; }
+    /// <remarks>
+    /// Observable on purpose. The row may already be on screen — asking to select something in the
+    /// folder already open is the common case — in which case no listing reload is coming and
+    /// waiting for one would mean waiting forever. So the view applies this on <em>either</em>
+    /// signal: this property changing, or the listing being replaced.
+    /// </remarks>
+    [ObservableProperty]
+    private string? _pendingSelection;
 
     public bool CanGoBack => _backStack.Count > 0;
     public bool CanGoForward => _forwardStack.Count > 0;

@@ -171,15 +171,37 @@ public sealed class ShellRecycleBin : IRecycleBin, IRecycleProbe
 
             // Everything is added first and performed once: that is what gives a single sink, and
             // it is also far faster than one operation per item.
+            //
+            // Each add is guarded separately, and that guard is load-bearing. Resolving a path that
+            // has since gone throws here — before PerformOperations has run — so a single missing
+            // item would otherwise abort the batch and report every one of its siblings as failed,
+            // having deleted none of them. One item's failure must never cost the others.
+            var added = 0;
             foreach (var item in items)
             {
                 ct.ThrowIfCancellationRequested();
-                var shellItem = ItemFor(item.SourcePath);
-                operation.DeleteItem(shellItem, null);
-                Marshal.ReleaseComObject(shellItem);
+                try
+                {
+                    var shellItem = ItemFor(item.SourcePath);
+                    try
+                    {
+                        operation.DeleteItem(shellItem, null);
+                        added++;
+                    }
+                    finally
+                    {
+                        Marshal.ReleaseComObject(shellItem);
+                    }
+                }
+                catch (Exception ex) when (IsShellFailure(ex))
+                {
+                    sink.NoteItemFailure(item, ex.Message);
+                }
             }
 
-            operation.PerformOperations();
+            // Performing an empty operation is legal but pointless, and skipping it keeps the shell
+            // from putting anything on screen when every item was already gone.
+            if (added > 0) operation.PerformOperations();
         }
         catch (OperationCanceledException)
         {
@@ -337,6 +359,15 @@ public sealed class ShellRecycleBin : IRecycleBin, IRecycleProbe
         private string? _batchFailure;
 
         public void NoteBatchFailure(string message) => _batchFailure = message;
+
+        /// <summary>Records one item the shell would not even accept — most often a path that has
+        /// gone since the plan was made. Marked as seen so <see cref="Result"/> does not report it
+        /// a second time under the generic message.</summary>
+        public void NoteItemFailure(PlannedDelete item, string message)
+        {
+            _seen.Add(item.SourcePath);
+            _failed.Add(new FailedDelete(item.SourcePath, $"{item.Name}: {message}"));
+        }
 
         public RecycleResult Result()
         {
