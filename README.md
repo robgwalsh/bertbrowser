@@ -1,6 +1,8 @@
 # bertbrowser
 
 [![Latest release](https://img.shields.io/github/v/release/robgwalsh/bertbrowser?label=release&color=1f6feb)](https://github.com/robgwalsh/bertbrowser/releases/latest)
+[![Unstable](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Frobgwalsh%2Fbertbrowser%2Freleases%2Ftags%2Funstable&query=%24.name&label=unstable&color=d29922)](https://github.com/robgwalsh/bertbrowser/releases/tag/unstable)
+[![Unstable build](https://img.shields.io/github/actions/workflow/status/robgwalsh/bertbrowser/unstable.yml?branch=main&label=build)](https://github.com/robgwalsh/bertbrowser/actions/workflows/unstable.yml)
 
 An offline Windows 10/11 file browser built for my personal preferences.
 
@@ -21,6 +23,19 @@ winget install RobWalsh.BertBrowser
 * **Or** grab the [latest installer](https://github.com/robgwalsh/bertbrowser/releases/latest/download/BertBrowser-win-Setup.exe) and run it.
 * **Or** download the [latest portable executable](https://github.com/robgwalsh/bertbrowser/releases/latest/download/BertBrowser-win-Portable.zip) if you'd rather not install anything.
 
+### Unstable
+
+The latest code in `main`, rebuilt and published on every push. It gets the same test suite a release
+gets and none of the settling time.
+
+* Grab the [unstable installer](https://github.com/robgwalsh/bertbrowser/releases/download/unstable/BertBrowser-unstable-Setup.exe), or the [unstable portable build](https://github.com/robgwalsh/bertbrowser/releases/download/unstable/BertBrowser-unstable-Portable.zip).
+
+It **replaces an installed copy** rather than sitting beside it, and from then on that copy updates
+along unstable instead of along releases. The title bar says which you are on — `BertBrowser 1.1.3-unstable.42`
+against `BertBrowser 1.1.2`. Your data in `%USERPROFILE%\.bertbrowser` is untouched either way, and
+running the [stable installer](https://github.com/robgwalsh/bertbrowser/releases/latest/download/BertBrowser-win-Setup.exe)
+over the top puts you back.
+
 ## Building and running
 
 ```powershell
@@ -39,11 +54,7 @@ See [docs/build-and-release.md](docs/build-and-release.md) for packaging, the ta
 
 ## Testing the interface
 
-`dotnet test` covers everything in Core — the planners, the executors, path keys, themes, layout.
-What it cannot cover is the window itself, and running the app to look at it means putting a window
-over whatever you were doing and losing your keyboard to it.
-
-`tools/BertBrowser.Harness` is the answer: it builds the app's own service graph and shows the real
+`tools/BertBrowser.Harness` allows testing the BertBrowser in a headless way: it builds the app's own service graph and shows the real
 `MainWindow` parked outside every monitor and refused activation, then drives it with a small script
 language and captures it with `RenderTargetBitmap` — a software re-render of the visual tree, so
 being offscreen and covered costs nothing.

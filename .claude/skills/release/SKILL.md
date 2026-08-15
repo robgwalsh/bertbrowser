@@ -12,6 +12,14 @@ with Velopack, publishes the GitHub Release, and opens the winget PR. Full detai
 Nothing here is reversible once the tag is pushed except by deleting the release, so do the
 pre-flight first and do not skip it.
 
+**This is the release channel only.** There is a second one — `unstable`, published by
+`.github/workflows/unstable.yml` on every push to `main` as a rolling pre-release tagged `unstable`.
+Ignore it here: it has its own tag, channel and feed file, so cutting a release neither disturbs it
+nor is disturbed by it, and every filter below (`--workflow=release.yml`, the six-asset check, the
+`vX.Y.Z` tag) refers to the release channel. Two things follow: `gh release list` will show an
+`unstable` pre-release that is not yours to touch, and a **draft** release — not a pre-release — is
+now the way to stage something privately.
+
 ## 1. Pre-flight
 
 ```powershell
@@ -23,6 +31,9 @@ git tag --sort=-v:refname | head -3 # the last version, to pick the next one
 ```
 
 A red test fails the release *after* the tag exists, which is the annoying case. Run it locally.
+`main` is now built and tested on every push too, so
+`gh run list --workflow=unstable.yml --branch main --limit 1` says whether the commit you are about
+to tag is already green — check it, but run the suite locally anyway if that run hasn't finished.
 
 Pick the version with semver as a user reads it: features → minor, fixes only → patch.
 

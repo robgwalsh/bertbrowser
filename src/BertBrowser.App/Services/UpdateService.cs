@@ -22,9 +22,17 @@ public sealed class UpdateService : IUpdateService
         // BERTBROWSER_UPDATE_URL points at a local Releases directory (or any static
         // file host) for end-to-end update testing without touching GitHub.
         var overrideUrl = Environment.GetEnvironmentVariable("BERTBROWSER_UPDATE_URL");
+
+        // Which GitHub releases to look at; Velopack then picks this build's own channel out of
+        // them (releases.win.json for a release, releases.unstable.json for a build off main).
+        // Both arms matter. An unstable build ships as a pre-release, so refusing pre-releases
+        // would leave it unable to ever see its own feed; a release must keep refusing them, or the
+        // newest thing on offer is the unstable pre-release, which carries no feed for its channel.
+        var prerelease = AppVersion.IsUnstable;
+
         _manager = overrideUrl is { Length: > 0 }
             ? new UpdateManager(overrideUrl)
-            : new UpdateManager(new GithubSource(RepoUrl, accessToken: null, prerelease: false));
+            : new UpdateManager(new GithubSource(RepoUrl, accessToken: null, prerelease));
     }
 
     public async Task CheckAndStageUpdateAsync()

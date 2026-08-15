@@ -1,3 +1,4 @@
+using BertBrowser.Core.Updates;
 using System.Reflection;
 
 namespace BertBrowser.App.Services;
@@ -22,6 +23,18 @@ public static class AppVersion
 {
     /// <summary>Bare version — <c>1.4.2</c> — with no build metadata.</summary>
     public static string Display { get; } = Read();
+
+    /// <summary>
+    /// Whether this build came off the unstable channel — <c>1.4.3-unstable.42</c>. Decided by the
+    /// version itself, which is the same string CI handed <c>vpk pack --channel</c>, so the app
+    /// cannot disagree with the package it was built into.
+    /// </summary>
+    /// <remarks>
+    /// Computed on read rather than initialised, so it cannot depend on being declared after
+    /// <see cref="Display"/> — a static initialiser reading a field declared below it gets null,
+    /// which here would silently mean "stable" and cost an unstable copy its updates.
+    /// </remarks>
+    public static bool IsUnstable => ReleaseChannel.IsUnstable(Display);
 
     private static string Read()
     {

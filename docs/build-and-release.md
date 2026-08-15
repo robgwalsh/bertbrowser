@@ -125,6 +125,81 @@ If a run failed *after* the release was created, delete the release too
 (`gh release delete v1.2.3 --cleanup-tag`) rather than leaving a half-uploaded one for installed apps
 to find. For a run that failed on something transient, `gh run rerun <id>` is enough.
 
+## The unstable channel
+
+`main` also ships. `.github/workflows/unstable.yml` runs on **every push to `main`** (and on
+`workflow_dispatch`), and does what the release workflow does with four differences: the version, the
+channel, the release it publishes to, and no winget.
+
+| | Release | Unstable |
+|---|---|---|
+| Trigger | push tag `v*` | push to `main` |
+| Version | the tag, minus `v` | last tag + `0.0.1`, plus `-unstable.<run number>` |
+| Velopack channel | `win` (the default) | `unstable` |
+| Feed file | `releases.win.json` | `releases.unstable.json` |
+| Installer | `BertBrowser-win-Setup.exe` | `BertBrowser-unstable-Setup.exe` |
+| GitHub release | one per version, tag `vX.Y.Z` | one rolling **pre-release**, tag `unstable` |
+| Deltas | yes | yes |
+| winget | yes | no |
+
+**The two cannot reach each other**, which is the property worth protecting, and it is guarded twice
+over. A release copy passes `prerelease: false`, so the unstable pre-release is not even in the list
+of releases it considers; and Velopack asks each release in that list for
+`releases.<channel>.json` and **skips any release that hasn't got one**, so the feeds would not cross
+even if a release did turn up. That second guard is what makes the reverse direction safe too — an
+unstable copy lists stable releases and skips every one of them, rather than being confused by a
+newer stable release. On top of that, GitHub's `latest` excludes pre-releases, so the README's stable
+download links never resolve to an unstable build, and this workflow has no winget job, so nothing
+off `main` is ever offered to winget.
+
+`1.1.3-unstable.42` reads as "heading for 1.1.3, build 42". It sorts *below* `1.1.3` — a SemVer
+pre-release always does — and above `1.1.3-unstable.7`, because SemVer compares dot-separated numeric
+identifiers numerically. That is why the run number is a separate identifier rather than glued on.
+
+Things about the **rolling tag** worth knowing before changing any of it:
+
+- **The release is deleted and recreated on every run**, rather than merged into: `vpk upload`
+  refuses to add a second `releases.unstable.json` to a release that already has one, and GitHub
+  ignores `target_commitish` for a tag that already exists — so the tag has to be deleted with it or
+  the release keeps pointing at the old commit. The download URL 404s for the couple of minutes an
+  upload takes; a copy that checks in that window finds no feed and quietly does nothing.
+- **Deletion goes by release id, not by tag, and pushes queue rather than cancel.** Both guard the
+  same failure: a run interrupted mid-upload strands a *draft* release holding the `unstable` tag.
+  A draft has no tag, so `gh release delete unstable` cannot see it — while vpk's own collision check
+  can, and refuses to publish. Left alone that wedges the channel until someone clears it by hand.
+- **Deltas still work**, and matter more here than on a release, since an unstable copy updates on
+  every push. The delta is built at pack time against the package `vpk download` pulls from the
+  release that is still up, and a client applies it against its own local package — neither has
+  anything to do with the release being replaced afterwards. `--pre` on that download is what makes
+  it find anything at all, the feed living on a pre-release; without it the delta silently comes out
+  full-sized.
+- **The fixed tag is the only way the README can link to "the current unstable build".** There is no
+  `releases/latest/download/...` form for a pre-release.
+
+The badge is the fiddly part, and two obvious approaches are both dead ends. `github/v/release` with
+`?include_prereleases` renders the **tag name** — for a rolling tag that is the constant string
+`unstable`, no version in it at all (neovim's `nightly` badge reads exactly that way). And shields'
+`endpoint` route **blocks `github.com` outright**, so serving it a `badge.json` uploaded as a release
+asset renders `domain is blocked`, permanently. What works is `dynamic/json` against
+`api.github.com`, reading the release's `name` — which is why the workflow names the release the bare
+version rather than `BertBrowser <version>`. That route is unauthenticated and so in principle
+rate-limitable; the failure mode is a badge briefly reading `invalid`, and the build-status badge
+beside it never depends on GitHub's API at all.
+
+### The app knows which channel it is on
+
+`ReleaseChannel.IsUnstable` (in Core, with tests) reads it off the build's own version string, and
+`UpdateService` uses it for the one flag that differs — whether `GithubSource` looks at pre-releases.
+Both directions are load-bearing: an unstable build that refused pre-releases could never see its own
+feed, and a release build that accepted them would be handed the unstable pre-release, which carries
+no `releases.win.json`. The version is also what the title bar shows, so which channel a copy is on is
+visible without digging.
+
+**Unstable replaces a release install rather than sitting beside it** — same `packId`, so same install
+directory. That is deliberate: two copies would share `%USERPROFILE%\.bertbrowser` and the
+single-instance mutex and fight over the database. Running the release `Setup.exe` over an unstable
+install puts it back on the release channel.
+
 ## Build an installer locally
 
 ```powershell
@@ -135,7 +210,22 @@ Same steps CI runs, minus the upload. Running it again with a higher version aga
 `Releases\` directory produces a delta against what's already there, which is how the delta path gets
 exercised without publishing anything.
 
-`publish\` and `Releases\` are both gitignored.
+`publish\` and `Releases\` are both gitignored. Note the rule is `[Rr]eleases/` with no leading slash,
+so it matches a directory of that name **anywhere** in the tree — a source folder called `Releases\`
+would be silently untracked and would build locally right up until CI checked out without it. That is
+why the channel predicate lives in `src\BertBrowser.Core\Updates\`.
+
+`pack.ps1` packs the release channel. To exercise the unstable one, pass `vpk` the two extra
+arguments CI passes — a pre-release version and the channel:
+
+```powershell
+vpk pack --packId BertBrowser --packVersion 1.1.3-unstable.42 --packDir publish `
+  --mainExe BertBrowser.exe --channel unstable --delta None
+```
+
+That is also how to check the channel plumbing without publishing anything: pack `-unstable.1` and
+`-unstable.2` into a `Releases\` directory, install the first, point `BERTBROWSER_UPDATE_URL` at that
+directory, and confirm it finds the second.
 
 ## How updates reach users
 
@@ -146,8 +236,11 @@ next launch retries. Behaviour worth remembering:
 - **Updates are mandatory.** A newer release is downloaded and staged with
   `WaitExitThenApplyUpdates`, so it applies when the app closes whether or not the user takes the
   "Restart now?" prompt.
-- **Pre-releases are ignored** (`prerelease: false`), so a GitHub pre-release is a safe way to stage
-  something without pushing it to everyone.
+- **A release build ignores pre-releases**, an unstable build reads them — that one flag is the whole
+  difference, and it comes from the build's own version (see [The unstable
+  channel](#the-unstable-channel)). Note the consequence: a GitHub pre-release is **no longer** a
+  quiet way to stage something, because the rolling `unstable` pre-release is what every unstable
+  copy is watching. Use a draft release for that.
 - **Dev builds never update.** `_manager.IsInstalled` is false under `dotnet run`, so the check
   returns immediately.
 - **This is the app's only network access**, which the README promises — keep it that way.
