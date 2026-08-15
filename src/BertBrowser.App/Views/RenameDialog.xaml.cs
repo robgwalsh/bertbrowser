@@ -47,6 +47,13 @@ public partial class RenameDialog : ThemedWindow
         };
     }
 
+    /// <summary>The dialog built but not shown, for the UI harness to park offscreen and
+    /// photograph. Nothing in the app uses it: <see cref="Show"/> is the only way in from the
+    /// interface, and it goes through this same constructor.</summary>
+    internal static RenameDialog Create(
+        IReadOnlyList<RenameSource> sources,
+        Func<IReadOnlyList<RenameSource>, string, RenamePlan> planner) => new(sources, planner);
+
     /// <summary>Shows the dialog and returns the plan to carry out, or null if it was cancelled or
     /// there was nothing to do.</summary>
     public static RenamePlan? Show(

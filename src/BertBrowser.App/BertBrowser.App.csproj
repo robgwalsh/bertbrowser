@@ -17,6 +17,13 @@
     <Page Include="App.xaml" />
   </ItemGroup>
 
+  <!-- The UI harness hosts this window offscreen and builds the same service graph. Seeing the
+       internals is what lets it drive the real view models and the real composition root rather
+       than a parallel set of accessors that could drift from them. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="BertBrowser.Harness" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Velopack" Version="1.2.0" />

@@ -47,6 +47,60 @@ public partial class App : Application
 
         AppPaths.MigrateLegacyData();
 
+        Services = BuildServices();
+
+        Services.GetRequiredService<Db>().Migrate();
+
+        // Before any window exists, so the first frame is already in the chosen theme.
+        Services.GetRequiredService<IThemeService>().Initialize();
+
+        // Start path priority: command-line argument, then last visited, then user profile.
+        var settings = Services.GetRequiredService<AppSettings>();
+        var shell = Services.GetRequiredService<ShellViewModel>();
+        var startup = CommandLine.Parse(e.Args);
+        if (startup.Targets.FirstOrDefault(t => Directory.Exists(t.Path)) is { } target)
+            shell.StartPath = target.Path;
+        else if (settings.LastPath is { } last && Directory.Exists(last))
+            shell.StartPath = last;
+
+        var window = Services.GetRequiredService<MainWindow>();
+        window.Show();
+
+        // Anything the first target could not cover — extra paths, /select, --new-tab — once there
+        // is a window to open it in.
+        if (startup.Targets.Count > 0)
+            _ = shell.OpenRequestAsync(RemainingAfterStart(startup, shell.StartPath));
+
+        ListenForOtherInstances(window, shell);
+
+        // Build the global MFT search index in the background (each NTFS volume on its own
+        // thread); it needs the elevation this app requests via its manifest.
+        Services.GetRequiredService<IMftIndexService>().Start();
+
+        _ = Task.Run(() => Services.GetRequiredService<IUpdateService>().CheckAndStageUpdateAsync());
+
+        // A delete holds its items until the undo record is retired, which normally happens by the
+        // time the app closes. A crash leaves them behind, so sweep up anything a previous session
+        // abandoned — only batches over a day old, so a second copy running right now keeps its
+        // pending undo.
+        _ = Task.Run(() => BertBrowser.Core.Services.Delete.DeleteExecutor
+            .PurgeAbandonedStaging(TimeSpan.FromDays(1)));
+    }
+
+    /// <summary>
+    /// The composition root, and nothing else: building the graph starts no indexer, opens no
+    /// window and writes to no disk.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="OnStartup"/> because the UI harness hosts the same window in a
+    /// process that never calls <c>Application.Run</c>, and needs the same services without the
+    /// side effects that belong to a real launch — the MFT indexer, the update check, the staging
+    /// sweep and the single-instance listener. <paramref name="customize"/> runs last, so a caller
+    /// can replace a registration (the harness swaps <see cref="IProcessLauncher"/> for one that
+    /// refuses, since a scripted run must not start programs on the user's desktop).
+    /// </remarks>
+    internal static IServiceProvider BuildServices(Action<IServiceCollection>? customize = null)
+    {
         var services = new ServiceCollection();
         services.AddSingleton(AppSettings.Load());
         services.AddSingleton<UserThemeStore>();
@@ -89,45 +143,15 @@ public partial class App : Application
         services.AddSingleton<PaneFactory>();
         services.AddSingleton<ShellViewModel>();
         services.AddSingleton<MainWindow>();
-        Services = services.BuildServiceProvider();
 
-        Services.GetRequiredService<Db>().Migrate();
+        customize?.Invoke(services);
 
-        // Before any window exists, so the first frame is already in the chosen theme.
-        Services.GetRequiredService<IThemeService>().Initialize();
-
-        // Start path priority: command-line argument, then last visited, then user profile.
-        var settings = Services.GetRequiredService<AppSettings>();
-        var shell = Services.GetRequiredService<ShellViewModel>();
-        var startup = CommandLine.Parse(e.Args);
-        if (startup.Targets.FirstOrDefault(t => Directory.Exists(t.Path)) is { } target)
-            shell.StartPath = target.Path;
-        else if (settings.LastPath is { } last && Directory.Exists(last))
-            shell.StartPath = last;
-
-        var window = Services.GetRequiredService<MainWindow>();
-        window.Show();
-
-        // Anything the first target could not cover — extra paths, /select, --new-tab — once there
-        // is a window to open it in.
-        if (startup.Targets.Count > 0)
-            _ = shell.OpenRequestAsync(RemainingAfterStart(startup, shell.StartPath));
-
-        ListenForOtherInstances(window, shell);
-
-        // Build the global MFT search index in the background (each NTFS volume on its own
-        // thread); it needs the elevation this app requests via its manifest.
-        Services.GetRequiredService<IMftIndexService>().Start();
-
-        _ = Task.Run(() => Services.GetRequiredService<IUpdateService>().CheckAndStageUpdateAsync());
-
-        // A delete holds its items until the undo record is retired, which normally happens by the
-        // time the app closes. A crash leaves them behind, so sweep up anything a previous session
-        // abandoned — only batches over a day old, so a second copy running right now keeps its
-        // pending undo.
-        _ = Task.Run(() => BertBrowser.Core.Services.Delete.DeleteExecutor
-            .PurgeAbandonedStaging(TimeSpan.FromDays(1)));
+        return services.BuildServiceProvider();
     }
+
+    /// <summary>Adopts a service graph built outside <see cref="OnStartup"/>, so the code-behind
+    /// that reaches for <see cref="Services"/> works in a harness-hosted window too.</summary>
+    internal static void UseServices(IServiceProvider services) => Services = services;
 
     /// <summary>
     /// The startup path already opened the first browsable target in the window's own first tab, so

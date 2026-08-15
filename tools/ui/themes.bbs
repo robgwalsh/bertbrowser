@@ -1,0 +1,50 @@
+# Every built-in theme, plus the dialogs that are easiest to break with one — each has its own
+# window and its own set of tokens, so a colour that only exists in a dialog is invisible from a
+# capture of the main window.
+#
+# Read these as a set: a token that resolved to nothing shows up as a black-on-black label in one
+# picture and looks fine in the other nine.
+
+tree .
+refresh
+select notes.txt, report.md
+
+shot 01-dark-plus
+dialog rename       02-rename-dark
+dialog delete       03-delete-dark
+dialog settings     04-settings-dark
+dialog properties   05-properties-dark
+dialog theme-editor 06-theme-editor-dark
+
+theme light-plus
+shot 07-light-plus
+dialog rename     08-rename-light
+dialog delete     09-delete-light
+dialog settings   10-settings-light
+dialog properties 11-properties-light
+
+# A search result and the tile view in a light theme: the flattened list's Folder column and the
+# tile captions both take their foreground from somewhere other than the row.
+search report
+shot 12-search-light
+clear-search
+thumbnails 0.6
+shot 13-tiles-light
+thumbnails 0
+
+theme nord
+shot 14-nord
+theme catppuccin-latte
+shot 15-catppuccin-latte
+theme solarized-light
+shot 16-solarized-light
+theme ayu-mirage
+shot 17-ayu-mirage
+theme cobalt2
+shot 18-cobalt2
+theme everforest-dark
+shot 19-everforest-dark
+theme rose-pine-dawn
+shot 20-rose-pine-dawn
+theme high-contrast-dark
+shot 21-high-contrast-dark

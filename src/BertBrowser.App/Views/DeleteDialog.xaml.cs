@@ -70,6 +70,11 @@ public partial class DeleteDialog : ThemedWindow
         Closed += (_, _) => _surveying.Cancel();
     }
 
+    /// <summary>The dialog built but not shown, for the UI harness to park offscreen and
+    /// photograph. <see cref="Confirm"/> is the only way in from the interface, and it goes
+    /// through this same constructor.</summary>
+    internal static DeleteDialog Create(DeletePlan plan, Surveyor surveyor) => new(plan, surveyor);
+
     /// <summary>Shows the dialog. True when the user chose to go ahead.</summary>
     public static bool Confirm(Window? owner, DeletePlan plan, Surveyor surveyor)
     {

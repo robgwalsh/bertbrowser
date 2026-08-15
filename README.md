@@ -37,6 +37,31 @@ Note that warnings are treated as errors across the solution (`Directory.Build.p
 
 See [docs/build-and-release.md](docs/build-and-release.md) for packaging, the tag-driven release workflow, and how updates reach installed copies.
 
+## Testing the interface
+
+`dotnet test` covers everything in Core — the planners, the executors, path keys, themes, layout.
+What it cannot cover is the window itself, and running the app to look at it means putting a window
+over whatever you were doing and losing your keyboard to it.
+
+`tools/BertBrowser.Harness` is the answer: it builds the app's own service graph and shows the real
+`MainWindow` parked outside every monitor and refused activation, then drives it with a small script
+language and captures it with `RenderTargetBitmap` — a software re-render of the visual tree, so
+being offscreen and covered costs nothing.
+
+```powershell
+$harness = "tools\BertBrowser.Harness\bin\Debug\net10.0-windows\BertBrowser.Harness.exe"
+
+& $harness --script tools\ui\smoke.bbs      # browse, search, move, rename, delete, undo
+& $harness --script tools\ui\themes.bbs     # every built-in theme, and the dialogs
+& $harness -c "tree .; refresh; shot look"  # ad hoc; prints the PNG path
+& $harness --help
+```
+
+Each run gets a throwaway fixture tree and its own scratch `BERTBROWSER_DATA_DIR`, so it never
+touches your real index, settings or themes. It starts no programs, never touches the clipboard, and
+refuses to write outside its sandbox — the harness drives the real transfer, rename and delete
+executors, not stubs.
+
 ## Data locations
 
 | What | Where |
@@ -51,6 +76,7 @@ Delete the folder to reset the app completely.
 - `src/BertBrowser.Core` — everything testable and UI-free: SQLite persistence and migrations, path canonicalization, search-index and directory-size services.
 - `src/BertBrowser.App` — the WPF shell (MVVM via CommunityToolkit.Mvvm, DI via Microsoft.Extensions.DependencyInjection).
 - `tests/BertBrowser.Core.Tests` — xUnit tests for Core; they run against real temp SQLite databases and directory trees.
+- `tools/BertBrowser.Harness` — hosts the real window offscreen and scripts it; `tools/ui/*.bbs` are the scripts.
 
 See [CLAUDE.md](CLAUDE.md) for a deeper architecture walkthrough (path-key invariants, migrations, the size-scan algorithm).
 

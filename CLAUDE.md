@@ -13,18 +13,30 @@ dotnet build bertbrowser.sln          # build everything
 dotnet test bertbrowser.sln           # run all tests (xUnit, Core only)
 dotnet test tests/BertBrowser.Core.Tests --filter "FullyQualifiedName~PathKeyTests"   # one test class
 dotnet test tests/BertBrowser.Core.Tests --filter "FullyQualifiedName~PathKeyTests.MethodName"  # one test
-dotnet run --project src/BertBrowser.App   # launch the app (optional arg: start directory)
+
+# Drive the real window offscreen — see "Never launch the GUI" below.
+tools/BertBrowser.Harness/bin/Debug/net10.0-windows/BertBrowser.Harness.exe --script tools/ui/smoke.bbs
 ```
 
 `Directory.Build.props` sets `TreatWarningsAsErrors` and `Nullable` for all projects — any warning fails the build.
 
 If a build fails with MSB3021/MSB3026 because a running BertBrowser instance locks `bin\Debug`, just kill it (`Get-Process BertBrowser | Stop-Process -Force`) and rebuild — no need to ask or build to a scratch directory.
 
+## Never launch the GUI
+
+`dotnet run --project src\BertBrowser.App` — and `BertBrowser.exe` — put a real window on the
+user's screen, take keyboard focus, and compete with whatever they are doing. They multitask while
+you work. **Do not run either, ever**, including "just to check something quickly". The only
+exception is the user explicitly asking you to launch it.
+
+To see the interface, use the harness (below), which hosts the same window where nobody can see it.
+
 ## Structure
 
 - `src/BertBrowser.Core` — plain net10.0, no UI dependencies: SQLite persistence, path canonicalization, search/size services. This is the only project with tests; keep anything testable here rather than in the App.
-- `src/BertBrowser.App` — WPF shell. MVVM via CommunityToolkit.Mvvm source generators (`[ObservableProperty]`, `[RelayCommand]` on `partial` classes), DI via `Microsoft.Extensions.DependencyInjection`. The composition root is `App.xaml.cs` (`App.Services`): register new services/repositories there.
+- `src/BertBrowser.App` — WPF shell. MVVM via CommunityToolkit.Mvvm source generators (`[ObservableProperty]`, `[RelayCommand]` on `partial` classes), DI via `Microsoft.Extensions.DependencyInjection`. The composition root is `App.BuildServices()` in `App.xaml.cs` (`App.Services`): register new services/repositories there.
 - `tests/BertBrowser.Core.Tests` — xUnit; tests create real SQLite databases and directory trees under `%TEMP%`.
+- `tools/BertBrowser.Harness` — the UI harness; `tools/ui/*.bbs` are its scripts.
 
 ## Key architecture
 
@@ -310,12 +322,36 @@ might be holding a pending undo. One instance is what makes that assumption soun
 The protocol is deliberately one verb — *navigate to this path*. Nothing on the wire can become a
 launch, a file that gets written, or anything but a directory listing.
 
+**Two traps here fail silently, and both were caught only by driving the real app:**
+
+- **`GetImpersonationUserName()` returns the bare account name** ("Rob"), while
+  `WindowsIdentity.GetCurrent().Name` is qualified ("MACHINE\Rob"). Comparing them whole never
+  matches, so the server accepted every connection and immediately dropped it — the hand-off looked
+  like it worked, and a second full copy started anyway. `SingleInstance` compares the account
+  portion. The DACL is the real gate; this check is defence in depth and must not be allowed to fail
+  closed by accident.
+- **A pipe that connects and then breaks means the server dropped you**, not that the pipe is
+  missing. `Connect()` succeeding followed by "Pipe is broken" on the first write is the signature of
+  a server-side rejection, and is worth checking before assuming a naming or ACL problem.
+
 `ShellViewModel.OpenRequestAsync` carries a request out, resolving each target against disk (a
 target naming a file opens its folder and highlights it, which is the only useful reading of "open
 this file" for a file browser). Highlighting goes through `DirectoryTabViewModel.PendingSelection`,
-a one-shot the **view** consumes once `FileListViewModel.Items` has been replaced — the selection
-lives in the `ListView`, so nothing else can apply it, and not before the rows exist. It is applied
-*before* `FocusFileList`, since selecting scrolls.
+a one-shot the **view** consumes — the selection lives in the `ListView`, so nothing else can apply
+it. Three things about it are load-bearing, and getting any of them wrong means `/select` quietly
+selects nothing:
+
+- **It is set *before* the navigation is awaited**, not after. The listing that arrives is the one
+  the selection belongs to, and by the time an `await` returns the view has already been told.
+- **It is observable, and applied on either signal** — the property changing *or* the listing being
+  replaced. Selecting something in the folder already open is the common case, and there no reload
+  is coming to trigger it later.
+- **The apply is deferred to `DispatcherPriority.Background`.** Both signals arrive before the
+  `ListView`'s `ItemsSource` binding has caught up with the view model's new collection, so
+  selecting immediately searches the folder that was showing a moment ago.
+
+It clears on success; a failure only clears when the listing it was waiting for has actually
+arrived. Applied *before* `FocusFileList`, since selecting scrolls.
 
 ### Theming
 
@@ -570,3 +606,55 @@ layout space: `SidebarTreeStyle` (in `Controls/Lists.xaml`) retemplates the `Scr
 `ScrollBar` style's 12px width. The pinned row carries the same 12px as a `Margin`, since it sits
 outside the scroll area. That style is vertical-only on purpose; a tree that scrolls sideways would
 clip with no bar to reach the rest.
+
+### Verifying the interface (the harness)
+
+`tools/BertBrowser.Harness` is how the UI gets looked at, and it exists because of one constraint:
+**the user is at the machine while you work.** A window that appears over what they are doing and
+takes the keyboard puts their keystrokes and the test's into the same queue. So the app is never
+launched; the harness hosts the same `MainWindow`, from the same `App.BuildServices()` graph, on its
+own STA thread — parked at -32000,-32000, `ShowActivated=false`, `WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE`,
+`EnableWindow(false)` — and captures it with `RenderTargetBitmap`, a **software re-render of the
+visual tree rather than a screen grab**, so where the window sits and what covers it are irrelevant
+to the picture. `.claude/skills/verify` is the command reference; `tools/ui/*.bbs` are the scripts.
+
+Five things here are load-bearing:
+
+- **The composition root had to be split from the launch.** `App.BuildServices()` builds the graph
+  and does nothing else; `OnStartup` keeps the side effects that belong to a real launch — the MFT
+  indexer, the update check, `PurgeAbandonedStaging`, the single-instance listener, `window.Show()`.
+  The harness wants the first and none of the second. `BuildServices` takes a `customize` callback
+  so the harness can replace `IProcessLauncher`, and `App.UseServices` sets the static the
+  code-behind reaches through.
+- **The window is given a launcher that refuses**, because that is the one thing offscreen cannot
+  fix: opening a file starts another program, and *its* window belongs to the desktop. For the same
+  reason the harness never touches the clipboard (there is one, and the user is using it) — `move`
+  and `copy` go through `TransferPlanner`/`TransferExecutor`, which is what paste and drag-and-drop
+  go through anyway.
+- **`AppPaths.OverrideVariable` (`BERTBROWSER_DATA_DIR`) is what keeps a run out of the user's
+  data.** It is read by a static initialiser, so it must be set before anything touches `AppPaths`;
+  `UiSession.Start` sets it and then *asserts* `AppPaths.DataDir` actually moved, refusing to run
+  rather than indexing and deleting against the real database. Destructive commands are additionally
+  fenced to the run's sandbox, since the harness drives the real delete and transfer executors.
+- **A capture is measured by the element's own `RenderSize`, not its content's.** Every window here
+  draws its own title bar through `WindowChrome`, so the window's visual covers the whole frame
+  while `Window.Content` sits below the caption and inside the root panel's margin. Measuring the
+  content and painting the window (which is what the equivalent tool for a native-caption app does)
+  produced pictures 34 px short at the bottom — and 32 px short again for any dialog whose root
+  panel had a margin. A child element is re-hosted at the origin through a `VisualBrush`, or it
+  renders at its window coordinates and comes back mostly blank.
+- **Dialogs are shown modelessly and photographed, never `ShowDialog`n.** `ShowDialog` runs a nested
+  message loop on the script's own thread, so the run would hang until the watchdog fired. Each has
+  an `internal static Create` beside its public `Show`, going through the same constructor, so a
+  capture cannot drift from what the app puts on screen.
+
+Measured, not assumed: **the window reaches the foreground exactly once**, during the first layout
+pass, through no event the process is told about — `ShowActivated=false`, `WS_EX_NOACTIVATE`,
+disabling the window and refusing WPF focus all fail to prevent it. `ForegroundGuard` polls at 10 ms
+and hands it straight back; the count is in `state`, and more than one means something new is
+activating the window. Quiescence is `FileListViewModel.IsLoading` across **every** tab plus
+`ShellViewModel.IsTransferring`, pumped at `DispatcherPriority.Background` (which is what lets the
+continuations run) and finished with one `ContextIdle` pass; a search additionally needs the 200 ms
+debounce waited out, which is what `SettleSearch` is. `MainWindow.Loaded` is where
+`InitializeAsync` starts, so a settle straight after `Show()` finds nothing loading and returns
+immediately — `WaitForFirstListing` waits for a tab with a path in it instead.

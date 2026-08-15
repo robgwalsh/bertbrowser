@@ -1,0 +1,60 @@
+# The canonical harness run: browse a tree, search it, move something, take it back.
+# Everything here happens in a window the user never sees, against a throwaway tree the
+# run makes for itself.
+
+tree .
+refresh
+assert-count 8
+assert-row Documents
+shot 01-browse
+
+# Folder-local search: recursive, flattened, and each hit shows the folder it came from.
+# Three report.md files, one per level, is what the fixture is for.
+search report
+assert-flattened
+assert-count 3
+assert-status result
+shot 02-search
+clear-search
+assert-not-flattened
+
+# A move and its undo. Both go through TransferPlanner/TransferExecutor — the same code
+# a drag-and-drop does — so a rule mutated in either shows up here.
+select photo.jpg, archive.zip
+assert-selected 2
+shot 03-selected
+move to Documents
+assert-no-row photo.jpg
+assert-exists Documents/photo.jpg
+assert-can-undo
+undo
+assert-row photo.jpg
+assert-missing Documents/photo.jpg
+
+# A rename, numbered across a selection: "Holiday" over two files gives Holiday 1/2,
+# each keeping its own extension.
+select notes.txt, report.md
+rename Holiday
+assert-row "Holiday 1.txt"
+assert-row "Holiday 2.md"
+undo
+assert-row notes.txt
+
+# The real Recycle Bin, and Ctrl+Z putting it back out again.
+select budget.xlsx
+delete
+assert-missing budget.xlsx
+undo
+assert-exists budget.xlsx
+
+# Tabs, panes and the tile view — the layout a capture is usually about.
+newtab Documents
+assert-tabs 2
+split right Pictures
+assert-panes 2
+thumbnails 0.5
+shot 04-panes
+
+# Nothing in this run may have tried to put another program's window on screen.
+assert-not-launched
+state

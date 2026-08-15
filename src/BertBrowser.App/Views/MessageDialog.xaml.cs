@@ -22,8 +22,22 @@ public partial class MessageDialog : ThemedWindow
         MessageDialogKind kind = MessageDialogKind.Information,
         bool showCancel = false)
     {
-        var dialog = new MessageDialog { Title = caption };
+        var dialog = Create(message, caption, kind, showCancel);
         if (owner is not null && !ReferenceEquals(owner, dialog)) dialog.Owner = owner;
+
+        return dialog.ShowDialog() == true;
+    }
+
+    /// <summary>The dialog built but not shown, for the UI harness to park offscreen and
+    /// photograph. <see cref="Show"/> goes through it too, so a capture cannot drift from what
+    /// the app actually puts on screen.</summary>
+    internal static MessageDialog Create(
+        string message,
+        string caption,
+        MessageDialogKind kind = MessageDialogKind.Information,
+        bool showCancel = false)
+    {
+        var dialog = new MessageDialog { Title = caption };
 
         dialog.MessageText.Text = message;
         dialog.CancelButton.Visibility = showCancel ? Visibility.Visible : Visibility.Collapsed;
@@ -38,7 +52,7 @@ public partial class MessageDialog : ThemedWindow
         dialog.Glyph.Text = char.ConvertFromUtf32(glyph);
         if (dialog.TryFindResource(token) is Brush brush) dialog.Glyph.Foreground = brush;
 
-        return dialog.ShowDialog() == true;
+        return dialog;
     }
 
     private void Ok_Click(object sender, RoutedEventArgs e) => DialogResult = true;

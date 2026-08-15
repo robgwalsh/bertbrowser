@@ -7,9 +7,23 @@ namespace BertBrowser.App.Services;
 /// </summary>
 public static class AppPaths
 {
-    public static string DataDir { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".bertbrowser");
+    /// <summary>
+    /// Environment variable that moves the whole data directory somewhere else.
+    /// </summary>
+    /// <remarks>
+    /// Read once, before anything opens the database, so a harness run cannot inherit the user's
+    /// index, settings or themes — nor write into them. Nothing in the shipped app sets it; it
+    /// exists so <c>tools/BertBrowser.Harness</c> can host the real window against a scratch
+    /// directory it deletes afterwards.
+    /// </remarks>
+    public const string OverrideVariable = "BERTBROWSER_DATA_DIR";
+
+    public static string DataDir { get; } =
+        Environment.GetEnvironmentVariable(OverrideVariable) is { Length: > 0 } overridden
+            ? Path.GetFullPath(overridden)
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".bertbrowser");
 
     public static string DbPath => Path.Combine(DataDir, "bertbrowser.db");
     public static string SettingsPath => Path.Combine(DataDir, "settings.json");
