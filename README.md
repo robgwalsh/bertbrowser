@@ -53,6 +53,7 @@ $harness = "tools\BertBrowser.Harness\bin\Debug\net10.0-windows\BertBrowser.Harn
 
 & $harness --script tools\ui\smoke.bbs      # browse, search, move, rename, delete, undo
 & $harness --script tools\ui\themes.bbs     # every built-in theme, and the dialogs
+& $harness --script tools\ui\tree.bbs --sandbox C:\Source\treecheck --allow-outside
 & $harness -c "tree .; refresh; shot look"  # ad hoc; prints the PNG path
 & $harness --help
 ```

@@ -584,6 +584,39 @@ out through `explorer.exe`.
 
 The left sidebar has two sections: **Bookmarks** (top, sized to content) and **Drives & devices** (below, fills the rest). `FolderTreeViewModel.Roots` is `ObservableCollection<ISidebarNode>` mixing browsable `DirectoryNodeViewModel` drives (expandable tree) with `PortableDeviceNodeViewModel` leaves — MTP phones/cameras enumerated off-thread via `Interop.PortableDevices` (Shell.Application COM on an STA thread) that open in Explorer on double-click, since their contents aren't a filesystem path. Bookmarks persist in the `bookmark` table via `BookmarkRepository`/`IBookmarkService`; the file-list and tree context menus toggle them (`ShellViewModel.ToggleBookmarksAsync`), and `BookmarksViewModel` keeps an in-memory key set so the menu can label Bookmark/Remove without a DB hit.
 
+**A tree row that loses its `TreeViewItem` takes the selection with it, and this tree reports a
+selection as a navigation.** WPF answers the removal of the selected container by selecting its
+parent, which cascades to the drive root — so toggling "Show hidden items" walked the active tab to
+`C:\`, and a refresh after a move or a delete walked it up a level. There are two halves, because
+there are two kinds of rebuild:
+
+- **`RebuildChildren` never calls `Clear()`** — it diffs, removing and inserting only what actually
+  changed. A folder that is merely being filtered in or out of view keeps its container, so the
+  hidden-items toggle disturbs nothing.
+- **`RefreshDirectoriesAsync` goes through `RebuildingAsync`**, which suppresses `DirectorySelected`
+  — a repopulate genuinely builds new child objects, so there is no container to keep. The
+  suppression **must outlive the call**: the teardown and selection fix-up happen on the *next
+  layout pass*, so a guard that ends when the method returns catches nothing at all, and looks like
+  it works because an assertion made straight afterwards runs before the stray selection has
+  happened. Hence the release at `DispatcherPriority.Loaded`.
+
+- **`NoteSelected` swallows the echo of a selection this class made itself.** Keeping the containers
+  alive (the point of the diff) means an assignment to `IsSelected` is echoed back through the
+  container a layout pass later — after the suppression has been released, and indistinguishable
+  from a click. So the node is remembered and its next announcement ignored, once. The cost is at
+  most one ignored click on the row the tree had just selected by itself.
+
+There is deliberately **no attempt to put the selection back** after a refresh replaced the selected
+row. Assigning `IsSelected` to restore it runs straight into the echo above, and re-announces
+whatever the tree had settled on — with the tab in a folder the tree cannot reveal (anything under
+`AppData`, which is hidden), that was the deepest reachable ancestor, and the tab jumped there on
+startup. Leaving the tree unhighlighted until the next reveal is the cheaper half of the trade.
+
+`tools/ui/tree.bbs` covers this — its `settle` calls are load-bearing, since an assertion made
+immediately after the command passes either way, and its `tree-click` steps are what prove the
+guards have not also swallowed a *real* selection. Put the `Clear()` back and it goes red at the
+hidden toggle; drop the suppression and it goes red at the move.
+
 Both sections honour "Show hidden items", and both filter rather than re-query: `BookmarksViewModel`
 keeps every bookmark in `_all`, `DirectoryNodeViewModel` keeps every loaded child in `_allChildren`,
 and the collection the view binds is the filtered projection — so `ShellViewModel`'s toggle re-filters
@@ -636,13 +669,21 @@ Five things here are load-bearing:
   `UiSession.Start` sets it and then *asserts* `AppPaths.DataDir` actually moved, refusing to run
   rather than indexing and deleting against the real database. Destructive commands are additionally
   fenced to the run's sandbox, since the harness drives the real delete and transfer executors.
-- **A capture is measured by the element's own `RenderSize`, not its content's.** Every window here
-  draws its own title bar through `WindowChrome`, so the window's visual covers the whole frame
-  while `Window.Content` sits below the caption and inside the root panel's margin. Measuring the
-  content and painting the window (which is what the equivalent tool for a native-caption app does)
-  produced pictures 34 px short at the bottom — and 32 px short again for any dialog whose root
-  panel had a margin. A child element is re-hosted at the origin through a `VisualBrush`, or it
-  renders at its window coordinates and comes back mostly blank.
+- **A capture renders the window and crops, and is measured by the window's own `RenderSize`.** Two
+  traps, both silent. Every window here draws its own title bar through `WindowChrome`, so the
+  window's visual covers the whole frame while `Window.Content` sits below the caption and inside
+  the root panel's margin — measuring the content and painting the window (which is what the
+  equivalent tool for a native-caption app does) produced pictures 34 px short at the bottom, and
+  32 px short again for any dialog whose root panel had a margin. And a child element must *not* be
+  re-hosted through a `VisualBrush` to get it to the origin, tempting as that is: **WPF caches a
+  `VisualBrush`'s realisation, and a `SolidColorBrush` inside it changing colour does not invalidate
+  that cache.** One capture taken before a `theme` command made every capture after it come back in
+  the old theme's colours, while the brushes, the resources and the elements' own properties all
+  said the new theme had applied — a convincing-looking theming bug that was entirely in the
+  harness. `Capture.CropTo` renders the root and cuts the element out of it; there is no cache to go
+  stale. `probe <token> [element]` is the command that settled it, and is worth reaching for again:
+  it prints what the resolver produced, what the app and window resources hand back, and what the
+  element's own `Background`/`Foreground` are.
 - **Dialogs are shown modelessly and photographed, never `ShowDialog`n.** `ShowDialog` runs a nested
   message loop on the script's own thread, so the run would hang until the watchdog fired. Each has
   an `internal static Create` beside its public `Show`, going through the same constructor, so a

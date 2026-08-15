@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using BertBrowser.App.Interop;
 using BertBrowser.Core.Data;
@@ -37,6 +38,9 @@ public sealed class FolderTreeViewModel
     {
         if (ShowHidden == showHidden) return;
         ShowHidden = showHidden;
+
+        // No selection guard needed: ApplyHiddenFilter diffs the rows rather than clearing them,
+        // so a folder that is staying keeps its container — and with it the selection.
         foreach (var root in Roots.OfType<DirectoryNodeViewModel>())
             root.ApplyHiddenFilter();
     }
@@ -190,13 +194,88 @@ public sealed class FolderTreeViewModel
         catch (IOException) { return Array.Empty<DirectoryInfo>(); }
     }
 
-    internal void RaiseSelected(string path)
+    /// <summary>
+    /// A node became the selected one. Announced only when it was not this class that did it.
+    /// </summary>
+    /// <remarks>
+    /// Two things have to be filtered out, and the second is the subtle one. A selection this class
+    /// assigns is caught by <see cref="_suppressSelectionEvents"/> — but WPF <b>echoes that
+    /// assignment back</b> through the container a layout pass later, long after the guard has
+    /// been released, and that echo is indistinguishable from a click. So the node is remembered
+    /// and its next announcement swallowed, once. The cost is at most one ignored click, on the
+    /// row the tree had just selected by itself; the alternative is the tab silently navigating to
+    /// wherever the tree happened to settle, which is what it used to do on startup whenever the
+    /// current folder was somewhere the tree could not reveal (anything under <c>AppData</c>).
+    /// </remarks>
+    internal void NoteSelected(DirectoryNodeViewModel node)
     {
-        if (!_suppressSelectionEvents)
-            DirectorySelected?.Invoke(path);
+        if (_suppressSelectionEvents > 0)
+        {
+            _selfSelected = node;
+            return;
+        }
+
+        var echo = ReferenceEquals(node, _selfSelected);
+        _selfSelected = null;
+        if (echo) return;
+
+        DirectorySelected?.Invoke(node.FullPath);
     }
 
-    private bool _suppressSelectionEvents;
+    /// <summary>The node this class last selected itself, until its echo has been accounted for.</summary>
+    private DirectoryNodeViewModel? _selfSelected;
+
+    /// <summary>Nesting depth of <see cref="Rebuilding"/> / <see cref="RevealPathAsync"/>; a count
+    /// rather than a flag because a rebuild can await a repopulate that suppresses in its turn, and
+    /// the inner one finishing must not un-suppress the outer.</summary>
+    private int _suppressSelectionEvents;
+
+    /// <summary>
+    /// Rebuilds the tree's rows without the churn being mistaken for a click.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A row that is replaced takes its <c>TreeViewItem</c> with it, and WPF answers the removal of
+    /// the selected container by selecting its parent — which this tree reports as a navigation.
+    /// So a refresh after a move or a delete walked the active tab up to the drive root.
+    /// <see cref="DirectoryNodeViewModel.RebuildChildren"/> is what keeps the *filter* out of this
+    /// (it diffs rather than clearing, so no container is disturbed); a repopulate genuinely builds
+    /// new child objects, and this is the guard for that.
+    /// </para>
+    /// <para>
+    /// <b>The suppression has to outlive the rebuild.</b> A collection change only raises a
+    /// notification; WPF tears the containers down and fixes the selection up during the
+    /// <em>next layout pass</em>, so a guard that ends when the method returns catches nothing at
+    /// all — and looks like it works, because an assertion made straight afterwards runs before
+    /// the stray selection has happened. Hence the deferral to
+    /// <see cref="DispatcherPriority.Loaded"/>, which is after layout.
+    /// </para>
+    /// <para>
+    /// Deliberately no attempt to *restore* the selection here. Putting it back by hand means
+    /// assigning <c>IsSelected</c>, and WPF can flip that property false and true again a layout
+    /// pass later as containers are regenerated — after the suppression has ended, which is a
+    /// navigation to wherever the tree had settled. That cost a real bug: with the tab in a folder
+    /// the tree could not reveal (anything under <c>AppData</c>, which is hidden), the restore
+    /// re-announced the deepest reachable ancestor and the tab jumped there. A refresh that
+    /// replaces the selected row therefore leaves the tree unhighlighted until the next reveal,
+    /// which is the cheap half of the trade.
+    /// </para>
+    /// </remarks>
+    private async Task RebuildingAsync(Func<Task> rebuild)
+    {
+        var dispatcher = Dispatcher.CurrentDispatcher;
+
+        _suppressSelectionEvents++;
+        try
+        {
+            await rebuild();
+        }
+        finally
+        {
+            _ = dispatcher.BeginInvoke(
+                DispatcherPriority.Loaded, () => _suppressSelectionEvents--);
+        }
+    }
 
     /// <summary>
     /// Expands the tree down to <paramref name="path"/> (or its deepest reachable ancestor)
@@ -225,8 +304,14 @@ public sealed class FolderTreeViewModel
         }
         if (keys.Count == 0) return;
 
-        foreach (var node in Roots.OfType<DirectoryNodeViewModel>())
-            await RefreshMatchingAsync(node, keys);
+        // A repopulate replaces the child nodes wholesale, so the selected row's container goes
+        // with them — see Rebuilding. Without this, a move or a delete walked the active tab up to
+        // the drive root.
+        await RebuildingAsync(async () =>
+        {
+            foreach (var node in Roots.OfType<DirectoryNodeViewModel>())
+                await RefreshMatchingAsync(node, keys);
+        });
     }
 
     private static async Task RefreshMatchingAsync(DirectoryNodeViewModel node, HashSet<string> keys)
@@ -300,14 +385,14 @@ public sealed class FolderTreeViewModel
             chain.Add(node);
         }
 
-        _suppressSelectionEvents = true;
+        _suppressSelectionEvents++;
         try
         {
             node.IsSelected = true;
         }
         finally
         {
-            _suppressSelectionEvents = false;
+            _suppressSelectionEvents--;
         }
         return chain;
     }
@@ -428,21 +513,55 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
             child.ApplyHiddenFilter();
     }
 
+    /// <summary>
+    /// Brings <see cref="Children"/> in line with the filter, in place.
+    /// </summary>
+    /// <remarks>
+    /// <b>Never <c>Clear()</c>.</b> Clearing tears down every <c>TreeViewItem</c> below this node,
+    /// and WPF answers the removal of the selected one by selecting its parent — which this tree
+    /// reports as a navigation, so toggling "Show hidden items" walked the active tab to the drive
+    /// root. Removing and inserting only what actually changed leaves every row that is staying
+    /// exactly where it is, container and selection included.
+    /// </remarks>
     private void RebuildChildren()
     {
-        Children.Clear();
+        var wanted = new List<DirectoryNodeViewModel>();
+
         if (!_isPopulated)
         {
             if (ShowHidden ? _hasSubdirectories : _hasVisibleSubdirectories)
-                Children.Add(Placeholder);
-            return;
+                wanted.Add(Placeholder);
+        }
+        else
+        {
+            foreach (var child in _allChildren)
+                if (IsChildVisible(child))
+                    wanted.Add(child);
         }
 
-        foreach (var child in _allChildren)
-        {
-            if (IsChildVisible(child))
-                Children.Add(child);
-        }
+        Sync(Children, wanted);
+    }
+
+    /// <summary>
+    /// Makes <paramref name="current"/> equal <paramref name="wanted"/> by removing and inserting,
+    /// never by replacing.
+    /// </summary>
+    /// <remarks>
+    /// Both lists come from the same source in the same order, so once what is leaving has gone,
+    /// what remains is a subsequence of <paramref name="wanted"/> and a single forward pass can
+    /// place the rest.
+    /// </remarks>
+    private static void Sync(
+        ObservableCollection<DirectoryNodeViewModel> current, List<DirectoryNodeViewModel> wanted)
+    {
+        var keep = new HashSet<DirectoryNodeViewModel>(wanted);
+        for (var i = current.Count - 1; i >= 0; i--)
+            if (!keep.Contains(current[i]))
+                current.RemoveAt(i);
+
+        for (var i = 0; i < wanted.Count; i++)
+            if (i >= current.Count || !ReferenceEquals(current[i], wanted[i]))
+                current.Insert(i, wanted[i]);
     }
 
     /// <summary>Hidden attribute for a directory path; false for drive roots and anything we can't stat.</summary>
@@ -482,7 +601,7 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
     {
         if (!value || _tree is null) return;
 
-        _tree.RaiseSelected(FullPath);
+        _tree.NoteSelected(this);
     }
 
     /// <summary>Populates children off the UI thread on first call; later calls return the same

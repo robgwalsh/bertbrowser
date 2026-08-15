@@ -1,0 +1,73 @@
+# The folder tree's selection, which used to be lost every time its rows were rebuilt.
+#
+# Both cases below go through Children.Clear(), and WPF answers the removal of the selected
+# TreeViewItem by selecting its parent — which raised DirectorySelected and navigated the tab
+# to the drive root. The `settle` calls are load-bearing: the selection fix-up happens on the
+# next layout pass, so an assertion made immediately after the command passes either way.
+#
+# Run against a sandbox at exactly this path — the tree-click assertions name it, and it has to
+# be somewhere visible rather than the default under %TEMP%, since AppData is hidden and with
+# "Show hidden items" off the tree cannot reveal down to it at all:
+#   --sandbox C:\Source\bertbrowser-treecheck --allow-outside
+
+tree .
+refresh
+go Documents
+settle 400
+assert-path Documents
+
+# Toggling "Show hidden items" re-filters every node in the tree.
+hidden on
+settle 500
+assert-path Documents
+shot 01-hidden-on
+hidden off
+settle 500
+assert-path Documents
+hidden on
+settle 500
+assert-path Documents
+hidden off
+settle 500
+assert-path Documents
+
+# A transfer repopulates the affected folders, which builds new child nodes — so the selected
+# row is not merely re-filtered, it is replaced.
+select letter.txt
+move to .
+settle 500
+assert-path Documents
+shot 02-after-move
+undo
+settle 500
+assert-path Documents
+
+# A delete refreshes the same way.
+select draft.md
+delete
+settle 500
+assert-path Documents
+undo
+settle 500
+assert-path Documents
+assert-row draft.md
+
+# The other half of the same rule: none of the above may have cost the tree its ability to
+# navigate when a person really does click a row. The guards work by ignoring selections the
+# tree made itself, so this is what stops them ignoring one it did not.
+tree-click .
+assert-path bertbrowser-treecheck
+tree-click Documents
+assert-path Documents
+tree-click Empty
+assert-path Empty
+hidden on
+settle 500
+tree-click .
+assert-path bertbrowser-treecheck
+tree-click Pictures
+assert-path Pictures
+hidden off
+settle 500
+
+state

@@ -24,17 +24,22 @@ internal static class Capture
 {
     public static (int Width, int Height) Save(FrameworkElement element, string path)
     {
-        var (width, height) = RenderSize(element);
+        var root = Root(element);
+        var (width, height) = RenderSize(root);
 
         if (width <= 0 || height <= 0)
             throw new InvalidOperationException(
-                $"{Describe(element)} has no size to capture ({width}x{height}); it is probably collapsed.");
+                $"{Describe(root)} has no size to capture ({width}x{height}).");
 
         var target = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-        target.Render(AtOrigin(element, width, height));
+        target.Render(root);
+
+        BitmapSource picture = ReferenceEquals(element, root)
+            ? target
+            : CropTo(target, element, root);
 
         var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(target));
+        encoder.Frames.Add(BitmapFrame.Create(picture));
 
         if (Path.GetDirectoryName(path) is { Length: > 0 } directory)
             Directory.CreateDirectory(directory);
@@ -42,48 +47,73 @@ internal static class Capture
         using var stream = File.Create(path);
         encoder.Save(stream);
 
-        return (width, height);
+        return (picture.PixelWidth, picture.PixelHeight);
     }
 
     /// <summary>
-    /// Re-hosts an element at the origin so its picture is not shifted by where it sits.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="RenderTargetBitmap.Render"/> applies the visual's offset within its parent, so
-    /// rendering a child straight into a bitmap of that child's size draws it at its window
-    /// coordinates — the file list, three hundred pixels in from the left, lands mostly outside the
-    /// bitmap and comes back as a band of empty background. Painting it through a
-    /// <see cref="VisualBrush"/> normalises that away; the brush samples the live visual, so this
-    /// is still a software re-render of the real tree rather than a copy of anything.
-    /// </remarks>
-    private static Visual AtOrigin(FrameworkElement element, int width, int height)
-    {
-        var visual = new DrawingVisual();
-
-        using (var context = visual.RenderOpen())
-        {
-            context.DrawRectangle(
-                new VisualBrush(element)
-                {
-                    Stretch = Stretch.None,
-                    AlignmentX = AlignmentX.Left,
-                    AlignmentY = AlignmentY.Top,
-                },
-                null,
-                new Rect(0, 0, width, height));
-        }
-
-        return visual;
-    }
-
-    /// <summary>
-    /// How big the picture of an element should be.
+    /// Cuts one element out of a picture of the whole window.
     /// </summary>
     /// <remarks>
     /// <para>
+    /// The obvious way to photograph a child on its own is to paint it through a
+    /// <see cref="VisualBrush"/> into a bitmap of its size — <see cref="RenderTargetBitmap.Render"/>
+    /// applies the visual's offset within its parent, so rendering a child straight into a bitmap
+    /// of that child's size draws it at its window coordinates and mostly misses.
+    /// </para>
+    /// <para>
+    /// That way is wrong here, and wrong in a way that takes a while to catch: WPF caches a
+    /// <see cref="VisualBrush"/>'s realisation of the visual it points at, and a
+    /// <see cref="SolidColorBrush"/> inside that visual changing colour does not invalidate the
+    /// cache. So one capture taken before a <c>theme</c> command made every capture after it come
+    /// back in the old theme's colours — while the brushes, the resources and the elements' own
+    /// properties all said the new theme had applied. Rendering the root and cropping has no cache
+    /// to go stale.
+    /// </para>
+    /// </remarks>
+    private static BitmapSource CropTo(BitmapSource picture, FrameworkElement element, FrameworkElement root)
+    {
+        Rect bounds;
+        try
+        {
+            bounds = element.TransformToAncestor(root).TransformBounds(new Rect(element.RenderSize));
+        }
+        catch (InvalidOperationException e)
+        {
+            throw new InvalidOperationException(
+                $"{Describe(element)} is not connected to {Describe(root)}.", e);
+        }
+
+        // Clamped, because an element can extend past the window it is in — a list wider than its
+        // viewport, a row scrolled half out — and CroppedBitmap throws rather than clipping.
+        var x = (int)Math.Floor(Math.Clamp(bounds.X, 0, picture.PixelWidth));
+        var y = (int)Math.Floor(Math.Clamp(bounds.Y, 0, picture.PixelHeight));
+        var width = (int)Math.Ceiling(Math.Clamp(bounds.Right, 0, picture.PixelWidth)) - x;
+        var height = (int)Math.Ceiling(Math.Clamp(bounds.Bottom, 0, picture.PixelHeight)) - y;
+
+        if (width <= 0 || height <= 0)
+            throw new InvalidOperationException(
+                $"{Describe(element)} has no visible size to capture ({bounds}); it is probably " +
+                "collapsed or scrolled out of the window.");
+
+        return new CroppedBitmap(picture, new Int32Rect(x, y, width, height));
+    }
+
+    /// <summary>The window an element belongs to, or the element itself when it is one.</summary>
+    private static FrameworkElement Root(FrameworkElement element)
+    {
+        var root = element;
+        while (root is not Window && VisualTreeHelper.GetParent(root) is FrameworkElement parent)
+            root = parent;
+
+        return root;
+    }
+
+    /// <summary>
+    /// How big the picture of a window should be.
+    /// </summary>
+    /// <remarks>
     /// The element's own <see cref="FrameworkElement.RenderSize"/> — what layout actually gave it,
     /// not what it asked for (<c>DesiredSize</c>) and not what it would like to be (<c>Width</c>).
-    /// </para>
     /// <para>
     /// It is tempting to measure a <see cref="Window"/> by its <c>Content</c> instead, since a
     /// window's <c>ActualHeight</c> normally includes a caption its visual tree does not contain.

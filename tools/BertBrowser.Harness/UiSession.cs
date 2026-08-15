@@ -116,6 +116,16 @@ internal sealed class UiSession : IDisposable
 
         var shell = services.GetRequiredService<ShellViewModel>();
         shell.StartPath = options.StartPath ?? options.SandboxDir;
+        if (options.Verbose)
+        {
+            log.WriteLine($"# start:   {shell.StartPath} (exists: {Directory.Exists(shell.StartPath)})");
+
+            // The folder tree is the one thing that can navigate a tab without anyone asking it to
+            // — a rebuild of its rows used to be mistaken for a click, see FolderTreeViewModel —
+            // so a run that ends up somewhere unexpected should say where the instruction came
+            // from rather than leaving it to be guessed at.
+            shell.Tree.DirectorySelected += p => log.WriteLine($"# tree selected: {p}");
+        }
 
         var before = Native.Foreground();
         if (options.Verbose) log.WriteLine($"# foreground on entry: {before.Describe()}");

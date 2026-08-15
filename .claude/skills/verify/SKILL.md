@@ -44,6 +44,11 @@ MSB3021 because a running BertBrowser locks `bin\Debug`, kill it
 & $harness --script C:\Source\bertbrowser\tools\ui\smoke.bbs          # the canonical pass
 & $harness --script C:\Source\bertbrowser\tools\ui\themes.bbs         # every built-in theme + dialogs
 & $harness -c "tree .; refresh; shot check" --out $env:TEMP\look      # ad hoc
+
+# The folder tree keeping its selection through a rebuild. Needs a visible sandbox — see the
+# last bullet under "What to trust".
+& $harness --script C:\Source\bertbrowser\tools\ui\tree.bbs `
+    --sandbox C:\Source\bertbrowser-treecheck --allow-outside
 ```
 
 Then `Read` each path printed after `SHOT `.
@@ -60,6 +65,7 @@ mkdir <rel> | write <rel> [bytes] | sandbox
 go <path>                   navigate the active tab (relative paths resolve in the sandbox)
 up | back | forward | refresh
 enter <name>                open a folder row, as double-click does
+tree-click <path>           click a folder in the sidebar tree (it must be showing already)
 
 select <name>[, <name>…] | select-all | deselect
 
@@ -82,6 +88,8 @@ dialog <kind> [name]        PNG of a dialog: rename, delete, delete-permanent, m
                             properties, settings, theme-editor
 state                       one JSON line of everything worth asserting on
 rows                        the row names, for when an assertion is about to fail
+probe <token> [element]     where a theme token's colour came out: the resolver, the app and
+                            window resources, and the element's own Background/Foreground
 
 assert-path <substring> | assert-status <substring> | assert-count <n>
 assert-row <name> | assert-no-row <name> | assert-selected <n>

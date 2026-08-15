@@ -100,6 +100,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "forward": Invoke(() => session.Tab.ForwardCommand.Execute(null)); break;
             case "refresh": Invoke(() => session.Tab.RefreshCommand.Execute(null)); break;
             case "enter": Enter(rest); break;
+            case "tree-click": TreeClick(rest); break;
 
             // selection
             case "select": Select(rest); break;
@@ -137,6 +138,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "shot": Shot(rest); break;
             case "dialog": Dialog(rest); break;
             case "state": output.WriteLine("STATE " + State()); break;
+            case "probe": Probe(rest); break;
             case "rows": output.WriteLine("ROWS " + string.Join(", ", RowNames())); break;
 
             // assertions
@@ -210,6 +212,46 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         Invoke(() => session.Tab.Open(row, elevated: false));
         session.Settle();
+    }
+
+    /// <summary>
+    /// Clicks a folder in the sidebar tree.
+    /// </summary>
+    /// <remarks>
+    /// Setting <c>IsSelected</c> on the node is exactly what a click does — the <c>TreeViewItem</c>
+    /// writes it back through the container style's two-way binding, and the tree turns that into
+    /// a navigation. Which makes this the one way to check that the guards keeping the tree from
+    /// announcing its <em>own</em> selections have not also swallowed a real one. The folder has to
+    /// be showing already; navigate to it or its parent first.
+    /// </remarks>
+    private void TreeClick(string rest)
+    {
+        var path = _sandbox.Resolve(Require(rest, "tree-click"));
+
+        session.Dispatcher.Invoke(() =>
+        {
+            var node = TreeNode(session.Shell.Tree.Roots.OfType<DirectoryNodeViewModel>(), path)
+                ?? throw new AssertionException(
+                    $"The tree has no row for '{path}' showing; navigate there or to its parent first.");
+
+            node.IsSelected = true;
+        });
+
+        // The tree's own reveal is debounced, and the navigation it kicks off is a listing load.
+        session.Settle(quietMs: 200);
+    }
+
+    private static DirectoryNodeViewModel? TreeNode(
+        IEnumerable<DirectoryNodeViewModel> nodes, string path)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.FullPath.Length == 0) continue; // unexpanded-node placeholder
+            if (node.FullPath.Equals(path, StringComparison.OrdinalIgnoreCase)) return node;
+            if (TreeNode(node.Children, path) is { } found) return found;
+        }
+
+        return null;
     }
 
     // ---- selection --------------------------------------------------------------------
@@ -653,6 +695,44 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         return "{" + string.Join(",", fields.Select(f => $"{Quote(f.Name)}:{f.Value}")) + "}";
     });
+
+    /// <summary>
+    /// Where a token's colour actually came out, at every level that could have got it wrong.
+    /// </summary>
+    /// <remarks>
+    /// Theming is recolour-in-place: one brush per token, shared by every consumer, its
+    /// <c>Color</c> driven by a binding. When that goes wrong the symptom is a window that is half
+    /// one theme and half another, and the question is always the same — did the resolver produce
+    /// the new colour, did the brush follow it, and is the element still pointing at that brush.
+    /// This answers all three at once.
+    /// </remarks>
+    private void Probe(string rest)
+    {
+        var (token, elementName) = Split(Require(rest, "probe"));
+
+        output.WriteLine(session.Dispatcher.Invoke(() =>
+        {
+            var themes = session.Services.GetRequiredService<IThemeService>();
+            var app = Application.Current.TryFindResource(token) as SolidColorBrush;
+            var window = session.Window.TryFindResource(token) as SolidColorBrush;
+
+            var text = $"PROBE {token} resolver={themes.GetColor(token).ToHex()} " +
+                $"app={Describe(app)} window={Describe(window)}";
+
+            if (elementName.Length > 0 && FindNamed<FrameworkElement>(elementName) is { } element)
+            {
+                var background = element.GetValue(Control.BackgroundProperty) as SolidColorBrush;
+                var foreground = element.GetValue(Control.ForegroundProperty) as SolidColorBrush;
+                text += $" | {elementName}.Background={Describe(background)} " +
+                    $".Foreground={Describe(foreground)}";
+            }
+
+            return text;
+        }));
+    }
+
+    private static string Describe(SolidColorBrush? brush) =>
+        brush is null ? "<none>" : $"{brush.Color}{(brush.IsFrozen ? " FROZEN" : "")}#{brush.GetHashCode():X}";
 
     private static string Text(long value) => value.ToString(CultureInfo.InvariantCulture);
 
