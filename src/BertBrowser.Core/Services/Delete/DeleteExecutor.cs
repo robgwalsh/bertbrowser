@@ -48,6 +48,8 @@ public sealed class DeleteExecutor
     private readonly IDeleteProbe _probe;
     private readonly IReadOnlyCollection<string> _protectedKeys;
     private readonly string? _stagingRoot;
+    private readonly IRecycleBin? _recycleBin;
+    private readonly IRecycleProbe _recycleProbe;
 
     /// <param name="probe">How the executor asks what is on disk.</param>
     /// <param name="protectedPaths">Locations to refuse outright; defaults to
@@ -56,14 +58,24 @@ public sealed class DeleteExecutor
     /// item's own volume. Only for tests, which have no business creating folders at the root of
     /// the machine's disks — and, being under the temp directory, still land on the same volume as
     /// the files they make, which is what the whole design rests on.</param>
+    /// <param name="recycleBin">The Windows Recycle Bin. Null means there is none to use, and every
+    /// item the plan wanted recycled is held in the staging folder instead — never erased.</param>
+    /// <param name="recycleProbe">Re-asks, against live state, whether an item's volume will take a
+    /// recycled item; defaults to "no volume will".</param>
     public DeleteExecutor(
-        IDeleteProbe probe, IEnumerable<string>? protectedPaths = null, string? stagingRoot = null)
+        IDeleteProbe probe,
+        IEnumerable<string>? protectedPaths = null,
+        string? stagingRoot = null,
+        IRecycleBin? recycleBin = null,
+        IRecycleProbe? recycleProbe = null)
     {
         _probe = probe;
         _protectedKeys = protectedPaths is null
             ? ProtectedLocations.Default
             : ProtectedLocations.KeysOf(protectedPaths);
         _stagingRoot = stagingRoot;
+        _recycleBin = recycleBin;
+        _recycleProbe = recycleProbe ?? NoRecycleProbe.Instance;
     }
 
     public DeleteExecutor() : this(new FileSystemDeleteProbe())
@@ -82,26 +94,40 @@ public sealed class DeleteExecutor
         var volumeBatches = new Dictionary<string, string>(StringComparer.Ordinal);
         var localBatches = new Dictionary<string, string>(StringComparer.Ordinal);
 
+        // Items bound for the Recycle Bin are gathered rather than done here: the shell wants one
+        // operation with everything added to it, which is also the only way to get a single
+        // progress sink out of it.
+        var toRecycle = new List<PlannedDelete>();
+
+        var total = plan.Deletions.Count;
         var done = 0;
         foreach (var item in plan.Deletions)
         {
             if (ct.IsCancellationRequested) break;
-            progress?.Report(new DeleteProgress(done, plan.Deletions.Count, item.Name));
-            done++;
 
             try
             {
                 Revalidate(item);
 
-                if (plan.Permanent)
+                switch (LiveDisposition(item))
                 {
-                    Erase(item.SourcePath, item.IsDirectory);
-                    deleted.Add(new DeletedItem(item.SourcePath, item.IsDirectory, null));
-                }
-                else
-                {
-                    var staged = Stage(item, volumeBatches, localBatches, staging);
-                    deleted.Add(new DeletedItem(item.SourcePath, item.IsDirectory, staged));
+                    case DeleteDisposition.Recycle:
+                        toRecycle.Add(item);
+                        continue; // counted when the batch runs
+
+                    case DeleteDisposition.Erase:
+                        progress?.Report(new DeleteProgress(done, total, item.Name));
+                        done++;
+                        Erase(item.SourcePath, item.IsDirectory);
+                        deleted.Add(new DeletedItem(item.SourcePath, item.IsDirectory, null));
+                        break;
+
+                    default:
+                        progress?.Report(new DeleteProgress(done, total, item.Name));
+                        done++;
+                        var staged = Stage(item, volumeBatches, localBatches, staging);
+                        deleted.Add(new DeletedItem(item.SourcePath, item.IsDirectory, staged));
+                        break;
                 }
             }
             catch (Exception ex) when (IsDeleteFailure(ex))
@@ -110,8 +136,44 @@ public sealed class DeleteExecutor
             }
         }
 
-        progress?.Report(new DeleteProgress(done, plan.Deletions.Count, ""));
+        if (toRecycle.Count > 0 && _recycleBin is { } bin && !ct.IsCancellationRequested)
+        {
+            var result = bin.Recycle(toRecycle, ct, Offset(progress, done, total));
+            foreach (var item in result.Recycled)
+                deleted.Add(new DeletedItem(item.SourcePath, item.IsDirectory, null, item.RecycledPath));
+            failed.AddRange(result.Failed);
+            done += toRecycle.Count;
+        }
+
+        progress?.Report(new DeleteProgress(done, total, ""));
         return new DeleteOutcome(plan.Permanent, deleted, failed, staging);
+    }
+
+    /// <summary>
+    /// The planner's routing, re-asked against live state — a plan is built while the confirmation
+    /// is open. An item can lose its Recycle Bin between the two (a share goes away, the bin is
+    /// turned off), and with no bin to hand it to the answer is the holding folder, never an erase.
+    /// </summary>
+    private DeleteDisposition LiveDisposition(PlannedDelete item)
+    {
+        if (item.Disposition != DeleteDisposition.Recycle) return item.Disposition;
+
+        return _recycleBin is not null && _recycleProbe.CanRecycle(item.SourcePath)
+            ? DeleteDisposition.Recycle
+            : DeleteDisposition.Stage;
+    }
+
+    /// <summary>Shifts a batch's own 0..n progress into its place in the whole plan, so the bar does
+    /// not restart when the Recycle Bin takes over.</summary>
+    private static IProgress<DeleteProgress>? Offset(
+        IProgress<DeleteProgress>? progress, int done, int total) =>
+        progress is null ? null : new OffsetProgress(progress, done, total);
+
+    private sealed class OffsetProgress(IProgress<DeleteProgress> inner, int done, int total)
+        : IProgress<DeleteProgress>
+    {
+        public void Report(DeleteProgress value) =>
+            inner.Report(new DeleteProgress(done + value.Done, total, value.CurrentName));
     }
 
     /// <summary>Re-applies the planner's rules against live disk state.</summary>
@@ -299,16 +361,30 @@ public sealed class DeleteExecutor
             if (ct.IsCancellationRequested) break;
             try
             {
-                if (item.StagedPath is not { } staged || !Exists(staged))
-                {
-                    failed.Add(new FailedDelete(item.SourcePath,
-                        $"{item.Name}: the deleted copy is no longer being held."));
-                    continue;
-                }
+                // Nothing here writes over anything, whichever way the item was held.
                 if (Exists(item.SourcePath))
                 {
                     failed.Add(new FailedDelete(item.SourcePath,
                         $"{item.Name}: something else now occupies its original location."));
+                    continue;
+                }
+
+                if (item.RecycledPath is not null)
+                {
+                    if (_recycleBin is not { } bin || !bin.Restore(item))
+                    {
+                        failed.Add(new FailedDelete(item.SourcePath,
+                            $"{item.Name}: the Recycle Bin no longer holds it ({item.RecycledPath})."));
+                        continue;
+                    }
+                    restored++;
+                    continue;
+                }
+
+                if (item.StagedPath is not { } staged || !Exists(staged))
+                {
+                    failed.Add(new FailedDelete(item.SourcePath,
+                        $"{item.Name}: the deleted copy is no longer being held."));
                     continue;
                 }
 
@@ -475,12 +551,16 @@ public sealed class DeleteExecutor
     }
 
     /// <summary>
-    /// True for anything sitting in a holding folder — i.e. deleted, but not yet committed. Search
-    /// asks, because an item the user has just deleted turning up in results looks exactly like a
-    /// delete that did not work.
+    /// True for anything sitting in a holding folder or in the Windows Recycle Bin — i.e. deleted,
+    /// whether this app is holding it or the shell is. Search asks, because an item the user has
+    /// just deleted turning up in results looks exactly like a delete that did not work; and a
+    /// recycled file surfacing as <c>C:\$Recycle.Bin\S-1-5-21-…\$RAB1234.txt</c> is worse still,
+    /// since the name it turns up under is not even the one that was deleted.
     /// </summary>
     public static bool IsHeldPath(string path)
     {
+        if (ProtectedLocations.IsInsideRecycleBin(path)) return true;
+
         foreach (var segment in path.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries))
         {
             if (string.Equals(segment, TrashFolderName, StringComparison.OrdinalIgnoreCase) ||

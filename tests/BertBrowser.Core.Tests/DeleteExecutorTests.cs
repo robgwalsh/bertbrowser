@@ -57,10 +57,10 @@ public sealed class DeleteExecutorTests : IDisposable
 
     private string P(params string[] parts) => Path.Combine([_root, .. parts]);
 
-    private DeleteOutcome Run(string[] sources, bool permanent = false)
+    private DeleteOutcome Run(string[] sources, DeleteMode mode = DeleteMode.Staged)
     {
         var plan = _planner.Plan(
-            sources.Select(s => new DeleteSource(s, Directory.Exists(s))).ToList(), permanent);
+            sources.Select(s => new DeleteSource(s, Directory.Exists(s))).ToList(), mode);
         return _executor.Execute(plan);
     }
 
@@ -262,7 +262,7 @@ public sealed class DeleteExecutorTests : IDisposable
     [Fact]
     public void UndoIsRefusedForAPermanentDelete()
     {
-        var outcome = Run([File_("hello", "a.txt")], permanent: true);
+        var outcome = Run([File_("hello", "a.txt")], DeleteMode.Permanent);
 
         var undo = _executor.Undo(outcome);
 
@@ -278,7 +278,7 @@ public sealed class DeleteExecutorTests : IDisposable
         var folder = Dir("tree");
         File_("one", "tree", "a.txt");
 
-        var outcome = Run([folder], permanent: true);
+        var outcome = Run([folder], DeleteMode.Permanent);
 
         Assert.Empty(outcome.Failed);
         Assert.False(Directory.Exists(folder));
@@ -294,7 +294,7 @@ public sealed class DeleteExecutorTests : IDisposable
         var locked = File_("locked", "tree", "readonly.txt");
         File.SetAttributes(locked, FileAttributes.ReadOnly);
 
-        var outcome = Run([folder], permanent: true);
+        var outcome = Run([folder], DeleteMode.Permanent);
 
         Assert.Empty(outcome.Failed);
         Assert.False(Directory.Exists(folder));
@@ -309,7 +309,7 @@ public sealed class DeleteExecutorTests : IDisposable
         var kept = File_("kept", "kept.txt");
 
         var plan = _planner.Plan(
-            [new DeleteSource(gone, false), new DeleteSource(kept, false)], permanent: false);
+            [new DeleteSource(gone, false), new DeleteSource(kept, false)], DeleteMode.Staged);
         File.Delete(gone); // disk changes while the confirmation is open
 
         var outcome = _executor.Execute(plan);
@@ -325,7 +325,7 @@ public sealed class DeleteExecutorTests : IDisposable
         // Planned by an executor that does not protect it, run by one that does: the executor must
         // hold the line itself rather than trusting a plan built before the confirmation.
         var folder = Dir("system-ish");
-        var plan = _planner.Plan([new DeleteSource(folder, true)], permanent: true);
+        var plan = _planner.Plan([new DeleteSource(folder, true)], DeleteMode.Permanent);
 
         var guarded = new DeleteExecutor(new FileSystemDeleteProbe(), [folder], stagingRoot: _root);
         var outcome = guarded.Execute(plan);
@@ -340,7 +340,7 @@ public sealed class DeleteExecutorTests : IDisposable
         var a = File_("a", "a.txt");
         var b = File_("b", "b.txt");
         var plan = _planner.Plan(
-            [new DeleteSource(a, false), new DeleteSource(b, false)], permanent: false);
+            [new DeleteSource(a, false), new DeleteSource(b, false)], DeleteMode.Staged);
 
         using var cts = new CancellationTokenSource();
         cts.Cancel();
@@ -357,7 +357,7 @@ public sealed class DeleteExecutorTests : IDisposable
     {
         var plan = _planner.Plan(
             [new DeleteSource(File_("a", "a.txt"), false), new DeleteSource(File_("b", "b.txt"), false)],
-            permanent: false);
+            DeleteMode.Staged);
 
         // Not Progress<T>: it posts to the thread pool when there is no sync context, so the list
         // would still be empty when the assertions run.
@@ -432,6 +432,302 @@ public sealed class DeleteExecutorTests : IDisposable
         File.WriteAllText(P("tree", "a.txt"), "tampered");
 
         Assert.NotEqual(before, Snapshot(folder));
+    }
+
+    // --- what search must not show ---
+
+    /// <summary>
+    /// A file the user just deleted turning up in search looks exactly like a delete that did not
+    /// work — and a recycled one turns up under a name that is not even the one they deleted, as
+    /// <c>$RAB1234.txt</c>. Both are filtered, which is why this is the same predicate for both.
+    /// </summary>
+    [Theory]
+    [InlineData(@"C:\.bertbrowser-trash\delete-abc123\a.txt")]
+    [InlineData(@"C:\p\.bertbrowser-deleted-abc123\a.txt")]
+    [InlineData(@"C:\$Recycle.Bin\S-1-5-21-1\$RAB1234.txt")]
+    [InlineData(@"C:\$RECYCLE.BIN\S-1-5-21-1\$RAB1234.txt")]
+    public void DeletedItems_AreHiddenFromSearch(string path)
+    {
+        Assert.True(DeleteExecutor.IsHeldPath(path));
+    }
+
+    [Theory]
+    [InlineData(@"C:\p\a.txt")]
+    [InlineData(@"C:\p\$Recycled\a.txt")]
+    [InlineData(@"C:\p\bertbrowser-trash\a.txt")]
+    public void OrdinaryFiles_AreNotHiddenFromSearch(string path)
+    {
+        Assert.False(DeleteExecutor.IsHeldPath(path));
+    }
+
+    // --- the Recycle Bin ---
+    //
+    // Against a fake bin that really moves the files, so these assert on contents like the rest of
+    // the suite. The real one is IFileOperation and cannot be exercised here; what is being pinned
+    // down is the executor's own behaviour around it — routing, a mixed batch, and undo.
+
+    private FakeRecycleBin NewBin(params string[] volumelessPaths)
+    {
+        var bin = new FakeRecycleBin(Path.Combine(_root, "fake-bin"));
+        foreach (var path in volumelessPaths) bin.RefuseVolumeFor(path);
+        return bin;
+    }
+
+    private DeleteOutcome RunWithBin(FakeRecycleBin bin, params string[] sources)
+    {
+        var planner = new DeletePlanner(new FileSystemDeleteProbe(), [], bin);
+        var executor = new DeleteExecutor(
+            new FileSystemDeleteProbe(), [], stagingRoot: _root, recycleBin: bin, recycleProbe: bin);
+        var plan = planner.Plan(
+            sources.Select(s => new DeleteSource(s, Directory.Exists(s))).ToList(), DeleteMode.Recycle);
+        return executor.Execute(plan);
+    }
+
+    private DeleteUndoResult UndoWithBin(FakeRecycleBin bin, DeleteOutcome outcome) =>
+        new DeleteExecutor(
+                new FileSystemDeleteProbe(), [], stagingRoot: _root, recycleBin: bin, recycleProbe: bin)
+            .Undo(outcome);
+
+    [Fact]
+    public void ARecycledFile_LeavesItsFolder_AndIsHeldByTheBin()
+    {
+        var file = File_("hello", "a.txt");
+        var bin = NewBin();
+
+        var outcome = RunWithBin(bin, file);
+
+        Assert.False(Exists(file));
+        var item = Assert.Single(outcome.Deleted);
+        Assert.NotNull(item.RecycledPath);
+        Assert.Null(item.StagedPath);
+        AssertContent(item.RecycledPath!, "hello");
+        Assert.True(outcome.CanUndo);
+    }
+
+    /// <summary>Nothing is staged for a recycled item, so there is no holding folder to commit —
+    /// which is the whole structural gain: the data outlives the undo record by as long as the user
+    /// leaves the bin alone, rather than by exactly one operation.</summary>
+    [Fact]
+    public void ARecycledDelete_CreatesNoHoldingFolder()
+    {
+        var bin = NewBin();
+
+        var outcome = RunWithBin(bin, File_("hello", "a.txt"));
+
+        Assert.Empty(outcome.StagingDirectories);
+        DeleteExecutor.CommitStaging(outcome); // must be a no-op rather than reaching into the bin
+        AssertContent(outcome.Deleted[0].RecycledPath!, "hello");
+    }
+
+    [Fact]
+    public void UndoingARecycledDelete_PutsTheFileBackWithItsContents()
+    {
+        var file = File_("hello", "a.txt");
+        var bin = NewBin();
+        var outcome = RunWithBin(bin, file);
+
+        var undo = UndoWithBin(bin, outcome);
+
+        Assert.Equal(1, undo.Restored);
+        Assert.Empty(undo.Failed);
+        AssertContent(file, "hello");
+    }
+
+    [Fact]
+    public void UndoingARecycledFolder_RestoresTheTreeByteForByte()
+    {
+        var folder = Dir("tree");
+        File_("one", "tree", "a.txt");
+        File_("two", "tree", "nested", "b.txt");
+        var before = Snapshot(folder);
+        var bin = NewBin();
+
+        var outcome = RunWithBin(bin, folder);
+        Assert.False(Exists(folder));
+        var undo = UndoWithBin(bin, outcome);
+
+        Assert.Equal(1, undo.Restored);
+        Assert.Equal(before, Snapshot(folder));
+    }
+
+    /// <summary>The case the whole fallback exists for: one selection spanning a volume with a bin
+    /// and one without. Both halves must survive, and undo must put both back.</summary>
+    [Fact]
+    public void AMixedBatch_RecyclesWhatItCan_AndHoldsTheRest()
+    {
+        var recyclable = File_("first", "a.txt");
+        var notRecyclable = File_("second", "b.txt");
+        var bin = NewBin(notRecyclable);
+
+        var outcome = RunWithBin(bin, recyclable, notRecyclable);
+
+        Assert.False(Exists(recyclable));
+        Assert.False(Exists(notRecyclable));
+
+        var recycled = outcome.Deleted.Single(d => d.SourcePath == recyclable);
+        var staged = outcome.Deleted.Single(d => d.SourcePath == notRecyclable);
+        Assert.NotNull(recycled.RecycledPath);
+        Assert.Null(recycled.StagedPath);
+        Assert.NotNull(staged.StagedPath);
+        Assert.Null(staged.RecycledPath);
+        Assert.NotEmpty(outcome.StagingDirectories);
+
+        var undo = UndoWithBin(bin, outcome);
+
+        Assert.Equal(2, undo.Restored);
+        Assert.Empty(undo.Failed);
+        AssertContent(recyclable, "first");
+        AssertContent(notRecyclable, "second");
+    }
+
+    /// <summary>
+    /// With no bin wired up at all, a plan that asked to recycle must fall back to the holding
+    /// folder. The one outcome that would be unforgivable is erasing instead.
+    /// </summary>
+    [Fact]
+    public void WithNoBinAvailable_ARecyclePlanIsHeld_NeverErased()
+    {
+        var file = File_("hello", "a.txt");
+        var bin = NewBin();
+        var planner = new DeletePlanner(new FileSystemDeleteProbe(), [], bin);
+        var plan = planner.Plan([new DeleteSource(file, false)], DeleteMode.Recycle);
+        Assert.Equal(DeleteDisposition.Recycle, plan.Deletions[0].Disposition);
+
+        // Same plan, executed by an executor that has no bin.
+        var outcome = _executor.Execute(plan);
+
+        Assert.False(Exists(file));
+        var item = Assert.Single(outcome.Deleted);
+        Assert.NotNull(item.StagedPath);
+        AssertContent(item.StagedPath!, "hello");
+
+        Assert.Equal(1, _executor.Undo(outcome).Restored);
+        AssertContent(file, "hello");
+    }
+
+    /// <summary>
+    /// The shell erases rather than holds an item too big for the bin. That is not a failure, but
+    /// there is nothing to undo — and the outcome has to say so rather than offering a Ctrl+Z that
+    /// cannot work.
+    /// </summary>
+    [Fact]
+    public void AnItemTheBinErasedInsteadOfHolding_IsNotOfferedForUndo()
+    {
+        var file = File_("hello", "a.txt");
+        var bin = NewBin();
+        bin.EraseInsteadOfHolding(file);
+
+        var outcome = RunWithBin(bin, file);
+
+        Assert.False(Exists(file));
+        Assert.Null(Assert.Single(outcome.Deleted).RecycledPath);
+        Assert.False(outcome.CanUndo);
+    }
+
+    [Fact]
+    public void UndoingAnItemTheBinNoLongerHolds_IsReportedRatherThanSilent()
+    {
+        var file = File_("hello", "a.txt");
+        var bin = NewBin();
+        var outcome = RunWithBin(bin, file);
+
+        bin.Empty(); // the user emptied the Recycle Bin before pressing Ctrl+Z
+
+        var undo = UndoWithBin(bin, outcome);
+
+        Assert.Equal(0, undo.Restored);
+        Assert.Contains("Recycle Bin", Assert.Single(undo.Failed).Message);
+    }
+
+    [Fact]
+    public void UndoWillNotOverwriteSomethingThatTookTheOriginalPath()
+    {
+        var file = File_("hello", "a.txt");
+        var bin = NewBin();
+        var outcome = RunWithBin(bin, file);
+
+        File.WriteAllText(file, "something else entirely");
+
+        var undo = UndoWithBin(bin, outcome);
+
+        Assert.Equal(0, undo.Restored);
+        Assert.Single(undo.Failed);
+        AssertContent(file, "something else entirely");
+    }
+}
+
+/// <summary>
+/// A stand-in for the Windows Recycle Bin that really moves files, so tests can assert on contents.
+/// It models the three behaviours the executor has to cope with: a volume the bin does not serve,
+/// an item the shell erases instead of holding, and a bin that has been emptied.
+/// </summary>
+internal sealed class FakeRecycleBin(string binRoot) : IRecycleBin, IRecycleProbe
+{
+    private readonly HashSet<string> _noBin = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _erases = new(StringComparer.OrdinalIgnoreCase);
+    private int _next;
+
+    /// <summary>Makes <paramref name="path"/> look like it lives on a share or on media with the
+    /// bin turned off.</summary>
+    public void RefuseVolumeFor(string path) => _noBin.Add(path);
+
+    /// <summary>Makes the bin accept <paramref name="path"/> but erase it — what the shell does with
+    /// an item larger than the bin's quota.</summary>
+    public void EraseInsteadOfHolding(string path) => _erases.Add(path);
+
+    public void Empty()
+    {
+        if (Directory.Exists(binRoot)) Directory.Delete(binRoot, recursive: true);
+    }
+
+    public bool CanRecycle(string path) => !_noBin.Contains(path);
+
+    public RecycleResult Recycle(
+        IReadOnlyList<PlannedDelete> items,
+        CancellationToken ct = default,
+        IProgress<DeleteProgress>? progress = null)
+    {
+        Directory.CreateDirectory(binRoot);
+        var recycled = new List<RecycledItem>();
+        var failed = new List<FailedDelete>();
+
+        var done = 0;
+        foreach (var item in items)
+        {
+            progress?.Report(new DeleteProgress(done++, items.Count, item.Name));
+
+            if (_erases.Contains(item.SourcePath))
+            {
+                if (item.IsDirectory) Directory.Delete(item.SourcePath, recursive: true);
+                else File.Delete(item.SourcePath);
+                recycled.Add(new RecycledItem(item.SourcePath, item.IsDirectory, null));
+                continue;
+            }
+
+            // The real bin renames to $R<id><ext>; the shape matters more than the exact name.
+            var target = Path.Combine(binRoot, $"$R{_next++:D6}{Path.GetExtension(item.SourcePath)}");
+            if (item.IsDirectory) Directory.Move(item.SourcePath, target);
+            else File.Move(item.SourcePath, target, overwrite: false);
+            recycled.Add(new RecycledItem(item.SourcePath, item.IsDirectory, target));
+        }
+
+        return new RecycleResult(recycled, failed);
+    }
+
+    public bool Restore(DeletedItem item)
+    {
+        if (item.RecycledPath is not { } held) return false;
+        if (item.IsDirectory)
+        {
+            if (!Directory.Exists(held)) return false;
+            Directory.Move(held, item.SourcePath);
+        }
+        else
+        {
+            if (!File.Exists(held)) return false;
+            File.Move(held, item.SourcePath, overwrite: false);
+        }
+        return true;
     }
 }
 

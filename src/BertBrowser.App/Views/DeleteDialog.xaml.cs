@@ -53,10 +53,7 @@ public partial class DeleteDialog : ThemedWindow
 
         HeadingText.Text = Heading(plan);
         PermanentBanner.Visibility = plan.Permanent ? Visibility.Visible : Visibility.Collapsed;
-        UndoHint.Text = plan.Permanent
-            ? ""
-            : "Ctrl+Z puts these back. They are held until the next move, rename or delete — or " +
-              "until BertBrowser closes — and then removed for good.";
+        UndoHint.Text = UndoHintFor(plan);
 
         foreach (var item in plan.Deletions)
         {
@@ -90,6 +87,31 @@ public partial class DeleteDialog : ThemedWindow
         return plan.Deletions.Count == 1
             ? $"{verb} '{plan.Deletions[0].Name}'?"
             : $"{verb} these {plan.Deletions.Count:N0} items?";
+    }
+
+    /// <summary>
+    /// What happens after "Delete", in the user's terms. The Recycle Bin keeps items until it is
+    /// emptied rather than until the next operation, which is worth saying — and where a volume has
+    /// no bin the items take this app's own holding folder instead, which is worth saying too
+    /// rather than leaving it to be discovered.
+    /// </summary>
+    private static string UndoHintFor(DeletePlan plan)
+    {
+        if (plan.Permanent) return "";
+
+        const string held =
+            "Ctrl+Z puts these back. They are held until the next move, rename or delete — or " +
+            "until BertBrowser closes — and then removed for good.";
+
+        if (plan.Mode != DeleteMode.Recycle) return held;
+
+        if (!plan.HasStagedFallback)
+            return "Ctrl+Z puts these back. They also stay in your Recycle Bin until you empty it.";
+
+        var staged = plan.Deletions.Count(d => d.Disposition == DeleteDisposition.Stage);
+        return "Ctrl+Z puts these back. They stay in your Recycle Bin until you empty it — except " +
+            $"{staged:N0} on a drive with no Recycle Bin, which BertBrowser holds only until the " +
+            "next move, rename or delete.";
     }
 
     private void ShowProblems(DeletePlan plan)

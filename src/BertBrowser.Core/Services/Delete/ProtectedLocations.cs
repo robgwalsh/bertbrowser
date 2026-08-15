@@ -16,8 +16,28 @@ namespace BertBrowser.Core.Services.Delete;
 /// </remarks>
 public static class ProtectedLocations
 {
+    /// <summary>The per-volume Recycle Bin folder, and the name Windows used before it.</summary>
+    private static readonly string[] RecycleBinFolders = ["$Recycle.Bin", "$RECYCLE.BIN", "RECYCLER"];
+
     /// <summary>Canonical keys of the locations refused by default.</summary>
     public static IReadOnlyCollection<string> Default { get; } = Build();
+
+    /// <summary>
+    /// True for a Recycle Bin folder or anything inside one. Unlike the exact matches above this
+    /// covers the contents too, and deliberately: those <c>$R</c> files are what Ctrl+Z restores
+    /// from, so deleting one out from under a pending undo would break it. It is a name test rather
+    /// than a path list because the folder exists once per volume and enumerating drives to find
+    /// them would mean touching every disconnected network share at startup.
+    /// </summary>
+    public static bool IsInsideRecycleBin(string path)
+    {
+        foreach (var segment in path.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            foreach (var folder in RecycleBinFolders)
+                if (string.Equals(segment, folder, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
 
     /// <summary>Canonicalizes <paramref name="paths"/> into a set the planner can test against,
     /// dropping anything that isn't a usable path.</summary>

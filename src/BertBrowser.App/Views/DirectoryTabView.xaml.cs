@@ -81,7 +81,12 @@ public partial class DirectoryTabView : UserControl
         if (e.PropertyName == nameof(FileListViewModel.IsFlattened))
             UpdateRelPathColumn();
         else if (e.PropertyName == nameof(FileListViewModel.Items))
+        {
+            // Before the focus call: selecting scrolls the list, and doing it the other way round
+            // would move the caret off whatever was just brought into view.
+            ApplyPendingSelection();
             FocusFileList();
+        }
         else if (e.PropertyName == nameof(FileListViewModel.IsThumbnailView))
             ApplyViewMode();
     }
@@ -584,6 +589,15 @@ public partial class DirectoryTabView : UserControl
             "Rename", MessageDialogKind.Warning);
     }
 
+    /// <summary>Highlights whatever a <c>/select</c> request asked for, once the rows it names
+    /// exist. One-shot: an ordinary navigation afterwards must not keep re-selecting it.</summary>
+    private void ApplyPendingSelection()
+    {
+        if (Tab.PendingSelection is not { Length: > 0 } path) return;
+        Tab.PendingSelection = null;
+        SelectPaths([path]);
+    }
+
     private void SelectPaths(IEnumerable<string> paths)
     {
         var wanted = paths.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -620,7 +634,9 @@ public partial class DirectoryTabView : UserControl
             .ToList();
 
         var owner = Window.GetWindow(this);
-        var plan = _shell.PlanDelete(ordered, permanent);
+        // Delete goes to the Windows Recycle Bin; the planner falls back to this app's own holding
+        // folder per item where a volume has no bin. Shift+Delete still erases outright.
+        var plan = _shell.PlanDelete(ordered, permanent ? DeleteMode.Permanent : DeleteMode.Recycle);
 
         if (!plan.HasWork)
         {

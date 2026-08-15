@@ -16,8 +16,16 @@ namespace BertBrowser.App.Views;
 /// </remarks>
 internal sealed class DropPipeline(ShellViewModel shell, Action<string> report)
 {
-    /// <summary>Private clipboard format: in-app drops only. Deliberately not
-    /// <see cref="DataFormats.FileDrop"/>, which would make this a drag source for Explorer.</summary>
+    /// <summary>
+    /// Private clipboard format, and the <em>only</em> one this pipeline reads.
+    /// </summary>
+    /// <remarks>
+    /// A drag out of this app also carries <see cref="DataFormats.FileDrop"/> so other applications
+    /// can take it — but nothing here looks at that, deliberately. Reading only the private format
+    /// means an in-app drop is decided by exactly the same code and the same plan it always was,
+    /// and it is what keeps drops arriving <em>from</em> other applications out of scope rather
+    /// than half-supported.
+    /// </remarks>
     public const string ItemsFormat = "BertBrowser.FileItems";
 
     private DependencyObject? _highlighted;
@@ -75,6 +83,14 @@ internal sealed class DropPipeline(ShellViewModel shell, Action<string> report)
         InvalidateHoverCache();
 
         if (Sources(e) is not { Length: > 0 } sources || destination is null) return;
+
+        // This drop is ours, so the drag source must not also act on it. Both of the next two lines
+        // say so independently: the session flag, and an effect of None for DoDragDrop to return.
+        // Without them, our own move would be read as an external one and the items we just placed
+        // would be deleted from where they came from — which they have already left.
+        DragSession.ClaimInApp();
+        e.Effects = DragDropEffects.None;
+
         var verb = VerbFor(e.KeyStates);
 
         try

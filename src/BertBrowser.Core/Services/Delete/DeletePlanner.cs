@@ -16,15 +16,23 @@ namespace BertBrowser.Core.Services.Delete;
 public sealed class DeletePlanner
 {
     private readonly IDeleteProbe _probe;
+    private readonly IRecycleProbe _recycleProbe;
     private readonly IReadOnlyCollection<string> _protectedKeys;
 
     /// <param name="probe">How the planner asks what is on disk.</param>
     /// <param name="protectedPaths">Locations to refuse outright; defaults to
     /// <see cref="ProtectedLocations.Default"/>. Injectable so the rule can be tested without
     /// depending on where Windows happens to be installed.</param>
-    public DeletePlanner(IDeleteProbe probe, IEnumerable<string>? protectedPaths = null)
+    /// <param name="recycleProbe">How the planner asks whether a volume has a Recycle Bin that will
+    /// take something. Defaults to "none has", so Core on its own routes everything to the holding
+    /// folder rather than assuming a bin that may not be there.</param>
+    public DeletePlanner(
+        IDeleteProbe probe,
+        IEnumerable<string>? protectedPaths = null,
+        IRecycleProbe? recycleProbe = null)
     {
         _probe = probe;
+        _recycleProbe = recycleProbe ?? NoRecycleProbe.Instance;
         _protectedKeys = protectedPaths is null
             ? ProtectedLocations.Default
             : ProtectedLocations.KeysOf(protectedPaths);
@@ -34,10 +42,10 @@ public sealed class DeletePlanner
     {
     }
 
-    public DeletePlan Plan(IReadOnlyList<DeleteSource> sources, bool permanent)
+    public DeletePlan Plan(IReadOnlyList<DeleteSource> sources, DeleteMode mode)
     {
         var distinct = Distinct(sources);
-        if (distinct.Count == 0) return DeletePlan.Empty(permanent);
+        if (distinct.Count == 0) return DeletePlan.Empty(mode);
 
         var deletions = new List<PlannedDelete>();
         var rejected = new List<RejectedDelete>();
@@ -72,6 +80,13 @@ public sealed class DeletePlanner
                 continue;
             }
 
+            if (ProtectedLocations.IsInsideRecycleBin(path))
+            {
+                rejected.Add(new RejectedDelete(path, DeleteRejection.ProtectedLocation,
+                    $"'{Path.GetFileName(path)}' is in the Recycle Bin; empty it from Windows instead."));
+                continue;
+            }
+
             if (directoryKeys.Any(other => other != key && PathKey.IsUnder(key, other)))
             {
                 rejected.Add(new RejectedDelete(path, DeleteRejection.InsideADeletedFolder,
@@ -79,11 +94,24 @@ public sealed class DeletePlanner
                 continue;
             }
 
-            deletions.Add(new PlannedDelete(path, isDirectory));
+            deletions.Add(new PlannedDelete(path, isDirectory, DispositionFor(mode, path)));
         }
 
-        return new DeletePlan(permanent, deletions, rejected);
+        return new DeletePlan(mode, deletions, rejected);
     }
+
+    /// <summary>
+    /// Where one item is really going. A Recycle Bin delete falls back to the holding folder when
+    /// the item's volume has no bin — a network share, removable media with it turned off — because
+    /// the alternative the shell offers is erasing the item outright, which is not what the user
+    /// asked for and not something to discover afterwards.
+    /// </summary>
+    private DeleteDisposition DispositionFor(DeleteMode mode, string path) => mode switch
+    {
+        DeleteMode.Permanent => DeleteDisposition.Erase,
+        DeleteMode.Staged => DeleteDisposition.Stage,
+        _ => _recycleProbe.CanRecycle(path) ? DeleteDisposition.Recycle : DeleteDisposition.Stage,
+    };
 
     /// <summary>Drops repeats, so nothing is planned — or counted in the confirmation — twice.</summary>
     private static List<(string Path, string Key)> Distinct(IReadOnlyList<DeleteSource> sources)

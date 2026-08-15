@@ -132,11 +132,19 @@ Tests: `RenamePatternTests` (naming and validation), `RenamePlannerTests` (rules
 ### Delete
 
 `Core/Services/Delete` is split the same way again, and rests on one idea: **an ordinary delete does
-not erase anything.** Each item is *moved* into a hidden holding folder — a rename, so a hundred
-gigabytes costs what one file costs — and stays there intact until the delete can no longer be
-undone. That is what makes Ctrl+Z restore a directory tree byte for byte rather than best-effort.
-Shift+Delete is the other path: erase in place, no holding, no undo, and the confirmation says so in
-a red banner rather than in a footnote.
+not erase anything.** Shift+Delete is the other path: erase in place, no holding, no undo, and the
+confirmation says so in a red banner rather than in a footnote.
+
+An ordinary delete goes to the **Windows Recycle Bin**, so deleted items are where every other app
+on the machine puts them and stay there until the user empties it. Where a volume has no working bin
+— a network share, removable media with it turned off — the item falls back to this app's own hidden
+holding folder, a *move* rather than a copy, so a hundred gigabytes costs what one file costs. Both
+routes are undoable; they differ in how long the data outlives the undo record, which is why the
+confirmation says which one an item is taking.
+
+`DeleteMode` is what the user asked for (`Recycle` / `Staged` / `Permanent`); `DeleteDisposition` is
+what will happen to one particular item. **The planner decides the disposition, not the executor**,
+because that is what lets the confirmation describe what is really about to happen.
 
 - **`DeletePlanner`** decides, touching nothing, through **`IDeleteProbe`**. It refuses drive roots
   and a small set of **`ProtectedLocations`** (Windows, Program Files, ProgramData, the profile
@@ -150,11 +158,35 @@ a red banner rather than in a footnote.
   junction is the one entry deleting it removes) and marks a result `Incomplete` rather than
   throwing, so the totals are honest about being a floor. It is cancellable and nothing depends on
   it: a delete whose survey never finished deletes exactly the same items.
-- **`DeleteExecutor`** writes, re-applying the planner's rules against live disk state first. The
-  holding folder is `<volume root>\.bertbrowser-trash\delete-<id>`, hidden — at the volume root so a
-  move is a rename, one place per disk, and sweepable later. `Directory.Move` reporting
-  `ERROR_NOT_SAME_DEVICE` (a mount point part-way down the path) is the one case that falls back to
-  a `.bertbrowser-deleted-*` folder beside the item, which cannot be on another volume.
+- **`DeleteExecutor`** writes, re-applying the planner's rules against live disk state first —
+  including the disposition, since an item can lose its Recycle Bin between plan and execution. With
+  no bin to hand it to the answer is the holding folder, **never an erase**. The holding folder is
+  `<volume root>\.bertbrowser-trash\delete-<id>`, hidden — at the volume root so a move is a rename,
+  one place per disk, and sweepable later. `Directory.Move` reporting `ERROR_NOT_SAME_DEVICE` (a
+  mount point part-way down the path) is the one case that falls back to a `.bertbrowser-deleted-*`
+  folder beside the item, which cannot be on another volume.
+- **`Interop/ShellRecycleBin`** (App) is the bin itself, over `IFileOperation` on an STA thread with
+  a deadline, and it implements both `IRecycleBin` and `IRecycleProbe` from one object so the
+  planner and the executor cannot disagree about what has a bin. `IFileOperation` rather than
+  `SHFileOperation` for one decisive reason: its progress sink's `PostDeleteItem` hands back
+  `psiNewlyCreated`, the item's `$R` path *inside* the bin — which is what undo restores from, and
+  is what keeps it correct when the same path has been deleted twice. A null there means the shell
+  erased the item rather than holding it, which is not a failure but leaves nothing to undo, so
+  `DeleteOutcome.CanUndo` asks each item rather than trusting the mode.
+
+  **The flags are the dangerous part.** `FOF_ALLOWUNDO` with `FOF_NOCONFIRMATION` means "if it
+  cannot be recycled, erase it without asking". Two things stand against that: the planner routes
+  binless volumes to staging before the shell ever sees them, and **`FOF_WANTNUKEWARNING` stays
+  set**, which overrides `FOF_NOCONFIRMATION` for exactly the case pre-flight cannot predict (an
+  item over the bin's quota). That is the only OS-drawn dialog this app permits, and it is
+  deliberate. `FOFX_EARLYFAILURE` is deliberately *absent* — it would abandon the rest of the batch
+  on the first error, and everything else here holds that one item's failure must not cost the
+  others.
+
+  Restore goes through the shell's own **canonical `undelete` verb** (never the localised menu
+  text). `InvokeVerb` returns nothing at all, so success is established by watching for the original
+  path to reappear on a short deadline; a timeout is reported as a failure naming the `$R` path
+  rather than being assumed to have worked.
 
 Three things here are load-bearing:
 
@@ -162,7 +194,9 @@ Three things here are load-bearing:
   caller — so held data outlives the undo record by exactly one operation, the same contract a
   Replace's staging has. `MainWindow.Closing` retires too, or a session would end with its last
   delete still on disk. The undo slot is now three-way (move / rename / delete), one level, whichever
-  happened last.
+  happened last. **A recycled item has no staging lifecycle at all** — it contributes no holding
+  folder, so commit no-ops over it and the data simply stays in the bin. That is the structural gain
+  of the Recycle Bin being the default, and it is why nothing in this list needed changing for it.
 - **`IsStagingDirectory` is the guard on every recursive delete in this file.** A path only qualifies
   if it is named the way this class names holding folders. Mutate it to return true and
   `CommittingRefusesAnythingThatIsNotAHoldingFolder` deletes a real folder and goes red — that is
@@ -180,11 +214,22 @@ root is one careless click away in that list. `ShellViewModel.DeleteAsync` fans 
 does, plus `LeaveDeletedFoldersAsync`: a tab sitting inside a folder that was just deleted is moved
 up to where that folder was, rather than left on a path that no longer exists.
 
-Tests: `DeletePlannerTests` (rules, fake filesystem), `DeleteExecutorTests` (real files, restored
-trees compared file-by-file against a pre-delete snapshot, with meta-tests that the comparison
-notices a missing file and changed contents), `DeleteSurveyorTests` (counts and bytes). The executor
-takes a `stagingRoot` purely so tests do not create folders at the root of a real disk. Mutate a rule
-and confirm a test goes red.
+One thing the Recycle Bin quietly breaks unless you look for it: **`$Recycle.Bin` has to be excluded
+from search**, or a recycled file keeps turning up in global MFT results under a name that is not
+even the one that was deleted (`C:\$Recycle.Bin\S-1-5-21-…\$RAB1234.txt`). `DeleteExecutor.IsHeldPath`
+is the one predicate `SearchService` asks, and it now covers the bin alongside
+`.bertbrowser-trash`. `ProtectedLocations.IsInsideRecycleBin` refuses deleting anything *in* the bin
+— unlike the exact-match protected set, the contents are covered too, and deliberately: those `$R`
+files are what Ctrl+Z restores from.
+
+Tests: `DeletePlannerTests` (rules and Recycle Bin routing, fake filesystem and a fake probe),
+`DeleteExecutorTests` (real files, restored trees compared file-by-file against a pre-delete
+snapshot, with meta-tests that the comparison notices a missing file and changed contents; the bin
+is a `FakeRecycleBin` that really moves files, so a **mixed batch** — half recycled, half staged —
+and its undo are asserted on contents), `DeleteSurveyorTests` (counts and bytes). The executor takes
+a `stagingRoot` purely so tests do not create folders at the root of a real disk. Mutate a rule and
+confirm a test goes red — `DispositionFor` returning `Recycle` unconditionally, or the executor
+erasing when there is no bin, both go red.
 
 ### Launching other programs
 
@@ -234,6 +279,43 @@ folder tree deliberately has no elevated entry — a drive root is one careless 
 The shell chain can't be unit-tested; it was verified with a scratch harness that compiles
 `ShellLauncher.cs` directly and compares the integrity level of a child launched each way
 (`Process.Start` → High, shell route → Medium). Rebuild that harness rather than trusting a fake.
+
+### Startup, the command line, and single instance
+
+One copy runs per user. A second launch parses its arguments, hands them to the first over a named
+pipe, and **returns from `Main` without ever calling `app.Run()`** — no WPF, no DI, no database. This
+is not only convenience: two copies each run their own MFT indexer against the same SQLite file, and
+`DeleteExecutor.PurgeAbandonedStaging` only skips batches under a day old *because* a second copy
+might be holding a pending undo. One instance is what makes that assumption sound.
+
+- **`Core/Cli/CommandLine`** parses, and is **pure** — it never touches the filesystem, so "does
+  this exist?" stays with the caller and every rule is testable. It understands several paths,
+  `--new-tab`/`-t`, `--new-pane`/`-p` (this app splits panes rather than opening second windows, so
+  there is deliberately no `--new-window`), and Explorer's `/select,<path>` in both the one-token and
+  two-token spellings. An unrecognised option becomes an **error, never a path** — a mistyped flag
+  opening the profile folder is worse than a message. It also repairs the mangling everyone hits
+  once: `"C:\Dir\"` reaches argv as `C:\Dir"`, because the backslash escaped the closing quote.
+- **`Core/Cli/NavigationRequest`** is the wire format *and* `IsAcceptablePath`, the single rule
+  deciding whether a path may be acted on — used by the command line and the pipe alike, so there is
+  one place to audit rather than two that drift. It is `ThemeId.IsSafe`'s counterpart for IPC:
+  absolute local or UNC only, no device paths, no wildcards, no control characters (which is what
+  makes tab a safe field separator). Mutate it to accept and 19 theories go red.
+- **`Services/SingleInstance`** owns the mutex and the pipe. Claimed **after**
+  `VelopackApp.Build().Run()`, whose hooks exit the process and must not be gated behind an instance
+  check. Both peers are elevated processes of the same user, so the pipe needs no mandatory-label
+  work — a DACL admitting only the current user's SID is right, and the client's identity is
+  re-checked after connect anyway. **A failed hand-off falls through and starts normally**: the first
+  copy may be mid-shutdown, and starting is better than exiting having done nothing.
+
+The protocol is deliberately one verb — *navigate to this path*. Nothing on the wire can become a
+launch, a file that gets written, or anything but a directory listing.
+
+`ShellViewModel.OpenRequestAsync` carries a request out, resolving each target against disk (a
+target naming a file opens its folder and highlights it, which is the only useful reading of "open
+this file" for a file browser). Highlighting goes through `DirectoryTabViewModel.PendingSelection`,
+a one-shot the **view** consumes once `FileListViewModel.Items` has been replaced — the selection
+lives in the `ListView`, so nothing else can apply it, and not before the rows exist. It is applied
+*before* `FocusFileList`, since selecting scrolls.
 
 ### Theming
 
@@ -419,11 +501,50 @@ shared decide/highlight/execute logic; `Views/FileDragDropController` is attache
 source + list drop target), which is what makes dragging between panes work — it resolves an
 empty-space drop against its *own* tab's directory; and `Views/TreeDropTarget` is attached **once**
 by the window, because the folder tree is shared and a per-pane controller hooking its `Drop` would
-plan and carry out the same transfer once per open pane. Drops use a private `BertBrowser.FileItems`
-data format so they stay in-app. Two further details matter: pressing an already-selected row
-**defers** WPF's collapse-to-one-item selection to mouse-up, or a multi-item drag would carry one
-item; and the plan computed while hovering is only advisory — the drop always re-plans from scratch
-before writing.
+plan and carry out the same transfer once per open pane. Two further details matter: pressing an
+already-selected row **defers** WPF's collapse-to-one-item selection to mouse-up, or a multi-item
+drag would carry one item; and the plan computed while hovering is only advisory — the drop always
+re-plans from scratch before writing.
+
+**Dragging out to other applications** works, and the asymmetry is deliberate: the payload carries
+CF_HDROP *as well as* the private `BertBrowser.FileItems` format, but `DropPipeline` **reads only
+the private one**. So an in-app drop is decided by exactly the code and plan it always was, while
+Explorer, editors, browsers and mail clients see an ordinary file drop. Accepting drops *from* other
+applications is out of scope — UIPI blocks it because this app is elevated, and the workaround opens
+a channel from lower-integrity processes.
+
+The source sets `Preferred DropEffect` = `Copy`. That is documented as a clipboard-paste convention,
+but Explorer honours it during a drag too — verified: a same-volume drag that would otherwise have
+defaulted to Move came back as Copy — and copying is the right default for dragging a file into
+another application. Shift still overrides it.
+
+**Whether the originals are then ours to delete is the dangerous question**, and it is answered by
+`Core/Services/Transfer/DragOutContract`, a pure function with a truth table in
+`DragOutContractTests`. `DoDragDrop` returning `Move` does *not* mean "delete": Explorer's
+same-volume move is an *optimized* move that relocates the files itself and reports
+`PERFORMEDDROPEFFECT = None`. Only a non-optimized move puts the removal on the source. Both report
+formats are frequently absent (Explorer left both unset in every drop this was verified against), so
+the rule has a defined answer for "no report at all" — fall back to the returned effect — and never
+deletes on anything except an explicit `Move`.
+
+Two independent guards stop us acting on **our own** drops, either of which suffices:
+`Views/DragSession` (a static claimed by `DropPipeline` the moment it recognises the private format)
+and `DropPipeline` setting `e.Effects = None` after handling. Without them our own move reads as an
+external one and we delete the items we just placed — the code previously never assigned `e.Effects`
+at all, so `DoDragDrop` returned whatever WPF left there.
+
+The removal itself goes through `ShellViewModel.RemoveDraggedOutSourcesAsync` → the **ordinary
+reversible delete**. Nothing calls `File.Delete`. That means an external window's say-so cannot
+reach past `DeletePlanner`'s refusals, sources that have already gone are dropped rather than
+reported (that is what an optimized move looks like from here), and Ctrl+Z puts everything back.
+
+This chain cannot be unit-tested past `DragOutContract`. It was verified with a scratch harness
+built twice from one source — `asInvoker` and `requireAdministrator` — confirming a medium-integrity
+Explorer really can call `GetData` back into a high-integrity process. Rebuild that harness rather
+than trusting a fake, and note the two traps it hit: logging from inside the COM callbacks hangs the
+app (they arrive on the UI thread inside `DoDragDrop`'s modal loop), and launching the `asInvoker`
+build from an elevated shell silently gives it a high token, so there is no control unless it goes
+out through `explorer.exe`.
 
 The left sidebar has two sections: **Bookmarks** (top, sized to content) and **Drives & devices** (below, fills the rest). `FolderTreeViewModel.Roots` is `ObservableCollection<ISidebarNode>` mixing browsable `DirectoryNodeViewModel` drives (expandable tree) with `PortableDeviceNodeViewModel` leaves — MTP phones/cameras enumerated off-thread via `Interop.PortableDevices` (Shell.Application COM on an STA thread) that open in Explorer on double-click, since their contents aren't a filesystem path. Bookmarks persist in the `bookmark` table via `BookmarkRepository`/`IBookmarkService`; the file-list and tree context menus toggle them (`ShellViewModel.ToggleBookmarksAsync`), and `BookmarksViewModel` keeps an in-memory key set so the menu can label Bookmark/Remove without a DB hit.
 

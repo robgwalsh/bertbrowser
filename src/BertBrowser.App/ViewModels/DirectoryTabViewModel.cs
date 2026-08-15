@@ -97,6 +97,14 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         }
     }
 
+    /// <summary>
+    /// An item to highlight once the next listing has loaded, then forgotten. Set by
+    /// <c>ShellViewModel.OpenRequestAsync</c> for Explorer's <c>/select</c>, and consumed by
+    /// <c>DirectoryTabView</c> — the selection lives in the <c>ListView</c>, so the view is the only
+    /// thing that can apply it, and only once the rows it names actually exist.
+    /// </summary>
+    public string? PendingSelection { get; set; }
+
     public bool CanGoBack => _backStack.Count > 0;
     public bool CanGoForward => _forwardStack.Count > 0;
     public bool CanGoUp => CurrentPath.Length > 0 && Path.GetDirectoryName(CurrentPath) is not null;

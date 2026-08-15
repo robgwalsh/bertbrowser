@@ -41,7 +41,7 @@ public sealed class DeleteSurveyorTests : IDisposable
 
     private DeleteSurvey Survey(params string[] sources) =>
         _surveyor.Survey(_planner.Plan(
-            sources.Select(s => new DeleteSource(s, Directory.Exists(s))).ToList(), permanent: false));
+            sources.Select(s => new DeleteSource(s, Directory.Exists(s))).ToList(), DeleteMode.Staged));
 
     [Fact]
     public void AFileIsOneFileAndItsOwnLength()
@@ -104,7 +104,7 @@ public sealed class DeleteSurveyorTests : IDisposable
 
         var reports = new SynchronousProgress<DeleteMeasurement>();
         var plan = _planner.Plan(
-            [new DeleteSource(a, false), new DeleteSource(b, false)], permanent: false);
+            [new DeleteSource(a, false), new DeleteSource(b, false)], DeleteMode.Staged);
         _surveyor.Survey(plan, CancellationToken.None, reports);
 
         Assert.Equal([a, b], reports.Reports.Select(r => r.SourcePath));
@@ -114,7 +114,7 @@ public sealed class DeleteSurveyorTests : IDisposable
     public void AnItemThatHasGoneIsMarkedIncompleteRatherThanThrowing()
     {
         var file = File_("hello", "a.txt");
-        var plan = _planner.Plan([new DeleteSource(file, false)], permanent: false);
+        var plan = _planner.Plan([new DeleteSource(file, false)], DeleteMode.Staged);
         File.Delete(file);
 
         var survey = _surveyor.Survey(plan);
@@ -128,7 +128,7 @@ public sealed class DeleteSurveyorTests : IDisposable
     {
         File_("one", "tree", "a.txt");
         var plan = _planner.Plan(
-            [new DeleteSource(Path.Combine(_root, "tree"), true)], permanent: false);
+            [new DeleteSource(Path.Combine(_root, "tree"), true)], DeleteMode.Staged);
 
         using var cts = new CancellationTokenSource();
         cts.Cancel();

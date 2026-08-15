@@ -1,8 +1,12 @@
+using System.Collections.Specialized;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using BertBrowser.App.Interop;
 using BertBrowser.App.ViewModels;
+using BertBrowser.Core.Services.Transfer;
 
 namespace BertBrowser.App.Views;
 
@@ -21,6 +25,7 @@ internal sealed class FileDragDropController
 {
     private readonly ListView _list;
     private readonly DirectoryTabViewModel _tab;
+    private readonly ShellViewModel _shell;
     private readonly DropPipeline _pipeline;
 
     private Point _pressOrigin;
@@ -36,6 +41,7 @@ internal sealed class FileDragDropController
     {
         _list = list;
         _tab = tab;
+        _shell = shell;
         // Results report in the pane the user dropped into, not in whichever one happens to be
         // active when the transfer finishes.
         _pipeline = new DropPipeline(shell, message => tab.StatusText = message);
@@ -106,6 +112,11 @@ internal sealed class FileDragDropController
         _dragCandidate = null;
     }
 
+    /// <summary>
+    /// Builds the payload and runs the drag. The <see cref="DataObject"/> carries the private
+    /// format <em>and</em> CF_HDROP: in-app targets read only the private one, so dropping between
+    /// panes behaves exactly as it always has, while other applications see an ordinary file drop.
+    /// </summary>
     private void StartDrag()
     {
         var paths = _list.SelectedItems.OfType<FileItemViewModel>()
@@ -115,10 +126,33 @@ internal sealed class FileDragDropController
 
         _dragging = true;
         _deferredSelection = null; // a drag consumes the deferred click
+
+        using var session = DragSession.Begin();
         try
         {
             var data = new DataObject(DropPipeline.ItemsFormat, paths);
-            DragDrop.DoDragDrop(_list, data, DragDropEffects.Move | DragDropEffects.Copy);
+
+            // What makes this a drag source for Explorer, editors, browsers and mail clients.
+            var files = new StringCollection();
+            foreach (var path in paths) files.Add(path);
+            data.SetFileDropList(files);
+
+            // Ask for a copy. Between two folders on one volume Explorer would otherwise default to
+            // a move, and dragging a file into another application should add it there rather than
+            // quietly take it out of the folder being browsed. Shift still overrides this.
+            DropEffectFormats.SetPreferred(data, DragDropEffects.Copy);
+
+            var result = DragDrop.DoDragDrop(_list, data, DragDropEffects.Move | DragDropEffects.Copy);
+
+            // Whether the originals are now ours to remove is the one genuinely dangerous question
+            // here, so it is decided by a pure, tested rule rather than inline.
+            var action = DragOutContract.Decide(
+                session.HandledInApp,
+                (DropEffect)(int)result,
+                DropEffectFormats.LogicalPerformedOn(data),
+                DropEffectFormats.PerformedOn(data));
+
+            _ = FinishDragOutAsync(action, paths);
         }
         catch (COMException)
         {
@@ -132,6 +166,38 @@ internal sealed class FileDragDropController
             _pipeline.ClearHighlight();
         }
     }
+
+    /// <summary>
+    /// Acts on the drag's verdict. Nothing here deletes: a removal goes through the ordinary
+    /// reversible delete, so an external application's say-so cannot reach past the delete
+    /// planner's refusals and Ctrl+Z still puts everything back.
+    /// </summary>
+    private async Task FinishDragOutAsync(DragOutAction action, string[] paths)
+    {
+        try
+        {
+            switch (action)
+            {
+                case DragOutAction.RemoveSources:
+                    await _shell.RemoveDraggedOutSourcesAsync(paths);
+                    break;
+
+                // An optimized move: the target relocated the items itself, so the folder they left
+                // has changed underneath us even though there is nothing for us to remove.
+                case DragOutAction.RefreshOnly:
+                    await _shell.RefreshTabsShowingAsync(ParentsOf(paths));
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            // An unhandled exception on an async void continuation would take the process down.
+            _tab.StatusText = $"Drag failed: {ex.Message}";
+        }
+    }
+
+    private static IEnumerable<string> ParentsOf(IEnumerable<string> paths) =>
+        paths.Select(Path.GetDirectoryName).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase);
 
     // --- Drop target ---
 

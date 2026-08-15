@@ -569,7 +569,7 @@ public partial class MainWindow : ThemedWindow
     /// away in this list, so the reversible one is the only one offered.</summary>
     private async Task DeleteTreeFolderAsync(string path)
     {
-        var plan = _shell.PlanDelete([new DeleteSource(path, IsDirectory: true)], permanent: false);
+        var plan = _shell.PlanDelete([new DeleteSource(path, IsDirectory: true)], DeleteMode.Recycle);
         if (!plan.HasWork)
         {
             if (plan.Problems is { Count: > 0 } problems)

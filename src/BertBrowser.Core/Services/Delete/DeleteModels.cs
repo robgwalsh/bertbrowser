@@ -1,5 +1,38 @@
 namespace BertBrowser.Core.Services.Delete;
 
+/// <summary>What the user asked for.</summary>
+public enum DeleteMode
+{
+    /// <summary>The ordinary delete: send the items to the Windows Recycle Bin, where they stay —
+    /// visible and restorable in Explorer — until the user empties it.</summary>
+    Recycle,
+
+    /// <summary>Move the items into this app's own holding folder instead. The fallback for volumes
+    /// with no working Recycle Bin, and still undoable for exactly one operation.</summary>
+    Staged,
+
+    /// <summary>Shift+Delete: erase in place, hold nothing, and there is no undo.</summary>
+    Permanent,
+}
+
+/// <summary>
+/// What will actually happen to one item, which is not always what the user asked for: a volume
+/// with no Recycle Bin — a network share, removable media with the bin turned off — takes the
+/// staged route instead. The planner decides this, so the confirmation can say what is really
+/// about to happen rather than what was requested.
+/// </summary>
+public enum DeleteDisposition
+{
+    /// <summary>Into the Windows Recycle Bin.</summary>
+    Recycle,
+
+    /// <summary>Into this app's holding folder.</summary>
+    Stage,
+
+    /// <summary>Erased in place.</summary>
+    Erase,
+}
+
 /// <summary>One item the user asked to delete.</summary>
 /// <param name="Path">Full path of the item.</param>
 /// <param name="IsDirectory">What the caller believes it is. The planner asks disk rather than
@@ -40,7 +73,11 @@ public sealed record RejectedDelete(string SourcePath, DeleteRejection Reason, s
 }
 
 /// <summary>One item the planner accepted.</summary>
-public sealed record PlannedDelete(string SourcePath, bool IsDirectory)
+/// <param name="Disposition">Where this particular item is going. Defaults to
+/// <see cref="DeleteDisposition.Stage"/>, which is the behaviour that predates the Recycle Bin and
+/// the safe answer for any caller that has not thought about it.</param>
+public sealed record PlannedDelete(
+    string SourcePath, bool IsDirectory, DeleteDisposition Disposition = DeleteDisposition.Stage)
 {
     public string Name => Path.GetFileName(SourcePath);
 
@@ -49,19 +86,30 @@ public sealed record PlannedDelete(string SourcePath, bool IsDirectory)
 }
 
 /// <summary>The validated answer to "what would deleting these do?".</summary>
-/// <param name="Permanent">True for a Shift+Delete: the items are erased instead of being set
-/// aside, and there is no undo.</param>
+/// <param name="Mode">What the user asked for. Individual items may still differ — see
+/// <see cref="PlannedDelete.Disposition"/>.</param>
 public sealed record DeletePlan(
-    bool Permanent,
+    DeleteMode Mode,
     IReadOnlyList<PlannedDelete> Deletions,
     IReadOnlyList<RejectedDelete> Rejected)
 {
+    /// <summary>A Shift+Delete: the items are erased instead of being set aside, and there is no
+    /// undo. Kept as a computed property because it is what the dialog and the executor's erase
+    /// branch actually care about.</summary>
+    public bool Permanent => Mode == DeleteMode.Permanent;
+
     public bool HasWork => Deletions.Count > 0;
 
     /// <summary>Refusals worth surfacing; no-ops are filtered out.</summary>
     public IReadOnlyList<RejectedDelete> Problems => Rejected.Where(r => !r.IsBenign).ToList();
 
-    public static DeletePlan Empty(bool permanent) => new(permanent, [], []);
+    /// <summary>True when the user asked for the Recycle Bin but at least one item cannot go there
+    /// and will be held by this app instead. The confirmation says so rather than letting the
+    /// difference be discovered later.</summary>
+    public bool HasStagedFallback =>
+        Mode == DeleteMode.Recycle && Deletions.Any(d => d.Disposition == DeleteDisposition.Stage);
+
+    public static DeletePlan Empty(DeleteMode mode) => new(mode, [], []);
 }
 
 /// <summary>How much one planned item actually amounts to, so the confirmation can say what is
@@ -94,10 +142,18 @@ public sealed record DeleteSurvey(IReadOnlyList<DeleteMeasurement> Items)
 /// <param name="SourcePath">Where it was — the undo target.</param>
 /// <param name="IsDirectory">True for a folder.</param>
 /// <param name="StagedPath">Where it is being held until the delete is committed, or null when it
-/// was erased outright. Undo moves it back from here.</param>
-public sealed record DeletedItem(string SourcePath, bool IsDirectory, string? StagedPath)
+/// was erased outright or sent to the Recycle Bin. Undo moves it back from here.</param>
+/// <param name="RecycledPath">The item's <c>$R</c> path inside the Recycle Bin, when that is where
+/// it went. Undo restores from exactly this rather than searching the bin for something with a
+/// matching original path, which is what keeps it correct when the same path has been deleted
+/// more than once.</param>
+public sealed record DeletedItem(
+    string SourcePath, bool IsDirectory, string? StagedPath, string? RecycledPath = null)
 {
     public string Name => Path.GetFileName(SourcePath);
+
+    /// <summary>True when the item still exists somewhere and can be put back.</summary>
+    public bool IsRecoverable => StagedPath is not null || RecycledPath is not null;
 }
 
 /// <param name="SourcePath">The item that could not be deleted.</param>
@@ -114,8 +170,10 @@ public sealed record DeleteOutcome(
     IReadOnlyList<FailedDelete> Failed,
     IReadOnlyList<string> StagingDirectories)
 {
-    /// <summary>Only a staged delete can be reversed; a permanent one erased the data.</summary>
-    public bool CanUndo => !Permanent && Deleted.Count > 0;
+    /// <summary>Only a delete that still has the data somewhere can be reversed. A permanent one
+    /// erased it; so did the Recycle Bin for any item it declined to hold, which is why this asks
+    /// each item rather than trusting the mode.</summary>
+    public bool CanUndo => !Permanent && Deleted.Any(d => d.IsRecoverable);
 
     public static DeleteOutcome Empty(bool permanent) => new(permanent, [], [], []);
 }

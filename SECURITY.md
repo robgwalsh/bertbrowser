@@ -79,6 +79,22 @@ Limits worth knowing:
 - **A program that requests elevation itself** now raises its own UAC prompt, where previously it
   inherited administrator rights silently.
 
+### Dragging files out of BertBrowser
+
+Files can be dragged from BertBrowser into other applications. If the receiving application takes
+the drop as a **move**, the CF_HDROP contract makes the source responsible for removing the
+originals — so BertBrowser does, but only through its ordinary reversible delete. The delete
+planner's refusals still apply, so no external window can talk BertBrowser into removing a drive
+root or a protected system folder, and Ctrl+Z puts everything back.
+
+BertBrowser asks for a **copy** by default, so a drag into another application adds a copy there
+rather than taking the file out of the folder you were looking at. Holding Shift still requests a
+move, as it does everywhere in Windows.
+
+Dropping files *into* BertBrowser from other applications is deliberately **not** supported. Windows
+blocks it because BertBrowser runs elevated, and the workaround would mean accepting a channel from
+lower-integrity processes for no benefit this app needs.
+
 ### Custom commands run what you tell them to
 
 User-defined context-menu commands (Settings → Commands) execute the program you name with the
@@ -92,12 +108,22 @@ sitting next to the one you clicked.
 
 ### Deleted files are moved, not erased
 
-An ordinary delete moves items to a hidden `.bertbrowser-trash` folder at the root of their volume
-so that Ctrl+Z can put them back, and they are erased only when the undo slot is retired or on a
-startup sweep of batches over a day old. Two things follow on a **shared** computer: other local
-users can see the *names* of what you deleted, and can tamper with the staged data (destroying your
-undo). File contents keep their original permissions across the move. Shift+Delete erases in place
-and stages nothing.
+An ordinary delete sends items to the **Windows Recycle Bin**, where they stay — visible and
+restorable in Explorer — until you empty it. Ctrl+Z restores from there.
+
+Where a volume has no working Recycle Bin (a network share, removable media with it turned off) the
+items go instead to a hidden `.bertbrowser-trash` folder at the root of their volume, and are erased
+when the undo slot is retired or on a startup sweep of batches over a day old. Two things follow on
+a **shared** computer for that fallback path only: other local users can see the *names* of what you
+deleted, and can tamper with the staged data (destroying your undo). File contents keep their
+original permissions across the move either way.
+
+Shift+Delete erases in place, holds nothing, and cannot be undone.
+
+Because this app is elevated, one Windows dialog is deliberately left switched on: if an item cannot
+be recycled — most often because it is larger than the bin's quota — Windows asks before erasing it
+rather than being silently permitted to. Every other shell confirmation, progress and error dialog
+is suppressed in favour of BertBrowser's own.
 
 ### What *is* in scope
 

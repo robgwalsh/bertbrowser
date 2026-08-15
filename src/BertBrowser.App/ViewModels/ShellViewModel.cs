@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using BertBrowser.App.Interop;
 using BertBrowser.App.Services;
+using BertBrowser.Core.Cli;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Paths;
@@ -291,6 +292,63 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     {
         if (path.Length == 0) return;
         SplitPane(ActivePane, orientation, path);
+    }
+
+    /// <summary>
+    /// Carries out a request from the command line, or from a second copy of the app handing over
+    /// its own. Each target is resolved against disk here rather than in the parser, which is pure.
+    /// </summary>
+    /// <remarks>
+    /// A target naming a file rather than a folder opens the folder it is in and highlights it —
+    /// the same thing Explorer's <c>/select</c> does, and the only useful reading of "open this
+    /// file" for a file browser.
+    /// </remarks>
+    public async Task OpenRequestAsync(CommandLineRequest request)
+    {
+        foreach (var target in request.Targets)
+        {
+            var (directory, selection) = Resolve(target);
+            if (directory is null) continue;
+
+            DirectoryTabViewModel tab;
+            switch (request.Mode)
+            {
+                case OpenIn.NewTab:
+                    tab = ActivePane.AddTab(directory, activate: true);
+                    break;
+
+                case OpenIn.NewPane:
+                    SplitPane(ActivePane, SplitOrientation.Vertical, directory);
+                    tab = ActiveTab; // SplitPane activates the pane it just created
+                    break;
+
+                default:
+                    tab = ActiveTab;
+                    await tab.NavigateToAsync(directory);
+                    break;
+            }
+
+            // Applied by the view once the listing it belongs to has finished loading.
+            tab.PendingSelection = selection;
+        }
+    }
+
+    /// <summary>Turns one requested target into "which folder to show, and what to highlight in
+    /// it". Null when it names nothing that exists.</summary>
+    private static (string? Directory, string? Selection) Resolve(OpenTarget target)
+    {
+        if (Directory.Exists(target.Path))
+        {
+            // A folder asked for with /select is highlighted in its parent, like Explorer.
+            if (!target.Select) return (target.Path, null);
+            var above = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(target.Path));
+            return above is null ? (target.Path, null) : (above, target.Path);
+        }
+
+        if (File.Exists(target.Path))
+            return (Path.GetDirectoryName(target.Path), target.Path);
+
+        return (null, null);
     }
 
     /// <summary>Asks the window to reveal <paramref name="directory"/> in the folder tree. Ignored
@@ -678,8 +736,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
     /// <summary>Works out what deleting these would take with it, without changing anything — the
     /// confirmation dialog shows exactly this plan, and the executor is handed the same one.</summary>
-    public DeletePlan PlanDelete(IReadOnlyList<DeleteSource> sources, bool permanent) =>
-        _deletePlanner.Plan(sources, permanent);
+    public DeletePlan PlanDelete(IReadOnlyList<DeleteSource> sources, DeleteMode mode) =>
+        _deletePlanner.Plan(sources, mode);
 
     /// <summary>Measures a plan for the confirmation dialog. Off the UI thread and cancellable: a
     /// folder holding a hundred thousand files takes a moment to add up, and closing the dialog
@@ -693,7 +751,58 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// failed.</summary>
     /// <remarks>The plan is advisory in the same way a drop plan is: it was built before the
     /// confirmation was answered, and the executor re-checks every item against live disk state.</remarks>
-    public async Task<DeleteOutcome> DeleteAsync(DeletePlan plan)
+    /// <summary>
+    /// Removes items that a foreign application took with a move. Called only when
+    /// <see cref="DragOutContract"/> says the target copied them and left the originals to us.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This goes through the ordinary reversible delete rather than removing anything directly, and
+    /// that is the whole point. An external window's say-so cannot reach past
+    /// <c>DeletePlanner</c>'s refusals — a drive root, a protected location — the removal is a
+    /// rename rather than a copy however large the tree is, and it claims the undo slot, so Ctrl+Z
+    /// puts everything back if the drag went somewhere unexpected.
+    /// </para>
+    /// <para>
+    /// Sources that have already gone are dropped rather than reported: that is what an optimized
+    /// move looks like from here, and it is a success, not a failure.
+    /// </para>
+    /// </remarks>
+    public async Task RemoveDraggedOutSourcesAsync(IReadOnlyList<string> paths)
+    {
+        var sources = paths
+            .Where(p => File.Exists(p) || Directory.Exists(p))
+            .Select(p => new DeleteSource(p, Directory.Exists(p)))
+            .ToList();
+
+        if (sources.Count == 0)
+        {
+            await RefreshTabsShowingAsync(ParentDirectoriesOf(paths));
+            return;
+        }
+
+        var plan = PlanDelete(sources, DeleteMode.Recycle);
+        if (!plan.HasWork)
+        {
+            await RefreshTabsShowingAsync(ParentDirectoriesOf(paths));
+            return;
+        }
+
+        var outcome = await DeleteAsync(
+            plan, $"Ctrl+Z: undo moving {plan.Deletions.Count:N0} item(s) out of BertBrowser");
+
+        // DeleteAsync leaves "Deleted N item(s)" behind, which after a drag into another window
+        // reads as though the drag destroyed them. Say what actually happened instead.
+        if (outcome.Failed.Count == 0 && outcome.Deleted.Count > 0)
+            SetStatus($"Moved {outcome.Deleted.Count:N0} item(s) out — Ctrl+Z to undo");
+    }
+
+    private static IEnumerable<string> ParentDirectoriesOf(IEnumerable<string> paths) =>
+        paths.Select(Path.GetDirectoryName).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase);
+
+    /// <param name="undoDescription">What Ctrl+Z will say. Defaults to describing a delete; a drag
+    /// out of the app reuses this whole path but is not, to the user, a delete.</param>
+    public async Task<DeleteOutcome> DeleteAsync(DeletePlan plan, string? undoDescription = null)
     {
         // Shares the transfer flag with moves and renames: Ctrl+Z must not reach the previous
         // operation's undo record while any of them is still running.
@@ -717,7 +826,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             if (outcome.CanUndo)
             {
                 _undoableDelete = outcome;
-                UndoDescription = $"Ctrl+Z: undo delete of {outcome.Deleted.Count:N0} item(s)";
+                UndoDescription = undoDescription
+                    ?? $"Ctrl+Z: undo delete of {outcome.Deleted.Count:N0} item(s)";
             }
 
             // Vacate first: a tab still pointing inside a folder that has gone would otherwise be
