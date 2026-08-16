@@ -168,13 +168,41 @@
                            Visibility="{Binding ActiveTab.SelectionSummary, Converter={StaticResource NullToCollapsed}}">
                 <TextBlock Text="{Binding ActiveTab.SelectionSummary}" Foreground="{StaticResource Theme.Text.Secondary}" Margin="10,0,0,0"/>
             </StatusBarItem>
-            <!-- Background MFT indexing progress (blank when idle). -->
+            <!-- Background MFT indexing progress (blank when idle), or why there is no index.
+                 When the reason is one the user can act on — a declined elevation prompt, a helper
+                 that died — the same text becomes a button that asks again. Nothing retries on a
+                 timer: every retry is a UAC prompt. -->
             <StatusBarItem DockPanel.Dock="Left"
                            Visibility="{Binding IndexingStatus, Converter={StaticResource NullToCollapsed}}">
                 <StackPanel Orientation="Horizontal">
+                    <!-- StatusBar tokens, not Theme.Text.Link: the link colour is chosen to read
+                         against the body background, and this strip is the accent colour. The
+                         contrast suite covers these two against it. -->
                     <TextBlock Style="{StaticResource ToolbarIcon}" FontSize="12" Text="&#xE9D9;"
-                               Foreground="{StaticResource Theme.Text.Link}" Margin="10,0,4,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding IndexingStatus}" Foreground="{StaticResource Theme.Text.Link}" VerticalAlignment="Center"/>
+                               Foreground="{StaticResource Theme.StatusBar.Foreground}" Margin="10,0,4,0" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding IndexingStatus}" Foreground="{StaticResource Theme.StatusBar.Foreground}"
+                               VerticalAlignment="Center">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IndexingCanRetry}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <Button Style="{StaticResource LinkButton}"
+                            Foreground="{StaticResource Theme.StatusBar.Foreground}"
+                            Command="{Binding RetryIndexingCommand}"
+                            ToolTip="Ask for administrator rights again so drives can be indexed"
+                            VerticalAlignment="Center"
+                            Visibility="{Binding IndexingCanRetry, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock>
+                            <Run Text="{Binding IndexingStatus, Mode=OneWay}"/><Run Text="  Try again"
+                                 FontWeight="SemiBold"/>
+                        </TextBlock>
+                    </Button>
                 </StackPanel>
             </StatusBarItem>
             <!-- Thumbnail size: min = details list, dragging right grows thumbnails. -->

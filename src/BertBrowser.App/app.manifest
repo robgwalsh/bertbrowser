@@ -2,12 +2,16 @@
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
   <assemblyIdentity version="1.0.0.0" name="BertBrowser.App"/>
 
-  <!-- Reading the NTFS MFT and USN change journal (global search) needs a raw volume
-       handle, which the OS only grants to an elevated process. -->
+  <!-- asInvoker. A file browser runs as the person using it: what it opens, deletes and launches
+       should carry their rights and no more. Reading the NTFS MFT and USN change journal does need
+       a raw volume handle and therefore an administrator token, so that one job lives in
+       BertBrowser.Indexer.exe, which this process starts on demand and which can do nothing else.
+       Do not put requireAdministrator back here to fix an access-denied error — a folder this app
+       cannot read is a folder Explorer cannot read either, and that is the intended behaviour. -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
-        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>

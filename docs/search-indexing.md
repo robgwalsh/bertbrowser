@@ -142,10 +142,14 @@ life of the app. A volume that fails to open, has no usable journal, or throws m
 non-fatal — searches on it fall back to the crawler. `StatusText` drives the "Indexing C:…" note in
 the status bar, and `IndexRefreshed` lets an already-open search re-query once a volume lands.
 
-**This is why the app requests `requireAdministrator`.** Opening `\\.\C:` for raw reads needs it.
-Nothing else in BertBrowser does — including the programs it launches, which are started by the
-desktop shell at your own integrity level rather than inheriting this one. See
-[SECURITY.md](../SECURITY.md).
+**This is why there is a separate elevated process.** Opening `\\.\C:` for raw reads needs an
+administrator token, and nothing else in BertBrowser does — so the app itself is `asInvoker` and
+everything described above runs inside `BertBrowser.Indexer.exe`, which the app starts on demand and
+talks to over a named pipe. The app holds an `MftIndexClient` that mirrors what the helper reports,
+so `IsIndexed`, `AnyIndexed` and `StatusText` answer locally and none of the consumers above know
+the difference. If the helper cannot run — a declined prompt, a standard-user account — nothing is
+indexed and every search falls back to the crawler, which is the same path a non-NTFS volume takes.
+See [SECURITY.md](../SECURITY.md) and the "elevated index helper" section of `CLAUDE.md`.
 
 ## Maintain: the USN journal
 
@@ -244,7 +248,9 @@ the canonical path.
 
 ## Costs and limits
 
-- **Admin rights**, for raw volume access. Non-negotiable for the MFT path.
+- **Admin rights**, for raw volume access. Non-negotiable for the MFT path — but confined to
+  `BertBrowser.Indexer.exe`, so it costs one UAC prompt per session rather than an elevated browser.
+  Declining is survivable: everything falls back to the crawler.
 - **Fixed NTFS volumes only.** Network shares, exFAT/FAT32 removable media and MTP devices go
   through the crawler (or, for MTP, are not searchable at all).
 - **Index size** is one row per file and directory on every fixed volume, in

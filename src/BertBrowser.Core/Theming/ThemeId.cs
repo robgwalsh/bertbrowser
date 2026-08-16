@@ -5,8 +5,8 @@ namespace BertBrowser.Core.Theming;
 /// <summary>
 /// A theme's id is also its filename, so it is the one piece of a theme that can reach outside the
 /// themes folder. An imported <c>*.json</c> is untrusted input — its <c>"id"</c> is whatever the
-/// author typed — and this app runs elevated, so an id of <c>C:\Windows\Temp\evil</c> or
-/// <c>..\..\..\something</c> would otherwise become an arbitrary write as administrator
+/// author typed — so an id of <c>C:\Windows\Temp\evil</c> or <c>..\..\..\something</c> would
+/// otherwise become a write anywhere the user can write, rather than a file in the themes folder
 /// (<see cref="System.IO.Path.Combine(string, string)"/> discards the first path entirely when the
 /// second is rooted).
 /// </summary>

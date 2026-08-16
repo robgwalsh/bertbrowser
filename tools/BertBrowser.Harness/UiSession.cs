@@ -8,6 +8,7 @@ using BertBrowser.App.Theming;
 using BertBrowser.App.ViewModels;
 using BertBrowser.App.Views;
 using BertBrowser.Core.Data;
+using BertBrowser.Core.Services.Mft;
 using Microsoft.Extensions.DependencyInjection;
 using AppShell = BertBrowser.App.App;
 
@@ -104,8 +105,36 @@ internal sealed class UiSession : IDisposable
                 "an unstyled window.");
 
         var launcher = new RefusingProcessLauncher();
-        var services = AppShell.BuildServices(s => s.AddSingleton<IProcessLauncher>(launcher));
+        var services = AppShell.BuildServices(s =>
+        {
+            s.AddSingleton<IProcessLauncher>(launcher);
+
+            // The app's own registration starts BertBrowser.Indexer.exe elevated, which means a
+            // UAC dialog on the user's desktop — the one thing parking the window offscreen cannot
+            // fix. A scripted run gets nothing, the in-process indexer (--index), or the real
+            // client against a launcher that starts nothing (--index-declined).
+            s.AddSingleton<IMftIndexService>(provider =>
+            {
+                if (options.IndexDeclined)
+                    return new MftIndexClient(new DecliningIndexHostLauncher(), new NoIndexTransportFactory());
+
+                return options.Index
+                    ? new MftIndexService(
+                        provider.GetRequiredService<FsIndexRepository>(),
+                        provider.GetRequiredService<DirSizeRepository>())
+                    : new NullMftIndexService();
+            });
+        });
         AppShell.UseServices(services);
+
+        // Belt to that braces: if the app's default ever reaches a run, fail here rather than
+        // prompting whoever is at the keyboard. --index-declined is exempt because it builds the
+        // client itself, over a launcher that starts nothing — the client is not the hazard, the
+        // launcher under it is.
+        if (!options.IndexDeclined && services.GetRequiredService<IMftIndexService>() is MftIndexClient)
+            throw new InvalidOperationException(
+                "The harness resolved the elevating index client. A scripted run must never raise " +
+                "a UAC prompt; register NullMftIndexService or MftIndexService instead.");
 
         services.GetRequiredService<Db>().Migrate();
 
@@ -143,10 +172,25 @@ internal sealed class UiSession : IDisposable
         var session = new UiSession(options, window, services, launcher, guard);
 
         // The MFT indexer is off unless asked for: it reads every NTFS volume's master file table,
-        // which is minutes of disk on a machine someone is using, and it needs rights this process
-        // deliberately does not request.
-        if (options.Index)
-            services.GetRequiredService<BertBrowser.Core.Services.Mft.IMftIndexService>().Start();
+        // which is minutes of disk on a machine someone is using. With --index it runs *in this
+        // process* rather than through the elevated helper, so it can never prompt — and since the
+        // harness is asInvoker, MftVolumeIndexer.Open() simply fails soft on every volume unless
+        // this run was itself started elevated, leaving the crawler to cover the search.
+        if (options.IndexDeclined)
+        {
+            // Nothing is started; the client reports the declined prompt and the status bar shows
+            // its retry.
+            services.GetRequiredService<IMftIndexService>().Start();
+        }
+        else if (options.Index)
+        {
+            if (!IsElevated())
+                log.WriteLine("# NOTE: --index without elevation; volumes will be skipped and the " +
+                              "crawl fallback used. Start the harness from an elevated shell to " +
+                              "exercise the real MFT pass.");
+
+            services.GetRequiredService<IMftIndexService>().Start();
+        }
 
         session.WaitForFirstListing();
 
@@ -310,5 +354,23 @@ internal sealed class UiSession : IDisposable
 
         Dispatcher.InvokeShutdown();
         _guard.Dispose();
+    }
+
+    /// <summary>
+    /// Whether this run holds an administrator token, so <c>--index</c> can say up front that it
+    /// will not reach a single volume rather than leaving an empty index to be puzzled over.
+    /// </summary>
+    private static bool IsElevated()
+    {
+        try
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            return new System.Security.Principal.WindowsPrincipal(identity)
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        catch (Exception e) when (e is UnauthorizedAccessException or InvalidOperationException)
+        {
+            return false;
+        }
     }
 }

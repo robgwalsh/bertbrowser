@@ -1,0 +1,35 @@
+# What the window looks like when there is no search index.
+#
+# Run with --index-declined, which puts the real MftIndexClient behind a launcher that starts
+# nothing and reports a declined elevation prompt. Everything below the launcher is genuine, so
+# this is the failure path the app actually takes when someone says no to the UAC dialog — not a
+# picture staged to resemble it.
+#
+#   BertBrowser.Harness.exe --script tools/ui/index-degraded.bbs --index-declined
+
+tree .
+refresh
+assert-count 8
+
+# The status bar says why there is no index, and offers to ask again. Nothing retries on a timer:
+# every retry is a UAC prompt.
+settle
+assert-indexing "permission declined"
+assert-indexing retry
+shot 01-index-declined
+
+# The app is entirely usable without it. Browsing, folder-local search, and everything that does
+# not read the MFT behave exactly as they do with an index.
+search report
+assert-flattened
+assert-count 3
+clear-search
+assert-not-flattened
+shot 02-usable-without-index
+
+# A whole-PC search still answers — SearchService falls back to its crawl — but says the index is
+# off rather than promising a background pass that is not happening.
+gsearch report
+settle
+assert-status "the search index is off"
+shot 03-global-search-degraded

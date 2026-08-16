@@ -1,16 +1,20 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
-using System.Windows;
-using BertBrowser.App.Interop;
-using BertBrowser.App.Views;
 using BertBrowser.Core.Services;
 
 namespace BertBrowser.App.Services;
 
 /// <summary>
-/// The one way this app starts another program. Nothing else may call <see cref="Process.Start"/>:
-/// this process holds an administrator token, and a child started directly inherits it silently.
+/// The one way this app starts another program.
 /// </summary>
+/// <remarks>
+/// Still a single chokepoint, though no longer for the original reason. This process used to hold
+/// an administrator token, so a child started directly inherited it without a prompt — opening a
+/// downloaded <c>.exe</c> ran it as administrator. The app is <c>asInvoker</c> now and a child
+/// inherits an ordinary token, so the danger is gone; what remains is worth keeping anyway, because
+/// one place that starts programs is one place to audit, to fake in the harness, and to change.
+/// </remarks>
 public interface IProcessLauncher
 {
     /// <summary>
@@ -23,43 +27,56 @@ public interface IProcessLauncher
 
     /// <summary>
     /// The absolute path <paramref name="program"/> resolves to, or null. Callers with a fallback
-    /// chain ("Windows Terminal, else PowerShell") ask this first: a launch no longer throws when
-    /// the program is missing, so this is how they find out.
+    /// chain ("Windows Terminal, else PowerShell") ask this first, and it also decides <em>what</em>
+    /// runs here — against <c>PATH</c>, rather than leaving a bare name to be resolved later
+    /// against whatever folder happens to be current.
     /// </summary>
     string? Resolve(string program);
 }
 
 /// <inheritdoc cref="IProcessLauncher"/>
 /// <remarks>
-/// Mechanism lives in <see cref="ShellLauncher"/>; this is the policy on top of it. The policy is
-/// one sentence: <b>nothing starts elevated unless the user chose it.</b> So when the shell route
-/// is unavailable — no explorer, an unusual shell, a shell that did not answer in time — this does
-/// not quietly fall back to the elevated launch that was the original problem. It says so, and
-/// asks.
+/// <para>
+/// The policy is still one sentence — <b>nothing starts elevated unless the user chose it</b> — but
+/// it now costs nothing to keep. An ordinary launch is an ordinary launch; <c>runas</c> from a
+/// medium-integrity process raises a real UAC prompt, which is what "Run as administrator" should
+/// have meant all along. From the old elevated process the same verb elevated silently, since the
+/// token was already there, which is why this used to be several hundred lines of COM reaching into
+/// <c>explorer.exe</c> to borrow a lesser token back.
+/// </para>
+/// <para>
+/// A declined prompt is <c>ERROR_CANCELLED</c> and is reported as the user's choice rather than as
+/// a failure.
+/// </para>
 /// </remarks>
 public sealed class ProcessLauncher : IProcessLauncher
 {
+    private const int ERROR_CANCELLED = 1223;
+
     public string? Launch(string file, string? arguments = null, string? workingDirectory = null,
         bool elevated = false)
     {
         if (string.IsNullOrWhiteSpace(file)) return "Nothing to open.";
 
-        var verb = elevated ? "runas" : null;
-        var result = ShellLauncher.ShellExecuteAsUser(file, arguments, workingDirectory, verb, out var error);
-
-        return result switch
+        try
         {
-            ShellLaunchResult.Launched => null,
-
-            // The shell was reached and may still be working on it. Offering to start it another
-            // way here is how you end up running it twice, so this only reports.
-            ShellLaunchResult.Unresponsive =>
-                $"Windows Explorer did not respond. '{Describe(file)}' may still open.",
-
-            // No shell to hand it to, and doing it ourselves means doing it as administrator.
-            // That is the user's call, not ours.
-            _ => AskThenLaunchElevated(file, arguments, workingDirectory, error),
-        };
+            Process.Start(new ProcessStartInfo(file, arguments ?? "")
+            {
+                UseShellExecute = true,
+                Verb = elevated ? "runas" : "",
+                WorkingDirectory = workingDirectory ?? "",
+            });
+            return null;
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == ERROR_CANCELLED)
+        {
+            return $"'{Describe(file)}' was not opened.";
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException
+                                      or FileNotFoundException or ObjectDisposedException)
+        {
+            return $"Cannot open: {ex.Message}";
+        }
     }
 
     public string? Resolve(string program) => ExecutablePath.Resolve(
@@ -71,48 +88,4 @@ public sealed class ProcessLauncher : IProcessLauncher
     /// <summary>What to call this file in a sentence.</summary>
     private static string Describe(string file) =>
         Path.GetFileName(file.TrimEnd('\\')) is { Length: > 0 } name ? name : file;
-
-    private static string? AskThenLaunchElevated(
-        string file, string? arguments, string? workingDirectory, string? error)
-    {
-        var name = Describe(file);
-        var message =
-            $"Windows could not be asked to open '{name}' as your normal user account " +
-            $"({error?.TrimEnd('.') ?? "the shell did not respond"}).\n\n" +
-            "BertBrowser runs as administrator so it can index your drives, so opening it from here " +
-            "would run it as administrator too — with full access to this computer.\n\n" +
-            "Open it as administrator anyway?";
-
-        if (!Confirm(message)) return $"'{name}' was not opened.";
-
-        try
-        {
-            Process.Start(new ProcessStartInfo(file, arguments ?? "")
-            {
-                UseShellExecute = true,
-                WorkingDirectory = workingDirectory ?? "",
-            });
-            return null;
-        }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException
-                                      or FileNotFoundException)
-        {
-            return $"Cannot open: {ex.Message}";
-        }
-    }
-
-    /// <summary>Dialogs belong to the UI thread, and a launch can be requested from a background
-    /// continuation, so the ask is marshalled rather than assumed to be on it.</summary>
-    private static bool Confirm(string message)
-    {
-        var app = Application.Current;
-        if (app is null) return false;
-
-        return app.Dispatcher.Invoke(() => MessageDialog.Show(
-            app.MainWindow,
-            message,
-            "Run as administrator?",
-            MessageDialogKind.Warning,
-            showCancel: true));
-    }
 }

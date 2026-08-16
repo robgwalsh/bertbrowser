@@ -11,13 +11,29 @@ public sealed class Db
 {
     private readonly string _connectionString;
 
-    public Db(string databasePath)
+    public Db(string databasePath) : this(databasePath, create: true)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+    }
+
+    /// <summary>
+    /// Opens a database, optionally refusing to bring one into existence.
+    /// </summary>
+    /// <param name="create">
+    /// False for the elevated index helper, and deliberately so. It runs with an administrator
+    /// token, and a file an elevated process creates is owned by Administrators — so a helper that
+    /// somehow ran before the app would leave a database and a directory the app then has to live
+    /// with. The app creates and migrates first; the helper attaches to what is already there and
+    /// fails loudly if it is not.
+    /// </param>
+    public Db(string databasePath, bool create)
+    {
+        if (create)
+            Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = databasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
+            Mode = create ? SqliteOpenMode.ReadWriteCreate : SqliteOpenMode.ReadWrite,
             Pooling = true,
         }.ToString();
     }

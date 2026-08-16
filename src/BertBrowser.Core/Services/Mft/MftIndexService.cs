@@ -1,8 +1,6 @@
-using System.Collections.Concurrent;
 using System.Text;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Interop;
-using BertBrowser.Core.Paths;
 
 namespace BertBrowser.Core.Services.Mft;
 
@@ -20,6 +18,13 @@ public interface IMftIndexService : IDisposable
     /// are partial and a refresh is coming).</summary>
     bool IsBuilding { get; }
 
+    /// <summary>
+    /// The bare drive letters currently building. Exposed because the out-of-process host has to
+    /// relay this exactly rather than paraphrase it: the client formats the status line with the
+    /// same function the in-process indexer does, so the two can never word it differently.
+    /// </summary>
+    IReadOnlyCollection<string> BuildingDrives { get; }
+
     /// <summary>True if <paramref name="pathKey"/> sits on a volume whose live MFT index is
     /// complete. Search uses this to treat that root as fresh and skip the crawl fallback.</summary>
     bool IsIndexed(string pathKey);
@@ -33,6 +38,19 @@ public interface IMftIndexService : IDisposable
 
     /// <summary>Human-readable indexing state for the status bar; empty when idle.</summary>
     string StatusText { get; }
+
+    /// <summary>
+    /// True when <see cref="StatusText"/> describes a failure the user could do something about —
+    /// a declined elevation prompt, or an indexer that died — so the status bar can offer a retry.
+    /// </summary>
+    /// <remarks>
+    /// There is deliberately no automatic retry anywhere behind this. Retrying means raising a UAC
+    /// prompt, and a prompt nobody asked for that reappears on a timer is worse than no index.
+    /// </remarks>
+    bool CanRetry { get; }
+
+    /// <summary>Tries again after a failure. A no-op unless <see cref="CanRetry"/>.</summary>
+    void Retry();
 }
 
 /// <summary>
@@ -48,8 +66,7 @@ public sealed class MftIndexService : IMftIndexService
     private readonly CancellationTokenSource _lifetime = new();
     private readonly List<Thread> _threads = new();
     private readonly List<MftVolumeIndexer> _indexers = new();
-    private readonly ConcurrentDictionary<string, byte> _completedRoots = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, byte> _building = new(StringComparer.Ordinal);
+    private readonly MftIndexState _state = new();
     private int _started;
 
     public event Action<string>? IndexRefreshed;
@@ -61,21 +78,20 @@ public sealed class MftIndexService : IMftIndexService
         _dirSizeRepository = dirSizeRepository;
     }
 
-    public bool AnyIndexed => !_completedRoots.IsEmpty;
+    public bool AnyIndexed => _state.AnyIndexed;
 
-    public bool IsBuilding => !_building.IsEmpty;
+    public bool IsBuilding => _state.IsBuilding;
+
+    public IReadOnlyCollection<string> BuildingDrives => _state.BuildingDrives;
 
     public string StatusText { get; private set; } = "";
 
-    public bool IsIndexed(string pathKey)
-    {
-        foreach (var root in _completedRoots.Keys)
-        {
-            if (pathKey.Equals(root, StringComparison.Ordinal) || PathKey.IsUnder(pathKey, root))
-                return true;
-        }
-        return false;
-    }
+    /// <summary>Always false: the in-process indexer needs nothing the user could grant it.</summary>
+    public bool CanRetry => false;
+
+    public bool IsIndexed(string pathKey) => _state.IsIndexed(pathKey);
+
+    public void Retry() => Start();
 
     public void Start()
     {
@@ -105,15 +121,15 @@ public sealed class MftIndexService : IMftIndexService
             if (!indexer.Open())
                 return; // couldn't open volume / no journal — leave to the crawl fallback
 
-            _building[drive] = 0;
+            _state.MarkBuilding(drive);
             UpdateStatus();
 
             indexer.BuildInitialIndex(ct);
             if (ct.IsCancellationRequested)
                 return;
 
-            _completedRoots[indexer.RootKey] = 0;
-            _building.TryRemove(drive, out _);
+            _state.MarkComplete(indexer.RootKey);
+            _state.ClearBuilding(drive);
             UpdateStatus();
             IndexRefreshed?.Invoke(indexer.RootKey);
 
@@ -128,20 +144,14 @@ public sealed class MftIndexService : IMftIndexService
         }
         finally
         {
-            _building.TryRemove(drive, out _);
+            _state.ClearBuilding(drive);
             UpdateStatus();
         }
     }
 
     private void UpdateStatus()
     {
-        var building = _building.Keys.OrderBy(d => d, StringComparer.Ordinal).ToList();
-        StatusText = building.Count switch
-        {
-            0 => "",
-            1 => $"Indexing {building[0]}:…",
-            _ => $"Indexing {string.Join(", ", building.Select(d => d + ":"))}…",
-        };
+        StatusText = _state.FormatStatus();
         StatusChanged?.Invoke();
     }
 

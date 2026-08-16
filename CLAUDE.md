@@ -35,6 +35,7 @@ To see the interface, use the harness (below), which hosts the same window where
 
 - `src/BertBrowser.Core` — plain net10.0, no UI dependencies: SQLite persistence, path canonicalization, search/size services. This is the only project with tests; keep anything testable here rather than in the App.
 - `src/BertBrowser.App` — WPF shell. MVVM via CommunityToolkit.Mvvm source generators (`[ObservableProperty]`, `[RelayCommand]` on `partial` classes), DI via `Microsoft.Extensions.DependencyInjection`. The composition root is `App.BuildServices()` in `App.xaml.cs` (`App.Services`): register new services/repositories there.
+- `src/BertBrowser.Indexer` — the elevated index helper: a small `net10.0` console exe with a `requireAdministrator` manifest, the only component that asks for one. It hosts the existing `MftIndexService` and reports over a pipe; see "The elevated index helper" below.
 - `tests/BertBrowser.Core.Tests` — xUnit; tests create real SQLite databases and directory trees under `%TEMP%`.
 - `tools/BertBrowser.Harness` — the UI harness; `tools/ui/*.bbs` are its scripts.
 
@@ -243,43 +244,101 @@ a `stagingRoot` purely so tests do not create folders at the root of a real disk
 confirm a test goes red — `DispositionFor` returning `Recycle` unconditionally, or the executor
 erasing when there is no bin, both go red.
 
+### The elevated index helper
+
+**The app is `asInvoker`.** Exactly one thing needs an administrator token — `MftVolumeIndexer.Open()`
+calling `CreateFileW(@"\\.\C:")` — and that one thing lives in its own process,
+`src/BertBrowser.Indexer` (a `net10.0` console exe with a `requireAdministrator` manifest). The App
+registers `MftIndexClient` for `IMftIndexService` instead of `MftIndexService`, so every consumer —
+`ShellViewModel`, `DirectoryTabViewModel`, `SearchService` — is unchanged by the split. That
+six-member interface is the whole seam.
+
+Do **not** put `requireAdministrator` back on the app to fix an access-denied error. A folder this
+app cannot read is a folder Explorer cannot read either, and that is now the intended behaviour.
+
+Four decisions here are load-bearing, and three of them were only found by driving the real thing:
+
+- **The app is the pipe server and the helper is the client**, which is the reverse of the obvious
+  arrangement. A pipe created by a high-integrity process carries a High mandatory label, and
+  mandatory policy forbids writing *up*, so a medium-integrity app could not write to a pipe its own
+  helper had created. Creating it app-side makes the helper's connection a write-*down*, always
+  permitted, and no labelling code is needed. Verified: a Medium (`S-1-16-8192`) process created the
+  pipe, a High (`S-1-16-12288`) helper connected, and messages crossed both ways.
+- **`PipeOptions.Asynchronous` on both ends, and real buffer sizes on the server.** Two separate
+  deadlocks live here. A pipe created with zero-size buffers holds nothing, so every write blocks
+  until the peer reads — and with both ends greeting each other, neither ever does
+  (`SingleInstance` gets away with zero only because its pipe is one-directional and never written
+  to). And Windows serializes I/O on a *non-overlapped* handle, so the helper's main thread parked in
+  a blocking read blocks its own volume threads' writes on the same handle: not one progress message
+  could leave while the app sat waiting for exactly those messages. Both look like "the helper
+  hangs".
+- **`CanElevate` must not use `IsInRole(Administrator)`.** An administrator running normally holds a
+  *filtered* token in which the Administrators group is deny-only, so `IsInRole` answers **false**
+  for precisely the people who can elevate — the app would tell every one of them their account is
+  not an administrator and never offer the prompt. `ElevatedIndexHostLauncher` reads the token's
+  elevation type instead (`Limited` or `Full` ⇒ can elevate). Measured on a real medium-integrity
+  process: `CanElevate: True`, `IsInRole(Admin): False`.
+- **The elevated surface is four verbs and never a path** — `Hello`, `Start`, `Shutdown`, `Ping`.
+  `IndexProtocol.IsAcceptableArgument` refuses an argument on any of them. Adding a "re-index this
+  folder" verb would put an attacker-chosen path on the elevated surface and undo the point of the
+  split.
+
+Lifetime: **losing the pipe is what kills the helper**, and the kernel breaks it however the app
+ends, crash included — measured at 4 ms after a `taskkill /f` mid-index. A watchdog on the parent's
+process handle is the backstop, and `Shutdown` is only the tidy path. The app **cannot** terminate
+the helper (a medium process may not open a high one for `PROCESS_TERMINATE`), which is why the
+first two are the guarantee.
+
+Both processes share the SQLite database, and that is safe for a reason worth knowing: the profile
+directory carries inheritable Full Control for the interactive user, so a file the elevated helper
+creates is *owned* by Administrators but still grants the user full access. Verified with `icacls`
+after a real 295,808-row index pass. The app creates and migrates the database first and the helper
+opens it with `create: false` and never calls `Migrate()` — schema ownership stays with the app.
+
+Degraded mode is the normal case, not an error: a declined prompt, a standard-user account, or a
+dead helper each leave `IsIndexed` false, `SearchService` falls back to its crawl exactly as it does
+on a non-NTFS volume, and the status bar carries the reason plus a retry. **Nothing retries on a
+timer** — every retry is a UAC prompt.
+
+Packaging costs nothing: CI publishes the helper into the same `publish` folder the app goes to, and
+`vpk pack --packDir publish` picks it up. Measured at ~218 KB on top of a 150 MB publish, because the
+helper's `net10.0` runtime set is a strict subset of the app's.
+
+**A local build needs the same thing, and the way it fails is misleading.** `ElevatedIndexHostLauncher`
+resolves the helper beside the executable and nowhere else, so a `bin` without it fails `File.Exists`
+*before* `ShellExecuteEx` — the status bar reports the index unavailable having never raised a UAC
+prompt, which reads as an elevation problem and is not one. `BertBrowser.App.csproj`'s `CopyIndexHelper`
+target builds the helper and copies it across, and two things about it are deliberate: it invokes the
+build directly rather than through a `ProjectReference`, because even `ReferenceOutputAssembly="false"`
+pulls the helper into the app's *publish* graph where it lands incoherent — apphost and `.json` files,
+no managed `.dll` — and is then hidden by the real self-contained publish landing on top of it; and it
+passes `RemoveProperties`, because a nested build inherits the outer one's global properties and
+`dotnet publish -r win-x64` would otherwise demand a RID flavour of the helper that nothing restored.
+Since the copy is not a reference, it does not propagate to projects referencing the App — a scratch
+driver that wants the real chain must copy the helper itself.
+
 ### Launching other programs
 
-**Nothing in this app calls `Process.Start` any more** — there is exactly one, inside
-`ProcessLauncher`, and a `git grep` finding a second one is a bug. The reason is that this process
-holds an administrator token for the MFT, and a child started directly inherits it *with no prompt*:
-double-clicking a downloaded `.exe` would run it as administrator. The split is three ways:
+**There is exactly one `Process.Start` in the app, inside `ProcessLauncher`**, and a `git grep`
+finding a second is still a bug — but the reason is now ordinary hygiene rather than danger. This
+process no longer holds an administrator token, so a child inherits an ordinary one; the chokepoint
+survives because one place that starts programs is one place to audit, to fake in the harness, and
+to change.
 
-- **`Interop/ShellLauncher`** is the mechanism, and the trick is that it does not launch anything.
-  `explorer.exe` already runs at the user's own integrity level and publishes its automation object
-  as `ShellWindows`; reaching that gets an `IShellDispatch2` **living in explorer's process**, and
-  asking *it* to `ShellExecute` makes explorer the parent, so the child gets explorer's token. This
-  is also what makes elevation honest: `runas` from *this* process would elevate silently — we
-  already hold the token — while from medium-integrity explorer it is a real request and Windows
-  prompts.
-- **`Services/ProcessLauncher`** (`IProcessLauncher`, DI) is the policy, and the policy is one
-  sentence: **nothing starts elevated unless the user chose it.** When the shell can't be reached it
-  refuses and asks rather than falling back to the elevated launch that was the original problem.
-- **`Core/Services/ExecutablePath`** resolves a program name to a full path *before* the handover.
+`ProcessLauncher` is `Process.Start` with `UseShellExecute` and, when the user asked for it, the
+`runas` verb — which from a medium-integrity process raises a real UAC prompt, so "Run as
+administrator" finally means what it says. `ERROR_CANCELLED` (1223) is reported as the user's choice
+rather than a failure.
 
-Four things here are load-bearing:
+**`Interop/ShellLauncher.cs` is gone**, along with its hand-declared COM vtables and the
+`AllowSetForegroundWindow` dance. It existed only to reach `explorer.exe` and borrow a lesser token
+back, and both of its reasons vanished with the manifest change. Do not reintroduce it.
 
-- **The COM interfaces are hand-declared and every method ahead of the one we call must be present**,
-  in vtable order, or the call lands on the wrong slot — which is an access violation, not a
-  catchable exception. `ShellWindows` has eight members before `FindWindowSW`; `IShellBrowser` and
-  `IShellView` each derive from `IOleWindow` and have twelve before the one we use.
-- **Resolving first is not a nicety.** `ShellExecute` returns `void` — no handle, no exit code, no
-  "not found". "Open in Terminal" used to discover that Windows Terminal was missing by letting
-  `Process.Start` *throw* and falling through to PowerShell in the `catch`; with the throw gone, a
-  null resolve is that signal. It also decides *what* runs here rather than leaving a bare `code` for
-  an elevated process to look up. `ExecutablePathTests` covers it — including that a path which
-  isn't fully qualified is never probed, since that would resolve against the working directory.
-- **A timeout is its own outcome** (`ShellLaunchResult.Unresponsive`), distinct from "unavailable",
-  and nothing may be retried after it: the shell may still be mid-launch, so offering an alternative
-  would start the thing twice.
-- **`AllowSetForegroundWindow`** hands foreground rights to explorer before the call. Without it the
-  launched window — and the UAC prompt, which explorer owns rather than us — opens *behind*
-  BertBrowser.
+**`Core/Services/ExecutablePath` stays.** Its first justification is dead (`Process.Start` throws
+when a program is missing, where `ShellExecute` returned `void`), but its second is not: it decides
+*what* runs against `PATH` rather than leaving a bare name to resolve against the folder being
+browsed. `ExecutablePathTests` covers it, including that a path which isn't fully qualified is never
+probed.
 
 Elevation is offered three ways: the file list's **Run as administrator** item (one file only),
 Ctrl+Shift+double-click / Ctrl+Shift+Enter, and a per-command checkbox on custom commands. The
@@ -287,10 +346,6 @@ plain-Enter arm of `FileList_KeyDown` needs its modifier guard or it swallows Ct
 first, and the double-click handler resolves the row **under the cursor** rather than
 `SelectedItem`, because Ctrl+Shift has already told an `Extended` `ListView` to range-extend. The
 folder tree deliberately has no elevated entry — a drive root is one careless click away there.
-
-The shell chain can't be unit-tested; it was verified with a scratch harness that compiles
-`ShellLauncher.cs` directly and compares the integrity level of a child launched each way
-(`Process.Start` → High, shell route → Medium). Rebuild that harness rather than trusting a fake.
 
 ### Startup, the command line, and single instance
 
@@ -314,10 +369,13 @@ might be holding a pending undo. One instance is what makes that assumption soun
   makes tab a safe field separator). Mutate it to accept and 19 theories go red.
 - **`Services/SingleInstance`** owns the mutex and the pipe. Claimed **after**
   `VelopackApp.Build().Run()`, whose hooks exit the process and must not be gated behind an instance
-  check. Both peers are elevated processes of the same user, so the pipe needs no mandatory-label
-  work — a DACL admitting only the current user's SID is right, and the client's identity is
-  re-checked after connect anyway. **A failed hand-off falls through and starts normally**: the first
-  copy may be mid-shutdown, and starting is better than exiting having done nothing.
+  check. Both peers are ordinary medium-integrity processes of the same user, so the pipe needs no
+  mandatory-label work — a DACL admitting only the current user's SID is right, and the client's
+  identity is re-checked after connect anyway. **A failed hand-off falls through and starts
+  normally**: the first copy may be mid-shutdown, and starting is better than exiting having done
+  nothing. Its framing and identity check now come from `Core/Ipc` (`LineChannel`/`LineReader`,
+  `PipeIdentity`), shared with the index-helper pipe — but note its pipe is one-directional and the
+  server never writes, which is why zero-size buffers are safe there and are not for a duplex pipe.
 
 The protocol is deliberately one verb — *navigate to this path*. Nothing on the wire can become a
 launch, a file that gets written, or anything but a directory listing.
@@ -545,9 +603,14 @@ re-plans from scratch before writing.
 **Dragging out to other applications** works, and the asymmetry is deliberate: the payload carries
 CF_HDROP *as well as* the private `BertBrowser.FileItems` format, but `DropPipeline` **reads only
 the private one**. So an in-app drop is decided by exactly the code and plan it always was, while
-Explorer, editors, browsers and mail clients see an ordinary file drop. Accepting drops *from* other
-applications is out of scope — UIPI blocks it because this app is elevated, and the workaround opens
-a channel from lower-integrity processes.
+Explorer, editors, browsers and mail clients see an ordinary file drop.
+
+Accepting drops *from* other applications is **now possible but not implemented**, and that changed
+without anyone touching this code: UIPI used to block it because the app was elevated, and the app
+is `asInvoker` now. WPF will therefore accept such a drop and `DropPipeline`, which reads only the
+private format, will **silently ignore it** — a worse experience than the OS refusing outright.
+Handling external `CF_HDROP` is a separate piece of work; until then this is a known gap rather than
+a mystery.
 
 The source sets `Preferred DropEffect` = `Copy`. That is documented as a clipboard-paste convention,
 but Explorer honours it during a drag too — verified: a same-volume drag that would otherwise have
@@ -664,6 +727,15 @@ Five things here are load-bearing:
   reason the harness never touches the clipboard (there is one, and the user is using it) — `move`
   and `copy` go through `TransferPlanner`/`TransferExecutor`, which is what paste and drag-and-drop
   go through anyway.
+- **And it is given an index service that cannot prompt.** The app's own registration starts
+  `BertBrowser.Indexer.exe` elevated, which puts a UAC dialog on the desktop — the same problem as a
+  launched program, and worse, since it takes the secure desktop. `UiSession` injects
+  `NullMftIndexService`, and asserts it did not resolve an `MftIndexClient` rather than trusting the
+  registration to stay put. `--index` now means the **in-process** `MftIndexService`: identical
+  behaviour to before, and on an unelevated run `MftVolumeIndexer.Open()` fails soft on every volume
+  so the crawler covers the search. `--index-declined` puts the real client behind a launcher that
+  starts nothing, which is how `tools/ui/index-degraded.bbs` photographs the degraded status bar
+  without anyone having to decline a real prompt.
 - **`AppPaths.OverrideVariable` (`BERTBROWSER_DATA_DIR`) is what keeps a run out of the user's
   data.** It is read by a static initialiser, so it must be set before anything touches `AppPaths`;
   `UiSession.Start` sets it and then *asserts* `AppPaths.DataDir` actually moved, refusing to run

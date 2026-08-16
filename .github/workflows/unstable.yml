@@ -59,6 +59,13 @@ jobs:
           -r win-x64 --self-contained true
           -p:Version=${{ steps.ver.outputs.version }} -o publish
 
+      # The elevated index helper, into the same folder - see release.yml for why the order matters.
+      - name: Publish the index helper
+        run: >
+          dotnet publish src/BertBrowser.Indexer/BertBrowser.Indexer.csproj -c Release
+          -r win-x64 --self-contained true
+          -p:Version=${{ steps.ver.outputs.version }} -o publish
+
       # Deltas matter more here than on a release: an unstable copy takes an update on every push, so
       # it is a few MB each time instead of ~75. The delta is built here, against the package
       # downloaded from the release that is still up - the replacement below happens afterwards and

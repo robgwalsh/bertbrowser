@@ -20,10 +20,11 @@ public sealed class PaneFactory(
     DirSizeRepository dirSizeRepository,
     ISearchService searchService,
     AppSettings settings,
-    IProcessLauncher launcher)
+    IProcessLauncher launcher,
+    BertBrowser.Core.Services.Mft.IMftIndexService mftIndex)
 {
     public DirectoryTabViewModel CreateTab() =>
-        new(fileSystem, dirSizeRepository, searchService, settings, launcher);
+        new(fileSystem, dirSizeRepository, searchService, settings, launcher, mftIndex);
 
     /// <summary>A tab set up to look like <paramref name="source"/>: same sort order. History is
     /// deliberately not copied — the duplicate starts fresh.</summary>

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- net10.0, not net10.0-windows: this process draws nothing. Both projects publish
+         self-contained win-x64 into one folder for packaging, and this runtime asset set is a
+         strict subset of the app's (which adds the WindowsDesktop framework), so the two compose
+         rather than collide. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>BertBrowser.Indexer</AssemblyName>
+    <RootNamespace>BertBrowser.Indexer</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <IsPackable>false</IsPackable>
+    <!-- Not InvariantGlobalization: path keys are ToUpperInvariant()'d on both sides of the pipe
+         and written to a shared database. A different globalization mode here would fold some
+         characters differently and the app would query keys this process never wrote. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BertBrowser.Core\BertBrowser.Core.csproj" />
+  </ItemGroup>
+
+</Project>

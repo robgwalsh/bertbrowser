@@ -80,6 +80,37 @@
         </Setter>
     </Style>
 
+    <!--
+      Text that happens to be clickable, for the status bar: no chrome, no padding, just the link
+      colour and a hand cursor. The status bar uses this so the indexing line can offer a retry
+      without turning into a control that draws a box in the middle of a sentence.
+    -->
+    <Style x:Key="LinkButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Margin" Value="0"/>
+        <Setter Property="MinWidth" Value="0"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.Text.Link}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <ContentPresenter x:Name="Content" Margin="{TemplateBinding Padding}"
+                                      VerticalAlignment="Center"/>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Content" Property="TextBlock.TextDecorations" Value="Underline"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Icon glyph inside a toolbar button; inherits the button's Foreground. -->
     <Style x:Key="ToolbarIcon" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource SymbolFont}"/>

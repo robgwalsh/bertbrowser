@@ -144,6 +144,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             // assertions
             case "assert-path": AssertPath(rest); break;
             case "assert-status": AssertStatus(rest); break;
+            case "assert-indexing": AssertIndexing(rest); break;
             case "assert-count": AssertCount(rest); break;
             case "assert-row": AssertRow(rest, expected: true); break;
             case "assert-no-row": AssertRow(rest, expected: false); break;
@@ -371,11 +372,14 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     {
         var query = Require(rest, global ? "gsearch" : "search");
 
-        if (global && !options.Index)
+        // --index-declined is the exception: there the point *is* that there is no index, and the
+        // search still has to answer from the crawl fallback and say so.
+        if (global && !options.Index && !options.IndexDeclined)
             throw new InvalidOperationException(
                 "Whole-PC search reads the MFT index, which this run did not build. Start the " +
-                "harness with --index (it needs elevation and takes minutes), or use 'search', " +
-                "which walks the current folder.");
+                "harness with --index — from an elevated shell, since the index runs in this " +
+                "process rather than through the app's helper, and takes minutes — or use " +
+                "'search', which walks the current folder.");
 
         Invoke(() =>
         {
@@ -691,6 +695,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             ("foregroundCorrections", Text(session.ForegroundCorrections)),
             ("selection", Quote(tab.SelectionSummary)),
             ("status", Quote(tab.StatusText)),
+            ("indexing", Quote(shell.IndexingStatus)),
+            ("indexingCanRetry", Bool(shell.IndexingCanRetry)),
         };
 
         return "{" + string.Join(",", fields.Select(f => $"{Quote(f.Name)}:{f.Value}")) + "}";
@@ -775,6 +781,35 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         if (!actual.Contains(expected, StringComparison.OrdinalIgnoreCase))
             throw new AssertionException($"expected the status to contain '{expected}', got '{actual}'.");
+    }
+
+    /// <summary>
+    /// Asserts on the indexing line in the status bar, and on whether it offers a retry.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <c>assert-status</c> because it is the shell's, not the tab's: it describes
+    /// the machine's index rather than what one directory listing is doing. <c>retry</c> and
+    /// <c>no-retry</c> assert the affordance, which is the difference between "this will fix
+    /// itself" and "this needs you".
+    /// </remarks>
+    private void AssertIndexing(string rest)
+    {
+        var expected = Require(rest, "assert-indexing");
+        var (status, canRetry) = session.Dispatcher.Invoke(
+            () => (session.Shell.IndexingStatus, session.Shell.IndexingCanRetry));
+
+        switch (expected)
+        {
+            case "retry" when !canRetry:
+                throw new AssertionException($"expected a retry to be offered; the index line is '{status}'.");
+            case "no-retry" when canRetry:
+                throw new AssertionException($"expected no retry to be offered; the index line is '{status}'.");
+            case "retry" or "no-retry":
+                return;
+        }
+
+        if (!status.Contains(expected, StringComparison.OrdinalIgnoreCase))
+            throw new AssertionException($"expected the index line to contain '{expected}', got '{status}'.");
     }
 
     private void AssertCount(string rest)

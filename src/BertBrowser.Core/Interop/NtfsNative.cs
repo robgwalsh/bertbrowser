@@ -6,7 +6,9 @@ namespace BertBrowser.Core.Interop;
 /// <summary>
 /// Thin P/Invoke layer for reading the NTFS Master File Table and USN change journal.
 /// Every entry point here needs a raw volume handle (<c>\\.\C:</c>), which the OS only
-/// grants to an elevated process — the app ships with a requireAdministrator manifest.
+/// grants to an elevated process. That is why nothing here runs in the app itself: it all happens
+/// inside <c>BertBrowser.Indexer.exe</c>, which is the only component shipping a
+/// requireAdministrator manifest.
 /// Higher-level orchestration lives in <c>MftVolumeIndexer</c>; this file is purely the
 /// Win32 surface plus the small structs the FSCTLs marshal.
 /// </summary>

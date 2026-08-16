@@ -19,7 +19,7 @@ public sealed class UserThemeStore
     /// <summary>
     /// The file a theme lives in. Refuses anything <see cref="ThemeId.IsSafe"/> rejects rather than
     /// letting <see cref="Path.Combine(string, string)"/> quietly resolve it somewhere else — see
-    /// <see cref="ThemeId"/> for why that matters in an elevated process. Callers that handle
+    /// <see cref="ThemeId"/> for why that matters. Callers that handle
     /// untrusted ids check first; reaching here with a bad one is a bug.
     /// </summary>
     public string PathFor(string id)

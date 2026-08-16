@@ -5,6 +5,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using BertBrowser.Core.Cli;
+using BertBrowser.Core.Ipc;
 
 namespace BertBrowser.App.Services;
 
@@ -20,9 +21,15 @@ namespace BertBrowser.App.Services;
 /// undo. One instance is what makes that assumption sound.
 /// </para>
 /// <para>
-/// Both peers are elevated processes belonging to the same user, so the pipe needs no mandatory-label
-/// work: a DACL admitting only the current user's SID is exactly right, and the default High label
-/// is what we want. The client's identity is re-checked after connecting anyway.
+/// Both peers are ordinary medium-integrity processes belonging to the same user, so the pipe needs
+/// no mandatory-label work: a DACL admitting only the current user's SID is exactly right. The
+/// client's identity is re-checked after connecting anyway.
+/// </para>
+/// <para>
+/// Its framing and identity comparison come from <c>Core/Ipc</c>, shared with the index-helper pipe.
+/// One thing here is <em>not</em> shared and must not be copied from: this pipe is
+/// <see cref="PipeDirection.In"/> and the server never writes a byte, which is the only reason
+/// zero-size buffers are safe. A duplex pipe with no buffers deadlocks the moment both ends speak.
 /// </para>
 /// <para>
 /// Nothing here is a security boundary against the user themselves — it cannot be. What it does
@@ -96,9 +103,7 @@ public sealed class SingleInstance : IDisposable
 
             client.Connect((int)ConnectTimeout.TotalMilliseconds);
 
-            var payload = Encoding.UTF8.GetBytes(NavigationRequest.Format(request) + "\n");
-            client.Write(payload, 0, payload.Length);
-            client.Flush();
+            LineChannel.WriteLine(client, NavigationRequest.Format(request));
             return true;
         }
         catch (Exception ex) when (ex is TimeoutException or IOException or UnauthorizedAccessException
@@ -120,7 +125,7 @@ public sealed class SingleInstance : IDisposable
                 if (_stopping.IsCancellationRequested) return;
                 if (!IsOurOwnUser(server)) continue;
 
-                if (ReadLine(server) is { } line &&
+                if (LineChannel.ReadLine(server, NavigationRequest.MaxLineLength) is { } line &&
                     NavigationRequest.TryParse(line, out var request) &&
                     request.HasTargets)
                 {
@@ -161,19 +166,14 @@ public sealed class SingleInstance : IDisposable
 
     /// <summary>
     /// The DACL should already have refused anyone else; this is the belt to its braces.
+    /// See <see cref="PipeIdentity"/> for why the two names have to be compared the way they are.
     /// </summary>
-    /// <remarks>
-    /// <b>The two names are not in the same form.</b> <c>GetImpersonationUserName</c> returns the
-    /// bare account ("Rob"), while <c>WindowsIdentity.Name</c> is qualified
-    /// ("DESKTOP-K0BI3BS\Rob"). Comparing them whole never matches, which fails closed — every
-    /// hand-off silently dropped, the app quietly starting a second copy instead. So compare the
-    /// account portion, which is the part both forms actually agree on.
-    /// </remarks>
     private static bool IsOurOwnUser(NamedPipeServerStream server)
     {
         try
         {
-            return SameAccount(server.GetImpersonationUserName(), WindowsIdentity.GetCurrent().Name);
+            return PipeIdentity.SameAccount(
+                server.GetImpersonationUserName(), WindowsIdentity.GetCurrent().Name);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException)
         {
@@ -181,38 +181,6 @@ public sealed class SingleInstance : IDisposable
             // anomalous enough to refuse rather than wave through.
             return false;
         }
-    }
-
-    private static bool SameAccount(string left, string right) =>
-        AccountPart(left).Equals(AccountPart(right), StringComparison.OrdinalIgnoreCase);
-
-    private static string AccountPart(string name) => name[(name.LastIndexOf('\\') + 1)..];
-
-    /// <summary>
-    /// One bounded line. A peer that never sends a newline, or sends without end, gets cut off at
-    /// <see cref="NavigationRequest.MaxLineLength"/> rather than being allowed to grow this buffer
-    /// forever.
-    /// </summary>
-    private static string? ReadLine(Stream stream)
-    {
-        var buffer = new byte[1024];
-        var line = new MemoryStream();
-
-        while (line.Length < NavigationRequest.MaxLineLength)
-        {
-            var read = stream.Read(buffer, 0, buffer.Length);
-            if (read <= 0) break;
-
-            for (var i = 0; i < read; i++)
-            {
-                if (buffer[i] == (byte)'\n')
-                    return Encoding.UTF8.GetString(line.ToArray());
-                line.WriteByte(buffer[i]);
-            }
-        }
-
-        // No newline arrived, but what did arrive may still be a whole request.
-        return line.Length > 0 ? Encoding.UTF8.GetString(line.ToArray()) : null;
     }
 
     public void Dispose()

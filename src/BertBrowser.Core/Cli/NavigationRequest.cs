@@ -10,8 +10,9 @@ namespace BertBrowser.Core.Cli;
 /// <para>
 /// <b><see cref="IsAcceptablePath"/> is the rule worth auditing.</b> It is used by the command line
 /// <em>and</em> by the pipe listener, so there is one place to get right rather than two — the same
-/// discipline <c>ThemeId.IsSafe</c> gets, and for the same reason: this process is elevated, and a
-/// path arriving over IPC is untrusted input.
+/// discipline <c>ThemeId.IsSafe</c> gets, and for the same reason: a path arriving over IPC is
+/// untrusted input. <c>IndexProtocol</c> builds on it too, for the root keys the elevated index
+/// helper reports.
 /// </para>
 /// <para>
 /// What it permits is narrow on purpose: an absolute local or UNC path, and nothing else. It cannot

@@ -57,15 +57,35 @@ internal sealed class HarnessOptions
     public string? StartPath { get; init; }
 
     /// <summary>
-    /// Builds the global MFT index, as a real launch does.
+    /// Builds the global MFT index, in this process.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Off by default, and not merely for speed. The indexer reads every NTFS volume's master file
-    /// table — minutes of disk on a machine someone is using — and it needs administrator rights
-    /// the harness deliberately does not ask for. Whole-PC search is the one feature a run without
-    /// it cannot exercise; folder-local search does not touch it.
+    /// table — minutes of disk on a machine someone is using. Whole-PC search is the one feature a
+    /// run without it cannot exercise; folder-local search does not touch it.
+    /// </para>
+    /// <para>
+    /// <b>In this process, deliberately — never through the elevated helper the app uses.</b>
+    /// Starting <c>BertBrowser.Indexer.exe</c> would put a UAC dialog on the desktop of whoever is
+    /// at the keyboard, which is precisely what hosting the window offscreen exists to avoid. The
+    /// consequence is that an unelevated run indexes nothing: <c>MftVolumeIndexer.Open()</c> fails
+    /// soft on every volume and the crawler covers the search. Start the harness from an elevated
+    /// shell to exercise the real MFT pass.
+    /// </para>
     /// </remarks>
     public bool Index { get; init; }
+
+    /// <summary>
+    /// Runs the real <c>MftIndexClient</c> against a launcher that reports a declined elevation
+    /// prompt, so the degraded status bar can be photographed.
+    /// </summary>
+    /// <remarks>
+    /// The client itself is genuine — only the launcher is faked, and it starts nothing, so the run
+    /// exercises the real failure path without any possibility of a UAC dialog. This is the one
+    /// state a script cannot reach otherwise: whether the user says no is not ours to decide.
+    /// </remarks>
+    public bool IndexDeclined { get; init; }
 
     public bool Verbose { get; init; }
 
@@ -95,7 +115,8 @@ internal sealed class HarnessOptions
           --size <WxH>        window size for captures  (default: 1400x900)
           --theme <id>        start in a theme          (e.g. light-plus, nord)
           --start <path>      where the first tab opens (default: the sandbox)
-          --index             build the MFT index, as a real launch does (needs elevation)
+          --index             build the MFT index in-process (skips volumes unless elevated)
+          --index-declined    simulate a declined elevation prompt, to see the degraded state
           --timeout <sec>     watchdog, in seconds      (default: 120)
           --busy-timeout <ms> longest allowed listing   (default: 30000)
           --keep-going        do not stop at the first failure
@@ -123,6 +144,7 @@ internal sealed class HarnessOptions
         var busyTimeout = 30_000;
         var keepGoing = false;
         var index = false;
+        var indexDeclined = false;
         var verbose = false;
         var width = 1400;
         var height = 900;
@@ -149,6 +171,7 @@ internal sealed class HarnessOptions
                     case "--theme": themeId = Next("--theme"); break;
                     case "--start": startPath = Path.GetFullPath(Next("--start")); break;
                     case "--index": index = true; break;
+                    case "--index-declined": indexDeclined = true; break;
                     case "--timeout": timeout = int.Parse(Next("--timeout")); break;
                     case "--busy-timeout": busyTimeout = int.Parse(Next("--busy-timeout")); break;
                     case "--keep-going": keepGoing = true; break;
@@ -216,6 +239,7 @@ internal sealed class HarnessOptions
             ThemeId = themeId,
             StartPath = startPath,
             Index = index,
+            IndexDeclined = indexDeclined,
             Verbose = verbose,
         };
     }

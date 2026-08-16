@@ -1,5 +1,6 @@
 using System.Windows;
 using BertBrowser.App.Services;
+using BertBrowser.App.Services.Indexing;
 using BertBrowser.App.Theming;
 using BertBrowser.App.ViewModels;
 using BertBrowser.App.Views;
@@ -73,8 +74,11 @@ public partial class App : Application
 
         ListenForOtherInstances(window, shell);
 
-        // Build the global MFT search index in the background (each NTFS volume on its own
-        // thread); it needs the elevation this app requests via its manifest.
+        // Build the global MFT search index in the background. This is what raises the one
+        // elevation prompt the app asks for: reading the MFT needs an administrator token, so it
+        // happens in BertBrowser.Indexer.exe rather than here. Declining costs instant global
+        // search and nothing else — SearchService falls back to its crawl, and the status bar
+        // offers a retry.
         Services.GetRequiredService<IMftIndexService>().Start();
 
         _ = Task.Run(() => Services.GetRequiredService<IUpdateService>().CheckAndStageUpdateAsync());
@@ -136,7 +140,12 @@ public partial class App : Application
         services.AddSingleton<IBookmarkService, BookmarkService>();
         services.AddSingleton<IndexCrawler>();
         services.AddSingleton<IIndexWatcherService, IndexWatcherService>();
-        services.AddSingleton<IMftIndexService, MftIndexService>();
+        // Not MftIndexService: reading the MFT needs an administrator token, and this process
+        // deliberately does not have one. The client starts BertBrowser.Indexer.exe elevated and
+        // mirrors what it reports, so everything above this line is unchanged by the split.
+        services.AddSingleton<IIndexHostLauncher, ElevatedIndexHostLauncher>();
+        services.AddSingleton<IIndexTransportFactory, NamedPipeIndexTransportFactory>();
+        services.AddSingleton<IMftIndexService, MftIndexClient>();
         services.AddSingleton<ISearchService, SearchService>();
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddSingleton<IProcessLauncher, ProcessLauncher>();

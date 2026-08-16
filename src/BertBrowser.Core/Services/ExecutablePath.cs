@@ -55,8 +55,8 @@ public static class ExecutablePath
         if (NamesALocation(program))
         {
             // ...and it has to say *which* location. A relative path resolves against the current
-            // directory, which for this process is wherever it happened to be started — an
-            // elevated process must not let that decide what runs.
+            // directory, which for this process is wherever it happened to be started, and that
+            // must not be what decides which program runs.
             if (!Path.IsPathFullyQualified(program)) return null;
             return FirstThatExists(program, extensions, exists);
         }

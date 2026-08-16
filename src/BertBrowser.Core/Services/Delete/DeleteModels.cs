@@ -53,8 +53,8 @@ public enum DeleteRejection
     SourceIsRoot,
 
     /// <summary>A location the app refuses to delete outright — the Windows folder, Program Files,
-    /// the user profile root. This app runs elevated for its MFT index, so the usual "Windows will
-    /// stop you" backstop is not there.</summary>
+    /// the user profile root. Windows stops the system ones itself now, but the profile root is
+    /// entirely writable by its owner and nothing else would be in the way.</summary>
     ProtectedLocation,
 
     /// <summary>A folder above this item is being deleted too, so it goes with the ancestor.

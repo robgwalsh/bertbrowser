@@ -20,6 +20,10 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
 {
     private readonly ISearchService _searchService;
     private readonly IProcessLauncher _launcher;
+
+    /// <summary>Only ever asked whether anything is indexed, so a whole-PC search that found
+    /// nothing can say why rather than implying the PC is empty.</summary>
+    private readonly BertBrowser.Core.Services.Mft.IMftIndexService _mftIndex;
     private readonly AppSettings _settings;
 
     private readonly Stack<string> _backStack = new();
@@ -141,11 +145,13 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         DirSizeRepository dirSizeRepository,
         ISearchService searchService,
         AppSettings settings,
-        IProcessLauncher launcher)
+        IProcessLauncher launcher,
+        BertBrowser.Core.Services.Mft.IMftIndexService mftIndex)
     {
         _searchService = searchService;
         _settings = settings;
         _launcher = launcher;
+        _mftIndex = mftIndex;
 
         FileList = new FileListViewModel(fileSystem, dirSizeRepository, settings);
         FileList.PropertyChanged += OnFileListPropertyChanged;
@@ -402,8 +408,15 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         if (ct.IsCancellationRequested) return;
 
         var scope = global ? "this PC" : CurrentPath;
+
+        // With no index at all, "indexing in background…" would be a promise nothing is keeping:
+        // the drives are not being read, because the helper that reads them was declined or could
+        // not run. Say so instead — the status bar carries the retry.
+        var noIndex = global && !_mftIndex.AnyIndexed && !_mftIndex.IsBuilding;
+
         var suffix = outcome.Source switch
         {
+            _ when noIndex => " — the search index is off",
             SearchResultSource.LiveScan => " — indexing in background…",
             SearchResultSource.StaleIndex => " — refreshing index…",
             _ when global && outcome.RefreshPending => " — indexing drives…",

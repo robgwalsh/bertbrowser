@@ -35,8 +35,7 @@ namespace BertBrowser.App.Interop;
 /// </para>
 /// <para>
 /// Everything runs on a dedicated STA thread with a deadline, like
-/// <see cref="ShellLauncher"/> and <see cref="PortableDevices"/>: <c>IFileOperation</c> is
-/// apartment-threaded and may put up UI.
+/// <see cref="PortableDevices"/>: <c>IFileOperation</c> is apartment-threaded and may put up UI.
 /// </para>
 /// </remarks>
 public sealed class ShellRecycleBin : IRecycleBin, IRecycleProbe

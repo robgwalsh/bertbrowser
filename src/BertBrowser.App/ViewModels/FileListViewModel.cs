@@ -147,7 +147,12 @@ public sealed partial class FileListViewModel : ObservableObject
         {
             // superseded by a newer navigation
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        catch (UnauthorizedAccessException)
+        {
+            Items.Clear();
+            ErrorMessage = AccessDeniedMessage(path);
+        }
+        catch (IOException ex)
         {
             Items.Clear();
             ErrorMessage = ex.Message;
@@ -157,6 +162,20 @@ public sealed partial class FileListViewModel : ObservableObject
             IsLoading = false;
         }
     }
+
+    /// <summary>
+    /// What to say about a folder Windows will not open for us.
+    /// </summary>
+    /// <remarks>
+    /// This is a message people will actually see now. BertBrowser used to run with an
+    /// administrator token and could list almost anything; it runs as the person using it, so
+    /// <c>C:\System Volume Information</c>, another account's profile and similar folders are
+    /// closed to it exactly as they are to Explorer. The bare framework message ("Access to the
+    /// path … is denied.") reads like a defect, so say what it is and what would change it.
+    /// </remarks>
+    private static string AccessDeniedMessage(string path) =>
+        $"Access is denied. \"{path}\" needs administrator rights, which BertBrowser does not " +
+        "use — the same folders are closed to File Explorer.";
 
     /// <summary>Search mode: prepares an empty flattened list for streamed hits to append into.</summary>
     public void BeginSearch()

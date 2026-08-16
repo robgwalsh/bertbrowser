@@ -32,52 +32,54 @@ Some of BertBrowser's behaviour looks alarming and is intentional. These are kno
 documented; reports of them will be closed as "by design" unless they come with an angle not covered
 here.
 
-### The app runs as Administrator. What it launches does not.
+### The app runs as you. One helper process runs as Administrator.
 
-BertBrowser requests `requireAdministrator` in its manifest. It needs a raw volume handle to read
-the NTFS Master File Table and the USN change journal, which is what makes global search instant;
-Windows grants that only to an elevated process. That is the *only* thing needing it.
+BertBrowser's manifest is `asInvoker`: it runs with your ordinary account, and so does everything it
+opens. There is one exception, and it is a separate program.
 
-An elevated process normally passes its token to everything it starts, with no prompt — so a file
-browser like this one would silently run a downloaded program as administrator. BertBrowser does not
-do that:
+Reading the NTFS Master File Table and the USN change journal — what makes global search instant —
+needs a raw volume handle, and Windows grants that only to an elevated process. So that one job
+lives in **`BertBrowser.Indexer.exe`**, which ships beside the app and is started on demand:
 
-> **Anything you open from BertBrowser runs as your ordinary user account, exactly as if you had
-> double-clicked it in Explorer — because Explorer is what starts it.**
+> **One UAC prompt, for the index helper, when BertBrowser starts. Declining costs you instant
+> whole-PC search and nothing else — the app is fully usable without it, and the status bar offers
+> to ask again.**
 
-The mechanism: `explorer.exe` is already running at your normal integrity level and publishes its
-automation object system-wide. BertBrowser reaches that object and asks *it* to perform the launch,
-so the new process is Explorer's child and inherits Explorer's ordinary token rather than
-BertBrowser's administrator one. Double-clicking a file, "Open in Terminal", "Open in VS Code",
-opening a portable device, and custom commands all go through this single path.
+What the helper can be asked to do is deliberately tiny. The app and the helper talk over a named
+pipe whose entire vocabulary in the privileged direction is four words — *hello*, *start*,
+*shutdown*, *ping*. **None of them carries a path**, a filename or a program name, and the protocol
+rejects any message that tries to attach one. There is no way to talk the elevated process into
+touching a file of your choosing, because it does not accept the concept.
 
-The same indirection is what makes elevation honest. Asking for the `runas` verb from BertBrowser
-itself would elevate silently — it already holds the token, so there is nothing to consent to. Asked
-from medium-integrity Explorer it is a real elevation request, and Windows shows the consent dialog.
+Other properties worth knowing:
 
-There are three explicit ways to elevate, and each one prompts:
+- **The helper dies with the app.** Losing the pipe is what tells it to exit, so it goes when
+  BertBrowser does, crash included. It is also watching the app's process handle as a backstop.
+- **The app cannot kill the helper**, since an ordinary process may not terminate an elevated one.
+  That is why the two mechanisms above are the guarantee rather than a courtesy shutdown message.
+- **The pipe is created by the app, not the helper**, and admits only your own account. Both ends
+  additionally check that the peer is the process they expect.
+- **Nothing retries by itself.** A retry means another UAC prompt, so it only happens when you click.
+
+Because the app is no longer elevated, launching is now unremarkable: opening a file starts it with
+your ordinary token, the way Explorer does, with no indirection needed. Elevating on purpose is
+still offered three ways, and each prompts:
 
 - **Run as administrator** in the file list's right-click menu.
 - **Ctrl+Shift** while double-clicking, or Ctrl+Shift+Enter — Explorer's own convention.
 - **Run as administrator** on an individual custom command (Settings → Commands). Commands carrying
   it are marked with a shield in the menu.
 
-**The refusal contract:** if the desktop shell cannot be reached at all — Explorer is not running,
-or this session uses a different shell — BertBrowser does **not** quietly fall back to launching the
-thing itself, because that would mean launching it as administrator. It stops, explains, and asks.
-Declining starts nothing. If the shell is reached but does not answer in time, BertBrowser reports
-that and stops rather than retrying, since a retry could start the same thing twice.
-
 Limits worth knowing:
 
-- **A de-elevated child cannot read what only an administrator can.** Opening a file under
-  `System32\config` from BertBrowser will fail for the child even though BertBrowser can list the
-  folder. That is correct, and it is what "Run as administrator" is there for.
-- **If your desktop shell is itself elevated** (UAC turned off, or signed in as the built-in
-  Administrator), nothing on the machine is de-elevated and neither is this. BertBrowser still
-  matches what double-clicking in Explorer does, which is the promise being made.
-- **A program that requests elevation itself** now raises its own UAC prompt, where previously it
-  inherited administrator rights silently.
+- **Folders that need administrator rights are now closed to BertBrowser**, exactly as they are to
+  Explorer: `System Volume Information`, another account's profile, and similar. Listing one reports
+  access denied rather than showing its contents. This is the intended trade.
+- **Whole-PC search can find files the browser cannot open.** The helper reads the master file table,
+  which covers the whole volume, so a search may name a file that listing its folder would refuse.
+  Explorer's index behaves the same way.
+- **Deleting or moving inside protected system folders now fails** where it previously succeeded.
+  The failure is reported per item; the rest of the batch still runs.
 
 ### Dragging files out of BertBrowser
 
@@ -91,9 +93,10 @@ BertBrowser asks for a **copy** by default, so a drag into another application a
 rather than taking the file out of the folder you were looking at. Holding Shift still requests a
 move, as it does everywhere in Windows.
 
-Dropping files *into* BertBrowser from other applications is deliberately **not** supported. Windows
-blocks it because BertBrowser runs elevated, and the workaround would mean accepting a channel from
-lower-integrity processes for no benefit this app needs.
+Dropping files *into* BertBrowser from other applications is **not supported yet**. It used to be
+impossible — Windows blocked it while the app ran elevated — and now that the app runs as you the
+block is gone, but nothing has been built to handle such a drop. An external drop is ignored rather
+than acted on. Dragging files *out* is unaffected.
 
 ### Custom commands run what you tell them to
 
@@ -120,10 +123,11 @@ original permissions across the move either way.
 
 Shift+Delete erases in place, holds nothing, and cannot be undone.
 
-Because this app is elevated, one Windows dialog is deliberately left switched on: if an item cannot
-be recycled — most often because it is larger than the bin's quota — Windows asks before erasing it
-rather than being silently permitted to. Every other shell confirmation, progress and error dialog
-is suppressed in favour of BertBrowser's own.
+One Windows dialog is deliberately left switched on: if an item cannot be recycled — most often
+because it is larger than the bin's quota — Windows asks before erasing it rather than being
+silently permitted to. That is the one case pre-flight cannot predict, which is why it is the one
+confirmation left to the shell. Every other shell confirmation, progress and error dialog is
+suppressed in favour of BertBrowser's own.
 
 ### What *is* in scope
 

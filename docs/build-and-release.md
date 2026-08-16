@@ -25,11 +25,14 @@ Two things about this build worth knowing:
 
 - **`Directory.Build.props` sets `TreatWarningsAsErrors`** for every project, so a clean build is a
   warning-free build. A warning that CI hits is a failed release, not a nag.
-- **The app manifest requests `requireAdministrator`.** Reading the NTFS MFT needs it, so launching
-  triggers UAC — including from `dotnet run` and from the IDE. Only the *app* needs elevation;
-  building, testing and packaging do not, and neither do the programs it launches (see
-  [SECURITY.md](../SECURITY.md) — children go out through the desktop shell at the user's own
-  integrity level).
+- **The app manifest is `asInvoker`; `BertBrowser.Indexer.exe` is the one that requests
+  `requireAdministrator`.** Launching the app no longer triggers UAC — starting the index helper
+  does, once per session, and declining only costs whole-PC search. Building, testing and packaging
+  need nothing special. See [SECURITY.md](../SECURITY.md).
+- **The helper is published into the same folder as the app**, in a second `dotnet publish` step
+  that must stay *after* the app's. `vpk pack --packDir publish` packs the whole directory, so
+  nothing else about packaging, the installer or the winget manifest changes. It adds roughly 218 KB,
+  because the helper's `net10.0` runtime asset set is a strict subset of the app's WPF one.
 
 If a build fails with MSB3021/MSB3026 because a running instance is holding `bin\Debug`, kill it and
 rebuild:

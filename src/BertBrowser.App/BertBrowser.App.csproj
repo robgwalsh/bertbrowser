@@ -34,4 +34,51 @@
     <ProjectReference Include="..\BertBrowser.Core\BertBrowser.Core.csproj" />
   </ItemGroup>
 
+  <!--
+    Puts BertBrowser.Indexer.exe beside the app, which is where ElevatedIndexHostLauncher looks for
+    it and the only place it will accept it from.
+
+    CI publishes both projects into one folder, so packaged builds always had the helper; a local
+    build did not, and the symptom points nowhere near the cause — the launcher's File.Exists check
+    fails before ShellExecuteEx is called, so the status bar reports the index unavailable having
+    never raised a UAC prompt. Copying the apphost with its deps.json/runtimeconfig.json is enough
+    to make a development build behave like a packaged one: every assembly they name is already
+    here, because both projects get them from Core.
+
+    Deliberately *not* a ProjectReference, even one marked ReferenceOutputAssembly="false". That
+    reference puts the helper into the app's own publish graph, where it arrives incoherent — the
+    apphost and its .json files but no managed .dll, since nothing else about it is a publish asset.
+    In a packaged build the helper's own self-contained publish then lands on top of that wreckage
+    and hides it, which is precisely the kind of accident that only shows up in a build nobody
+    tested. Invoking the build directly gets the ordering with none of the entanglement, and leaves
+    `dotnet publish` producing exactly what it produced before this target existed.
+  -->
+  <Target Name="CopyIndexHelper" AfterTargets="Build">
+    <!-- RemoveProperties is load-bearing. A nested build inherits the outer one's global
+         properties, so `dotnet publish -r win-x64` would demand a win-x64 flavour of the helper
+         that nothing restored, and fail the publish outright. This copy only ever wants the plain
+         build; the self-contained helper a package needs is published separately by CI. -->
+    <MSBuild Projects="..\BertBrowser.Indexer\BertBrowser.Indexer.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration)"
+             RemoveProperties="RuntimeIdentifier;SelfContained;PublishDir;PublishReadyToRun;PublishSingleFile;PublishTrimmed;TargetFramework;Platform">
+      <Output TaskParameter="TargetOutputs" ItemName="_IndexHelperAssembly" />
+    </MSBuild>
+
+    <!-- Named individually rather than globbed, and with no Exists condition: an apphost separated
+         from its managed .dll still launches and fails later, somewhere far less obvious, so a file
+         that has gone missing should stop the build here. -->
+    <ItemGroup>
+      <_IndexHelperFile Include="@(_IndexHelperAssembly)" />
+      <_IndexHelperFile Include="@(_IndexHelperAssembly->'%(RootDir)%(Directory)%(Filename).exe')" />
+      <_IndexHelperFile Include="@(_IndexHelperAssembly->'%(RootDir)%(Directory)%(Filename).pdb')" />
+      <_IndexHelperFile Include="@(_IndexHelperAssembly->'%(RootDir)%(Directory)%(Filename).deps.json')" />
+      <_IndexHelperFile Include="@(_IndexHelperAssembly->'%(RootDir)%(Directory)%(Filename).runtimeconfig.json')" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(_IndexHelperFile)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

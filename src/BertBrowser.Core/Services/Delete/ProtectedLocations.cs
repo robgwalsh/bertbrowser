@@ -3,11 +3,20 @@ using BertBrowser.Core.Paths;
 namespace BertBrowser.Core.Services.Delete;
 
 /// <summary>
-/// The handful of folders this app will not delete however they were selected. Ordinary Windows
-/// stops most of these itself by refusing the access — but this app asks for elevation so it can
-/// read the MFT, so that backstop is not there, and a stray Ctrl+A in the wrong folder would find
-/// nothing in its way.
+/// The handful of folders this app will not delete however they were selected.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>The profile root is why this list still exists.</b> The app runs as the user now, so Windows
+/// itself refuses a delete of <c>Windows</c> or <c>Program Files</c> — but
+/// <see cref="Environment.SpecialFolder.UserProfile"/> is entirely writable by its owner, and a
+/// stray Ctrl+A there would find nothing in the way. That one entry earns the list on its own.
+/// </para>
+/// <para>
+/// The system folders stay as belt and braces: cheap, and they keep the rule honest on a machine
+/// where the app has somehow been started elevated anyway.
+/// </para>
+/// </remarks>
 /// <remarks>
 /// Only the folders themselves are protected, not what is inside them: the point is to refuse the
 /// one selection that ends the machine, not to make the app decline to manage files. Drive and

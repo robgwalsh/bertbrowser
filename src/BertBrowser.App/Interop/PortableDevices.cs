@@ -70,14 +70,14 @@ public static class PortableDevices
     }
 
     /// <summary>Opens the device in a Windows Explorer window. Goes through
-    /// <paramref name="launcher"/> like every other launch in this app, so it does not hand
-    /// Explorer this process's administrator token.</summary>
+    /// <paramref name="launcher"/> like every other launch in this app, so there stays exactly one
+    /// place that starts a program.</summary>
     public static string? OpenInExplorer(PortableDevice device, IProcessLauncher launcher)
     {
         if (device.ShellPath.Length == 0) return null;
 
-        // The full path rather than the bare name: this process is elevated and must not resolve
-        // "explorer.exe" through a search path.
+        // The full path rather than the bare name, so a stray "explorer.exe" earlier on PATH cannot
+        // decide what opens.
         var explorer = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
 

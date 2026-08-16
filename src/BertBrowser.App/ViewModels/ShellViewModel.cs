@@ -73,9 +73,15 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// <summary>The directory the window chrome follows: the visible tab of the active pane.</summary>
     public DirectoryTabViewModel ActiveTab => ActivePane.ActiveTab!;
 
-    /// <summary>MFT indexing state for the status bar ("Indexing C:…"); empty when idle.</summary>
+    /// <summary>MFT indexing state for the status bar ("Indexing C:…"); empty when idle. Also
+    /// carries the reason when there is no index — a declined prompt, or a helper that died.</summary>
     [ObservableProperty]
     private string _indexingStatus = "";
+
+    /// <summary>True when <see cref="IndexingStatus"/> is a failure the user could act on, which
+    /// turns the status-bar text into a button.</summary>
+    [ObservableProperty]
+    private bool _indexingCanRetry;
 
     // --- Whole-PC search (header) ---
 
@@ -167,6 +173,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         _mftIndex.IndexRefreshed += OnMftIndexRefreshed;
         _mftIndex.StatusChanged += OnMftStatusChanged;
         IndexingStatus = _mftIndex.StatusText;
+        IndexingCanRetry = _mftIndex.CanRetry;
     }
 
     /// <summary>Overrides the initial directory (e.g. from the command line).</summary>
@@ -503,8 +510,22 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
     private void OnMftStatusChanged()
     {
-        Application.Current?.Dispatcher.InvokeAsync(() => IndexingStatus = _mftIndex.StatusText);
+        Application.Current?.Dispatcher.InvokeAsync(() =>
+        {
+            IndexingStatus = _mftIndex.StatusText;
+            IndexingCanRetry = _mftIndex.CanRetry;
+        });
     }
+
+    /// <summary>
+    /// Asks for the search index again after it was declined or lost.
+    /// </summary>
+    /// <remarks>
+    /// A command rather than anything automatic, and that is the whole point: every retry raises a
+    /// UAC prompt, so it happens when someone clicks and at no other time.
+    /// </remarks>
+    [RelayCommand]
+    private void RetryIndexing() => _mftIndex.Retry();
 
     private void OnIndexRefreshed(string rootKey)
     {

@@ -31,6 +31,16 @@ jobs:
           -r win-x64 --self-contained true
           -p:Version=${{ steps.ver.outputs.version }} -o publish
 
+      # The elevated index helper, into the same folder. vpk packs the whole directory, so this is
+      # all it takes to ship it - no installer, manifest or winget change. The app goes first: this
+      # publish is a strict subset of it (no WindowsDesktop framework), so the shared runtime files
+      # are already there and only the helper's own assembly and apphost are added, well under 1 MB.
+      - name: Publish the index helper
+        run: >
+          dotnet publish src/BertBrowser.Indexer/BertBrowser.Indexer.csproj -c Release
+          -r win-x64 --self-contained true
+          -p:Version=${{ steps.ver.outputs.version }} -o publish
+
       - name: Pack and upload Velopack release
         shell: pwsh
         run: |

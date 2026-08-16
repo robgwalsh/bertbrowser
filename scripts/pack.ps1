@@ -13,6 +13,12 @@ dotnet publish "$root\src\BertBrowser.App\BertBrowser.App.csproj" -c Release `
     -r win-x64 --self-contained true -p:Version=$Version -o "$root\publish"
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+# The elevated index helper, into the same folder. The app goes first: this publish is a strict
+# subset of it, so only the helper's own assembly and apphost are added.
+dotnet publish "$root\src\BertBrowser.Indexer\BertBrowser.Indexer.csproj" -c Release `
+    -r win-x64 --self-contained true -p:Version=$Version -o "$root\publish"
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 vpk pack --packId BertBrowser --packVersion $Version --packDir "$root\publish" `
     --mainExe BertBrowser.exe --packTitle BertBrowser --packAuthors "Rob Walsh" `
     --icon "$root\src\BertBrowser.App\Assets\app.ico" --outputDir "$root\Releases"
