@@ -300,6 +300,114 @@ public sealed class DeleteExecutorTests : IDisposable
         Assert.False(Directory.Exists(folder));
     }
 
+    /// <summary>
+    /// Clearing read-only to get a permanent delete moving must not travel through a junction. The
+    /// erase itself never did — <c>Directory.Delete(recursive)</c> removes a link rather than
+    /// following it — but the attribute sweep reached the whole of whatever the junction pointed at,
+    /// and changed files the user had not selected. Swap the hand-rolled walk in
+    /// <c>ClearReadOnly</c> back for <c>SearchOption.AllDirectories</c> and this goes red.
+    /// </summary>
+    [Fact]
+    public void APermanentDelete_DoesNotClearReadOnlyThroughAJunction()
+    {
+        // The bystander: read-only, outside the tree, reachable only through the link.
+        var outside = Dir("outside");
+        var bystander = File_("keep me", "outside", "bystander.txt");
+        File.SetAttributes(bystander, FileAttributes.ReadOnly);
+
+        // The tree being deleted: a read-only file at the top level, so the first erase attempt
+        // throws there and the read-only sweep runs; and a junction one level down, which that
+        // attempt therefore never reaches and which is consequently still standing when the sweep
+        // walks. Depth is what makes this deterministic — put the junction beside the read-only file
+        // and whether it survives to be walked depends on directory enumeration order.
+        var folder = Dir("tree");
+        var locked = File_("locked", "tree", "readonly.txt");
+        File.SetAttributes(locked, FileAttributes.ReadOnly);
+        Dir("tree", "sub");
+        Assert.True(TryCreateJunction(P("tree", "sub", "link"), outside), "junction was not created");
+
+        var outcome = Run([folder], DeleteMode.Permanent);
+
+        Assert.Empty(outcome.Failed);
+        Assert.False(Directory.Exists(folder));
+
+        // Nothing beyond the link was touched — neither erased nor quietly made writable.
+        AssertContent(bystander, "keep me");
+        Assert.True((File.GetAttributes(bystander) & FileAttributes.ReadOnly) != 0,
+            "the read-only bit was cleared on a file outside the deleted tree");
+
+        // The fixture's teardown is a recursive delete, and a read-only file left behind would make
+        // it throw. Clearing it here is exactly what the code under test declined to do.
+        File.SetAttributes(bystander, FileAttributes.Normal);
+    }
+
+    /// <summary>
+    /// A permanent delete of a tree containing a junction has to <em>work</em>, and the way it used
+    /// to fail was the worst shape available: <c>Directory.Delete(recursive: true)</c> erases
+    /// everything else in the tree and then throws naming the link, so the contents were gone for
+    /// good and the user was told the delete had failed. Put that call back in <c>RemoveTree</c> and
+    /// this goes red on the very first assertion.
+    /// </summary>
+    [Fact]
+    public void APermanentDelete_RemovesATreeContainingAJunction_AndLeavesItsTargetAlone()
+    {
+        var outside = Dir("outside");
+        var bystander = File_("keep me", "outside", "bystander.txt");
+
+        var folder = Dir("tree");
+        File_("a", "tree", "a.txt");
+        File_("b", "tree", "sub", "b.txt");
+        Assert.True(TryCreateJunction(P("tree", "link"), outside), "junction was not created");
+
+        var outcome = Run([folder], DeleteMode.Permanent);
+
+        Assert.Empty(outcome.Failed);
+        Assert.False(Directory.Exists(folder), "the tree was reported deleted but is still there");
+
+        // The link went as one entry; what it pointed at is untouched.
+        AssertContent(bystander, "keep me");
+    }
+
+    /// <summary>
+    /// Meta-test for the two above: with the junction really in place, a walk that <em>does</em>
+    /// follow it reaches the bystander. Without this, the assertions could be passing because the
+    /// link was never usable rather than because it was declined.
+    /// </summary>
+    [Fact]
+    public void MetaAJunctionReallyDoesLeadToTheBystander()
+    {
+        var outside = Dir("outside");
+        File_("keep me", "outside", "bystander.txt");
+        Dir("tree");
+        Assert.True(TryCreateJunction(P("tree", "link"), outside), "junction was not created");
+
+        var throughTheLink = Directory
+            .EnumerateFiles(P("tree"), "*", SearchOption.AllDirectories)
+            .Select(Path.GetFileName)
+            .ToList();
+
+        Assert.Contains("bystander.txt", throughTheLink);
+    }
+
+    /// <summary>
+    /// A directory junction, which — unlike a symlink — an ordinary account may create. Shelling out
+    /// because .NET exposes no API for one; <c>IndexCrawlerTests</c> does the same.
+    /// </summary>
+    private static bool TryCreateJunction(string link, string target)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe",
+            $"/c mklink /J \"{link}\" \"{target}\"")
+        {
+            CreateNoWindow = true,
+            UseShellExecute = false,
+        };
+        using (var p = System.Diagnostics.Process.Start(psi)!)
+            p.WaitForExit();
+
+        return Directory.Exists(link) &&
+            (File.GetAttributes(link) & FileAttributes.ReparsePoint) != 0;
+    }
+
     // --- failures are per item ---
 
     [Fact]

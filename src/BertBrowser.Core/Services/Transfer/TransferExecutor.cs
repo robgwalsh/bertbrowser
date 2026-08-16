@@ -275,7 +275,11 @@ public sealed class TransferExecutor
 
         try
         {
-            if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
+            // DirectoryRemoval.RemoveTree, not Directory.Delete(recursive: true). What a Replace
+            // displaced into staging is the user's own folder and can contain a junction, and that
+            // call erases the rest of such a tree before throwing — swallowed here as harmless
+            // cleanup, so half a folder would be left behind for good without a word.
+            if (Directory.Exists(staging)) DirectoryRemoval.RemoveTree(staging);
         }
         catch (Exception ex) when (IsTransferFailure(ex))
         {

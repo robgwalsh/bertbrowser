@@ -308,13 +308,31 @@ public sealed class DeleteExecutor
         }
     }
 
+    /// <summary>
+    /// <see cref="DirectoryRemoval.RemoveTree"/>, not <c>Directory.Delete(recursive: true)</c>: that
+    /// call erases the rest of a tree containing a junction and then throws naming the link, which on
+    /// this path means a permanent delete destroying the contents and reporting that it failed.
+    /// </summary>
     private static void Remove(string path, bool isDirectory)
     {
-        if (isDirectory) Directory.Delete(path, recursive: true);
+        if (isDirectory) DirectoryRemoval.RemoveTree(path);
         else File.Delete(path);
     }
 
-    /// <summary>Best-effort: anything still read-only afterwards fails the retry, which is reported.</summary>
+    /// <summary>
+    /// Best-effort: anything still read-only afterwards fails the retry, which is reported.
+    /// </summary>
+    /// <remarks>
+    /// <b>The walk descends by hand rather than through <c>SearchOption.AllDirectories</c>, and that
+    /// is the whole point of it.</b> That overload follows directory reparse points, so a junction
+    /// anywhere in the tree put this loop into a directory somewhere else entirely — and a test for
+    /// the reparse bit on each entry does not help, because by the time the entry arrives the
+    /// enumeration has already gone through the link. Clearing read-only outside the tree being
+    /// deleted is a small harm (<see cref="Remove"/> does not follow junctions, so nothing out there
+    /// is erased) but it is a harm to files the user never selected. An explicit stack that declines
+    /// to push a link is the same shape <see cref="DeleteSurveyor"/> walks with, and for the same
+    /// reason: a junction is the one entry deleting it removes.
+    /// </remarks>
     private static void ClearReadOnly(string path, bool isDirectory)
     {
         try
@@ -326,12 +344,29 @@ public sealed class DeleteExecutor
             }
 
             var root = new DirectoryInfo(path);
-            foreach (var entry in root.EnumerateFileSystemInfos("*", SearchOption.AllDirectories))
+            if (DirectoryRemoval.IsLink(root)) return;
+
+            var pending = new Stack<DirectoryInfo>();
+            pending.Push(root);
+            while (pending.Count > 0)
             {
-                if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) continue;
-                if ((entry.Attributes & FileAttributes.ReadOnly) != 0)
-                    entry.Attributes &= ~FileAttributes.ReadOnly;
+                var current = pending.Pop();
+                foreach (var entry in current.GetFileSystemInfos())
+                {
+                    try
+                    {
+                        if (entry is DirectoryInfo child && !DirectoryRemoval.IsLink(child)) pending.Push(child);
+                        if (DirectoryRemoval.IsLink(entry)) continue;
+                        if ((entry.Attributes & FileAttributes.ReadOnly) != 0)
+                            entry.Attributes &= ~FileAttributes.ReadOnly;
+                    }
+                    catch (Exception ex) when (IsDeleteFailure(ex))
+                    {
+                        // One stubborn entry must not stop the rest; the delete retry reports it.
+                    }
+                }
             }
+
             if ((root.Attributes & FileAttributes.ReadOnly) != 0)
                 root.Attributes &= ~FileAttributes.ReadOnly;
         }
@@ -422,7 +457,10 @@ public sealed class DeleteExecutor
             if (!IsStagingDirectory(directory)) continue;
             try
             {
-                if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+                // RemoveTree, not Directory.Delete(recursive): a held item can be a tree with a
+                // junction in it, and that call would erase most of the folder and then throw —
+                // caught here, so the debris would simply be left behind without a word.
+                if (Directory.Exists(directory)) DirectoryRemoval.RemoveTree(directory);
                 RemoveEmptyTrashRoot(directory);
             }
             catch (Exception ex) when (IsDeleteFailure(ex))
@@ -506,7 +544,7 @@ public sealed class DeleteExecutor
                     try
                     {
                         if (Directory.GetCreationTimeUtc(batch) > cutoff) continue;
-                        Directory.Delete(batch, recursive: true);
+                        DirectoryRemoval.RemoveTree(batch);
                     }
                     catch (Exception ex) when (IsDeleteFailure(ex))
                     {

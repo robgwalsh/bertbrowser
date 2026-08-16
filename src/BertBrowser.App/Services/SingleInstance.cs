@@ -1,6 +1,7 @@
 using System.IO;
 using System.IO.Pipes;
 using System.Security.AccessControl;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Threading;
@@ -37,6 +38,14 @@ namespace BertBrowser.App.Services;
 /// <see cref="NavigationRequest.IsAcceptablePath"/>. Nothing on the wire can become a launch, a
 /// file that gets written, or anything but a directory listing.
 /// </para>
+/// <para>
+/// <b>A second account signed in to the same machine is a different question, and the endpoint name
+/// is the answer to it</b> — see <see cref="InstanceEndpoint"/> for why a predictable name was one
+/// another user could claim, and what that cost. The copy that owns the name
+/// <see cref="Publish">publishes</see> it to <see cref="AppPaths.DataDir"/> for the next launch to
+/// read; the profile's own permissions are what keep that file to one account, and the mutex — which
+/// is <c>Local\</c>, and so per-session and unsquattable — remains what decides who is first.
+/// </para>
 /// </remarks>
 public sealed class SingleInstance : IDisposable
 {
@@ -44,12 +53,16 @@ public sealed class SingleInstance : IDisposable
     /// not stall the second one's startup.</summary>
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromMilliseconds(500);
 
-    private readonly string _pipeName;
+    /// <summary>Where the running copy leaves its endpoint name for the next launch to find.</summary>
+    private static string EndpointPath => Path.Combine(AppPaths.DataDir, "instance.pipe");
+
+    /// <summary>Null for a later copy that found nothing published — there is nobody to hand to.</summary>
+    private readonly string? _pipeName;
     private readonly Mutex _mutex;
     private readonly CancellationTokenSource _stopping = new();
     private Thread? _listener;
 
-    private SingleInstance(string pipeName, Mutex mutex, bool isFirst)
+    private SingleInstance(string? pipeName, Mutex mutex, bool isFirst)
     {
         _pipeName = pipeName;
         _mutex = mutex;
@@ -70,15 +83,21 @@ public sealed class SingleInstance : IDisposable
     {
         var key = KeyForCurrentUser();
         // Local\ rather than Global\: this is a per-session, per-user thing, and Global\ would need
-        // privileges we should not be relying on.
+        // privileges we should not be relying on. The mutex is what decides who is first — a name in
+        // this namespace cannot be claimed from another session, which is exactly the property the
+        // pipe namespace lacks and why the endpoint below is named the way it is.
         var mutex = new Mutex(initiallyOwned: true, $"Local\\BertBrowser.{key}", out var isFirst);
-        return new SingleInstance($"BertBrowser.{key}", mutex, isFirst);
+
+        // The first copy invents its endpoint and publishes it once it is listening; a later one can
+        // only be told, and starts normally if it was not.
+        var pipeName = isFirst ? InstanceEndpoint.Name(key, Nonce()) : Published(key);
+        return new SingleInstance(pipeName, mutex, isFirst);
     }
 
-    /// <summary>Starts listening. Only the first instance should call this.</summary>
+    /// <summary>Starts listening, then publishes where. Only the first instance should call this.</summary>
     public void StartListening()
     {
-        if (!IsFirst) return;
+        if (!IsFirst || _pipeName is null) return;
 
         _listener = new Thread(Listen)
         {
@@ -86,6 +105,11 @@ public sealed class SingleInstance : IDisposable
             Name = "BertBrowser single-instance listener",
         };
         _listener.Start();
+
+        // After the thread, so the window between "a launch can find the name" and "something is
+        // answering to it" is as small as it can be made. A launch that lands inside it fails to
+        // connect and starts normally, which is the same fallback a mid-shutdown first copy gets.
+        Publish(_pipeName);
     }
 
     /// <summary>
@@ -95,6 +119,8 @@ public sealed class SingleInstance : IDisposable
     /// </summary>
     public bool TryHandOff(CommandLineRequest request)
     {
+        if (_pipeName is null) return false;
+
         try
         {
             using var client = new NamedPipeClientStream(
@@ -143,8 +169,69 @@ public sealed class SingleInstance : IDisposable
         }
     }
 
+    // --- Endpoint discovery ---
+
+    /// <summary>
+    /// Records the endpoint for the next launch to find. Best-effort: a name that cannot be written
+    /// costs the hand-off and nothing else, and the next launch starts its own copy.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately does <em>not</em> create the directory. <c>AppPaths.MigrateLegacyData</c> moves
+    /// pre-1.0 data only when the data directory does not yet exist, and it runs before this does —
+    /// so a <c>CreateDirectory</c> here would be the thing that silently retired that migration.
+    /// </remarks>
+    private static void Publish(string pipeName)
+    {
+        try
+        {
+            File.WriteAllText(EndpointPath, pipeName);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                      or DirectoryNotFoundException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// The endpoint a running copy left behind, or null. A file left by a crash names a pipe nobody
+    /// is answering, which the connect attempt discovers and treats as "no first instance".
+    /// </summary>
+    private static string? Published(string key)
+    {
+        try
+        {
+            if (!File.Exists(EndpointPath)) return null;
+            var name = File.ReadAllText(EndpointPath).Trim();
+            return InstanceEndpoint.IsAcceptable(name, key) ? name : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                      or DirectoryNotFoundException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static void Unpublish()
+    {
+        try
+        {
+            if (File.Exists(EndpointPath)) File.Delete(EndpointPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                      or DirectoryNotFoundException)
+        {
+        }
+    }
+
+    private static string Nonce() =>
+        Convert.ToHexString(RandomNumberGenerator.GetBytes(InstanceEndpoint.NonceLength / 2));
+
     private NamedPipeServerStream CreateServer()
     {
+        // Only the first instance listens, and only after Claim gave it a name of its own.
+        var pipeName = _pipeName
+            ?? throw new InvalidOperationException("Listening without an endpoint to listen on.");
+
         var self = WindowsIdentity.GetCurrent().User
             ?? throw new InvalidOperationException("No user SID for the current process.");
 
@@ -154,7 +241,7 @@ public sealed class SingleInstance : IDisposable
             self, PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance, AccessControlType.Allow));
 
         return NamedPipeServerStreamAcl.Create(
-            _pipeName,
+            pipeName,
             PipeDirection.In,
             maxNumberOfServerInstances: 1,
             PipeTransmissionMode.Byte,
@@ -187,10 +274,15 @@ public sealed class SingleInstance : IDisposable
     {
         _stopping.Cancel();
 
+        // Before waking the listener: from here on there is no endpoint to hand off to, and a launch
+        // that reads a name we are about to stop answering has to wait out a connect timeout to find
+        // that out.
+        if (IsFirst) Unpublish();
+
         // The listener is parked in WaitForConnection, which only returns when something connects.
         // Connecting to ourselves is the tidy way to wake it; failing that it is a background
         // thread and process exit takes it.
-        if (_listener is not null && IsFirst)
+        if (_listener is not null && IsFirst && _pipeName is not null)
         {
             try
             {

@@ -213,7 +213,17 @@ Three things here are load-bearing:
 - **`IsStagingDirectory` is the guard on every recursive delete in this file.** A path only qualifies
   if it is named the way this class names holding folders. Mutate it to return true and
   `CommittingRefusesAnythingThatIsNotAHoldingFolder` deletes a real folder and goes red — that is
-  the check standing between a mangled outcome and `Directory.Delete(recursive: true)` on anything.
+  the check standing between a mangled outcome and erasing a tree it was never given.
+- **Nothing here erases a tree with `Directory.Delete(recursive: true)`; it all goes through
+  `Core/Services/DirectoryRemoval`.** That call cannot be used on anything the user owns: given a
+  junction anywhere in the tree it erases everything *else* and then throws
+  `ERROR_INVALID_PARAMETER` naming the link. On a permanent delete that meant the contents were gone,
+  unrecoverably, and the user was told the delete had failed; on a staging commit the throw is
+  swallowed as harmless cleanup and half a folder stays for good. `RemoveTree` walks with an explicit
+  stack, collects directories in pre-order and removes them in reverse, and takes a junction as the
+  one entry deleting it removes. `TransferExecutor.CommitStaging` uses it for the same reason — what
+  a Replace displaced is the user's own folder. `DirectoryRemovalTests` covers it; make the walk
+  follow a link and it goes red.
 - **A crash leaves holding folders behind**, so `PurgeAbandonedStaging` sweeps every ready volume at
   startup — but only batches over a day old, so a second copy of the app running right now keeps its
   pending undo.
@@ -376,6 +386,19 @@ might be holding a pending undo. One instance is what makes that assumption soun
   nothing. Its framing and identity check now come from `Core/Ipc` (`LineChannel`/`LineReader`,
   `PipeIdentity`), shared with the index-helper pipe — but note its pipe is one-directional and the
   server never writes, which is why zero-size buffers are safe there and are not for a duplex pipe.
+- **The endpoint name is random, and that is not decoration** (`Core/Ipc/InstanceEndpoint`). Pipe
+  names are one machine-wide, first-come namespace with no per-user partitioning, so the old
+  predictable `BertBrowser.<SID>` was a name *another signed-in account* could take first — after
+  which the real first copy could never create its listener, and every launch wrote the folder path
+  it was asked to open to the squatter and exited having opened nothing. A DACL cannot answer that:
+  it governs who may open an endpoint, not who may claim the name. So the name carries a 128-bit
+  nonce, and the copy that owns it publishes the name to `~/.bertbrowser/instance.pipe` — protected
+  by the profile's own permissions — for the next launch to read, withdrawing it on dispose. The
+  **mutex** stays the "am I first" gate, because `Local\` *is* per-session and cannot be squatted.
+  Two things to keep: `Publish` must not `CreateDirectory` (`AppPaths.MigrateLegacyData` only runs
+  when the data directory does not yet exist, so creating it here would silently retire that
+  migration), and a missing or stale file must fail the hand-off rather than throw — the caller then
+  starts normally, which is the existing fallback. `InstanceEndpointTests` covers the name rule.
 
 The protocol is deliberately one verb — *navigate to this path*. Nothing on the wire can become a
 launch, a file that gets written, or anything but a directory listing.
