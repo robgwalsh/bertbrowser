@@ -142,6 +142,98 @@ Tests: `RenamePatternTests` (naming and validation), `RenamePlannerTests` (rules
 `RenameExecutorTests` (real files, contents asserted, undo included, with a meta-test that the
 "nothing stranded" check can fail). Mutate a rule and confirm a test goes red.
 
+### Creating
+
+`Core/Services/NewItem` is split the same way again, and is the smallest of the three because
+there is only ever **one** item: every entry point names one thing, so `NewItemPlan` carries one
+`RejectedNewItem?` rather than a list, and there is no batch for one item's failure to cost.
+
+**Creating is additive, exactly as copying is, so it has no undo and does not touch the
+three-way slot.** `CreateNewItemAsync` never calls `RetireUndoable`, which means a rename or a
+delete before it stays undoable — the item it made is empty, and Delete removes it reversibly.
+`NewItemOutcome` deliberately has no `CanUndo` member at all; the absence is the design.
+
+- **`NewItemPattern`** is the naming rule, pure and shared. Its character and reserved-name checks
+  are **`RenamePattern.Validate`'s** — a name Windows refuses refuses it whether the file arrives by
+  rename or by creation, and `NewItemPlannerTests` asserts the refusal comes back in *that*
+  function's own words, so re-implementing it goes red. It cleans trailing dots and spaces before
+  validating, since Windows drops them silently and "Reports. " is a perfectly good request for
+  "Reports". Its one addition is measuring the typed stem and the type's extension **together**
+  against the 255 limit, because the box only holds half of what lands on disk.
+- **`NewItemPlanner`** decides, touching nothing, through **`INewItemProbe`**, and exists for the
+  reason the rename planner does: the dialog asks on every keystroke, so the rule it previews is the
+  rule the create obeys. Four refusals, each something the dialog can say while the name is still
+  editable — `ParentMissing`, `InvalidName`, `NameTaken`, `TemplateMissing`. **`ProtectedLocations`
+  is deliberately not consulted**: it guards a few folders against being *deleted*, exact-match only,
+  and creating inside them is the ordinary thing this app is for — a new file in the profile root is
+  not a mistake, and `C:\Windows` is refused by its ACL now the app is `asInvoker`.
+- **`NewItemExecutor`** writes, re-applying those rules against live disk first. **The trap it is
+  shaped around is that `Directory.CreateDirectory` succeeds silently on a folder that is already
+  there** — a create that merely reported success would hand the user somebody else's folder — so
+  existence is checked immediately before the call rather than trusted from a plan built while the
+  dialog sat open. Files need no such care and do not get it: `FileMode.CreateNew` and
+  `File.Copy(overwrite: false)` both throw on a taken path, which closes the window a
+  check-then-create leaves open. A copied template has Hidden/ReadOnly cleared, because the shipped
+  ones under `%APPDATA%\Microsoft\Windows\Templates` are commonly both and the file the user asked
+  for should be neither.
+
+**The `"name (2)"` rule is now one function**, `Core/Paths/UniquePath`, with three callers — the
+transfer executor's staging, the delete executor's, and the dialog's suggested name. Its
+`isDirectory` is a **parameter, not something probed from the path**: the two executors are making
+room for an item already at that path, but the dialog is placing something new, and probing would
+tell it about whatever is *in the way* instead — a folder named `notes.txt` blocking a new file
+`notes.txt` would give `notes.txt (2)` rather than `notes (2).txt`. `UniquePathTests` covers exactly
+that.
+
+**The file types are the app's own list, not Windows'.** `AppSettings.NewFileTypes` is nullable on
+purpose, the same distinction `ThemeId` draws: null means never configured and ships
+`NewFileTemplate.Defaults()`, `[]` means the user emptied it deliberately. `ResolvedNewFileTypes` is
+the one place that resolves it, so the menu, the settings page and the harness cannot disagree.
+"New ▸ Folder" is not in the list and is never configurable.
+
+**Windows' `ShellNew` registry is read, never written.** Adding a per-user entry needs no elevation
+but *removing* a machine-wide one does, which would mean registry-write verbs on
+`BertBrowser.Indexer` and undo the point of the four-verb elevated surface — and it would change
+Explorer's own New menu machine-wide. So `Interop/ShellNewRegistry` (App) opens every key
+`writable: false` and emits raw values, and **`ShellNewImport` (Core) does all the deciding**, which
+is what lets `ShellNewImportTests` cover it in a project that cannot open a registry key. Two rules
+there are load-bearing: **`Command` entries are dropped**, because they name a program to run (it is
+how Shortcut and Briefcase work) and honouring one would put a registry-supplied command line
+through `ProcessLauncher`; and a label that is an unresolved `@dll,-id` resource string falls back to
+the bare extension rather than reaching the menu as its own raw text. The three ShellNew value kinds
+collapse to **two** on the way in — `Data`'s bytes are written out once, at import, into
+`AppPaths.TemplatesDir` — so every persisted template is either "empty" or "a file on disk" and the
+executor has one branch instead of three.
+
+`Views/NewItemDialog` is a near-copy of `RenameDialog` and deliberately so, down to the
+`internal static Create` the harness needs. It re-plans on every keystroke, and again in `Ok_Click`
+because the disk may have changed while it sat open. `Views/NewItemMenu` builds the file-type
+entries the way `CustomCommandMenu` does — `Tag`-based removal, `SetResourceReference` so runtime
+items follow a theme change, `"_"` doubled — while "Folder" and "Empty file…" stay in XAML either
+side of the anchor.
+
+Two placement details. **New targets the folder being shown, never the selection**, which is why it
+sits at the top of the file list's menu — and why an empty-space right-click, which opens that same
+menu, gets it without needing its own affordance. And it is **disabled while the list is flattened**:
+a search result is not a folder, and creating into the search root would make something that may not
+match the query and so would not appear, which reads as a failure. Ctrl+Shift+N lives in
+`FileList_KeyDown` beside F2 and Delete, with its own modifier guard, because it acts on the focused
+pane's directory.
+
+`ShellViewModel.CreateNewItemAsync` sets **`PendingSelection` itself**, before awaiting the refresh,
+rather than leaving the view to select afterwards — so the tree's New lands in whichever pane is
+showing that folder, and the harness's `newfolder` exercises the same selection path the menu does,
+which is what makes `assert-selected 1` in a `.bbs` a real assertion. `RefreshAfterCreateAsync`
+rebuilds the tree **only for a folder**: the tree shows nothing else, and a rebuild costs containers,
+which is most of what the folder-tree rules are about.
+
+Tests: `NewItemPatternTests`/`NewItemPlannerTests` (rules, fake probe at the bottom of the file),
+`NewItemExecutorTests` (real files, contents asserted, with a meta-test that the "exactly these
+names" check can fail), `ShellNewImportTests` (the mapping), `UniquePathTests`. `tools/ui/newitem.bbs`
+covers the wiring — including a rename, then a create, then `assert-can-undo`, which is what proves
+the create left the undo slot alone. Mutate a rule and confirm a test goes red: drop the executor's
+existence check and `AFolderThatAppearedSinceThePlan_FailsRatherThanBeingAdopted` goes red on its own.
+
 ### Delete
 
 `Core/Services/Delete` is split the same way again, and rests on one idea: **an ordinary delete does
@@ -459,7 +551,7 @@ C# any more** — everything goes through a named token.
 - **`BertBrowser.App.Theming`** materialises it. `ThemeTokenDictionary` is a `ResourceDictionary`
   holding one brush per token; `ThemeService` resolves a definition and recolours them.
 
-Four things here are load-bearing and easy to undo by accident:
+Five things here are load-bearing and easy to undo by accident:
 
 - **Brushes are recoloured in place, never replaced**, which is why `{StaticResource Theme.X.Y}`
   works everywhere and nothing needs `DynamicResource` or rebinding. Consequently a token brush
@@ -479,11 +571,25 @@ Four things here are load-bearing and easy to undo by accident:
   items back to the body colour.
 - **`Colors` are value types and cannot be recoloured**, so the few consumers that need one (the
   pinned-row `DropShadowEffect`) use `{DynamicResource Theme.X.Y.Value}`.
+- **Selected text in a `TextBox` needs an MSBuild switch, not just brushes.** WPF has two ways of
+  painting a selection and only one honours `SelectionTextBrush`: the default draws the selection as
+  an adorner *over* the run, so at `SelectionOpacity="1"` it is an opaque rectangle covering the
+  glyphs and `Theme.Input.SelectionForeground` is ignored outright — which reads as "the text goes
+  the same colour as the highlight" and looks like a palette bug rather than a rendering one.
+  `Directory.Build.props` sets
+  `Switch.System.Windows.Controls.Text.UseAdornerForTextboxSelectionRendering=false`, which moves
+  painting into `TextBoxView` — highlight behind the run, glyphs on top in `SelectionTextBrush`. It
+  is in the shared props rather than one csproj so the app and the harness that photographs it can
+  never disagree about how text renders. `ThemeCatalogTests` already contrast-checks that token pair,
+  so every built-in was correct the whole time the switch was missing. **Note the harness cannot see
+  this**: its window is never activated, and WPF paints no selection in an inactive one — it was
+  measured with a scratch WPF app rendering an offscreen `TextBox` both ways.
 
 Things that look done but aren't unless you check: `GridViewColumnHeader` needs `PART_HeaderGripper`
 (or column resize breaks silently) and a blank template for `Role=Padding` (or a classic strip shows
 after the last column); menu separators resolve through `MenuItem.SeparatorStyleKey`, not an
-implicit `Separator` style; `TextBox` needs explicit `CaretBrush`/`SelectionBrush`.
+implicit `Separator` style; `TextBox` needs explicit `CaretBrush`/`SelectionBrush` (and the
+selection-rendering switch above).
 A retemplated `ComboBox` needs `ItemTemplate`, **not** `DisplayMemberPath`: the closed box renders
 `SelectionBoxItemTemplate`, which WPF derives from `ItemTemplate` alone — the `DisplayMemberPath`
 fallback lives in the stock presenter and disappears with the stock template, leaving the box showing

@@ -1,0 +1,68 @@
+# Creating folders and files. Everything goes through NewItemPlanner/NewItemExecutor — the
+# same code the New menu, the folder tree and Ctrl+Shift+N go through — so a rule mutated in
+# either shows up here. The refusals themselves are asserted in NewItemPlannerTests; a script
+# stops on the first failing command, so this covers the wiring instead.
+
+tree .
+refresh
+assert-count 8
+
+# A new folder lands in the list, on disk, and selected. That last one is the PendingSelection
+# hand-off: the shell sets it before awaiting the refresh, so the listing that arrives is the
+# one the selection belongs to. Set it afterwards and this goes red.
+newfolder Reports
+settle
+assert-row Reports
+assert-exists Reports
+assert-selected 1
+assert-count 9
+shot 01-new-folder
+
+# The suggested name steps aside rather than opening on a name it would refuse — "New folder"
+# exists after the first one, so the second is "New folder (2)".
+newfolder "New folder"
+settle
+newfolder "New folder (2)"
+settle
+assert-row "New folder"
+assert-row "New folder (2)"
+
+# A new file. The name is taken literally, extension and all.
+newfile "Meeting notes.txt"
+settle
+assert-row "Meeting notes.txt"
+assert-exists "Meeting notes.txt"
+
+# Creating in an empty folder, which is where a New menu is most often reached for.
+enter Empty
+settle
+assert-count 0
+newfolder Drafts
+settle
+assert-count 1
+assert-row Drafts
+up
+settle
+
+# Creating never claims the undo slot — it is additive, like Copy. The interesting half is the
+# second assertion: a rename before it stays undoable, which is what "does not touch the slot"
+# means. Call RetireUndoable in CreateNewItemAsync and this goes red.
+assert-cannot-undo
+select notes.txt
+rename renamed.txt
+assert-can-undo
+newfolder Ideas
+settle
+assert-row Ideas
+assert-can-undo
+undo
+settle
+assert-row notes.txt
+
+# Both dialogs, with their suggested names filled in. Neither needs a selection.
+deselect
+dialog new-folder 02-new-folder-dialog
+dialog new-file 03-new-file-dialog
+
+assert-not-launched
+state

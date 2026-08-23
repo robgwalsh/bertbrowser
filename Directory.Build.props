@@ -5,4 +5,22 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
+
+  <!--
+    Selected text in a TextBox. WPF has two ways of painting a selection and only one of them
+    honours SelectionTextBrush: the legacy path draws the selection as an *adorner over* the run,
+    so at SelectionOpacity="1" it is an opaque rectangle covering the glyphs and the selected text
+    is simply not there. That is the default, and on a dark theme it reads as "the text goes the
+    same colour as the highlight". Turning the adorner off moves selection painting into TextBoxView,
+    which draws the highlight behind the run and the glyphs on top in SelectionTextBrush — which is
+    what Theme.Input.SelectionForeground exists for and what every built-in theme defines.
+
+    It lives here rather than in one csproj so the app and the UI harness that photographs it can
+    never disagree about how text renders. Measured offscreen both ways before choosing.
+  -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption
+        Include="Switch.System.Windows.Controls.Text.UseAdornerForTextboxSelectionRendering"
+        Value="false" Trim="true" />
+  </ItemGroup>
 </Project>

@@ -31,6 +31,12 @@ public static class AppPaths
     /// <summary>Where the user's own <c>*.json</c> themes live. Created on demand.</summary>
     public static string ThemesDir => Path.Combine(DataDir, "themes");
 
+    /// <summary>Where template files for the "New" menu live — both the ones an import writes out
+    /// of the registry and any the user points at themselves. Created on demand. Under
+    /// <see cref="DataDir"/> so <see cref="OverrideVariable"/> redirects it with everything else,
+    /// and a harness run cannot write into the user's.</summary>
+    public static string TemplatesDir => Path.Combine(DataDir, "templates");
+
     /// <summary>
     /// One-time move of data from the pre-1.0 location (%LOCALAPPDATA%\BertBrowser)
     /// to ~/.bertbrowser. Runs before the DB is opened; no-op once DataDir exists.

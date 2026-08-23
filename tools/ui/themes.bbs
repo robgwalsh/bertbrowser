@@ -10,7 +10,8 @@ refresh
 select notes.txt, report.md
 
 shot 01-dark-plus
-dialog rename       02-rename-dark
+dialog new-folder   02-new-folder-dark
+dialog rename       02b-rename-dark
 dialog delete       03-delete-dark
 dialog settings     04-settings-dark
 dialog properties   05-properties-dark
@@ -18,7 +19,8 @@ dialog theme-editor 06-theme-editor-dark
 
 theme light-plus
 shot 07-light-plus
-dialog rename     08-rename-light
+dialog new-file    08-new-file-light
+dialog rename     08b-rename-light
 dialog delete     09-delete-light
 dialog settings   10-settings-light
 dialog properties 11-properties-light

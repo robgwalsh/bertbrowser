@@ -119,6 +119,9 @@ public partial class App : Application
         services.AddSingleton<BertBrowser.Core.Services.Transfer.TransferExecutor>();
         services.AddSingleton<BertBrowser.Core.Services.Rename.RenamePlanner>();
         services.AddSingleton<BertBrowser.Core.Services.Rename.RenameExecutor>();
+        services.AddSingleton<BertBrowser.Core.Services.NewItem.NewItemPlanner>();
+        services.AddSingleton<BertBrowser.Core.Services.NewItem.NewItemExecutor>();
+        services.AddSingleton<IShellNewCatalog, ShellNewCatalog>();
         // One instance serving both roles: it caches per-volume answers, and the planner and the
         // executor should agree about what has a Recycle Bin.
         services.AddSingleton<Interop.ShellRecycleBin>();

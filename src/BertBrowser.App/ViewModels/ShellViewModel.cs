@@ -11,6 +11,7 @@ using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.Mft;
+using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
 using BertBrowser.Core.Services.Transfer;
 
@@ -33,6 +34,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private readonly TransferExecutor _transferExecutor;
     private readonly RenamePlanner _renamePlanner;
     private readonly RenameExecutor _renameExecutor;
+    private readonly NewItemPlanner _newItemPlanner;
+    private readonly NewItemExecutor _newItemExecutor;
     private readonly DeletePlanner _deletePlanner;
     private readonly DeleteExecutor _deleteExecutor;
     private readonly DeleteSurveyor _deleteSurveyor;
@@ -137,6 +140,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         TransferExecutor transferExecutor,
         RenamePlanner renamePlanner,
         RenameExecutor renameExecutor,
+        NewItemPlanner newItemPlanner,
+        NewItemExecutor newItemExecutor,
         DeletePlanner deletePlanner,
         DeleteExecutor deleteExecutor,
         DeleteSurveyor deleteSurveyor,
@@ -152,6 +157,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         _transferExecutor = transferExecutor;
         _renamePlanner = renamePlanner;
         _renameExecutor = renameExecutor;
+        _newItemPlanner = newItemPlanner;
+        _newItemExecutor = newItemExecutor;
         _deletePlanner = deletePlanner;
         _deleteExecutor = deleteExecutor;
         _deleteSurveyor = deleteSurveyor;
@@ -704,6 +711,105 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         {
             IsTransferring = false;
             UndoCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    // --- Creating ---
+
+    /// <summary>The name the New dialog opens with: the type's default, stepped aside to "(2)" if
+    /// that is already taken, so it never opens on a name it would refuse.</summary>
+    public string SuggestNewItemName(
+        string directory, NewItemKind kind, NewFileTemplate? template = null) =>
+        kind == NewItemKind.Folder
+            ? _newItemPlanner.SuggestName(directory, "New folder", NewItemKind.Folder)
+            : _newItemPlanner.SuggestName(
+                directory,
+                template?.DefaultBaseName ?? "New file",
+                NewItemKind.File,
+                template?.Extension ?? "");
+
+    /// <summary>Works out what creating this would produce, without changing anything — the New
+    /// dialog asks on every keystroke so it can refuse before anything is written.</summary>
+    public NewItemPlan PlanNewItem(
+        string directory, string name, NewItemKind kind, string? templatePath) =>
+        _newItemPlanner.Plan(directory, name, kind, templatePath);
+
+    public async Task<NewItemOutcome> CreateNewItemAsync(NewItemPlan plan)
+    {
+        // Shares the transfer flag: it is what "this app is writing" means, it keeps a create from
+        // racing a paste, and the harness's quiescence check reads it.
+        if (IsTransferring || !plan.HasWork) return NewItemOutcome.Empty;
+
+        IsTransferring = true;
+        UndoCommand.NotifyCanExecuteChanged();
+        try
+        {
+            var outcome = await Task.Run(() => _newItemExecutor.Execute(plan));
+
+            // Deliberately no RetireUndoable and no undo record. Creating is additive, exactly as
+            // copying is, so Ctrl+Z is left pointing at whatever move, rename or delete came
+            // before rather than being spent on something the user can simply delete.
+
+            if (outcome.CreatedPath is { } created)
+            {
+                // Set before the refresh is awaited, so the listing that arrives is the one the
+                // selection belongs to — the same rule /select obeys. Done here rather than in the
+                // view so the tree's New lands in whichever pane is showing that folder.
+                foreach (var tab in TabsShowing(plan.Directory)) tab.PendingSelection = created;
+            }
+
+            await RefreshAfterCreateAsync(plan);
+
+            SetStatus(outcome.Failed is { } failed
+                ? failed.Message
+                : $"Created '{plan.Name}'");
+            return outcome;
+        }
+        finally
+        {
+            IsTransferring = false;
+            UndoCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    private async Task RefreshAfterCreateAsync(NewItemPlan plan)
+    {
+        // The tree only shows folders, so a new file is no reason to rebuild it — and a rebuild
+        // costs containers, which is most of what the folder-tree rules are about.
+        if (plan.Kind == NewItemKind.Folder)
+            await Tree.RefreshDirectoriesAsync([plan.Directory]);
+
+        await RefreshTabsShowingAsync([plan.Directory]);
+    }
+
+    /// <summary>Every open tab showing <paramref name="directory"/>, matched by path key rather
+    /// than by string comparison.</summary>
+    private IEnumerable<DirectoryTabViewModel> TabsShowing(string directory)
+    {
+        string wanted;
+        try
+        {
+            wanted = PathKey.Canonicalize(directory);
+        }
+        catch (ArgumentException)
+        {
+            yield break;
+        }
+
+        foreach (var tab in AllTabs.ToList())
+        {
+            if (tab.CurrentPath.Length == 0) continue;
+            string key;
+            try
+            {
+                key = PathKey.Canonicalize(tab.CurrentPath);
+            }
+            catch (ArgumentException)
+            {
+                continue;
+            }
+
+            if (key == wanted) yield return tab;
         }
     }
 

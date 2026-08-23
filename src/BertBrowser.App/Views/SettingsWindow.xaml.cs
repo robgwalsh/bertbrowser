@@ -58,4 +58,17 @@ public partial class SettingsWindow : ThemedWindow
         if (dialog.ShowDialog(this) == true)
             command.Command = dialog.FileName;
     }
+
+    private void BrowseTemplate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_vm.SelectedNewFileType is not { } type) return;
+
+        var dialog = new OpenFileDialog
+        {
+            Title = "Choose a template file",
+            Filter = "All files (*.*)|*.*",
+        };
+        if (dialog.ShowDialog(this) == true)
+            type.TemplatePath = dialog.FileName;
+    }
 }

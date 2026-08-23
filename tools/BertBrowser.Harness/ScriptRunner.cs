@@ -10,6 +10,7 @@ using BertBrowser.App.Views;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services.Delete;
+using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
 using BertBrowser.Core.Services.Transfer;
 using Microsoft.Extensions.DependencyInjection;
@@ -121,6 +122,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "clear-search": Invoke(() => session.Tab.ClearSearchCommand.Execute(null)); break;
 
             // acting on the selection
+            case "newfolder": NewItem(rest, NewItemKind.Folder); break;
+            case "newfile": NewItem(rest, NewItemKind.File); break;
             case "rename": Rename(rest); break;
             case "delete": Delete(rest, DeleteMode.Recycle); break;
             case "delete-permanent": Delete(rest, DeleteMode.Permanent); break;
@@ -423,6 +426,42 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             throw new AssertionException(string.Join("; ", failures.Select(f => f.Message)));
     }
 
+    /// <summary>Creates a folder or a file in the active tab's directory, as the New menu does.</summary>
+    /// <remarks>
+    /// Unlike every other command here this acts on the *folder* rather than the selection, so it
+    /// needs nothing selected. It plans with the same <c>ShellViewModel.PlanNewItem</c> and carries
+    /// the result out with the same <c>CreateNewItemAsync</c> — including the PendingSelection
+    /// hand-off, which is why 'assert-selected 1' after one of these is a real assertion. Use
+    /// 'dialog new-folder' / 'dialog new-file' to photograph the dialog itself.
+    /// </remarks>
+    private void NewItem(string rest, NewItemKind kind)
+    {
+        var verb = kind == NewItemKind.Folder ? "newfolder" : "newfile";
+        var name = Require(rest, verb);
+
+        var directory = session.Dispatcher.Invoke(() => session.Tab.CurrentPath);
+        if (directory.Length == 0) throw new AssertionException($"No folder is open to {verb} in.");
+
+        var template = kind == NewItemKind.File ? TemplateFor(name) : null;
+        var plan = session.Dispatcher.Invoke(
+            () => session.Shell.PlanNewItem(directory, name, kind, template?.TemplatePath));
+
+        if (plan.Rejected is { } rejected)
+            throw new AssertionException($"The create was refused: {rejected.Message}");
+
+        _sandbox.RequireInside(plan.TargetPath, verb);
+
+        var outcome = Await(() => session.Shell.CreateNewItemAsync(plan));
+
+        if (outcome.Failed is { } failure) throw new AssertionException(failure.Message);
+    }
+
+    /// <summary>The configured type whose extension the name ends with, so 'newfile letter.rtf'
+    /// picks up that type's template rather than making an empty file.</summary>
+    private NewFileTemplate? TemplateFor(string name) =>
+        session.Services.GetRequiredService<AppSettings>().ResolvedNewFileTypes
+            .FirstOrDefault(t => name.EndsWith(t.Extension, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Deletes the selection, as the confirmation's Delete button does.</summary>
     private void Delete(string rest, DeleteMode mode)
     {
@@ -635,17 +674,40 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             Selection().Select(i => new PropertiesTarget(i.FullPath, i.IsDirectory)).ToList(),
             session.Services.GetRequiredService<DirSizeRepository>())),
 
+        // Neither of these needs a selection, unlike every other kind here: New acts on the
+        // folder being shown.
+        "new-folder" => NewItemDialogFor(NewItemKind.Folder),
+
+        "new-file" => NewItemDialogFor(NewItemKind.File),
+
         "settings" => new SettingsWindow(new SettingsViewModel(
             session.Services.GetRequiredService<AppSettings>(),
-            session.Services.GetRequiredService<IThemeService>())),
+            session.Services.GetRequiredService<IThemeService>(),
+            session.Services.GetRequiredService<IShellNewCatalog>())),
 
         "theme-editor" => new ThemeEditorWindow(new AppearanceViewModel(
             session.Services.GetRequiredService<IThemeService>())),
 
         _ => throw new FormatException(
-            $"'{kind}' is not a dialog. Try: rename, delete, delete-permanent, message, warning, " +
-            "properties, settings, theme-editor."),
+            $"'{kind}' is not a dialog. Try: new-folder, new-file, rename, delete, " +
+            "delete-permanent, message, warning, properties, settings, theme-editor."),
     };
+
+    /// <summary>The New dialog as the menu opens it, suggested name and all.</summary>
+    private Window NewItemDialogFor(NewItemKind kind)
+    {
+        var directory = session.Tab.CurrentPath;
+        var template = kind == NewItemKind.File
+            ? session.Services.GetRequiredService<AppSettings>().ResolvedNewFileTypes.FirstOrDefault()
+            : null;
+
+        return NewItemDialog.Create(
+            directory,
+            kind,
+            template,
+            session.Shell.SuggestNewItemName(directory, kind, template),
+            session.Shell.PlanNewItem);
+    }
 
     private DeletePlan DeletePlanFor(DeleteMode mode)
     {

@@ -8,9 +8,14 @@
     <!--
       TextBox. CaretBrush and SelectionBrush are set explicitly and deliberately: WPF's defaults are
       a black caret and the Windows selection blue, both of which vanish on a dark field.
-      SelectionTextBrush is not optional here: at SelectionOpacity="1" the selection is an opaque
-      rectangle painted over the run, and the glyphs are only drawn on top of it when this brush is
-      set. Leave it unset and selected text disappears entirely rather than merely dimming.
+
+      SelectionTextBrush only does anything because Directory.Build.props turns off
+      UseAdornerForTextboxSelectionRendering. WPF's default path draws the selection as an adorner
+      *over* the run, so at SelectionOpacity="1" it is an opaque rectangle covering the glyphs and
+      the property is ignored outright — selected text simply is not there, which on a dark theme
+      reads as the text turning the same colour as the highlight. With the adorner off, TextBoxView
+      paints the highlight behind the run and the glyphs on top in SelectionTextBrush. The three
+      settings only make sense together; changing one alone silently breaks the selection.
     -->
     <Style TargetType="TextBox">
         <Setter Property="Background" Value="{StaticResource Theme.Input.Background}"/>

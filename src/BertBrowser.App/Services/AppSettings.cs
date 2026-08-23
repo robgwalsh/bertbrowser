@@ -30,6 +30,21 @@ public sealed class AppSettings
 
     public List<CustomCommandDefinition> CustomCommands { get; set; } = new();
 
+    /// <summary>The file types on the "New" submenu, in menu order. Null means the user has never
+    /// configured the list, which is what lets a first launch ship
+    /// <see cref="BertBrowser.Core.Services.NewItem.NewFileTemplate.Defaults"/> — an empty list is a
+    /// different thing entirely, and means they removed them all on purpose. Same reasoning as
+    /// <see cref="ThemeId"/>; "New ▸ Folder" is not in here because it is never configurable.</summary>
+    public List<BertBrowser.Core.Services.NewItem.NewFileTemplate>? NewFileTypes { get; set; }
+
+    /// <summary>The menu entries the "New" submenu should show: what is configured, or the shipped
+    /// defaults when nothing ever has been. One place, so the menu, the settings page and the
+    /// harness cannot disagree about what is on offer.</summary>
+    public IReadOnlyList<BertBrowser.Core.Services.NewItem.NewFileTemplate> ResolvedNewFileTypes =>
+        (NewFileTypes ?? BertBrowser.Core.Services.NewItem.NewFileTemplate.Defaults())
+            .Where(t => t.Enabled && t.Extension.Length > 0)
+            .ToList();
+
     /// <summary>Active theme: a built-in id ("dark-plus", "light-plus", …) or one of the user's own
     /// themes from <see cref="AppPaths.ThemesDir"/>. Null means the user has never picked one, which
     /// is what lets the first launch honour a Windows high-contrast setting instead of overriding

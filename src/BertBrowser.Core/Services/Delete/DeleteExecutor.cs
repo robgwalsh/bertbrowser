@@ -653,24 +653,10 @@ public sealed class DeleteExecutor
         return path;
     }
 
-    /// <summary>"name (2)"-style free path. Directories number the whole name; files number before
-    /// the extension.</summary>
-    private string UniquePath(string path)
-    {
-        if (!Exists(path)) return path;
-
-        var directory = Path.GetDirectoryName(path) ?? "";
-        var name = Path.GetFileName(path);
-        var isDirectory = _probe.DirectoryExists(path);
-        var stem = isDirectory ? name : Path.GetFileNameWithoutExtension(name);
-        var extension = isDirectory ? "" : Path.GetExtension(name);
-
-        for (var i = 2; ; i++)
-        {
-            var candidate = Path.Combine(directory, $"{stem} ({i}){extension}");
-            if (!Exists(candidate)) return candidate;
-        }
-    }
+    /// <summary>"name (2)"-style free path, through this executor's probe.</summary>
+    private string UniquePath(string path) =>
+        Paths.UniquePath.For(
+            path, _probe.DirectoryExists(path), _probe.DirectoryExists, _probe.FileExists);
 
     private static string ShortId() => Guid.NewGuid().ToString("N")[..8];
 

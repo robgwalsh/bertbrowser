@@ -9,6 +9,7 @@ using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Delete;
+using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
 
 namespace BertBrowser.App.Views;
@@ -383,6 +384,14 @@ public partial class DirectoryTabView : UserControl
             _ = DeleteSelectionAsync(permanent: Keyboard.Modifiers == ModifierKeys.Shift);
             e.Handled = true;
         }
+        else if (e.Key == Key.N && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
+        {
+            // Explorer's shortcut. It belongs on the list rather than in the window's InputBindings
+            // because it acts on the focused pane's directory, and it needs its modifier guard
+            // like every other arm here.
+            _ = CreateInCurrentFolderAsync(NewItemKind.Folder);
+            e.Handled = true;
+        }
     }
 
     // --- Type-ahead selection ---
@@ -504,9 +513,47 @@ public partial class DirectoryTabView : UserControl
         var allBookmarked = selection.Count > 0 && selection.All(i => _shell.Bookmarks.IsBookmarked(i.FullPath));
         BookmarkMenuItem.Header = allBookmarked ? "Remove bookmark" : "Bookmark";
 
+        // New acts on the folder being shown, so it needs one — and a flattened search result is
+        // not one: creating into the search root would produce an item that may not match the query
+        // and so would not appear, which reads as a failure.
+        NewMenuItem.IsEnabled = !Tab.FileList.IsFlattened && Tab.CurrentPath.Length > 0;
+        NewItemMenu.Rebuild(NewMenuItem, NewFileTypesSeparator, _settings,
+            template => _ = CreateInCurrentFolderAsync(NewItemKind.File, template));
+
         CustomCommandMenu.Rebuild(menu, CustomCommandsSeparator,
             selection.Select(i => (i.FullPath, i.IsDirectory)).ToList(),
             _settings, _shell.RunCustomCommand);
+    }
+
+    private void ContextNewFolder_Click(object sender, RoutedEventArgs e) =>
+        _ = CreateInCurrentFolderAsync(NewItemKind.Folder);
+
+    private void ContextNewEmptyFile_Click(object sender, RoutedEventArgs e) =>
+        _ = CreateInCurrentFolderAsync(NewItemKind.File);
+
+    /// <summary>Creates a folder or file in the directory this tab is showing. The selection is
+    /// deliberately not consulted: New makes something beside what is here, never inside it.</summary>
+    private async Task CreateInCurrentFolderAsync(
+        NewItemKind kind, NewFileTemplate? template = null)
+    {
+        if (Tab.FileList.IsFlattened || Tab.CurrentPath.Length == 0) return;
+
+        var directory = Tab.CurrentPath;
+        var owner = Window.GetWindow(this);
+        var suggestion = _shell.SuggestNewItemName(directory, kind, template);
+
+        if (NewItemDialog.Show(owner, directory, kind, template, suggestion, _shell.PlanNewItem)
+            is not { } plan)
+        {
+            return;
+        }
+
+        // The shell selects the new item through PendingSelection, so there is nothing to do here
+        // on success — it reaches whichever pane is showing this folder, not just this one.
+        var outcome = await _shell.CreateNewItemAsync(plan);
+
+        if (outcome.Failed is { } failed)
+            MessageDialog.Show(owner, failed.Message, "New", MessageDialogKind.Warning);
     }
 
     private void ContextOpen_Click(object sender, RoutedEventArgs e)

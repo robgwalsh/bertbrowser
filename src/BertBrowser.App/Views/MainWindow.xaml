@@ -304,6 +304,19 @@
                       ContextMenuOpening="FolderTree_ContextMenuOpening">
                 <TreeView.ContextMenu>
                     <ContextMenu>
+                        <MenuItem x:Name="TreeNewMenuItem" Header="New">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE710;"/></MenuItem.Icon>
+                            <MenuItem Header="Folder" Click="TreeNewFolder_Click">
+                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8B7;"/></MenuItem.Icon>
+                            </MenuItem>
+                            <!-- The configured file types are built here at ContextMenuOpening. -->
+                            <Separator x:Name="TreeNewFileTypesSeparator"/>
+                            <Separator/>
+                            <MenuItem Header="Empty file…" Click="TreeNewEmptyFile_Click">
+                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE7C3;"/></MenuItem.Icon>
+                            </MenuItem>
+                        </MenuItem>
+                        <Separator/>
                         <MenuItem Header="Open in new tab" Click="TreeOpenInNewTab_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8A7;"/></MenuItem.Icon>
                         </MenuItem>

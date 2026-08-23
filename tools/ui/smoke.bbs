@@ -40,6 +40,13 @@ assert-row "Holiday 2.md"
 undo
 assert-row notes.txt
 
+# Creating, which is additive: it appears, it is selected, and it leaves Ctrl+Z pointing at
+# whatever came before rather than spending the slot. tools/ui/newitem.bbs covers the rest.
+newfolder Reports
+settle
+assert-row Reports
+assert-selected 1
+
 # The real Recycle Bin, and Ctrl+Z putting it back out again.
 select budget.xlsx
 delete

@@ -76,6 +76,10 @@ search <text>               this folder's box, debounce and search waited out
 gsearch <text>              the header's whole-PC box (needs --index)
 clear-search
 
+newfolder <name>            create a folder in the active tab's directory, through
+                            PlanNewItem/CreateNewItemAsync (acts on the folder, not the selection)
+newfile <name>              same for a file; a name ending in a configured type's extension
+                            picks up that type's template, otherwise the file starts empty
 rename <pattern>            the selection, through PlanRename/RenameAsync
 delete | delete-permanent [names]
 move|copy [names] to <folder>
@@ -84,8 +88,9 @@ undo
 hidden on|off | thumbnails <0..1> | sort name|size|modified|type | theme <id>
 
 shot <name> [element]       PNG of the window, or of any x:Name'd element in it
-dialog <kind> [name]        PNG of a dialog: rename, delete, delete-permanent, message, warning,
-                            properties, settings, theme-editor
+dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, delete,
+                            delete-permanent, message, warning, properties, settings, theme-editor
+                            (new-folder/new-file need no selection; every other kind uses one)
 state                       one JSON line of everything worth asserting on
 rows                        the row names, for when an assertion is about to fail
 probe <token> [element]     where a theme token's colour came out: the resolver, the app and

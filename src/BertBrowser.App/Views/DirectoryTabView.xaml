@@ -137,6 +137,23 @@
                 </ListView.ItemContainerStyle>
                 <ListView.ContextMenu>
                     <ContextMenu>
+                        <!-- New targets the folder being shown, never the selection, which is why
+                             it is above Open — and why right-clicking empty space, which opens this
+                             same menu, gets it without needing its own affordance. -->
+                        <MenuItem x:Name="NewMenuItem" Header="New">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE710;"/></MenuItem.Icon>
+                            <MenuItem Header="Folder" InputGestureText="Ctrl+Shift+N"
+                                      Click="ContextNewFolder_Click">
+                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8B7;"/></MenuItem.Icon>
+                            </MenuItem>
+                            <!-- The configured file types are built here at ContextMenuOpening. -->
+                            <Separator x:Name="NewFileTypesSeparator"/>
+                            <Separator/>
+                            <MenuItem Header="Empty file…" Click="ContextNewEmptyFile_Click">
+                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE7C3;"/></MenuItem.Icon>
+                            </MenuItem>
+                        </MenuItem>
+                        <Separator/>
                         <MenuItem Header="Open" Click="ContextOpen_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8E5;"/></MenuItem.Icon>
                         </MenuItem>

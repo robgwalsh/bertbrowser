@@ -9,6 +9,7 @@ using System.Windows.Threading;
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services.Delete;
+using BertBrowser.Core.Services.NewItem;
 
 namespace BertBrowser.App.Views;
 
@@ -113,7 +114,10 @@ public partial class MainWindow : ThemedWindow
 
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
-        var vm = new SettingsViewModel(_settings, App.Services.GetRequiredService<IThemeService>());
+        var vm = new SettingsViewModel(
+            _settings,
+            App.Services.GetRequiredService<IThemeService>(),
+            App.Services.GetRequiredService<BertBrowser.App.Services.IShellNewCatalog>());
         if (new SettingsWindow(vm) { Owner = this }.ShowDialog() == true)
         {
             // Push a "Show hidden items" change made in the dialog through the shell; its setter
@@ -544,6 +548,9 @@ public partial class MainWindow : ThemedWindow
             _treeContextNode = node;
             TreeBookmarkMenuItem.Header =
                 _shell.Bookmarks.IsBookmarked(node.FullPath) ? "Remove bookmark" : "Bookmark";
+            NewItemMenu.Rebuild(TreeNewMenuItem, TreeNewFileTypesSeparator, _settings,
+                template => _ = CreateInTreeFolderAsync(node.FullPath, NewItemKind.File, template));
+
             if (FolderTree.ContextMenu is { } menu)
             {
                 CustomCommandMenu.Rebuild(menu, TreeCustomCommandsSeparator, [(node.FullPath, true)],
@@ -565,6 +572,39 @@ public partial class MainWindow : ThemedWindow
     private void TreeDelete_Click(object sender, RoutedEventArgs e)
     {
         if (_treeContextNode is { } node) _ = DeleteTreeFolderAsync(node.FullPath);
+    }
+
+    private void TreeNewFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (_treeContextNode is { } node)
+            _ = CreateInTreeFolderAsync(node.FullPath, NewItemKind.Folder);
+    }
+
+    private void TreeNewEmptyFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (_treeContextNode is { } node)
+            _ = CreateInTreeFolderAsync(node.FullPath, NewItemKind.File);
+    }
+
+    /// <summary>Creates something in a folder picked out of the tree. Goes through exactly the same
+    /// plan and executor as the file list's own New — the tree is just another way of naming the
+    /// folder — and the shell's PendingSelection is what selects the result in whichever pane
+    /// happens to be showing it.</summary>
+    private async Task CreateInTreeFolderAsync(
+        string path, NewItemKind kind, NewFileTemplate? template = null)
+    {
+        var suggestion = _shell.SuggestNewItemName(path, kind, template);
+
+        if (NewItemDialog.Show(this, path, kind, template, suggestion, _shell.PlanNewItem)
+            is not { } plan)
+        {
+            return;
+        }
+
+        var outcome = await _shell.CreateNewItemAsync(plan);
+
+        if (outcome.Failed is { } failed)
+            MessageDialog.Show(this, failed.Message, "New", MessageDialogKind.Warning);
     }
 
     /// <summary>Deletes a folder picked out of the tree. Goes through exactly the same plan,

@@ -159,6 +159,122 @@
                                Visibility="{Binding Appearance.IssueText, Converter={StaticResource NullToCollapsed}}"/>
                 </StackPanel>
 
+                <!-- File types on the New submenu -->
+                <DockPanel>
+                    <DockPanel.Style>
+                        <Style TargetType="DockPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedCategory.Id}"
+                                             Value="{x:Static vm:SettingsCategory.NewItems}">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DockPanel.Style>
+
+                    <TextBlock DockPanel.Dock="Top" Text="New file types"
+                               Style="{StaticResource PageHeading}" Margin="0,0,0,4"/>
+                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,12"
+                               Foreground="{StaticResource Theme.Text.Secondary}"
+                               Text="These appear on the New submenu of the file list and folder tree, in this order. A type with no template file makes an empty file. New ▸ Folder is always offered and is not listed here."/>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Type list, in menu order -->
+                        <DockPanel Grid.Column="0">
+                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+                                <Button Content="Add" Padding="12,3" Margin="0,0,6,0"
+                                        Command="{Binding AddNewFileTypeCommand}"/>
+                                <Button Content="Remove" Padding="12,3" Margin="0,0,6,0"
+                                        Command="{Binding RemoveNewFileTypeCommand}"/>
+                                <Button Content="↑" Padding="9,3" Margin="0,0,6,0" ToolTip="Move up"
+                                        Command="{Binding MoveNewFileTypeUpCommand}"/>
+                                <Button Content="↓" Padding="9,3" ToolTip="Move down"
+                                        Command="{Binding MoveNewFileTypeDownCommand}"/>
+                            </StackPanel>
+                            <ListBox ItemsSource="{Binding NewFileTypes}"
+                                     SelectedItem="{Binding SelectedNewFileType, Mode=TwoWay}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel Margin="2">
+                                            <CheckBox DockPanel.Dock="Left" Margin="0,0,6,0"
+                                                      IsChecked="{Binding Enabled, Mode=TwoWay}"
+                                                      ToolTip="Show this type on the New menu"/>
+                                            <TextBlock Text="{Binding Extension}" Margin="6,0,0,0"
+                                                       DockPanel.Dock="Right" Opacity="0.6"/>
+                                            <TextBlock Text="{Binding Label}"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+
+                        <!-- Editor for the selected type -->
+                        <Grid Grid.Column="2" VerticalAlignment="Top">
+                            <Grid.Style>
+                                <Style TargetType="Grid">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedNewFileType}" Value="{x:Null}">
+                                            <Setter Property="IsEnabled" Value="False"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Style>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                            <TextBox Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
+                                     VerticalContentAlignment="Center"
+                                     Text="{Binding SelectedNewFileType.Label, UpdateSourceTrigger=PropertyChanged}"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Extension:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
+                                     VerticalContentAlignment="Center"
+                                     Text="{Binding SelectedNewFileType.Extension, UpdateSourceTrigger=PropertyChanged}"/>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Template:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                            <TextBox Grid.Row="2" Grid.Column="1" Margin="0,0,6,8"
+                                     VerticalContentAlignment="Center"
+                                     Text="{Binding SelectedNewFileType.TemplatePath, UpdateSourceTrigger=PropertyChanged}"/>
+                            <Button Grid.Row="2" Grid.Column="2" Content="…" Width="28" Margin="0,0,0,8"
+                                    ToolTip="Browse for a template file" Click="BrowseTemplate_Click"/>
+
+                            <TextBlock Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2"
+                                       Style="{StaticResource Hint}" Margin="0,0,0,12"
+                                       Text="Leave blank to create an empty file."/>
+
+                            <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3">
+                                <Button Content="Import from Windows…" Padding="12,3"
+                                        HorizontalAlignment="Left"
+                                        Command="{Binding ImportFromWindowsCommand}"/>
+                                <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                           Text="Adds the file types Windows offers in its own New menu. This only reads the registry — it never changes what Explorer shows, and types already listed keep their place."/>
+                                <TextBlock Margin="0,6,0,0" TextWrapping="Wrap"
+                                           Foreground="{StaticResource Theme.Text.Secondary}"
+                                           Text="{Binding ImportStatus}"/>
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </DockPanel>
+
                 <!-- Custom context menu commands -->
                 <DockPanel>
                     <DockPanel.Style>
