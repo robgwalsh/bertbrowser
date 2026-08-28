@@ -36,6 +36,10 @@ public partial class DirectoryTabView : UserControl
         DataContext = tab;
 
         _marquee = MarqueeSelector.Attach(FileListView);
+        // The last selection change of a rubber-band sweep lands while the band is still down, and
+        // the preview skips those; without this the pane would keep showing whatever was selected
+        // before the drag began.
+        _marquee.DragEnded += () => { if (Tab.IsPreviewVisible) Tab.Preview.Show(Tab.SelectedItems); };
         // Attached after the marquee so the two never fight: the marquee ignores presses that land
         // on a row, and this ignores presses that land on empty space.
         FileDragDropController.Attach(FileListView, tab, shell);
@@ -44,7 +48,8 @@ public partial class DirectoryTabView : UserControl
         Tab.PropertyChanged += Tab_PropertyChanged;
         Tab.RevealFileRequested += OnRevealFileRequested;
         UpdateRelPathColumn();
-        ApplyViewMode(); // honor a restored thumbnail zoom level
+        ApplyViewMode();     // honor a restored thumbnail zoom level
+        UpdatePreviewPane(); // and a restored preview pane
     }
 
     /// <summary>Gives the subscriptions back. A tab is closable, unlike the window, so its view
@@ -54,6 +59,7 @@ public partial class DirectoryTabView : UserControl
         Tab.FileList.PropertyChanged -= FileList_PropertyChanged;
         Tab.PropertyChanged -= Tab_PropertyChanged;
         Tab.RevealFileRequested -= OnRevealFileRequested;
+        PreviewPane.Detach();
     }
 
     /// <summary>Keeps the deepest crumb visible: panes are narrower than a window, so a long path
@@ -68,8 +74,42 @@ public partial class DirectoryTabView : UserControl
             return;
         }
 
+        if (e.PropertyName == nameof(DirectoryTabViewModel.IsPreviewVisible))
+        {
+            UpdatePreviewPane();
+            return;
+        }
+
         if (e.PropertyName != nameof(DirectoryTabViewModel.CurrentPath)) return;
         _ = Dispatcher.InvokeAsync(BreadcrumbScroller.ScrollToRightEnd, DispatcherPriority.Loaded);
+    }
+
+    // --- Preview pane ---
+
+    /// <summary>Shows or hides the preview column. Assigned rather than bound because
+    /// <see cref="ColumnDefinition.Width"/> is not a bindable target — the same reason
+    /// <see cref="UpdateRelPathColumn"/> assigns its column too.</summary>
+    private void UpdatePreviewPane()
+    {
+        var show = Tab.IsPreviewVisible;
+        PreviewSplitterColumn.Width = show ? GridLength.Auto : new GridLength(0);
+        PreviewColumn.Width = show ? new GridLength(PreviewWidth()) : new GridLength(0);
+        PreviewSplitter.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        PreviewPane.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+
+        if (show) Tab.Preview.Show(Tab.SelectedItems);
+    }
+
+    /// <summary>Clamped, because a width saved on a wide monitor must not leave a narrow pane with
+    /// no file list at all.</summary>
+    private double PreviewWidth() => Math.Clamp(_settings.PreviewPaneWidth, 180, 1200);
+
+    private void PreviewSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        // The dragged width is persisted the way PaneLayoutHost writes its splitter weights back:
+        // on completion, not on every pixel of the drag.
+        if (PreviewColumn.ActualWidth > 0)
+            _settings.PreviewPaneWidth = PreviewColumn.ActualWidth;
     }
 
     public void FocusList() =>
@@ -290,7 +330,9 @@ public partial class DirectoryTabView : UserControl
     private bool _selectionSummaryPending;
 
     /// <summary>Coalesces the summary refresh to one per frame: a rubber-band drag adds and removes
-    /// items one at a time, and each recount walks the whole selection.</summary>
+    /// items one at a time, and each recount walks the whole selection. The preview rides the same
+    /// coalescing, and is skipped outright while the rubber band is down — it would otherwise start
+    /// a file read for every row the band swept over.</summary>
     private void QueueSelectionSummary()
     {
         if (_selectionSummaryPending) return;
@@ -299,6 +341,8 @@ public partial class DirectoryTabView : UserControl
         {
             _selectionSummaryPending = false;
             UpdateSelectionSummary();
+            if (Tab.IsPreviewVisible && !_marquee.IsDragging)
+                Tab.Preview.Show(Tab.SelectedItems);
         }, DispatcherPriority.Background);
     }
 

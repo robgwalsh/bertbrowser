@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using BertBrowser.App.Theming;
 using Microsoft.Extensions.DependencyInjection;
 using System.Windows;
@@ -25,6 +26,8 @@ public partial class MainWindow : ThemedWindow
     /// it instead of stacking another.</summary>
     private DiskUsageWindow? _diskUsage;
 
+    private TransferProgressWindow? _transferDetails;
+
     public MainWindow(ShellViewModel shell, BertBrowser.App.Services.AppSettings settings)
     {
         InitializeComponent();
@@ -50,6 +53,7 @@ public partial class MainWindow : ThemedWindow
         _shell.PaneFocusRequested += OnPaneFocusRequested;
         _shell.GlobalSearchFocusRequested += FocusGlobalSearchBox;
         _shell.DiskUsageRequested += ShowDiskUsage;
+        _shell.PropertyChanged += Shell_TransferProgressChanged;
 
         Loaded += async (_, _) => await _shell.InitializeAsync();
         Closing += (_, _) =>
@@ -137,6 +141,36 @@ public partial class MainWindow : ThemedWindow
             _shell.ShowHiddenItems = _settings.ShowHiddenItems;
             _shell.RefreshTileAspect();
         }
+    }
+
+    /// <summary>
+    /// Opens the transfer's detail view, or brings the one already up to the front. Re-used rather
+    /// than stacked, and it is handed the shell's own progress view model — the same object the
+    /// status bar is bound to, so the window is a second view of one transfer rather than a second
+    /// copy of its state.
+    /// </summary>
+    private void TransferDetails_Click(object sender, RoutedEventArgs e)
+    {
+        if (_shell.TransferProgress is not { } progress) return;
+
+        if (_transferDetails is { IsLoaded: true })
+        {
+            _transferDetails.Activate();
+            return;
+        }
+
+        _transferDetails = TransferProgressWindow.Show(this, progress);
+        _transferDetails.Closed += (_, _) => _transferDetails = null;
+    }
+
+    /// <summary>
+    /// The transfer finished, so its detail view has nothing left to show. Closed rather than left
+    /// standing on figures that have stopped moving, which would read as one still running.
+    /// </summary>
+    private void Shell_TransferProgressChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(ShellViewModel.TransferProgress)) return;
+        if (_shell.TransferProgress is null) _transferDetails?.Close();
     }
 
     /// <summary>
@@ -250,6 +284,14 @@ public partial class MainWindow : ThemedWindow
         {
             if (_shell.UndoCommand.CanExecute(null))
                 _shell.UndoCommand.Execute(null);
+            e.Handled = true;
+        }
+        // Explorer's preview-pane chord, for the muscle memory. It cannot be a KeyBinding the way
+        // Ctrl+P is: an Alt chord arrives as Key.System with the real key in SystemKey, which is
+        // the same shape Alt+Enter is handled in over in DirectoryTabView.
+        else if (e.Key == Key.System && e.SystemKey == Key.P && Keyboard.Modifiers == ModifierKeys.Alt)
+        {
+            _shell.ActiveTab.TogglePreviewCommand.Execute(null);
             e.Handled = true;
         }
         base.OnPreviewKeyDown(e);

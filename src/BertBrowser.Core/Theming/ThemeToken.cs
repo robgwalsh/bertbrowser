@@ -155,6 +155,19 @@ public static class ThemeToken
     public const string MarqueeBorder = "Theme.Marquee.Border";
     public const string ThumbnailTileBackground = "Theme.Thumbnail.TileBackground";
 
+    // Preview pane. Only the checkerboard is here: the pane's chrome, text and borders are the
+    // ordinary surface tokens, and inventing a parallel set of them would mean two places to
+    // change every time the app's greys move.
+    public const string PreviewCheckerLight = "Theme.Preview.CheckerLight";
+    public const string PreviewCheckerDark = "Theme.Preview.CheckerDark";
+
+    // Syntax colouring for the text preview.
+    public const string SyntaxKeyword = "Theme.Syntax.Keyword";
+    public const string SyntaxString = "Theme.Syntax.String";
+    public const string SyntaxComment = "Theme.Syntax.Comment";
+    public const string SyntaxNumber = "Theme.Syntax.Number";
+    public const string SyntaxPunctuation = "Theme.Syntax.Punctuation";
+
     private const string GroupSurfaces = "Surfaces";
     private const string GroupText = "Text";
     private const string GroupBorders = "Borders";
@@ -171,6 +184,7 @@ public static class ThemeToken
     private const string GroupStatusBar = "Status bar";
     private const string GroupFeedback = "Feedback";
     private const string GroupControls = "Controls";
+    private const string GroupSyntax = "Code preview";
     private const string GroupMisc = "Misc";
 
     /// <summary>In editor display order: groups appear in the order they first occur here.</summary>
@@ -301,6 +315,14 @@ public static class ThemeToken
         new(MarqueeFill, GroupMisc, "Rubber band fill", "The drag-to-select rectangle; alpha matters here.", false),
         new(MarqueeBorder, GroupMisc, "Rubber band border", "", false),
         new(ThumbnailTileBackground, GroupMisc, "Thumbnail tile", "Sits behind previews so transparent images still read.", false),
+        new(PreviewCheckerLight, GroupMisc, "Preview checker (light)", "The chequerboard behind a transparent image in the preview pane.", false),
+        new(PreviewCheckerDark, GroupMisc, "Preview checker (dark)", "The other square of the chequerboard.", false),
+
+        new(SyntaxKeyword, GroupSyntax, "Keyword", "Colouring in the preview pane's text view.", false),
+        new(SyntaxString, GroupSyntax, "String", "", false),
+        new(SyntaxComment, GroupSyntax, "Comment", "", false),
+        new(SyntaxNumber, GroupSyntax, "Number", "", false),
+        new(SyntaxPunctuation, GroupSyntax, "Punctuation", "Brackets, operators and separators.", false),
     };
 
     /// <summary>Every token key, in <see cref="Descriptors"/> order.</summary>

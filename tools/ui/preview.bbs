@@ -1,0 +1,102 @@
+# The preview pane: every body it can show, and the two rules that make it worth having.
+#
+# Nothing here presses play on a media file. The pane stops at the poster frame until someone
+# does, which is what keeps this run silent and keeps every capture a real picture — a MediaElement
+# renders through its own composition surface and comes back as a hole in a RenderTargetBitmap.
+
+tree .
+preview-fixture
+refresh
+go Preview
+assert-count 5
+
+# --- off by default, and toggling is per tab ---
+
+assert-hidden PreviewPane
+preview on
+assert-visible PreviewPane
+shot 01-empty PreviewPane
+
+# --- an image, with its dimensions and the chequerboard behind its transparency ---
+
+select sample.png
+settle 400
+assert-preview image
+shot 02-image PreviewPane
+
+# --- code, coloured and selectable ---
+
+select Sample.cs
+settle 400
+assert-preview text
+shot 03-code PreviewPane
+
+# --- markdown, which Explorer's pane shows nothing at all for ---
+
+select sample.md
+settle 400
+assert-preview text
+shot 04-markdown PreviewPane
+
+# --- an archive, listed without extracting anything ---
+
+select sample.zip
+settle 400
+assert-preview archive
+shot 05-archive PreviewPane
+
+# --- plain text, so the encoding and line-ending footer is on screen ---
+
+select plain.txt
+settle 400
+assert-preview text
+shot 06-text PreviewPane
+
+# --- a folder and a multi-selection both say what they are rather than going blank ---
+
+select-all
+settle 400
+assert-preview none
+shot 07-many PreviewPane
+
+deselect
+settle 400
+assert-preview none
+state
+
+# --- the whole window, so the splitter and the list beside it are in one picture ---
+
+select sample.png
+settle 400
+shot 08-window
+
+# --- the invariant that justifies the whole feature: previewing holds nothing open ---
+#
+# Explorer's pane locks the file it is showing; this one reads into memory and closes. If that
+# ever regresses, the rename below fails and this script goes red rather than the bug reaching
+# someone mid-move.
+
+select Sample.cs
+settle 400
+assert-preview text
+rename Renamed.cs
+assert-row Renamed.cs
+select Renamed.cs
+delete
+assert-missing Renamed.cs
+undo
+assert-row Renamed.cs
+
+# --- and it survives a theme change, since the syntax colours are tokens like everything else ---
+
+select Renamed.cs
+settle 400
+theme light-plus
+shot 09-code-light PreviewPane
+theme dark-plus
+
+# --- off again, and the list gets its width back ---
+
+preview off
+assert-hidden PreviewPane
+shot 10-off

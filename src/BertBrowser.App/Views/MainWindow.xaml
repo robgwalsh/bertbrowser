@@ -5,6 +5,7 @@
         xmlns:v="clr-namespace:BertBrowser.App.Views"
         Title="BertBrowser" Width="1200" Height="750"
         WindowStartupLocation="CenterScreen"
+        ShowsAppIcon="True"
         Background="{StaticResource Theme.Window.Background}"
         TextElement.Foreground="{StaticResource Theme.Text.Primary}"
         d:DataContext="{d:DesignInstance Type=vm:ShellViewModel}"
@@ -52,6 +53,12 @@
 
         <!-- Reopen the last tab closed in this pane. -->
         <KeyBinding Key="T" Modifiers="Ctrl+Shift" Command="{Binding ActivePane.ReopenClosedTabCommand}"/>
+
+        <!-- The preview pane, for the tab that has focus. Safe here for the same reason
+             Ctrl+Shift+D is: P is not a text-editing key, so it cannot be taken away from the
+             search or path box. Explorer's Alt+P is handled in code-behind instead, because an
+             Alt chord arrives as Key.System with the real key in SystemKey. -->
+        <KeyBinding Key="P" Modifiers="Ctrl" Command="{Binding ActiveTab.TogglePreviewCommand}"/>
     </Window.InputBindings>
 
     <!--
@@ -181,6 +188,45 @@
             <StatusBarItem DockPanel.Dock="Left"
                            Visibility="{Binding ActiveTab.SelectionSummary, Converter={StaticResource NullToCollapsed}}">
                 <TextBlock Text="{Binding ActiveTab.SelectionSummary}" Foreground="{StaticResource Theme.Text.Secondary}" Margin="10,0,0,0"/>
+            </StatusBarItem>
+            <!-- A running transfer: how far through it is in bytes, how fast, how long is left, and
+                 the way out of it. Bound to the nullable view model rather than to IsTransferring so
+                 the same strip can be posed for a capture without a transfer actually running.
+                 The bar is determinate only when the size index could total the plan; otherwise it
+                 is indeterminate beside a throughput figure, because a determinate bar pinned at 0%
+                 reads as a stall rather than as an unmeasured volume. -->
+            <StatusBarItem DockPanel.Dock="Left"
+                           Visibility="{Binding TransferProgress, Converter={StaticResource NullToCollapsed}}">
+                <!-- Every binding names TransferProgress in full rather than the panel switching
+                     DataContext to it once with `DataContext="{Binding TransferProgress}"`. That
+                     form binds the DataContext against the DataContext it is setting, which is a
+                     trap worth staying out of on a panel whose every sibling here binds to the
+                     shell. -->
+                <StackPanel Orientation="Horizontal">
+                    <ProgressBar Width="80" Margin="10,0,8,0" VerticalAlignment="Center"
+                                 Minimum="0" Maximum="1"
+                                 Value="{Binding TransferProgress.Fraction, Mode=OneWay}"
+                                 IsIndeterminate="{Binding TransferProgress.IsIndeterminate}"
+                                 Focusable="False" IsHitTestVisible="False"/>
+                    <!-- StatusBar tokens, not Theme.Text.*: this strip is the accent colour, and the
+                         contrast suite covers these against it. -->
+                    <TextBlock Text="{Binding TransferProgress.Headline}" MaxWidth="340"
+                               TextTrimming="CharacterEllipsis"
+                               Foreground="{StaticResource Theme.StatusBar.Foreground}" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding TransferProgress.DetailText}" Margin="10,0,0,0"
+                               Foreground="{StaticResource Theme.StatusBar.Foreground}" Opacity="0.8"
+                               VerticalAlignment="Center"/>
+                    <Button Style="{StaticResource LinkButton}" Margin="12,0,0,0"
+                            Foreground="{StaticResource Theme.StatusBar.Foreground}"
+                            Content="Details" VerticalAlignment="Center"
+                            ToolTip="Show every item in this transfer"
+                            Click="TransferDetails_Click"/>
+                    <Button Style="{StaticResource LinkButton}" Margin="10,0,0,0"
+                            Foreground="{StaticResource Theme.StatusBar.Foreground}"
+                            Content="Cancel" FontWeight="SemiBold" VerticalAlignment="Center"
+                            ToolTip="Stop this transfer. Whatever has already been transferred stays, and can be undone."
+                            Command="{Binding TransferProgress.CancelCommand}"/>
+                </StackPanel>
             </StatusBarItem>
             <!-- Background MFT indexing progress (blank when idle), or why there is no index.
                  When the reason is one the user can act on — a declined elevation prompt, a helper

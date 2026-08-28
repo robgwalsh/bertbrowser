@@ -54,7 +54,18 @@ public static class ShellThumbnails
 
     /// <summary>Returns a thumbnail (or the file-type icon when no preview exists) sized to
     /// fit <paramref name="size"/>×<paramref name="size"/> pixels, or null on failure.</summary>
-    public static ImageSource? GetThumbnail(string path, int size)
+    public static ImageSource? GetThumbnail(string path, int size) => Get(path, size, SIIGBF.ResizeToFit);
+
+    /// <summary>
+    /// A real preview, or null. Unlike <see cref="GetThumbnail"/> this passes
+    /// <c>SIIGBF_THUMBNAILONLY</c>, so the shell declines rather than substituting the file-type
+    /// icon — which is what lets the preview pane say "no preview available" instead of blowing a
+    /// 32 px icon up to fill a 600 px panel.
+    /// </summary>
+    public static ImageSource? GetPreview(string path, int size) =>
+        Get(path, size, SIIGBF.ThumbnailOnly | SIIGBF.BiggerSizeOk);
+
+    private static ImageSource? Get(string path, int size, SIIGBF flags)
     {
         IShellItemImageFactory? factory = null;
         var hbitmap = IntPtr.Zero;
@@ -62,7 +73,7 @@ public static class ShellThumbnails
         {
             SHCreateItemFromParsingName(path, IntPtr.Zero, IID_IShellItemImageFactory, out factory);
             // ResizeToFit gives a preview when the handler has one and an icon otherwise.
-            factory.GetImage(new SIZE(size, size), SIIGBF.ResizeToFit, out hbitmap);
+            factory.GetImage(new SIZE(size, size), flags, out hbitmap);
             if (hbitmap == IntPtr.Zero) return null;
 
             var source = Imaging.CreateBitmapSourceFromHBitmap(

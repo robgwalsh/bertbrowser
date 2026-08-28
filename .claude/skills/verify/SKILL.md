@@ -60,6 +60,9 @@ Exit codes: `0` pass · `1` a command or assertion failed · `2` environment · 
 ```
 tree [dir]                  lay down a throwaway fixture tree (folders, hidden entries, files of
                             several types, all stamped with one modified date)
+preview-fixture [dir]       files that really are what their extension says (a PNG with alpha, a
+                            zip, C# and Markdown), in a Preview folder of their own — `tree`'s
+                            photo.jpg is text, which previews as nothing
 mkdir <rel> | write <rel> [bytes] | sandbox
 
 go <path>                   navigate the active tab (relative paths resolve in the sandbox)
@@ -86,6 +89,8 @@ move|copy [names] to <folder>
 undo
 
 hidden on|off | thumbnails <0..1> | sort name|size|modified|type | theme <id>
+preview on|off              the active tab's preview pane, with its debounce and off-thread read
+                            waited out (so assert after this, not straight after a `select`)
 
 shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, delete,
@@ -105,6 +110,7 @@ assert-row <name> | assert-no-row <name> | assert-selected <n>
 assert-tabs <n> | assert-panes <n> | assert-flattened | assert-not-flattened
 assert-can-undo | assert-cannot-undo | assert-exists <path> | assert-missing <path>
 assert-visible <Name> | assert-hidden <Name> | assert-not-launched
+assert-preview <kind>       image | document | text | archive | font | media | loading | none
 
 echo <text> | sleep <ms> | settle [ms]      '#' at the start of a line is a comment
 ```
@@ -115,7 +121,8 @@ Options: `--out <dir>` · `--sandbox <dir>` · `--state-dir <dir>` · `--keep-st
 
 Element names come from the XAML: window-level are `FolderTree`, `GlobalSearchBox`, `PinnedRow`,
 `ThumbSlider`, `PaneHostSite`; per tab (resolved against the *active* tab) are `FileListView`,
-`SearchBox`, `PathBox`, `Breadcrumb`, `DetailsView`; per pane, `TabHost` and `ClosePaneButton`.
+`SearchBox`, `PathBox`, `Breadcrumb`, `DetailsView`, `PreviewPane`; per pane, `TabHost` and
+`ClosePaneButton`.
 
 ## Blocked on purpose
 
@@ -128,6 +135,10 @@ Element names come from the XAML: window-level are `FolderTree`, `GlobalSearchBo
   through — without it.
 - **Writing outside the sandbox is refused.** This app deletes and moves real files, and the harness
   drives the real executors. `--allow-outside` is the deliberate way past, for when you mean it.
+- **No media is ever played.** The preview pane stops at a poster frame until someone presses play,
+  and no script presses it. That keeps a run silent on a machine someone is using — and a
+  `MediaElement` renders through its own composition surface, so it would come back as a hole in a
+  `RenderTargetBitmap` anyway. Assert media through `state`, never a screenshot.
 - **The MFT indexer does not run** unless you pass `--index`. It reads every NTFS volume's master
   file table — minutes of disk on a machine someone is using — and needs administrator rights the
   harness does not request. `gsearch` says so rather than reporting an empty result as a finding.

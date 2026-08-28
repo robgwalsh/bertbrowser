@@ -498,8 +498,203 @@ public sealed class TransferExecutorTests : IDisposable
 
         Assert.Empty(outcome.Completed);
         Assert.Empty(outcome.Failed);
+        Assert.True(outcome.Cancelled);
         AssertContent(a, "a");
         AssertContent(b, "b");
+    }
+
+    // --- bytes ---
+
+    [Fact]
+    public void Progress_CountsTheBytesItWrote_NotJustTheItems()
+    {
+        var a = File_(new string('a', 4_000), "src", "a.txt");
+        var b = File_(new string('b', 6_000), "src", "b.txt");
+        var dest = Dir("dest");
+
+        var seen = new List<TransferProgress>();
+        var plan = _planner.Plan([a, b], dest, TransferVerb.Copy);
+        _executor.Execute(plan, null, default, new SyncProgress(seen.Add));
+
+        Assert.Equal(10_000, seen[^1].BytesDone);
+        Assert.Equal(2, seen[^1].Done);
+    }
+
+    [Fact]
+    public void Progress_CountsEveryFileInATreeItCopies()
+    {
+        File_(new string('x', 1_500), "src", "tree", "one.txt");
+        File_(new string('y', 2_500), "src", "tree", "sub", "two.txt");
+        var dest = Dir("dest");
+
+        var seen = new List<TransferProgress>();
+        var plan = _planner.Plan([P("src", "tree")], dest, TransferVerb.Copy);
+        _executor.Execute(plan, null, default, new SyncProgress(seen.Add));
+
+        Assert.Equal(4_000, seen[^1].BytesDone);
+    }
+
+    [Fact]
+    public void Progress_NeverGoesBackwards()
+    {
+        File_(new string('x', 3_000), "src", "tree", "one.txt");
+        File_(new string('y', 3_000), "src", "tree", "two.txt");
+        var c = File_(new string('z', 3_000), "src", "c.txt");
+        var dest = Dir("dest");
+
+        var seen = new List<TransferProgress>();
+        var plan = _planner.Plan([P("src", "tree"), c], dest, TransferVerb.Copy);
+        _executor.Execute(plan, null, default, new SyncProgress(seen.Add));
+
+        for (var i = 1; i < seen.Count; i++)
+            Assert.True(seen[i].BytesDone >= seen[i - 1].BytesDone,
+                $"report {i} went backwards: {seen[i - 1].BytesDone} then {seen[i].BytesDone}");
+    }
+
+    [Fact]
+    public void ASameVolumeMove_ReportsNoBytes_BecauseItIsARename()
+    {
+        // Not a stall and not a bug: relocating within a volume writes nothing, and a bar that
+        // crawled through 50 GB of "progress" here would be an invention.
+        var a = File_(new string('a', 8_000), "src", "a.txt");
+        var dest = Dir("dest");
+
+        var seen = new List<TransferProgress>();
+        var plan = _planner.Plan([a], dest, TransferVerb.Move);
+        _executor.Execute(plan, null, default, new SyncProgress(seen.Add));
+
+        Assert.Equal(0, seen[^1].BytesDone);
+        AssertContent(P("dest", "a.txt"), new string('a', 8_000));
+    }
+
+    // --- cancelling part-way through a file ---
+
+    /// <summary>An executor whose bytes move through a copier we can interrupt at a known point.
+    /// A real mid-file cancel would need a fixture large enough to still be copying when the token
+    /// trips, which is neither fast nor deterministic.</summary>
+    private TransferExecutor WithCopier(SteppedCopier copier) =>
+        new(new FileSystemTransferProbe(), copier);
+
+    [Fact]
+    public void Cancelling_InsideAFile_LeavesTheSourceAndSaysItWasCancelled()
+    {
+        var a = File_(new string('a', 4_000), "src", "a.txt");
+        var dest = Dir("dest");
+
+        using var cts = new CancellationTokenSource();
+        var copier = new SteppedCopier(chunks: 4, afterChunk: (_, _) => cts.Cancel());
+        var plan = _planner.Plan([a], dest, TransferVerb.Copy);
+
+        var outcome = WithCopier(copier).Execute(plan, null, cts.Token);
+
+        Assert.True(outcome.Cancelled);
+        Assert.Empty(outcome.Completed);
+        Assert.Empty(outcome.Failed);
+        AssertContent(a, new string('a', 4_000));
+        Assert.False(File.Exists(P("dest", "a.txt")), "a half-written file was left where a finished one belongs.");
+    }
+
+    [Fact]
+    public void Cancelling_InsideADirectoryCopy_RemovesThePartialTree()
+    {
+        // A copy is defined as purely additive, so a cancelled one must add nothing: half a tree
+        // reads as a finished copy to everything that looks at it afterwards.
+        File_(new string('x', 2_000), "src", "tree", "one.txt");
+        File_(new string('y', 2_000), "src", "tree", "two.txt");
+        File_(new string('z', 2_000), "src", "tree", "three.txt");
+        var dest = Dir("dest");
+
+        using var cts = new CancellationTokenSource();
+        var copier = new SteppedCopier(chunks: 2, afterChunk: (_, done) =>
+        {
+            if (done >= 2_000) cts.Cancel(); // one whole file across, then stop
+        });
+        var plan = _planner.Plan([P("src", "tree")], dest, TransferVerb.Copy);
+
+        var outcome = WithCopier(copier).Execute(plan, null, cts.Token);
+
+        Assert.True(outcome.Cancelled);
+        Assert.False(Directory.Exists(P("dest", "tree")), "a partial tree was left at the destination.");
+        Assert.True(Directory.Exists(P("src", "tree")));
+    }
+
+    [Fact]
+    public void ACancelledRun_KeepsWhatAlreadyGotAcross_AndStaysUndoable()
+    {
+        var a = File_(new string('a', 2_000), "src", "a.txt");
+        var b = File_(new string('b', 2_000), "src", "b.txt");
+        var dest = Dir("dest");
+
+        using var cts = new CancellationTokenSource();
+        var copier = new SteppedCopier(chunks: 2, afterChunk: (destination, _) =>
+        {
+            if (destination.EndsWith("b.txt", StringComparison.OrdinalIgnoreCase)) cts.Cancel();
+        });
+        // Cross-volume is what makes a file move copy rather than rename, so the copier is reached.
+        var plan = new TransferPlan(
+            TransferVerb.Move, dest,
+            [
+                new PlannedTransfer(a, false, P("dest", "a.txt"), false),
+                new PlannedTransfer(b, false, P("dest", "b.txt"), false),
+            ],
+            []);
+
+        var outcome = WithCopier(copier).Execute(plan, null, cts.Token);
+
+        Assert.True(outcome.Cancelled);
+        Assert.Single(outcome.Completed);
+        Assert.True(outcome.CanUndo, "what got across before the cancel still has to be undoable.");
+        AssertContent(P("dest", "a.txt"), new string('a', 2_000));
+        AssertContent(b, new string('b', 2_000)); // never left home
+    }
+
+    // --- the real copier's own guarantees ---
+
+    [Fact]
+    public void TheRealCopier_ReportsProgressWhileALargeFileIsCopied()
+    {
+        var source = P("src", "big.bin");
+        Directory.CreateDirectory(P("src"));
+        File.WriteAllBytes(source, new byte[8 * 1024 * 1024]);
+        var destination = P("dest", "big.bin");
+        Directory.CreateDirectory(P("dest"));
+
+        var reports = new List<long>();
+        new FileSystemFileCopier().Copy(source, destination, (done, _) => reports.Add(done), default);
+
+        Assert.NotEmpty(reports);
+        Assert.Equal(8 * 1024 * 1024, new FileInfo(destination).Length);
+    }
+
+    [Fact]
+    public void TheRealCopier_DeletesTheDestinationWhenCancelledMidFile()
+    {
+        var source = P("src", "big.bin");
+        Directory.CreateDirectory(P("src"));
+        File.WriteAllBytes(source, new byte[64 * 1024 * 1024]);
+        var destination = P("dest", "big.bin");
+        Directory.CreateDirectory(P("dest"));
+
+        using var cts = new CancellationTokenSource();
+        var copier = new FileSystemFileCopier();
+
+        Assert.Throws<OperationCanceledException>(() =>
+            copier.Copy(source, destination, (_, _) => cts.Cancel(), cts.Token));
+
+        Assert.False(File.Exists(destination), "a cancelled copy left its partial destination behind.");
+        Assert.True(File.Exists(source));
+    }
+
+    [Fact]
+    public void TheRealCopier_RefusesToOverwrite()
+    {
+        var source = File_("new", "src", "a.txt");
+        var destination = File_("existing", "dest", "a.txt");
+
+        Assert.Throws<IOException>(() =>
+            new FileSystemFileCopier().Copy(source, destination, null, default));
+
+        AssertContent(destination, "existing");
     }
 
     // --- copies ---
@@ -572,5 +767,58 @@ public sealed class TransferExecutorTests : IDisposable
     private sealed class SyncProgress(Action<TransferProgress> report) : IProgress<TransferProgress>
     {
         public void Report(TransferProgress value) => report(value);
+    }
+
+    /// <summary>
+    /// A copier that really copies, but in a fixed number of chunks with a hook between them, so a
+    /// cancel can be made to land in the middle of a named file every time.
+    /// </summary>
+    /// <remarks>
+    /// It reproduces <see cref="FileSystemFileCopier"/>'s contract — throw
+    /// <see cref="OperationCanceledException"/> and leave no partial destination — because the
+    /// tests above are about what the <em>executor</em> does around that contract. That the real
+    /// copier honours it is asserted separately, against a real file.
+    /// </remarks>
+    private sealed class SteppedCopier(int chunks, Action<string, long> afterChunk) : IFileCopier
+    {
+        public void Copy(string source, string destination, Action<long, long>? progress, CancellationToken ct) =>
+            Write(source, destination, progress, ct, deleteSource: false);
+
+        public void Move(string source, string destination, Action<long, long>? progress, CancellationToken ct) =>
+            Write(source, destination, progress, ct, deleteSource: true);
+
+        private void Write(
+            string source, string destination, Action<long, long>? progress,
+            CancellationToken ct, bool deleteSource)
+        {
+            var bytes = File.ReadAllBytes(source);
+            var size = Math.Max(1, (int)Math.Ceiling(bytes.Length / (double)chunks));
+            var cancelled = false;
+
+            using (var output = File.Open(destination, FileMode.CreateNew, FileAccess.Write))
+            {
+                for (var offset = 0; offset < bytes.Length; offset += size)
+                {
+                    if (ct.IsCancellationRequested)
+                    {
+                        cancelled = true;
+                        break;
+                    }
+
+                    var count = Math.Min(size, bytes.Length - offset);
+                    output.Write(bytes, offset, count);
+                    progress?.Invoke(offset + count, bytes.LongLength);
+                    afterChunk(destination, offset + count);
+                }
+            }
+
+            if (cancelled || ct.IsCancellationRequested)
+            {
+                File.Delete(destination);
+                throw new OperationCanceledException(ct);
+            }
+
+            if (deleteSource) File.Delete(source);
+        }
     }
 }

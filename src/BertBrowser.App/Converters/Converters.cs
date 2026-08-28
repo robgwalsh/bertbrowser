@@ -30,8 +30,26 @@ public sealed class InverseBoolConverter : IValueConverter
 
 public sealed class NullToCollapsedConverter : IValueConverter
 {
+    public bool Invert { get; set; }
+
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        var present = value is not (null or "");
+        if (Invert) present = !present;
+        return present ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>A byte count as words, for the preview pane's archive listing. The file list gets the
+/// same text from <c>SizeDisplay</c>; an archive entry is a plain record with no view model of its
+/// own, so the formatting happens here instead.</summary>
+public sealed class ByteSizeConverter : IValueConverter
+{
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        value is null or "" ? Visibility.Collapsed : Visibility.Visible;
+        value is long bytes ? BertBrowser.Core.Services.ByteSizeFormatter.Format(bytes) : "";
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();

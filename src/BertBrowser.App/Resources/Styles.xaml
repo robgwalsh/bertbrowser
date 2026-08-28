@@ -13,6 +13,8 @@
     <conv:BoolToVisibilityConverter x:Key="InverseBoolToVisibility" Invert="True"/>
     <conv:InverseBoolConverter x:Key="InverseBool"/>
     <conv:NullToCollapsedConverter x:Key="NullToCollapsed"/>
+    <conv:NullToCollapsedConverter x:Key="NullToVisible" Invert="True"/>
+    <conv:ByteSizeConverter x:Key="ByteSize"/>
     <conv:DepthToIndentConverter x:Key="DepthToIndent" IndentSize="16"/>
     <conv:ColorAlphaToOpacityConverter x:Key="ColorAlphaToOpacity"/>
     <conv:ColorToBrushConverter x:Key="ColorToBrush"/>

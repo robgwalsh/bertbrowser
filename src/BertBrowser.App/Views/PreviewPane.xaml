@@ -1,0 +1,250 @@
+<UserControl x:Class="BertBrowser.App.Views.PreviewPane"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:BertBrowser.App.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:PreviewPaneViewModel}"
+             AutomationProperties.AutomationId="PreviewPane"
+             Background="{StaticResource Theme.Window.Background}">
+    <!--
+      One tab's preview. Every body below is bound to its own Has* flag rather than to a
+      DataTrigger chain, because exactly one of them is ever true and a reader should be able to
+      see that at a glance.
+    -->
+    <UserControl.Resources>
+        <!-- Merged rather than relied upon from a sibling: StaticResource searches a dictionary's
+             own merged children, never its siblings. -->
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="../Resources/Theme/Tokens.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+
+            <Style x:Key="PreviewFooterText" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{StaticResource Theme.Text.Muted}"/>
+                <Setter Property="FontSize" Value="11"/>
+                <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                <Setter Property="Margin" Value="8,3,8,4"/>
+            </Style>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <DockPanel>
+        <!-- Header: the name, then type / size / modified, and the dimensions once an image
+             has actually been decoded. -->
+        <Border DockPanel.Dock="Top" BorderThickness="0,0,0,1"
+                BorderBrush="{StaticResource Theme.Border.Subtle}" Padding="8,6">
+            <StackPanel>
+                <TextBlock Text="{Binding Title}" FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis"
+                           ToolTip="{Binding Title}"/>
+                <TextBlock Text="{Binding SubTitle}" FontSize="11"
+                           Foreground="{StaticResource Theme.Text.Secondary}"
+                           TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Per-kind actions. Only the ones that apply to what is showing are visible. -->
+        <Border DockPanel.Dock="Top" Padding="4,2"
+                Visibility="{Binding HasActions, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel Orientation="Horizontal">
+                <Button Style="{StaticResource ToolbarButton}"
+                        Command="{Binding ToggleFitCommand}"
+                        Content="{Binding FitLabel}"
+                        ToolTip="Fit to the pane, or show at 100% and pan (double-click the image)"
+                        Visibility="{Binding HasImage, Converter={StaticResource BoolToVisibility}}"/>
+                <Button Style="{StaticResource ToolbarButton}" Content="Wrap"
+                        Command="{Binding ToggleWrapCommand}"
+                        ToolTip="Wrap long lines (turns the line numbers off)"
+                        Visibility="{Binding HasText, Converter={StaticResource BoolToVisibility}}"/>
+                <Button Style="{StaticResource ToolbarButton}" Content="Copy"
+                        Click="CopyText_Click"
+                        ToolTip="Copy the previewed text"
+                        Visibility="{Binding HasText, Converter={StaticResource BoolToVisibility}}"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Details, from the shell's property handlers. Curated per kind, not the whole dump —
+             the Properties dialog is where everything lives. -->
+        <Border DockPanel.Dock="Bottom" BorderThickness="0,1,0,0"
+                BorderBrush="{StaticResource Theme.Border.Subtle}" Padding="8,4"
+                Visibility="{Binding HasMetadata, Converter={StaticResource BoolToVisibility}}">
+            <ItemsControl ItemsSource="{Binding Metadata}" Grid.IsSharedSizeScope="True">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="0,1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="MetaLabel"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding Label}" Margin="0,0,10,0" FontSize="11"
+                                       Foreground="{StaticResource Theme.Text.Muted}"/>
+                            <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="11"
+                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding Value}"/>
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Border>
+
+        <!-- Whichever footer belongs to the body that is showing. -->
+        <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource PreviewFooterText}"
+                   Text="{Binding TextFooter}"
+                   Visibility="{Binding HasText, Converter={StaticResource BoolToVisibility}}"/>
+        <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource PreviewFooterText}"
+                   Text="{Binding ArchiveFooter}"
+                   Visibility="{Binding HasArchive, Converter={StaticResource BoolToVisibility}}"/>
+        <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource PreviewFooterText}"
+                   Text="{Binding FontFooter}"
+                   Visibility="{Binding HasFont, Converter={StaticResource BoolToVisibility}}"/>
+
+        <Grid>
+            <!-- Image. The chequerboard is built in code-behind from the theme's two colours and
+                 rebuilt when they change: a tiling brush caches its realisation, so recolouring a
+                 brush inside one does not repaint it. -->
+            <ScrollViewer x:Name="ImageScroller"
+                          HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                          Visibility="{Binding HasImage, Converter={StaticResource BoolToVisibility}}">
+                <Border x:Name="ImageBackdrop" MouseLeftButtonDown="Image_MouseDown">
+                    <Image x:Name="PreviewImage" Source="{Binding Image}"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           Stretch="Uniform" StretchDirection="DownOnly"/>
+                </Border>
+            </ScrollViewer>
+
+            <!-- Text and code. A RichTextBox rather than a TextBlock so the text can be selected
+                 and copied, which Explorer's pane cannot do; the gutter is a single TextBlock
+                 translated by the editor's scroll offset. -->
+            <Grid Visibility="{Binding HasText, Converter={StaticResource BoolToVisibility}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Border x:Name="GutterHost" Grid.Column="0" ClipToBounds="True"
+                        BorderThickness="0,0,1,0" BorderBrush="{StaticResource Theme.Border.Subtle}"
+                        Visibility="{Binding ShowLineNumbers, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock x:Name="Gutter" TextAlignment="Right" Margin="6,4,6,4"
+                               Foreground="{StaticResource Theme.Text.Muted}"
+                               LineStackingStrategy="BlockLineHeight"
+                               VerticalAlignment="Top">
+                        <TextBlock.RenderTransform>
+                            <TranslateTransform x:Name="GutterOffset"/>
+                        </TextBlock.RenderTransform>
+                    </TextBlock>
+                </Border>
+                <RichTextBox x:Name="TextView" Grid.Column="1" IsReadOnly="True"
+                             BorderThickness="0" Padding="0"
+                             IsUndoEnabled="False" AcceptsReturn="False"
+                             VerticalScrollBarVisibility="Auto"/>
+            </Grid>
+
+            <!-- Archive contents. Nothing is extracted to show this. -->
+            <ListView ItemsSource="{Binding ArchiveEntries}" BorderThickness="0"
+                      VirtualizingPanel.IsVirtualizing="True"
+                      VirtualizingPanel.VirtualizationMode="Recycling"
+                      Visibility="{Binding HasArchive, Converter={StaticResource BoolToVisibility}}">
+                <ListView.View>
+                    <GridView>
+                        <GridViewColumn Width="240">
+                            <GridViewColumnHeader Content="Name"/>
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Path}" TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding Path}"/>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Width="90">
+                            <GridViewColumnHeader Content="Size"/>
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding SizeBytes, Converter={StaticResource ByteSize}}"/>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Width="90">
+                            <GridViewColumnHeader Content="Packed"/>
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding CompressedBytes, Converter={StaticResource ByteSize}}"/>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                    </GridView>
+                </ListView.View>
+            </ListView>
+
+            <!-- Font specimen, rendered with the face in the file itself. -->
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          Visibility="{Binding HasFont, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel Margin="10">
+                    <TextBlock Text="ABCDEFGHIJKLM&#x0a;NOPQRSTUVWXYZ&#x0a;abcdefghijklmnopqrstuvwxyz&#x0a;0123456789  &amp;@$£€ .,;:!?"
+                               FontFamily="{Binding FontSpecimen}" FontSize="22" TextWrapping="Wrap"/>
+                    <Separator Margin="0,10"/>
+                    <TextBlock Text="Sphinx of black quartz, judge my vow."
+                               FontFamily="{Binding FontSpecimen}" FontSize="12" TextWrapping="Wrap" Margin="0,3"/>
+                    <TextBlock Text="Sphinx of black quartz, judge my vow."
+                               FontFamily="{Binding FontSpecimen}" FontSize="18" TextWrapping="Wrap" Margin="0,3"/>
+                    <TextBlock Text="Sphinx of black quartz, judge my vow."
+                               FontFamily="{Binding FontSpecimen}" FontSize="24" TextWrapping="Wrap" Margin="0,3"/>
+                    <TextBlock Text="Sphinx of black quartz"
+                               FontFamily="{Binding FontSpecimen}" FontSize="36" TextWrapping="Wrap" Margin="0,3"/>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Media. The poster frame is all there is until the user presses play — nothing is
+                 opened, nothing makes a sound, and the harness photographs the poster. -->
+            <Grid Visibility="{Binding HasMedia, Converter={StaticResource BoolToVisibility}}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <Image Source="{Binding Image}" Stretch="Uniform" StretchDirection="DownOnly"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       Visibility="{Binding MediaSource, Converter={StaticResource NullToVisible}}"/>
+                <MediaElement x:Name="MediaView" LoadedBehavior="Manual" UnloadedBehavior="Close"
+                              ScrubbingEnabled="True" Stretch="Uniform"
+                              MediaOpened="Media_Opened" MediaEnded="Media_Ended" MediaFailed="Media_Failed"
+                              Visibility="{Binding MediaSource, Converter={StaticResource NullToCollapsed}}"/>
+
+                <Button Grid.Row="0" Style="{StaticResource ToolbarButton}" Content="▶  Play"
+                        HorizontalAlignment="Center" VerticalAlignment="Center" Padding="14,8"
+                        Command="{Binding PlayMediaCommand}"
+                        Visibility="{Binding MediaSource, Converter={StaticResource NullToVisible}}"/>
+
+                <Grid Grid.Row="1" Margin="6,4" x:Name="Transport"
+                      Visibility="{Binding MediaSource, Converter={StaticResource NullToCollapsed}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="70"/>
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="PlayPause" Style="{StaticResource ToolbarButton}" Content="❚❚"
+                            Click="PlayPause_Click" MinWidth="30"/>
+                    <Slider x:Name="Seek" Grid.Column="1" Margin="6,0" VerticalAlignment="Center"
+                            Minimum="0" IsMoveToPointEnabled="True"
+                            Thumb.DragStarted="Seek_DragStarted" Thumb.DragCompleted="Seek_DragCompleted"/>
+                    <TextBlock x:Name="TimeText" Grid.Column="2" VerticalAlignment="Center"
+                               FontSize="11" Margin="0,0,8,0"
+                               Foreground="{StaticResource Theme.Text.Secondary}"/>
+                    <Slider Grid.Column="3" VerticalAlignment="Center" Minimum="0" Maximum="1"
+                            Value="{Binding Volume, ElementName=MediaView, Mode=TwoWay}"
+                            ToolTip="Volume"/>
+                </Grid>
+            </Grid>
+
+            <!-- Loading, and the reason there is nothing. Both sit over the bodies rather than
+                 beside them, so an empty pane is never simply blank. -->
+            <TextBlock Text="Loading…" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Foreground="{StaticResource Theme.Text.Muted}"
+                       Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibility}}"/>
+            <TextBlock Text="{Binding Message}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Margin="16" TextAlignment="Center" TextWrapping="Wrap"
+                       Foreground="{StaticResource Theme.Text.Muted}"
+                       Visibility="{Binding HasMessage, Converter={StaticResource BoolToVisibility}}"/>
+        </Grid>
+    </DockPanel>
+</UserControl>

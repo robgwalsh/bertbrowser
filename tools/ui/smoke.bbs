@@ -54,6 +54,24 @@ assert-missing budget.xlsx
 undo
 assert-exists budget.xlsx
 
+# The byte-level transfer surface, posed rather than run: a real transfer fast enough to be safe
+# here is over before a capture could catch it, and a slow one would put a different throughput
+# figure and time remaining into every picture. The numbers are given; the strip is the app's own.
+progress-demo
+assert-transfer "112 MB/s"
+assert-transfer "of 50.000 GB"
+assert-transfer "photo.jpg"
+shot 05-transfer-progress
+dialog transfer 06-transfer-details
+
+# The degraded shape: a plan the size index could not total. Bytes and throughput, but no
+# percentage and no time left — an indeterminate bar, never one stuck at zero.
+progress-demo unsized
+assert-transfer "112 MB/s"
+assert-transfer-indeterminate
+shot 07-transfer-unsized
+progress-demo off
+
 # Tabs, panes and the tile view — the layout a capture is usually about.
 newtab Documents
 assert-tabs 2
@@ -61,6 +79,14 @@ split right Pictures
 assert-panes 2
 thumbnails 0.5
 shot 04-panes
+
+# The preview pane appears and goes away. What it can actually show is preview.bbs's job — this
+# is here so the canonical pass notices if it stops appearing at all, and it deliberately asserts
+# nothing about content: the fixture's files carry the right extensions and the wrong bytes.
+preview on
+assert-visible PreviewPane
+preview off
+assert-hidden PreviewPane
 
 # Nothing in this run may have tried to put another program's window on screen.
 assert-not-launched

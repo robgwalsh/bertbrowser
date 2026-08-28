@@ -118,17 +118,41 @@ public sealed record CompletedTransfer(
 public sealed record FailedTransfer(string SourcePath, string Message);
 
 /// <summary>What actually happened on disk. <see cref="Completed"/> doubles as the undo record.</summary>
+/// <param name="Cancelled">True when the user stopped the transfer part-way. Without it a cancelled
+/// run is indistinguishable from an empty plan: the items that never ran appear in neither
+/// <paramref name="Completed"/>, <paramref name="Skipped"/> nor <paramref name="Failed"/>.</param>
 public sealed record TransferOutcome(
     TransferVerb Verb,
     string DestinationDirectory,
     IReadOnlyList<CompletedTransfer> Completed,
     IReadOnlyList<string> Skipped,
     IReadOnlyList<FailedTransfer> Failed,
-    string? StagingDirectory)
+    string? StagingDirectory,
+    bool Cancelled = false)
 {
-    /// <summary>Only a move is worth undoing: a copy adds without removing or overwriting.</summary>
+    /// <summary>Only a move is worth undoing: a copy adds without removing or overwriting.
+    /// A cancelled move still undoes — what got across is what goes back.</summary>
     public bool CanUndo => Verb == TransferVerb.Move && Completed.Count > 0;
 }
 
-/// <summary>Progress for the status bar while a transfer runs.</summary>
-public sealed record TransferProgress(int Done, int Total, string CurrentName);
+/// <summary>
+/// Progress while a transfer runs. Byte-level, because item counts say nothing useful about a
+/// single large file — "Copying 1 of 1" is what ten silent minutes used to look like.
+/// </summary>
+/// <param name="Done">Items finished.</param>
+/// <param name="Total">Items in the plan.</param>
+/// <param name="CurrentName">The item in flight; empty on the terminal report.</param>
+/// <param name="BytesDone">Bytes written so far across the whole plan. A move within one volume is
+/// a rename, so it moves no bytes and this stays at zero — which is correct, not a stall.</param>
+/// <param name="CurrentItemBytes">Bytes written into the item in flight.</param>
+/// <param name="CurrentItemTotal">That item's size as the OS reports it; 0 when not yet known.</param>
+/// <remarks>The plan's byte total is deliberately absent: it comes from the directory size index
+/// rather than from disk, which is the caller's business and keeps this executor free of any
+/// database dependency.</remarks>
+public sealed record TransferProgress(
+    int Done,
+    int Total,
+    string CurrentName,
+    long BytesDone = 0,
+    long CurrentItemBytes = 0,
+    long CurrentItemTotal = 0);

@@ -32,6 +32,21 @@ public sealed class AppSettings
     /// <summary>Mouse-wheel vertical scroll speed multiplier (1 = OS default). Defaults to 2×.</summary>
     public double ScrollSpeedMultiplier { get; set; } = 2.0;
 
+    /// <summary>Whether a newly opened tab shows its preview pane. Not nullable, unlike
+    /// <see cref="ThemeId"/> and <see cref="NewFileTypes"/>: "never configured" and "off" mean the
+    /// same thing for a pane, so there is nothing for null to say. Visibility itself is per tab —
+    /// this is the value a new tab starts from, and toggling in any tab writes it.</summary>
+    public bool ShowPreviewPane { get; set; }
+
+    /// <summary>Width of the preview pane, in device-independent pixels. Global rather than per
+    /// tab on purpose: panes differ in width, so a remembered per-tab width reads as the splitter
+    /// moving on its own rather than as the app remembering anything.</summary>
+    public double PreviewPaneWidth { get; set; } = 360;
+
+    /// <summary>How much of a text file the preview reads. The rest is not shown and the pane says
+    /// so — a preview that silently stops looks like the whole file.</summary>
+    public int PreviewTextMaxBytes { get; set; } = 1024 * 1024;
+
     /// <summary>Shape of a thumbnail tile as "width:height" — the zoom slider sets the width and
     /// this decides the height. Anything unparseable falls back to 4:3 (see
     /// <see cref="BertBrowser.Core.Models.AspectRatio"/>), so hand-editing this can't break the

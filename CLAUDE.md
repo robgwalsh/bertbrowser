@@ -71,8 +71,11 @@ reintroduce a scan-on-demand path.
 
 ### Transfers (move / copy / drag-and-drop)
 
-`Core/Services/Transfer` is the only code that relocates user data; `FileTransferService` (paste) is
-a thin facade over it, so there is exactly one implementation to audit. It is split deliberately:
+`Core/Services/Transfer` is the only code that relocates user data — drag-and-drop, the harness's
+`move`/`copy`, **and Ctrl+V**, which goes through `PlanDrop`/`ExecuteDropAsync` like a drop does.
+There is exactly one implementation to audit, and the old parallel `FileTransferService` is gone
+along with the paste path that had no progress, no undo and no conflict handling. It is split
+deliberately:
 
 - **`TransferPlanner`** decides, touching nothing. It refuses a folder dropped onto itself or into
   its own subtree, checking containment on both the literal and the link-resolved paths so a
@@ -88,6 +91,47 @@ a thin facade over it, so there is exactly one implementation to audit. It is sp
   junctions is refused across volumes rather than copied without them; one item's failure never
   affects the others. `Directory.Move` falls back to copy-then-delete **only** on
   `ERROR_NOT_SAME_DEVICE` — any other `IOException` is a real failure and must surface.
+- **`IFileCopier`** moves the bytes of one file, and is a seam for the reason `ITransferProbe` is:
+  it is what lets `TransferExecutorTests` land a cancel *in the middle of a file* deterministically
+  and in milliseconds instead of writing a multi-gigabyte fixture and racing it.
+
+**Progress is byte-level, and a cancel takes effect inside a file.** Both come from one decision:
+`FileSystemFileCopier` goes through `CopyFileExW`/`MoveFileWithProgressW` (`Core/Interop/CopyNative`)
+rather than `File.Copy`/`File.Move`. The progress routine gives per-chunk byte counts, returning
+`PROGRESS_CANCEL` stops a copy part-way, and staying on the OS call keeps everything `File.Copy`
+already did — it *is* `CopyFile2` underneath — sparse files, SMB server-side copy, attribute and
+timestamp semantics. A managed stream loop would have had to re-implement all of that, slower.
+Three things around it are load-bearing:
+
+- **The byte total is a lookup, not a walk.** `TransferEstimator` totals a plan from
+  `dir_size_cache` through `ITransferSizeSource` (`App/Services/IndexedTransferSizeSource`, one
+  batched `GetMany`), because sizing a 200,000-file tree before starting would cost more than the
+  transfer. **A missing row is unknown, never zero** — the estimate comes back `Complete: false`,
+  and the surfaces then show bytes and throughput against an *indeterminate* bar with no percentage
+  and no time remaining. A determinate bar pinned at 0% reads as a stall rather than as an
+  unmeasured volume. `TransferEstimator.MovesBytes` is the other half: **a same-volume move is a
+  rename and costs nothing**, so it contributes no bytes and shows no bar — it asks
+  `TransferExecutor.SameVolume`, the executor's own predicate, so the two cannot disagree.
+- **`Run` coalesces.** `CopyFileEx` calls back thousands of times for one large file; item
+  boundaries always report, in between at most one report per 100 ms — the guard `SearchService`
+  puts on live results. It also counts bytes per file and *snaps* to the size already known at the
+  end of one, which is what keeps the running total monotonic and exactly right at the finish.
+- **A cancel leaves nothing half-written.** Between items, the rest are untouched; inside a file,
+  the OS call removes the partial destination and keeps the source; inside a directory copy the
+  partial tree goes through `DirectoryRemoval.RemoveTree` (a copy is defined as purely additive, so
+  a cancelled one must add nothing); a cross-volume directory move takes the existing
+  `TryDeletePartialCopy` path and **never deletes the source**. Whatever got across before the
+  cancel stays across, `TransferOutcome.Cancelled` says it happened — without it a cancelled run is
+  indistinguishable from an empty plan — and a cancelled move is still undoable. Staging moves and
+  `Undo` run on `Run.Silent()`, uncancellable on purpose: a cancel landing half-way through putting
+  a displaced entry back would strand it.
+
+The surface is `TransferProgressViewModel`, shared by the status-bar strip in `MainWindow.xaml` and
+the modeless `Views/TransferProgressWindow` behind its **Details…** link, so the two cannot drift.
+It hangs off `ShellViewModel.TransferProgress`, **nullable and bound through `NullToCollapsed` the
+way `IndexingStatus` is, deliberately not gated on `IsTransferring`** — that flag is what
+`UiSession.Settle` waits on, so a posed transfer would hang the harness. Closing the detail window
+does not cancel: unlike `DeleteDialog`, whose survey nothing depends on, the transfer outlives it.
 
 Undo (Ctrl+Z, one level) reverses the last move and restores anything a Replace displaced.
 `ShellViewModel.RetireUndoable` is what finally commits a replacement, so staged data outlives the
@@ -96,10 +140,21 @@ additive. The undo slot is **shared with rename** — one level, whichever happe
 sides call `RetireUndoable` before claiming it, and `IsTransferring` gates both.
 
 Tests are the point of this design — `TransferPlannerTests` (rules, fake filesystem),
-`TransferExecutorTests` (real files, contents asserted), and `TransferRoundTripTests` (property
-tests: the multiset of file contents under the root is invariant under any move, and undo restores
-the tree byte-for-byte). Two meta-tests assert those invariant checks can actually detect a lost or
-moved file. If you change this code, mutate a rule and confirm a test goes red.
+`TransferExecutorTests` (real files, contents asserted; byte totals, mid-file and mid-tree cancels
+through a `SteppedCopier`, plus a few against the real `FileSystemFileCopier`),
+`TransferEstimatorTests` and `TransferRateTests` (pure, and the rate takes its timestamps as
+arguments so it never sleeps), and `TransferRoundTripTests` (property tests: the multiset of file
+contents under the root is invariant under any move, and undo restores the tree byte-for-byte —
+these are what stand behind a rewritten copy path, since a copy that truncates fails them at once).
+Two meta-tests assert those invariant checks can actually detect a lost or moved file. If you change
+this code, mutate a rule and confirm a test goes red: make the estimator count a same-volume move,
+or drop the partial-tree cleanup on a cancelled copy, and one goes red on its own.
+
+`tools/ui/smoke.bbs` covers the surfaces with `progress-demo`, which **poses** them at fixed numbers
+rather than running a transfer — one fast enough to be safe here is over before a capture could
+catch it, and a slow one would put a different throughput figure and time remaining into every
+picture. `progress-demo unsized` poses the degraded shape; `dialog transfer` photographs the detail
+window, and `themes.bbs` does it in both palettes.
 
 ### Rename
 
@@ -526,6 +581,105 @@ selects nothing:
 It clears on success; a failure only clears when the listing it was waiting for has actually
 arrived. Applied *before* `FocusFileList`, since selecting scrolls.
 
+### The preview pane
+
+Docked right of the file list **inside `DirectoryTabView`**, per tab, behind a `GridSplitter`.
+Per tab because the address bar, search box, progress bar, error banner and — decisively —
+`SelectedItems` are all already per tab. Ctrl+P toggles it; Alt+P does too, for Explorer's muscle
+memory, and has to live in `MainWindow`'s `PreviewKeyDown` because an Alt chord arrives as
+`Key.System` with the real key in `SystemKey`.
+
+The split follows the house shape: the deciding and the parsing are pure and in
+`Core/Services/Preview` where xUnit can reach them; the App does the I/O and the pixels. **Nothing
+is registered in `App.BuildServices()`** — `PreviewPaneViewModel` is constructed by
+`DirectoryTabViewModel` exactly as `FileListViewModel` is, from dependencies that ctor already has,
+and the Core services are static functions.
+
+Five rules are the design, and each is a thing Explorer's pane gets wrong:
+
+- **No file is ever held open.** Every read opens with `FileShare.ReadWrite | Delete`, copies into
+  memory and closes *before* anything is decoded, so previewing never blocks renaming, moving or
+  deleting — which in this app would mean blocking its own executors. The single exception is
+  deliberate and visible: pressing play hands the path to a `MediaElement`, which owns it until the
+  selection moves on (`StartOrStopMedia` calls `Close()`). `tools/ui/preview.bbs` proves the rule by
+  previewing a file and then renaming, deleting and undoing it; break the sharing flags and it goes
+  red.
+- **Nothing blocks the UI thread**, including `File.GetAttributes` — on a dead network share that is
+  the call that hangs. One CTS per request, cancel-previous, `OperationCanceledException` swallowed,
+  cancelled in `Dispose`; its *own* CTS, so a listing refresh cannot cancel a preview or the
+  reverse. The refusals that need no disk (nothing selected, several selected, a folder) are
+  answered on the UI thread instead, so those never flash a spinner on the way to a one-line
+  message.
+- **Selection churn is free.** 150 ms debounce, and skipped outright while `MarqueeSelector.IsDragging`
+  — a rubber band adds and removes items one at a time and would otherwise start a file read per
+  row. The push rides `QueueSelectionSummary`'s existing coalescing. `MarqueeSelector.DragEnded`
+  exists for this: the *last* selection change of a sweep happens while the band is still down, so
+  without it the pane would keep showing whatever was selected before the drag.
+- **Every read is bounded** — text at `AppSettings.PreviewTextMaxBytes` and 5,000 lines, archives at
+  1,000 entries, images decoded no wider than 2048 (and never scaled *up*, which is why the header
+  is probed before the decode). An oversized image is downgraded to the shell rather than refused:
+  the shell can thumbnail a 500 MB TIFF without us reading a byte.
+- **A cloud placeholder is never hydrated.** `Offline`, `RecallOnOpen` or `RecallOnDataAccess` is
+  `NotDownloaded` and a message, not a silent multi-gigabyte fetch. The two recall bits are absent
+  from .NET's `FileAttributes` and are named on `PreviewClassifier`.
+
+- **`PreviewClassifier`** decides, touching nothing: kind, byte budget, or a refusal. An
+  unrecognised extension becomes `Document` — an honest attempt through the shell — rather than an
+  immediate refusal, because the classifier cannot know which handlers this machine has. Office and
+  OpenDocument extensions are deliberately **not** archives even though they are zips: the shell
+  makes a real page-one thumbnail of them, which beats a listing of their guts.
+- **`TextPreviewReader`** is pure over a `Stream`: BOM, then strict UTF-8 validation, then a
+  UTF-16-without-a-BOM heuristic (the one case where NUL bytes mean text), then **Latin-1** — chosen
+  over the machine's ANSI codepage because it maps every byte, never throws, and gives the same
+  answer on every machine, which is what makes the tests mean anything. Whether the read was
+  truncated is passed *into* the UTF-8 validation: a sequence running off the end is evidence of the
+  cut when there was one and evidence against UTF-8 when there wasn't.
+- **`SyntaxTokenizer`** is hand-rolled and dependency-free, spans rather than a tree. The property
+  that matters is not colour but the **cover**: ordered, gap-free, non-overlapping, never past the
+  end — the view builds runs from it and would throw otherwise. `Merge` degrades to one plain span
+  rather than return a cover that does not hold, and the tests assert the property over every
+  language on deliberately malformed input.
+- **`PreviewMetadata`** selects by **canonical** name (`System.Image.Dimensions`), never the
+  localised label, or the strip silently empties on a non-English Windows. `ShellProperties` now
+  carries the canonical name, from `IPropertyDescription.GetCanonicalName` — which was already
+  declared in that vtable and unused.
+
+`ShellThumbnails.GetPreview` passes **`SIIGBF_THUMBNAILONLY`**, unlike `GetThumbnail`: the shell
+then declines instead of substituting the file-type icon, which is what lets the pane say "no
+preview available" rather than blow a 32 px icon up to fill the panel. `PreviewImageCache` is a
+bounded LRU keyed by path, size **and modified time** — a preview that outlived an edit would be a
+lie.
+
+In the view: a read-only `RichTextBox`, so the text can be **selected and copied**, which Explorer's
+pane cannot do. The cost is one inline per coloured span, so colouring stops past 1,500 lines and
+the footer says so — the text is still shown. The gutter is a single `TextBlock` translated by the
+editor's scroll offset, and is hidden when wrapping is on, because a wrapped line is not one row.
+**The chequerboard is built in code-behind and rebuilt on the token brushes' `Changed` event**: a
+tiling brush caches its realisation and a `SolidColorBrush` inside one changing colour does not
+invalidate it — the same trap documented for `VisualBrush` in the harness.
+
+`Theme.Preview.Checker*` and `Theme.Syntax.*` are the only new tokens; everything else reuses
+`Theme.Surface.*`/`Theme.Border.*`/`Theme.Text.*` rather than minting a parallel family.
+`ThemeCatalogTests.Code_stays_readable_in_the_preview_pane` contrast-checks them against every
+built-in — only the two roots define them, so a palette that reads on Dark+ and vanishes two shades
+lighter is caught there (it caught Nord, Cobalt2 and Everforest on the first attempt).
+
+Visibility is **per tab**; `AppSettings.ShowPreviewPane` is what a new tab starts from and toggling
+writes it back. Width is **global** — panes differ in width, so a per-tab width reads as the
+splitter moving on its own. `ColumnDefinition.Width` is not bindable, so `UpdatePreviewPane` assigns
+it, the way `UpdateRelPathColumn` does.
+
+Tests: `PreviewClassifierTests`, `TextPreviewReaderTests`, `SyntaxTokenizerTests`,
+`ArchiveListingTests`, `PreviewMetadataTests`. `tools/ui/preview.bbs` covers the wiring, with
+`preview-fixture` laying down files that are really what their extension says — the ordinary `tree`
+fixture's `photo.jpg` is text, which is fine for a listing and useless for a preview. Mutate a rule
+and confirm a test goes red: drop the classifier's placeholder check and the `NotDownloaded`
+theories go, drop the tokenizer's string handling and the cover assertion does.
+
+**Rendered Markdown and real PDF paging are the two things that want a package** (Markdig, PdfPig)
+and are deliberately absent: Markdown previews as its coloured source, PDF as page one from the
+shell.
+
 ### Theming
 
 The app is themed edge to edge, VS Code Dark+ by default. **No colour literal belongs in XAML or
@@ -645,6 +799,43 @@ mutate `IsSafe` to accept and the traversal theories go red.
 `ThemeCatalogTests` is the guard worth keeping green — it asserts every built-in defines every
 token, parses, and clears WCAG contrast for body text, selected rows, the status bar and menu
 highlights. Mutate a colour toward its background and it goes red.
+
+### The app icon
+
+`src/BertBrowser.App/Assets/app.ico` is a build output, and `tools/icon/build-app-icon.ps1` is its
+source — there is no `.svg` or `.psd` behind it. Change the drawing there and commit the regenerated
+file (`powershell -NoProfile -ExecutionPolicy Bypass -File tools/icon/build-app-icon.ps1`; Windows
+PowerShell, not `pwsh`, since the drawing is GDI+). `-PreviewDir` drops the frames out as PNGs,
+which is the only way to judge them — the small sizes have to be looked at magnified, on a light
+ground and a dark one. The mark is a folder whose face is the app's own layout: sidebar tree, a
+splitter, two panes of name/size rows, one row selected in the accent colour.
+
+**It is three drawings, not one scaled**, and that is the whole design. At 16px one device pixel is
+16 units of the 256-unit design space, so every row, divider and rim narrower than that dissolves
+into grey — a 256px drawing shrunk to 16 is a brown smudge. So there are three tiers (S 16/20/24,
+M 32/40/48, L 64/96/128/256), each laid out on a grid that lands on whole pixels at its own base
+size, each carrying only the detail its smallest member can hold: tier S has no sidebar and a much
+larger amber margin, because at that size the *folder* has to be recognisable before anything in it
+is. The file also carries 20, 24, 40 and 48 so that 125%, 150%, 200% and 300% scaling each land on a
+frame drawn for that size rather than on a resample. Frames ≤48 are BMP and ≥64 are PNG — the
+conventional layout, and the one `vpk --icon` reads.
+
+**`Window.Icon` is deliberately never set, on any window.** A null `Icon` is not a missing icon: WPF
+then lets Windows use the executable's own icon resource for the taskbar and Alt+Tab, and the shell
+picks per size out of all ten frames. Setting it would replace that with one frame scaled to
+everything — and WPF picks that frame itself, badly: `Icon="/Assets/app.ico"` in XAML resolves
+through `BitmapFrame.Create`, which hands back the 64x64 frame whatever the surface needs.
+
+So the title-bar icon goes through `Views/AppIcon` instead, which opens the `.ico` and chooses the
+smallest frame at least as large as the slot — downscaled or exact, never blown up.
+`ThemedWindow.ShowsAppIcon` is the opt-in (**`MainWindow` only**; the dialogs carry a title that says
+what they are, as Explorer's do) and `TitleBarIcon` is the resolved frame the template binds. It is
+re-picked on `WM_DPICHANGED`, because the frame that was exact on one monitor is not on the next.
+Two things bite: the pack URI must be **assembly-qualified**
+(`pack://application:,,,/BertBrowser;component/...`), since a relative one resolves against the
+*entry* assembly and that is `BertBrowser.Harness` when the harness hosts these windows; and the
+decode is wrapped, because it runs from a dependency-property setter during XAML parse, where an
+exception surfaces as the window failing to open rather than as an icon going missing.
 
 ### Tabs and panes
 

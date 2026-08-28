@@ -33,6 +33,26 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
 
     public FileListViewModel FileList { get; }
 
+    /// <summary>This tab's preview pane. Owned here, and constructed here rather than injected,
+    /// for the reason <see cref="FileList"/> is: it is part of what a tab <em>is</em>, and there
+    /// is one per tab because the selection it follows is per tab.</summary>
+    public PreviewPaneViewModel Preview { get; }
+
+    /// <summary>Whether this tab shows its preview pane. Per tab, so one pane can be previewing
+    /// while another shows a full-width list; the persisted setting is what a new tab starts
+    /// from, and toggling writes it back so the next tab inherits the choice.</summary>
+    [ObservableProperty]
+    private bool _isPreviewVisible;
+
+    partial void OnIsPreviewVisibleChanged(bool value)
+    {
+        _settings.ShowPreviewPane = value;
+        if (value) Preview.Show(SelectedItems);
+    }
+
+    [RelayCommand]
+    private void TogglePreview() => IsPreviewVisible = !IsPreviewVisible;
+
     /// <summary>Reflects the current "Show hidden items" setting (may change while running).
     /// Read straight from settings rather than pushed down from the shell: the toggle writes the
     /// setting before asking anything to refresh.</summary>
@@ -155,6 +175,8 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
 
         FileList = new FileListViewModel(fileSystem, dirSizeRepository, settings);
         FileList.PropertyChanged += OnFileListPropertyChanged;
+        Preview = new PreviewPaneViewModel(settings);
+        _isPreviewVisible = settings.ShowPreviewPane;
         _refreshTimer.Tick += OnRefreshTick;
     }
 
@@ -165,6 +187,7 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         _navigationCts.Cancel();
         _searchDebounceCts.Cancel();
         FileList.PropertyChanged -= OnFileListPropertyChanged;
+        Preview.Dispose();
         StopWatching();
     }
 

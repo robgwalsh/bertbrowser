@@ -3,8 +3,11 @@ using System.Text;
 
 namespace BertBrowser.App.Interop;
 
-/// <summary>A single shell property: localized display name + display-formatted value.</summary>
-public sealed record ShellProperty(string Name, string Value);
+/// <summary>A single shell property: localized display name + display-formatted value, plus the
+/// invariant canonical key ("System.Image.Dimensions") for anything that needs to <em>choose</em>
+/// properties rather than list them — see <c>PreviewMetadata</c>, which cannot match on
+/// <paramref name="Name"/> because that is whatever language Windows is in.</summary>
+public sealed record ShellProperty(string Name, string Value, string Canonical);
 
 /// <summary>
 /// Reads everything the file's registered property handlers expose (EXIF, ID3,
@@ -36,7 +39,7 @@ public static class ShellProperties
         try
         {
             store.GetCount(out var count);
-            var byName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var byName = new Dictionary<string, (string Value, string Canonical)>(StringComparer.OrdinalIgnoreCase);
 
             for (uint i = 0; i < count; i++)
             {
@@ -46,7 +49,7 @@ public static class ShellProperties
 
                     // Properties without a registered description are internal plumbing
                     // keys; Explorer hides them too.
-                    var name = GetDisplayName(ref key);
+                    var (name, canonical) = Describe(ref key);
                     if (string.IsNullOrWhiteSpace(name) || byName.ContainsKey(name))
                         continue;
 
@@ -63,7 +66,7 @@ public static class ShellProperties
 
                         var value = text.ToString().Trim();
                         if (value.Length > 0)
-                            byName[name] = value;
+                            byName[name] = (value, canonical);
                     }
                     finally
                     {
@@ -77,7 +80,7 @@ public static class ShellProperties
             }
 
             return byName
-                .Select(kv => new ShellProperty(kv.Key, kv.Value))
+                .Select(kv => new ShellProperty(kv.Key, kv.Value.Value, kv.Value.Canonical))
                 .OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
         }
@@ -87,33 +90,46 @@ public static class ShellProperties
         }
     }
 
-    private static string? GetDisplayName(ref PROPERTYKEY key)
+    /// <summary>The property's localized label and its invariant canonical name, from one
+    /// description lookup. A missing display name means the key is plumbing and is dropped by the
+    /// caller; a missing canonical name only costs the ability to select on it.</summary>
+    private static (string? Display, string Canonical) Describe(ref PROPERTYKEY key)
     {
         var iid = IID_IPropertyDescription;
         if (PSGetPropertyDescription(ref key, ref iid, out var desc) != 0)
-            return null;
+            return (null, "");
 
         try
         {
-            desc.GetDisplayName(out var ptr);
-            if (ptr == IntPtr.Zero)
-                return null;
-            try
-            {
-                return Marshal.PtrToStringUni(ptr);
-            }
-            finally
-            {
-                Marshal.FreeCoTaskMem(ptr);
-            }
+            return (TakeString(() => { desc.GetDisplayName(out var p); return p; }),
+                    TakeString(() => { desc.GetCanonicalName(out var p); return p; }) ?? "");
         }
         catch (COMException)
         {
-            return null; // no display name registered for this key
+            return (null, ""); // no description registered for this key
         }
         finally
         {
             Marshal.ReleaseComObject(desc);
+        }
+    }
+
+    /// <summary>Reads a shell-allocated string and frees it, however that turns out.</summary>
+    private static string? TakeString(Func<IntPtr> get)
+    {
+        var ptr = IntPtr.Zero;
+        try
+        {
+            ptr = get();
+            return ptr == IntPtr.Zero ? null : Marshal.PtrToStringUni(ptr);
+        }
+        catch (COMException)
+        {
+            return null;
+        }
+        finally
+        {
+            if (ptr != IntPtr.Zero) Marshal.FreeCoTaskMem(ptr);
         }
     }
 

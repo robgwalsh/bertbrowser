@@ -121,7 +121,7 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
 
-                                <Image x:Name="TitleIcon" Source="{TemplateBinding Icon}"
+                                <Image x:Name="TitleIcon" Source="{TemplateBinding TitleBarIcon}"
                                        Width="16" Height="16"
                                        Margin="10,0,0,0" VerticalAlignment="Center"/>
 
@@ -158,7 +158,7 @@
                         </DockPanel>
                     </Border>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="Icon" Value="{x:Null}">
+                        <Trigger Property="TitleBarIcon" Value="{x:Null}">
                             <Setter TargetName="TitleIcon" Property="Visibility" Value="Collapsed"/>
                         </Trigger>
                         <Trigger Property="WindowState" Value="Maximized">

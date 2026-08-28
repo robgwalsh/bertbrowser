@@ -117,6 +117,42 @@
                                Text="Shape of the tiles in thumbnail view, as width:height. The zoom slider under the file list sets the tile width; this sets the height."/>
                 </StackPanel>
 
+                <!-- Preview -->
+                <StackPanel>
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedCategory.Id}"
+                                             Value="{x:Static vm:SettingsCategory.Preview}">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <TextBlock Text="Preview" Style="{StaticResource PageHeading}"/>
+
+                    <CheckBox Content="Show the preview pane in new tabs" IsChecked="{Binding ShowPreviewPane}"/>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Each tab keeps its own preview pane, so one pane can preview while another shows a full-width list. This is what a new tab starts with; Ctrl+P (or Alt+P) toggles the one in front of you."/>
+
+                    <DockPanel Margin="0,10,0,0">
+                        <TextBlock Text="Read at most" VerticalAlignment="Center"/>
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding PreviewTextLimitText}" VerticalAlignment="Center"
+                                   HorizontalAlignment="Right" MinWidth="60"
+                                   Foreground="{StaticResource Theme.Text.Secondary}"/>
+                        <Slider Margin="12,0,8,0" VerticalAlignment="Center" Minimum="64" Maximum="8192"
+                                TickFrequency="64" IsSnapToTickEnabled="True"
+                                Value="{Binding PreviewTextLimitKb, Mode=TwoWay}"/>
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="How much of a text file the preview reads. Anything past this is not shown, and the pane says so rather than looking like the whole file."/>
+
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,14,0,0"
+                               Text="The preview never holds a file open, so a file you are previewing can still be renamed, moved or deleted. A file stored in the cloud and not downloaded is left alone rather than fetched."/>
+                </StackPanel>
+
                 <!--
                   Appearance sits outside the dialog's Save/Cancel contract on purpose: a theme you
                   cannot see until you press Save is not a theme you can choose. Picking one applies

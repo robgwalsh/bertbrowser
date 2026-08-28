@@ -51,6 +51,12 @@ internal sealed class MarqueeSelector
     /// side effects (folder-tree reveal) while it is set, since selection churns every frame.</summary>
     public bool IsDragging { get; private set; }
 
+    /// <summary>Raised once the rubber band is released. Work that is skipped during a drag —
+    /// the preview pane's read, most of all — has to be told when the drag is over, because the
+    /// last selection change of a sweep happens while the band is still down and nothing else
+    /// fires afterwards.</summary>
+    public event Action? DragEnded;
+
     public static MarqueeSelector Attach(ListView list) => new(list);
 
     private MarqueeSelector(ListView list)
@@ -158,6 +164,8 @@ internal sealed class MarqueeSelector
         _itemsHost = null;
         _scroller = null;
         _viewport = null;
+
+        DragEnded?.Invoke();
     }
 
     /// <summary>Pins the drag origin to the realized row nearest it, remembering the offset within

@@ -124,7 +124,7 @@ internal sealed class Sandbox(HarnessOptions options)
     /// in a way that has nothing to do with what changed. A fixed date in the past also keeps the
     /// "Modified" sort meaningful rather than a tie.
     /// </remarks>
-    private static void Stamp(string root)
+    public static void Stamp(string root)
     {
         var when = new DateTime(2024, 3, 14, 9, 26, 53, DateTimeKind.Local);
 

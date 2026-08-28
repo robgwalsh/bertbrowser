@@ -21,6 +21,9 @@ public sealed record TransferUndoResult(int Restored, IReadOnlyList<FailedTransf
 /// <item>A directory tree containing junctions or symlinks is refused across volumes rather than
 /// copied without them and then deleted.</item>
 /// <item>A failure on one item never aborts or rolls back the others; each is independent.</item>
+/// <item>A cancel takes effect <em>inside</em> a file, not merely between items, and leaves nothing
+/// half-written where a finished file belongs. Whatever got across before it stays across, and a
+/// cancelled move is still undoable.</item>
 /// </list>
 /// </remarks>
 public sealed class TransferExecutor
@@ -33,10 +36,19 @@ public sealed class TransferExecutor
     internal const string StagingPrefix = ".bertbrowser-replaced-";
 
     private readonly ITransferProbe _probe;
+    private readonly IFileCopier _copier;
 
-    public TransferExecutor(ITransferProbe probe) => _probe = probe;
+    public TransferExecutor(ITransferProbe probe, IFileCopier copier)
+    {
+        _probe = probe;
+        _copier = copier;
+    }
 
-    public TransferExecutor() : this(new FileSystemTransferProbe())
+    public TransferExecutor(ITransferProbe probe) : this(probe, new FileSystemFileCopier())
+    {
+    }
+
+    public TransferExecutor() : this(new FileSystemTransferProbe(), new FileSystemFileCopier())
     {
     }
 
@@ -54,35 +66,48 @@ public sealed class TransferExecutor
         var skipped = new List<string>();
         var failed = new List<FailedTransfer>();
         string? stagingDirectory = null;
+        var cancelled = false;
 
-        var done = 0;
+        var run = new Run(ct, progress, plan.Transfers.Count);
         foreach (var transfer in plan.Transfers)
         {
-            if (ct.IsCancellationRequested) break;
-            progress?.Report(new TransferProgress(done, plan.Transfers.Count, transfer.Name));
-            done++;
+            if (ct.IsCancellationRequested)
+            {
+                cancelled = true;
+                break;
+            }
 
+            run.BeginItem(transfer.Name);
             try
             {
                 var resolution = Resolution(resolutions, transfer, plan.Verb);
-                var result = ExecuteOne(plan, transfer, resolution, ref stagingDirectory);
+                var result = ExecuteOne(plan, transfer, resolution, ref stagingDirectory, run);
                 if (result is null) skipped.Add(transfer.SourcePath);
                 else completed.Add(result);
+            }
+            catch (OperationCanceledException)
+            {
+                // Stopped part-way through this item. Everything it had started is already undone
+                // by the primitive that was interrupted, so there is nothing to report about it.
+                cancelled = true;
+                break;
             }
             catch (Exception ex) when (IsTransferFailure(ex))
             {
                 failed.Add(new FailedTransfer(transfer.SourcePath, $"{transfer.Name}: {ex.Message}"));
             }
+            run.EndItem();
         }
 
-        progress?.Report(new TransferProgress(done, plan.Transfers.Count, ""));
+        run.Finished();
         return new TransferOutcome(
-            plan.Verb, plan.DestinationDirectory, completed, skipped, failed, stagingDirectory);
+            plan.Verb, plan.DestinationDirectory, completed, skipped, failed, stagingDirectory, cancelled);
     }
 
     /// <summary>Returns the completed record, or null when the item was skipped.</summary>
     private CompletedTransfer? ExecuteOne(
-        TransferPlan plan, PlannedTransfer transfer, ConflictResolution resolution, ref string? stagingDirectory)
+        TransferPlan plan, PlannedTransfer transfer, ConflictResolution resolution,
+        ref string? stagingDirectory, Run run)
     {
         Revalidate(plan, transfer);
 
@@ -102,7 +127,9 @@ public sealed class TransferExecutor
                     displacedStagePath = Path.Combine(stagingDirectory, Path.GetFileName(destinationPath));
                     displacedStagePath = UniquePath(displacedStagePath);
                     // A rename within the same directory tree: instant, and reversible by undo.
-                    MoveEntry(destinationPath, displacedStagePath, Directory.Exists(destinationPath));
+                    // Deliberately on an uncancellable run — clearing the name is bookkeeping, and
+                    // a cancel landing half-way through it would strand the displaced entry.
+                    MoveEntry(destinationPath, displacedStagePath, Directory.Exists(destinationPath), Run.Silent());
                     break;
 
                 default:
@@ -114,14 +141,15 @@ public sealed class TransferExecutor
         try
         {
             if (plan.Verb == TransferVerb.Move)
-                MoveEntry(transfer.SourcePath, destinationPath, transfer.IsDirectory);
+                MoveEntry(transfer.SourcePath, destinationPath, transfer.IsDirectory, run);
             else
-                CopyEntry(transfer.SourcePath, destinationPath, transfer.IsDirectory);
+                CopyEntry(transfer.SourcePath, destinationPath, transfer.IsDirectory, run);
         }
         catch when (displacedStagePath is not null)
         {
-            // The name was cleared for a transfer that then failed. Nothing succeeded, so the
-            // displaced entry goes straight back — no undo record will exist to rescue it later.
+            // The name was cleared for a transfer that then failed or was cancelled. Nothing
+            // succeeded, so the displaced entry goes straight back — no undo record will exist to
+            // rescue it later.
             RestoreDisplaced(displacedStagePath, destinationPath);
             throw;
         }
@@ -140,7 +168,7 @@ public sealed class TransferExecutor
         try
         {
             if (Exists(stagePath) && !Exists(destinationPath))
-                MoveEntry(stagePath, destinationPath, Directory.Exists(stagePath));
+                MoveEntry(stagePath, destinationPath, Directory.Exists(stagePath), Run.Silent());
         }
         catch (Exception ex) when (IsTransferFailure(ex))
         {
@@ -223,12 +251,12 @@ public sealed class TransferExecutor
                     continue;
                 }
 
-                MoveEntry(item.FinalPath, item.SourcePath, item.IsDirectory);
+                MoveEntry(item.FinalPath, item.SourcePath, item.IsDirectory, Run.Silent());
                 restored++;
 
                 // The name it took over is free again: put the displaced entry back.
                 if (item.DisplacedStagePath is { } staged && Exists(staged) && !Exists(item.FinalPath))
-                    MoveEntry(staged, item.FinalPath, Directory.Exists(staged));
+                    MoveEntry(staged, item.FinalPath, Directory.Exists(staged), Run.Silent());
             }
             catch (Exception ex) when (IsTransferFailure(ex))
             {
@@ -305,11 +333,16 @@ public sealed class TransferExecutor
 
     // --- Filesystem primitives ---
 
-    private void MoveEntry(string source, string destination, bool isDirectory)
+    private void MoveEntry(string source, string destination, bool isDirectory, Run run)
     {
         if (!isDirectory)
         {
-            File.Move(source, destination); // .NET spans volumes for files
+            // Spans volumes by itself, so unlike Directory.Move there is no ERROR_NOT_SAME_DEVICE
+            // arm to write here. Within a volume it is a rename and reports no bytes at all, which
+            // is why a same-volume move shows no progress rather than a bar that never moves.
+            run.BeginFile(0);
+            _copier.Move(source, destination, run.FileProgress, run.Token);
+            run.EndFile();
             return;
         }
 
@@ -326,21 +359,59 @@ public sealed class TransferExecutor
         catch (IOException ex) when (ex.HResult == HResultNotSameDevice)
         {
             // Mount points can make two paths share a root string but not a volume.
-            CrossVolumeMoveDirectory(source, destination);
+            CrossVolumeMoveDirectory(source, destination, run);
         }
     }
 
-    private void CopyEntry(string source, string destination, bool isDirectory)
+    private void CopyEntry(string source, string destination, bool isDirectory, Run run)
     {
-        if (isDirectory) CopyDirectory(new DirectoryInfo(source), destination);
-        else File.Copy(source, destination);
+        if (!isDirectory)
+        {
+            CopyFile(source, destination, TryLength(source), run);
+            return;
+        }
+
+        try
+        {
+            CopyDirectory(new DirectoryInfo(source), destination, run);
+        }
+        catch (OperationCanceledException)
+        {
+            // A copy is defined as purely additive, so a cancelled one must add nothing: half a
+            // tree at the destination reads as a finished copy to everything that looks at it.
+            TryDeletePartialCopy(destination);
+            throw;
+        }
+    }
+
+    /// <summary>One file's bytes, with the run's counters bracketing them.</summary>
+    /// <param name="knownLength">The size we already know, or null to take the OS's word for it.
+    /// Passing it keeps the running total exact even when the copy reports coarsely.</param>
+    private void CopyFile(string source, string destination, long? knownLength, Run run)
+    {
+        run.BeginFile(knownLength ?? 0);
+        _copier.Copy(source, destination, run.FileProgress, run.Token);
+        run.EndFile();
+    }
+
+    private static long? TryLength(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            return info.Exists ? info.Length : null;
+        }
+        catch (Exception ex) when (IsTransferFailure(ex))
+        {
+            return null;
+        }
     }
 
     /// <summary>
     /// Copy, verify, then delete. The source is only removed once the destination is confirmed to
     /// hold the same number of files and the same total bytes.
     /// </summary>
-    private void CrossVolumeMoveDirectory(string source, string destination)
+    private void CrossVolumeMoveDirectory(string source, string destination, Run run)
     {
         var info = new DirectoryInfo(source);
 
@@ -355,10 +426,12 @@ public sealed class TransferExecutor
 
         try
         {
-            CopyDirectory(info, destination);
+            CopyDirectory(info, destination, run);
         }
         catch
         {
+            // Covers a cancel as well as a failure: either way the source is still there and the
+            // half-copy at the destination is not something anyone should be left holding.
             TryDeletePartialCopy(destination);
             throw;
         }
@@ -403,7 +476,11 @@ public sealed class TransferExecutor
     {
         try
         {
-            if (Directory.Exists(destination)) Directory.Delete(destination, recursive: true);
+            // DirectoryRemoval.RemoveTree rather than Directory.Delete(recursive: true), for the
+            // reason that call is banned everywhere else in this app: given a junction it erases
+            // the rest of the tree and then throws — swallowed here as harmless cleanup, so half a
+            // partial copy would be left behind without a word.
+            if (Directory.Exists(destination)) DirectoryRemoval.RemoveTree(destination);
         }
         catch (Exception ex) when (IsTransferFailure(ex))
         {
@@ -411,19 +488,24 @@ public sealed class TransferExecutor
         }
     }
 
-    private static void CopyDirectory(DirectoryInfo source, string destination)
+    private void CopyDirectory(DirectoryInfo source, string destination, Run run)
     {
+        run.Token.ThrowIfCancellationRequested();
         Directory.CreateDirectory(destination);
         foreach (var entry in source.EnumerateFileSystemInfos())
         {
+            run.Token.ThrowIfCancellationRequested();
+
             if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
                 throw new IOException(
                     $"'{entry.Name}' is a junction or symbolic link and cannot be copied.");
 
             if (entry is DirectoryInfo dir)
-                CopyDirectory(dir, Path.Combine(destination, dir.Name));
+                CopyDirectory(dir, Path.Combine(destination, dir.Name), run);
             else if (entry is FileInfo file)
-                file.CopyTo(Path.Combine(destination, file.Name));
+                // The length comes free from the enumeration that found the file, so the running
+                // total is exact without a stat per entry.
+                CopyFile(file.FullName, Path.Combine(destination, file.Name), file.Length, run);
         }
         try
         {
@@ -437,7 +519,9 @@ public sealed class TransferExecutor
 
     /// <summary>Conservative: false whenever the volumes cannot be established, which routes the
     /// move through the guarded fallback instead of assuming a plain rename will do.</summary>
-    private static bool SameVolume(string a, string b)
+    /// <remarks>Internal because <see cref="TransferEstimator"/> has to answer the same question to
+    /// know whether an item moves any bytes at all, and the two must not drift apart.</remarks>
+    internal static bool SameVolume(string a, string b)
     {
         try
         {
@@ -478,4 +562,100 @@ public sealed class TransferExecutor
     private static bool IsTransferFailure(Exception ex) =>
         ex is IOException or UnauthorizedAccessException or System.Security.SecurityException
             or NotSupportedException or ArgumentException;
+
+    /// <summary>
+    /// One <see cref="Execute"/> call's running counters, its cancellation token, and the rate at
+    /// which it is willing to talk about them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The coalescing is not optional.</b> <c>CopyFileEx</c> calls back per chunk — thousands of
+    /// times for one large file — and forwarding each one to an <see cref="IProgress{T}"/> bound to
+    /// the UI floods the dispatcher with work whose only job is to redraw a bar that has moved a
+    /// pixel. Item boundaries always report; in between, at most one report per
+    /// <see cref="ReportInterval"/>. It is the same guard <c>SearchService</c> puts on live results.
+    /// </para>
+    /// <para>
+    /// <b>Bytes are counted per file and snapped at the end of one.</b> A copy may report coarsely
+    /// or, for a small file, not at all, so the running total is set from the size we already knew
+    /// rather than from whatever the last callback happened to say. That is what keeps the figure
+    /// monotonic and makes it add up to the real total at the end.
+    /// </para>
+    /// </remarks>
+    private sealed class Run
+    {
+        private static readonly TimeSpan ReportInterval = TimeSpan.FromMilliseconds(100);
+
+        private readonly IProgress<TransferProgress>? _progress;
+        private readonly int _items;
+        private readonly System.Diagnostics.Stopwatch _sinceReport = System.Diagnostics.Stopwatch.StartNew();
+
+        private long _bytesDone;
+        private long _fileBase;
+        private long _fileBytes;
+        private long _fileTotal;
+        private int _done;
+        private string _name = "";
+
+        internal Run(CancellationToken token, IProgress<TransferProgress>? progress, int items)
+        {
+            Token = token;
+            _progress = progress;
+            _items = items;
+        }
+
+        /// <summary>A run for work that must finish once started: clearing a name into staging,
+        /// putting a displaced entry back, undoing. Reports nothing and cannot be cancelled.</summary>
+        internal static Run Silent() => new(CancellationToken.None, null, 0);
+
+        internal CancellationToken Token { get; }
+
+        internal void BeginItem(string name)
+        {
+            _name = name;
+            Report(force: true);
+        }
+
+        internal void EndItem() => _done++;
+
+        internal void Finished()
+        {
+            _name = "";
+            _fileBytes = 0;
+            _fileTotal = 0;
+            Report(force: true);
+        }
+
+        internal void BeginFile(long knownLength)
+        {
+            _fileBase = _bytesDone;
+            _fileBytes = 0;
+            _fileTotal = knownLength;
+        }
+
+        internal void FileProgress(long transferred, long total)
+        {
+            _fileBytes = transferred;
+            if (total > _fileTotal) _fileTotal = total;
+            _bytesDone = _fileBase + transferred;
+            Report(force: false);
+        }
+
+        internal void EndFile()
+        {
+            _bytesDone = _fileBase + Math.Max(_fileTotal, _fileBytes);
+            _fileBytes = 0;
+            _fileTotal = 0;
+        }
+
+        private void Report(bool force)
+        {
+            if (_progress is null) return;
+            if (!force && _sinceReport.Elapsed < ReportInterval) return;
+
+            _sinceReport.Restart();
+            _progress.Report(new TransferProgress(
+                _done, _items, _name, _bytesDone, _fileBytes, _fileTotal));
+        }
+    }
 }

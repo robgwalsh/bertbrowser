@@ -27,7 +27,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 {
     private readonly ISearchService _searchService;
     private readonly IProcessLauncher _launcher;
-    private readonly IFileTransferService _fileTransfer;
     private readonly IMftIndexService _mftIndex;
     private readonly AppSettings _settings;
     private readonly TransferPlanner _transferPlanner;
@@ -39,6 +38,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private readonly DeletePlanner _deletePlanner;
     private readonly DeleteExecutor _deleteExecutor;
     private readonly DeleteSurveyor _deleteSurveyor;
+    private readonly DirSizeRepository _dirSizes;
     private readonly PaneFactory _factory;
 
     /// <summary>"Show hidden items" browse setting, toggled from the Settings dialog. Mirrors
@@ -150,7 +150,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     public ShellViewModel(
         IFileSystemService fileSystem,
         ISearchService searchService,
-        IFileTransferService fileTransfer,
         IBookmarkService bookmarkService,
         IMftIndexService mftIndex,
         DirSizeRepository dirSizes,
@@ -169,7 +168,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     {
         _launcher = launcher;
         _searchService = searchService;
-        _fileTransfer = fileTransfer;
         _mftIndex = mftIndex;
         _transferPlanner = transferPlanner;
         _transferExecutor = transferExecutor;
@@ -180,6 +178,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         _deletePlanner = deletePlanner;
         _deleteExecutor = deleteExecutor;
         _deleteSurveyor = deleteSurveyor;
+        _dirSizes = dirSizes;
         _factory = factory;
         _settings = settings;
         _showHiddenItems = settings.ShowHiddenItems; // seed the field so the ctor doesn't refresh
@@ -789,56 +788,33 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         if (clip is null) return;
         var (paths, isCut) = clip.Value;
 
-        SetStatus(isCut ? "Moving…" : "Copying…");
-
-        var errors = new List<string>();
-        var pasted = 0;
-
-        await Task.Run(() =>
+        // Paste is a drop by another name, so it goes through the one planner and executor that
+        // relocate user data — which is what gives it byte progress, cancellation, undo and
+        // conflict handling, and leaves exactly one implementation to audit.
+        var plan = PlanDrop(paths, destination, isCut ? TransferVerb.Move : TransferVerb.Copy);
+        if (!plan.HasWork)
         {
-            foreach (var source in paths)
-            {
-                try
-                {
-                    if (isCut)
-                    {
-                        var dest = _fileTransfer.MoveInto(source, destination);
-                        if (!dest.Equals(source, StringComparison.OrdinalIgnoreCase))
-                            pasted++;
-                    }
-                    else
-                    {
-                        _fileTransfer.CopyInto(source, destination);
-                        pasted++;
-                    }
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
-                    or InvalidOperationException or FileNotFoundException or DirectoryNotFoundException)
-                {
-                    errors.Add(ex.Message);
-                }
-            }
-        });
+            SetStatus(plan.Problems.Count > 0
+                ? $"Nothing pasted — {plan.Problems[0].Message}"
+                : "Nothing to paste here");
+            return;
+        }
 
-        if (isCut && pasted > 0)
+        var outcome = await ExecuteDropAsync(plan, resolutions: null);
+
+        // A cut is one-shot, like Explorer — but only once something has actually moved. A paste
+        // that was refused, skipped or cancelled leaves the clipboard alone, so it can be tried
+        // again somewhere else.
+        if (isCut && outcome is { Completed.Count: > 0 })
         {
             try
             {
-                FileClipboard.Clear(); // a cut is one-shot, like Explorer
+                FileClipboard.Clear();
             }
             catch (System.Runtime.InteropServices.ExternalException)
             {
             }
         }
-
-        // A cut empties its source folders too, so every tab showing one of them is now wrong.
-        var affected = paths.Select(Path.GetDirectoryName).OfType<string>().Append(destination);
-        await RefreshTabsShowingAsync(affected);
-
-        var verb = isCut ? "Moved" : "Copied";
-        SetStatus(errors.Count > 0
-            ? $"{verb} {pasted} item(s); {errors.Count} failed — {errors[0]}"
-            : $"{verb} {pasted} item(s)");
     }
 
     // --- Rename ---
@@ -1309,6 +1285,18 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     [ObservableProperty]
     private bool _isTransferring;
 
+    /// <summary>
+    /// The live byte-level state of a running transfer, or null when none is running.
+    /// </summary>
+    /// <remarks>
+    /// Nullable, and bound through <c>NullToCollapsed</c> the way <see cref="IndexingStatus"/> is,
+    /// rather than gated on <see cref="IsTransferring"/>: the status-bar strip and the detail window
+    /// then share one source of truth and can be posed for a capture without pretending a transfer
+    /// is under way — which would hang the harness's own busy-wait.
+    /// </remarks>
+    [ObservableProperty]
+    private TransferProgressViewModel? _transferProgress;
+
     public bool CanUndo =>
         (_undoableTransfer?.CanUndo == true || _undoableRename?.CanUndo == true ||
             _undoableDelete?.CanUndo == true) && !IsTransferring;
@@ -1324,25 +1312,35 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
     /// <summary>Carries out a planned drop off the UI thread, then refreshes the tree nodes and
     /// every open tab on both sides of the transfer.</summary>
-    public async Task ExecuteDropAsync(
+    /// <returns>What happened, or null when the drop was refused before it began — another
+    /// transfer already running, or a plan with nothing in it.</returns>
+    public async Task<TransferOutcome?> ExecuteDropAsync(
         TransferPlan plan, IReadOnlyDictionary<string, ConflictResolution>? resolutions)
     {
-        if (IsTransferring || !plan.HasWork) return;
+        if (IsTransferring || !plan.HasWork) return null;
 
         IsTransferring = true;
         UndoCommand.NotifyCanExecuteChanged();
+
+        var cancellation = new CancellationTokenSource();
         try
         {
-            var verbing = plan.Verb == TransferVerb.Move ? "Moving" : "Copying";
-            SetStatus($"{verbing} {plan.Transfers.Count:N0} item(s)…");
+            // The byte total is a lookup, not a walk: dir_size_cache already holds the recursive
+            // size of every directory on an indexed volume. Where it does not, the estimate comes
+            // back incomplete and the surfaces show throughput without a percentage or an ETA.
+            var estimate = await Task.Run(
+                () => TransferEstimator.Estimate(plan, IndexedTransferSizeSource.For(plan, _dirSizes)));
 
-            var progress = new Progress<TransferProgress>(p =>
-                SetStatus(p.CurrentName.Length > 0
-                    ? $"{verbing} {p.Done + 1:N0} of {p.Total:N0} — {p.CurrentName}"
-                    : ActiveTab.StatusText));
+            var surface = new TransferProgressViewModel(plan, estimate, cancellation.Cancel);
+            TransferProgress = surface;
+            SetStatus(surface.Headline);
+
+            // Constructed here so it captures the UI dispatcher: the handler then touches the view
+            // model directly from the executor's background thread.
+            var progress = new Progress<TransferProgress>(surface.Apply);
 
             var outcome = await Task.Run(
-                () => _transferExecutor.Execute(plan, resolutions, CancellationToken.None, progress));
+                () => _transferExecutor.Execute(plan, resolutions, cancellation.Token, progress));
 
             RetireUndoable();
             if (outcome.CanUndo)
@@ -1353,9 +1351,12 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
             await RefreshAfterTransferAsync(plan, outcome);
             SetStatus(DescribeOutcome(plan, outcome));
+            return outcome;
         }
         finally
         {
+            TransferProgress = null;
+            cancellation.Dispose();
             IsTransferring = false;
             UndoCommand.NotifyCanExecuteChanged();
         }
@@ -1435,7 +1436,12 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private static string DescribeOutcome(TransferPlan plan, TransferOutcome outcome)
     {
         var verb = plan.Verb == TransferVerb.Move ? "Moved" : "Copied";
-        var text = $"{verb} {outcome.Completed.Count:N0} item(s)";
+        // A cancelled transfer says so, and says what did get across: the alternative reads as a
+        // transfer that quietly moved fewer items than it was asked to.
+        var text = outcome.Cancelled
+            ? $"{(plan.Verb == TransferVerb.Move ? "Move" : "Copy")} cancelled — " +
+              $"{outcome.Completed.Count:N0} of {plan.Transfers.Count:N0} item(s) {verb.ToLowerInvariant()}"
+            : $"{verb} {outcome.Completed.Count:N0} item(s)";
         if (outcome.Skipped.Count > 0) text += $", skipped {outcome.Skipped.Count:N0}";
         if (outcome.Failed.Count > 0) text += $", {outcome.Failed.Count:N0} failed — {outcome.Failed[0].Message}";
         else if (outcome.CanUndo) text += " — Ctrl+Z to undo";

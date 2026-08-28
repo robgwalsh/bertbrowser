@@ -17,6 +17,13 @@
     <Page Include="App.xaml" />
   </ItemGroup>
 
+  <!-- Also a WPF Resource, not just the ApplicationIcon: ApplicationIcon only embeds it as a Win32
+       resource on the executable, which is what the shell reads, while AppIcon needs to open the
+       file itself to pick a frame for the title bar. -->
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+  </ItemGroup>
+
   <!-- The UI harness hosts this window offscreen and builds the same service graph. Seeing the
        internals is what lets it drive the real view models and the real composition root rather
        than a parallel set of accessors that could drift from them. -->

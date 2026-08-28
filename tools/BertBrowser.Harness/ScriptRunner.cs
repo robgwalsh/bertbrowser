@@ -1,9 +1,11 @@
 using System.Globalization;
+using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using BertBrowser.App.Services;
 using BertBrowser.App.Theming;
 using BertBrowser.App.ViewModels;
@@ -134,10 +136,13 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "move": Transfer(rest, TransferVerb.Move); break;
             case "copy": Transfer(rest, TransferVerb.Copy); break;
             case "undo": Undo(); break;
+            case "progress-demo": ProgressDemo(rest); break;
 
             // browse settings
             case "hidden": Hidden(rest); break;
             case "thumbnails": Thumbnails(rest); break;
+            case "preview": Preview(rest); break;
+            case "preview-fixture": PreviewFixture(rest); break;
             case "sort": Sort(rest); break;
             case "theme": Theme(rest); break;
 
@@ -153,10 +158,13 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-path": AssertPath(rest); break;
             case "assert-status": AssertStatus(rest); break;
             case "assert-indexing": AssertIndexing(rest); break;
+            case "assert-transfer": AssertTransfer(rest); break;
+            case "assert-transfer-indeterminate": AssertTransferIndeterminate(); break;
             case "assert-count": AssertCount(rest); break;
             case "assert-row": AssertRow(rest, expected: true); break;
             case "assert-no-row": AssertRow(rest, expected: false); break;
             case "assert-selected": AssertSelected(rest); break;
+            case "assert-preview": AssertPreview(rest); break;
             case "assert-tabs": AssertTabs(rest); break;
             case "assert-panes": AssertPanes(rest); break;
             case "assert-flattened": AssertFlattened(expected: true); break;
@@ -181,6 +189,119 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         var root = _sandbox.Populate(rest.Length == 0 ? "." : rest);
         output.WriteLine($"# tree: {root}");
     }
+
+    /// <summary>
+    /// Lays down files the preview pane can actually show, in a <c>Preview</c> folder of their own.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Tree"/> and not folded into it, for two reasons. The ordinary
+    /// fixture's files are text with the right extensions — <c>photo.jpg</c> is not a JPEG — which
+    /// is fine for a listing and useless for a preview; and adding files to that fixture would move
+    /// every <c>assert-count</c> in every existing script.
+    ///
+    /// What lands here is generated rather than shipped as binary test data, so it is deterministic
+    /// and reviewable: the PNG is drawn from a formula and carries transparency, so it also proves
+    /// the chequerboard behind it.
+    /// </remarks>
+    private void PreviewFixture(string rest)
+    {
+        var root = _sandbox.RequireInside(rest.Length == 0 ? "Preview" : rest, "preview-fixture");
+        Directory.CreateDirectory(root);
+
+        WriteSamplePng(Path.Combine(root, "sample.png"));
+        WriteSampleZip(Path.Combine(root, "sample.zip"));
+        File.WriteAllText(Path.Combine(root, "Sample.cs"), SampleCode);
+        File.WriteAllText(Path.Combine(root, "sample.md"), SampleMarkdown);
+        Sandbox.Write(Path.Combine(root, "plain.txt"), 400);
+
+        Sandbox.Stamp(root);
+        output.WriteLine($"# preview fixture: {root}");
+    }
+
+    /// <summary>A 64×64 PNG with an alpha hole through the middle, drawn from a formula so two
+    /// runs produce byte-identical files.</summary>
+    private static void WriteSamplePng(string path)
+    {
+        const int size = 64;
+        var pixels = new byte[size * size * 4];
+        for (var y = 0; y < size; y++)
+        {
+            for (var x = 0; x < size; x++)
+            {
+                var i = (y * size + x) * 4;
+                var inside = (x - 32) * (x - 32) + (y - 32) * (y - 32) < 20 * 20;
+                var alpha = (byte)(inside ? 0 : 255);
+                // Premultiplied would need the colour scaled by alpha; Bgra32 does not.
+                pixels[i + 0] = (byte)(x * 4);       // B
+                pixels[i + 1] = (byte)(y * 4);       // G
+                pixels[i + 2] = 200;                 // R
+                pixels[i + 3] = alpha;
+            }
+        }
+
+        var bitmap = BitmapSource.Create(size, size, 96, 96, PixelFormats.Bgra32, null, pixels, size * 4);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+
+        using var file = File.Create(path);
+        encoder.Save(file);
+    }
+
+    private static void WriteSampleZip(string path)
+    {
+        using var file = File.Create(path);
+        using var archive = new ZipArchive(file, ZipArchiveMode.Create);
+
+        foreach (var (name, text) in new[]
+        {
+            ("readme.txt", "This archive is listed, never extracted.\n"),
+            ("src/app.js", "console.log('hello');\n"),
+            ("src/lib/util.js", "export const one = 1;\n"),
+            ("docs/guide.md", "# Guide\n\nNothing here is opened.\n"),
+        })
+        {
+            using var entry = archive.CreateEntry(name).Open();
+            entry.Write(System.Text.Encoding.UTF8.GetBytes(text));
+        }
+    }
+
+    private const string SampleCode = """
+        using System;
+
+        namespace Sample;
+
+        /// <summary>A little of everything the tokenizer has an opinion about.</summary>
+        public static class Greeter
+        {
+            private const int Attempts = 3;      // a number and a line comment
+            private const string Url = "https://example.com/not-a-comment";
+
+            /* a block comment
+               over two lines */
+            public static void Greet(string name)
+            {
+                for (var i = 0; i < Attempts; i++)
+                    Console.WriteLine($"Hello, {name}! 0xFF is {0xFF}, and it's fine.");
+            }
+        }
+        """;
+
+    private const string SampleMarkdown = """
+        # Sample document
+
+        Ordinary paragraph text, which stays plain.
+
+        - a bullet
+        - another bullet
+
+        > a quoted line
+
+        ```csharp
+        var inside = "a fenced block";
+        ```
+
+        The end.
+        """;
 
     private void MakeDirectory(string rest) =>
         Directory.CreateDirectory(_sandbox.RequireInside(Require(rest, "mkdir"), "mkdir"));
@@ -526,6 +647,68 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         Await(() => session.Shell.ExecuteDropAsync(plan, resolutions: null));
     }
 
+    /// <summary>
+    /// Poses the transfer-progress surfaces at a fixed point, so the status-bar strip and the
+    /// detail window can be photographed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Nothing is transferred.</b> A real transfer fast enough to be safe here is over before a
+    /// capture could catch it, and one slow enough to catch would put timing — a throughput figure
+    /// and a time remaining — into every picture, so no two runs would ever match. The numbers are
+    /// therefore given, and the surfaces are the app's own.
+    /// </para>
+    /// <para>
+    /// It deliberately does <em>not</em> set <c>IsTransferring</c>: that is what
+    /// <see cref="UiSession.Settle"/> waits on, so a posed transfer would hang the script until the
+    /// watchdog fired. Both surfaces bind to the nullable progress view model instead, which is why
+    /// this works at all.
+    /// </para>
+    /// <para>
+    /// <c>progress-demo</c> alone poses a plan whose byte total is known; <c>progress-demo unsized</c>
+    /// poses one the size index could not total, which is the degraded shape — throughput and bytes
+    /// so far, no percentage, no time remaining, and an indeterminate bar.
+    /// </para>
+    /// </remarks>
+    private void ProgressDemo(string rest)
+    {
+        var argument = rest.Trim();
+        if (argument.Equals("off", StringComparison.OrdinalIgnoreCase))
+        {
+            session.Dispatcher.Invoke(() => session.Shell.TransferProgress = null);
+            return;
+        }
+
+        var complete = !argument.Equals("unsized", StringComparison.OrdinalIgnoreCase);
+        if (argument.Length > 0 && complete && !argument.Equals("sized", StringComparison.OrdinalIgnoreCase))
+            throw new FormatException("progress-demo takes nothing, 'sized', 'unsized' or 'off'.");
+
+        var destination = Path.Combine(_sandbox.Root, "Archive");
+        PlannedTransfer Item(string name, bool isDirectory) =>
+            new(Path.Combine(_sandbox.Root, name), isDirectory, Path.Combine(destination, name), false);
+
+        var plan = new TransferPlan(
+            TransferVerb.Copy, destination,
+            [Item("archive.zip", false), Item("photo.jpg", false), Item("Pictures", true)],
+            []);
+
+        var estimate = new TransferEstimate(50L * 1024 * 1024 * 1024, 1_284, complete);
+
+        session.Dispatcher.Invoke(() =>
+        {
+            // A cancel that does nothing — there is nothing to stop. Given rather than left null so
+            // the button photographs in the state it is really in during a transfer, enabled.
+            var surface = new TransferProgressViewModel(plan, estimate, cancel: () => { });
+            surface.PoseForCapture(itemsDone: 1, bytesDone: 4_509_715_660, bytesPerSecond: 117_440_512);
+            session.Shell.TransferProgress = surface;
+        });
+
+        // The strip is only realised once the item it lives in becomes visible, so without this a
+        // capture taken straight afterwards gets it measured but not yet filled in — an empty bar
+        // and blank labels, which looks like a binding fault and is not one.
+        session.Settle();
+    }
+
     private void Undo()
     {
         if (!session.Dispatcher.Invoke(() => session.Shell.CanUndo))
@@ -548,6 +731,25 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         var scale = Fraction(rest, "thumbnails");
         Invoke(() => session.Tab.FileList.ThumbnailScale = scale);
         session.Settle(quietMs: 120); // tiles decode their icons off-thread
+    }
+
+    /// <summary>Shows or hides the active tab's preview pane, then waits for it.</summary>
+    /// <remarks>
+    /// The quiet period is longer than the thumbnails one and has to be: the preview debounces the
+    /// selection for 150 ms before it reads anything, and only then goes off-thread to decode. It
+    /// is also why every preview assertion in a script belongs after this command rather than
+    /// immediately after a <c>select</c>.
+    ///
+    /// Nothing here ever starts a media pipeline. The pane shows a poster frame until someone
+    /// presses play, and no script presses play — a `MediaElement` renders through its own
+    /// composition surface and would come back as a hole in a `RenderTargetBitmap` anyway, quite
+    /// apart from making a noise on the machine someone is using.
+    /// </remarks>
+    private void Preview(string rest)
+    {
+        var show = Switch(rest, "preview");
+        Invoke(() => session.Tab.IsPreviewVisible = show);
+        session.Settle(quietMs: 400);
     }
 
     private void Sort(string rest)
@@ -695,9 +897,17 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         "disk-usage" => DiskUsageWindowFor(),
 
+        // Posed rather than run, for the reasons on ProgressDemo. Needs a progress-demo first, so
+        // the window shows the same fixed figures the status bar does.
+        "transfer" => session.Shell.TransferProgress is { } progress
+            ? TransferProgressWindow.Create(progress)
+            : throw new AssertionException(
+                "There is no transfer to show. Run 'progress-demo' before 'dialog transfer'."),
+
         _ => throw new FormatException(
             $"'{kind}' is not a dialog. Try: new-folder, new-file, rename, delete, " +
-            "delete-permanent, message, warning, properties, settings, theme-editor, disk-usage."),
+            "delete-permanent, message, warning, properties, settings, theme-editor, disk-usage, " +
+            "transfer."),
     };
 
     /// <summary>
@@ -809,6 +1019,12 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             ("panes", Text(shell.AllPanes.Count())),
             ("hidden", Bool(shell.ShowHiddenItems)),
             ("thumbnails", tab.FileList.ThumbnailScale.ToString("0.##", CultureInfo.InvariantCulture)),
+            ("preview", Bool(tab.IsPreviewVisible)),
+            ("previewState", Quote(tab.Preview.StateName)),
+            ("previewTitle", Quote(tab.Preview.Title)),
+            ("previewMessage", Quote(tab.Preview.Message ?? "")),
+            ("previewFooter", Quote(tab.Preview.TextFooter)),
+            ("previewMetadata", Text(tab.Preview.Metadata.Count)),
             ("canUndo", Bool(shell.CanUndo)),
             ("undo", Quote(shell.UndoDescription)),
             ("foregroundCorrections", Text(session.ForegroundCorrections)),
@@ -816,6 +1032,14 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             ("status", Quote(tab.StatusText)),
             ("indexing", Quote(shell.IndexingStatus)),
             ("indexingCanRetry", Bool(shell.IndexingCanRetry)),
+            ("isTransferring", Bool(shell.IsTransferring)),
+            // The byte-level surface, or nulls when nothing is running. Reported because there was
+            // previously no way for a script to see a transfer at all.
+            ("transferHeadline", Quote(shell.TransferProgress?.Headline ?? "")),
+            ("transferDetail", Quote(shell.TransferProgress?.DetailText ?? "")),
+            ("transferBytes", Text(shell.TransferProgress?.BytesDone ?? 0)),
+            ("transferBytesTotal", Text(shell.TransferProgress?.BytesTotal ?? 0)),
+            ("transferIndeterminate", Bool(shell.TransferProgress?.IsIndeterminate ?? false)),
         };
 
         return "{" + string.Join(",", fields.Select(f => $"{Quote(f.Name)}:{f.Value}")) + "}";
@@ -893,6 +1117,39 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             throw new AssertionException($"expected the path to contain '{expected}', got '{actual}'.");
     }
 
+    /// <summary>Asserts on the running transfer's own strip — its headline and its figures — which
+    /// is a different line from <c>assert-status</c>'s.</summary>
+    private void AssertTransfer(string rest)
+    {
+        var expected = Require(rest, "assert-transfer");
+        var actual = session.Dispatcher.Invoke(() => session.Shell.TransferProgress is { } p
+            ? $"{p.Headline}  {p.DetailText}"
+            : null);
+
+        if (actual is null)
+            throw new AssertionException(
+                $"expected a transfer showing '{expected}', but none is running. Run 'progress-demo' first.");
+
+        if (!actual.Contains(expected, StringComparison.OrdinalIgnoreCase))
+            throw new AssertionException($"expected the transfer to show '{expected}', got '{actual}'.");
+    }
+
+    /// <summary>
+    /// Asserts the transfer bar is indeterminate — which is what a plan the size index could not
+    /// total has to look like. A determinate bar there would sit at zero and read as a stall.
+    /// </summary>
+    private void AssertTransferIndeterminate()
+    {
+        var indeterminate = session.Dispatcher.Invoke(() => session.Shell.TransferProgress?.IsIndeterminate);
+
+        if (indeterminate is null)
+            throw new AssertionException("no transfer is running. Run 'progress-demo unsized' first.");
+        if (indeterminate is false)
+            throw new AssertionException(
+                "the transfer bar is determinate, but its byte total was never established — " +
+                "a bar pinned at zero reads as a stall rather than as an unmeasured volume.");
+    }
+
     private void AssertStatus(string rest)
     {
         var expected = Require(rest, "assert-status");
@@ -959,6 +1216,18 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         if (actual != expected)
             throw new AssertionException($"expected {expected} selected item(s), got {actual}.");
+    }
+
+    /// <summary>What the preview pane settled on: image, document, text, archive, font, media,
+    /// loading, or none. Asserted through the view model rather than a screenshot, because the
+    /// picture of a poster frame proves nothing about which branch produced it.</summary>
+    private void AssertPreview(string rest)
+    {
+        var expected = Require(rest, "assert-preview").ToLowerInvariant();
+        var actual = session.Dispatcher.Invoke(() => session.Tab.Preview.StateName);
+
+        if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+            throw new AssertionException($"expected the preview to be '{expected}', it is '{actual}'.");
     }
 
     private void AssertTabs(string rest)
@@ -1058,10 +1327,22 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         {
             if (!element.Name.Equals(name, StringComparison.Ordinal)) continue;
             if (ReferenceEquals(element.DataContext, active)) return element;
+
+            // A per-tab element may carry a DataContext of its own — the preview pane binds to the
+            // tab's preview view model rather than to the tab — so ask which tab view it lives in
+            // before falling back to whichever copy came first.
+            if (ReferenceEquals(OwningTab(element), active)) return element;
             fallback ??= element;
         }
 
         return fallback;
+    }
+
+    private static DirectoryTabViewModel? OwningTab(DependencyObject element)
+    {
+        for (var d = element; d is not null; d = VisualTreeHelper.GetParent(d))
+            if (d is FrameworkElement { DataContext: DirectoryTabViewModel tab }) return tab;
+        return null;
     }
 
     private static IEnumerable<DependencyObject> Descendants(DependencyObject root)

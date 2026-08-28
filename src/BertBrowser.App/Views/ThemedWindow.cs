@@ -52,6 +52,26 @@ public class ThemedWindow : Window
     public static readonly DependencyProperty TitleBarContentProperty = DependencyProperty.Register(
         nameof(TitleBarContent), typeof(object), typeof(ThemedWindow), new PropertyMetadata(null));
 
+    /// <summary>
+    /// Whether the app icon is drawn at the left of the title bar. Off by default: the dialogs
+    /// carry a title that already says what they are, and Explorer's own dialogs show no icon.
+    /// </summary>
+    public static readonly DependencyProperty ShowsAppIconProperty = DependencyProperty.Register(
+        nameof(ShowsAppIcon), typeof(bool), typeof(ThemedWindow),
+        new PropertyMetadata(false, (d, _) => ((ThemedWindow)d).RefreshTitleBarIcon()));
+
+    private static readonly DependencyPropertyKey TitleBarIconPropertyKey = DependencyProperty.RegisterReadOnly(
+        nameof(TitleBarIcon), typeof(ImageSource), typeof(ThemedWindow), new PropertyMetadata(null));
+
+    /// <summary>
+    /// The frame of the app icon drawn in the title bar, chosen for the window's current DPI —
+    /// see <see cref="AppIcon"/> for why the choice is made here rather than left to WPF.
+    /// </summary>
+    public static readonly DependencyProperty TitleBarIconProperty = TitleBarIconPropertyKey.DependencyProperty;
+
+    /// <summary>The title bar draws the icon at this many DIPs; the template agrees.</summary>
+    private const double TitleBarIconSize = 16;
+
     private IThemeService? _theme;
     private Button? _maximizeButton;
 
@@ -87,6 +107,34 @@ public class ThemedWindow : Window
     {
         get => GetValue(TitleBarContentProperty);
         set => SetValue(TitleBarContentProperty, value);
+    }
+
+    public bool ShowsAppIcon
+    {
+        get => (bool)GetValue(ShowsAppIconProperty);
+        set => SetValue(ShowsAppIconProperty, value);
+    }
+
+    public ImageSource? TitleBarIcon => (ImageSource?)GetValue(TitleBarIconProperty);
+
+    /// <summary>
+    /// Re-picks the icon frame for the window's current scale. Called once the window has an HWND
+    /// and again on every DPI change, since the frame that was exact on one monitor is not on
+    /// another — which is the whole reason the choice is not made once at load.
+    /// </summary>
+    private void RefreshTitleBarIcon()
+    {
+        if (!ShowsAppIcon)
+        {
+            SetValue(TitleBarIconPropertyKey, null);
+            return;
+        }
+
+        // Before the window has a presentation source there is no DPI to ask for, and
+        // VisualTreeHelper.GetDpi answers with the primary monitor's. Assume unscaled and re-pick
+        // from OnSourceInitialized, which is a moment later and knows.
+        var scale = PresentationSource.FromVisual(this) is null ? 1.0 : VisualTreeHelper.GetDpi(this).DpiScaleX;
+        SetValue(TitleBarIconPropertyKey, AppIcon.ForSlot(TitleBarIconSize, scale));
     }
 
     public override void OnApplyTemplate()
@@ -127,6 +175,7 @@ public class ThemedWindow : Window
         }
 
         ApplyFrameColours();
+        RefreshTitleBarIcon();
     }
 
     private void Wire(string partName, Action action)
@@ -189,6 +238,7 @@ public class ThemedWindow : Window
                 // scale — otherwise a maximised window dragged to a differently-scaled monitor
                 // keeps the old monitor's metrics.
                 ApplyFrameColours();
+                RefreshTitleBarIcon();
                 break;
         }
 

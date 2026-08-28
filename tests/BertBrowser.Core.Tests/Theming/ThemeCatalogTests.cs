@@ -138,6 +138,26 @@ public class ThemeCatalogTests
         AssertContrast(theme, ThemeToken.TreeChevronForeground, ThemeToken.SurfaceBackground, ThemeContrast.AaLargeText);
     }
 
+    /// <summary>
+    /// Code in the preview pane is read, not glanced at. Only the two roots define these colours
+    /// and every other built-in inherits them, so this is where a palette that reads on Dark+ and
+    /// disappears on a theme sitting two shades lighter gets caught.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(BuiltInIds))]
+    public void Code_stays_readable_in_the_preview_pane(string id)
+    {
+        var theme = Resolve(id);
+
+        AssertContrast(theme, ThemeToken.SyntaxKeyword, ThemeToken.WindowBackground, ThemeContrast.AaNormalText);
+        AssertContrast(theme, ThemeToken.SyntaxString, ThemeToken.WindowBackground, ThemeContrast.AaNormalText);
+        AssertContrast(theme, ThemeToken.SyntaxNumber, ThemeToken.WindowBackground, ThemeContrast.AaNormalText);
+        AssertContrast(theme, ThemeToken.SyntaxPunctuation, ThemeToken.WindowBackground, ThemeContrast.AaNormalText);
+        // Comments are meant to recede, so they answer to the large-text bar rather than vanish
+        // under a rule written for body text.
+        AssertContrast(theme, ThemeToken.SyntaxComment, ThemeToken.WindowBackground, ThemeContrast.AaLargeText);
+    }
+
     /// <summary>A row must not lose its text the moment it is hovered or selected.</summary>
     [Theory]
     [MemberData(nameof(BuiltInIds))]

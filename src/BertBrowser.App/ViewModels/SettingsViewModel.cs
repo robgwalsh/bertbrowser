@@ -97,6 +97,7 @@ public enum SettingsCategory
 {
     General,
     Appearance,
+    Preview,
     NewItems,
     Commands,
 }
@@ -163,6 +164,21 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private AspectRatio _tileAspect;
 
+    // --- Preview ---
+
+    /// <summary>Whether a newly opened tab starts with its preview showing. Visibility itself is
+    /// per tab, so this is a default rather than a switch — which is why the page says so.</summary>
+    [ObservableProperty]
+    private bool _showPreviewPane;
+
+    /// <summary>How much of a text file the preview reads, in kilobytes. Kept in KB here because
+    /// that is the unit the number is worth typing in; the setting itself is bytes.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PreviewTextLimitText))]
+    private double _previewTextLimitKb;
+
+    public string PreviewTextLimitText => $"{PreviewTextLimitKb:0} KB";
+
     /// <summary>
     /// Theme selection and editing. Unlike everything else here it applies live rather than on
     /// Save — see the note in the dialog.
@@ -176,6 +192,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         {
             new SettingsCategoryViewModel(SettingsCategory.General, "General", "\uE713"),
             new SettingsCategoryViewModel(SettingsCategory.Appearance, "Appearance", "\uE790"),
+            new SettingsCategoryViewModel(SettingsCategory.Preview, "Preview", "\uE8A1"),
             new SettingsCategoryViewModel(SettingsCategory.NewItems, "New items", "\uE710"),
             new SettingsCategoryViewModel(SettingsCategory.Commands, "Commands", "\uE8A7"),
         };
@@ -193,6 +210,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         SelectedNewFileType = NewFileTypes.FirstOrDefault();
         ShowHiddenItems = settings.ShowHiddenItems;
         ScrollSpeed = settings.ScrollSpeedMultiplier;
+        ShowPreviewPane = settings.ShowPreviewPane;
+        PreviewTextLimitKb = Math.Round(settings.PreviewTextMaxBytes / 1024.0);
 
         TileAspect = AspectRatio.Parse(settings.TileAspectRatio);
         TileAspectOptions = AspectRatio.Presets.Contains(TileAspect)
@@ -345,6 +364,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settings.NewFileTypes = NewFileTypes.Select(t => t.ToTemplate()).ToList();
         _settings.ShowHiddenItems = ShowHiddenItems;
         _settings.ScrollSpeedMultiplier = ScrollSpeed;
+        _settings.ShowPreviewPane = ShowPreviewPane;
+        _settings.PreviewTextMaxBytes = (int)Math.Clamp(PreviewTextLimitKb * 1024, 4096, 64 * 1024 * 1024);
         _settings.TileAspectRatio = TileAspect.ToString();
         _settings.Save();
         error = null;

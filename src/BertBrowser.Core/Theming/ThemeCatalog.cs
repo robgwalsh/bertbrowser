@@ -157,6 +157,15 @@ public static class ThemeCatalog
             [T.MarqueeFill] = "#33007ACC",
             [T.MarqueeBorder] = "#007ACC",
             [T.ThumbnailTileBackground] = "#2A2A2A",
+
+            [T.PreviewCheckerLight] = "#3A3A3A",
+            [T.PreviewCheckerDark] = "#2A2A2A",
+
+            [T.SyntaxKeyword] = "#6FB0E4",
+            [T.SyntaxString] = "#CE9178",
+            [T.SyntaxComment] = "#6A9955",
+            [T.SyntaxNumber] = "#B5CEA8",
+            [T.SyntaxPunctuation] = "#D4D4D4",
         },
     };
 
@@ -293,6 +302,15 @@ public static class ThemeCatalog
             [T.MarqueeFill] = "#330F6CBD",
             [T.MarqueeBorder] = StrongBlue,
             [T.ThumbnailTileBackground] = "#00000000",
+
+            [T.PreviewCheckerLight] = "#FFFFFF",
+            [T.PreviewCheckerDark] = "#E6E6E6",
+
+            [T.SyntaxKeyword] = "#0000FF",
+            [T.SyntaxString] = "#A31515",
+            [T.SyntaxComment] = "#008000",
+            [T.SyntaxNumber] = "#0A7048",
+            [T.SyntaxPunctuation] = "#3B3B3B",
         },
     };
 
