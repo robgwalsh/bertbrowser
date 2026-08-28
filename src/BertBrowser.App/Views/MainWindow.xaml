@@ -45,6 +45,13 @@
         <KeyBinding Key="W" Modifiers="Ctrl+Shift" Command="{Binding ActivePane.ClosePaneCommand}"/>
         <KeyBinding Key="F6" Command="{Binding FocusNextPaneCommand}"/>
         <KeyBinding Key="F6" Modifiers="Shift" Command="{Binding FocusPreviousPaneCommand}"/>
+
+        <!-- Disk usage. Safe as a window binding rather than a guarded PreviewKeyDown: it cannot
+             collide with typing the way Ctrl+F or Ctrl+Z can. -->
+        <KeyBinding Key="D" Modifiers="Ctrl+Shift" Command="{Binding AnalyseDiskUsageCommand}"/>
+
+        <!-- Reopen the last tab closed in this pane. -->
+        <KeyBinding Key="T" Modifiers="Ctrl+Shift" Command="{Binding ActivePane.ReopenClosedTabCommand}"/>
     </Window.InputBindings>
 
     <!--
@@ -134,6 +141,13 @@
 
                 <!-- "Show hidden items" lives in the Settings dialog only; it is a preference
                      you set once, not something the caption strip needs a button for. -->
+                <Button Style="{StaticResource ToolbarButton}"
+                        ToolTip="Disk usage — what is taking up space (Ctrl+Shift+D)"
+                        Command="{Binding AnalyseDiskUsageCommand}"
+                        AutomationProperties.Name="Disk usage">
+                    <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE9A9;"/>
+                </Button>
+
                 <Button Style="{StaticResource ToolbarButton}"
                         ToolTip="Settings — appearance and custom context menu commands"
                         Click="Settings_Click">
@@ -338,6 +352,15 @@
                         </MenuItem>
                         <MenuItem x:Name="TreeDeleteMenuItem" Header="Delete…" Click="TreeDelete_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE74D;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <Separator/>
+                        <MenuItem Header="Copy as path" Click="TreeCopyPath_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C8;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <Separator/>
+                        <!-- Right-clicking a drive here is the gesture this feature exists for. -->
+                        <MenuItem Header="Analyse disk usage…" Click="TreeDiskUsage_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE9A9;"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator x:Name="TreeCustomCommandsSeparator" Visibility="Collapsed"/>
                         <Separator/>

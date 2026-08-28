@@ -129,6 +129,24 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// scroll position.</summary>
     public event Action<string>? ActiveLocationChanged;
 
+    /// <summary>
+    /// Raised with the folder to analyse, or null for "This PC". The window builds the view — a
+    /// view model has no business constructing one — but every entry point goes through
+    /// <see cref="OpenDiskUsage"/> so there is one route and one place it can be opened wrongly.
+    /// </summary>
+    public event Action<string?>? DiskUsageRequested;
+
+    /// <summary>Opens the disk-usage view on <paramref name="path"/>, or on the whole PC when it
+    /// is null.</summary>
+    public void OpenDiskUsage(string? path) => DiskUsageRequested?.Invoke(path);
+
+    /// <summary>The Ctrl+Shift+D arm: analyse whatever the active tab is showing. A tab with no
+    /// path yet (or one showing a search result) falls back to the whole PC rather than refusing.
+    /// </summary>
+    [RelayCommand]
+    private void AnalyseDiskUsage() =>
+        OpenDiskUsage(ActiveTab.CurrentPath is { Length: > 0 } path ? path : null);
+
     public ShellViewModel(
         IFileSystemService fileSystem,
         ISearchService searchService,
@@ -186,6 +204,15 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// <summary>Overrides the initial directory (e.g. from the command line).</summary>
     public string? StartPath { get; set; }
 
+    /// <summary>
+    /// The arrangement to restore, or null to start with one pane on one directory.
+    /// </summary>
+    /// <remarks>
+    /// Ignored when <see cref="StartPath"/> came from the command line: someone who typed a folder
+    /// asked for that folder, and reopening six panes over the top of it would bury it.
+    /// </remarks>
+    public SessionLayout? StartLayout { get; set; }
+
     public async Task InitializeAsync()
     {
         Bookmarks.SetShowHidden(ShowHiddenItems);
@@ -197,11 +224,157 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         // Drives are enumerated off-thread; the roots must exist before the first reveal.
         await Tree.LoadDrivesAsync();
 
-        var start = StartPath ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        await ActiveTab.NavigateToAsync(start);
+        if (StartLayout is not { } layout || !await RestoreSessionAsync(layout))
+        {
+            var start = StartPath ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            await ActiveTab.NavigateToAsync(start);
+        }
 
         // Portable devices can be slow to enumerate; append them after the first view loads.
         await Tree.LoadDevicesAsync();
+    }
+
+    /// <summary>
+    /// Rebuilds the saved arrangement, or leaves everything alone and returns false.
+    /// </summary>
+    /// <remarks>
+    /// Everything unusable has already been pruned away by <see cref="SessionLayoutRules"/>; what
+    /// is left is turned into real panes through the same <see cref="PaneViewModel.AddTab"/> a
+    /// split or a Ctrl+T goes through, so a restored pane is indistinguishable from one the user
+    /// just made.
+    /// </remarks>
+    /// <summary>
+    /// Rebuilds a saved arrangement and points every tab at its folder. Returns false, having
+    /// changed nothing, when the layout is not one that can be restored.
+    /// </summary>
+    /// <remarks>
+    /// Awaiting only the visible tab of each pane is the difference between opening a session and
+    /// waiting for one: the tabs behind it navigate while the window is already usable.
+    /// </remarks>
+    public async Task<bool> RestoreSessionAsync(SessionLayout saved)
+    {
+        if (RestoreLayout(saved) is not { Count: > 0 } pending) return false;
+
+        await Task.WhenAll(pending.Where(p => p.Visible).Select(p => p.Tab.NavigateToAsync(p.Path)));
+
+        foreach (var background in pending.Where(p => !p.Visible))
+            _ = background.Tab.NavigateToAsync(background.Path);
+
+        return true;
+    }
+
+    /// <summary>A tab waiting to be pointed at its folder, and whether its pane is showing it.</summary>
+    private readonly record struct PendingNavigation(
+        DirectoryTabViewModel Tab, string Path, bool Visible);
+
+    private List<PendingNavigation>? RestoreLayout(SessionLayout saved)
+    {
+        if (!SessionLayoutRules.IsUsable(saved)) return null;
+
+        var pending = new List<PendingNavigation>();
+        var built = BuildLayout(saved, pending, out var active);
+        if (built is null || pending.Count == 0) return null;
+
+        var previous = ActivePane;
+
+        Layout = built;
+        ActivePane = active ?? LayoutTree.Leaves(built).First().Value;
+
+        // The pane the constructor made is not in the new tree, so it would otherwise leak its
+        // tab's in-flight work and event subscriptions.
+        previous.Dispose();
+
+        LayoutChanged?.Invoke();
+        return pending;
+    }
+
+    /// <remarks>
+    /// Tabs are added with an empty path so <see cref="PaneViewModel.AddTab"/> starts no navigation
+    /// of its own — every one is collected into <paramref name="pending"/> instead, so the caller
+    /// can await the visible ones and let the rest run behind them.
+    /// </remarks>
+    private ILayoutNode<PaneViewModel>? BuildLayout(
+        SessionLayout node, List<PendingNavigation> pending, out PaneViewModel? active)
+    {
+        active = null;
+
+        if (!node.IsSplit)
+        {
+            if (node.Tabs is not { Count: > 0 } tabs) return null;
+
+            var pane = new PaneViewModel(_factory, this);
+            var visibleIndex = Math.Clamp(node.ActiveTabIndex, 0, tabs.Count - 1);
+
+            for (var i = 0; i < tabs.Count; i++)
+            {
+                var created = pane.AddTab("", activate: false);
+                if (Enum.TryParse<SortColumn>(tabs[i].SortBy, out var column))
+                {
+                    created.FileList.SortBy = column;
+                    created.FileList.SortDescending = tabs[i].SortDescending;
+                }
+                pending.Add(new PendingNavigation(created, tabs[i].Path, i == visibleIndex));
+            }
+
+            pane.ActiveTab = pane.Tabs[visibleIndex];
+            if (node.IsActivePane) active = pane;
+
+            return new LayoutLeaf<PaneViewModel>(pane) { Weight = node.Weight };
+        }
+
+        var children = new List<ILayoutNode<PaneViewModel>>();
+        foreach (var child in node.Children!)
+        {
+            if (BuildLayout(child, pending, out var childActive) is not { } built) continue;
+            children.Add(built);
+            active ??= childActive;
+        }
+
+        // LayoutTree forbids a split with fewer than two children, so anything that thin is hoisted
+        // rather than handed over as a shape the live tree would reject.
+        if (children.Count == 0) return null;
+        if (children.Count == 1)
+        {
+            children[0].Weight = node.Weight;
+            return children[0];
+        }
+
+        return new LayoutSplit<PaneViewModel>(
+            node.Orientation ?? SplitOrientation.Vertical, children) { Weight = node.Weight };
+    }
+
+    /// <summary>
+    /// The current arrangement, in the shape settings.json stores. Taken on the way out.
+    /// </summary>
+    public SessionLayout CaptureLayout() => CaptureNode(Layout);
+
+    private SessionLayout CaptureNode(ILayoutNode<PaneViewModel> node)
+    {
+        if (node is LayoutSplit<PaneViewModel> split)
+        {
+            return new SessionLayout
+            {
+                Orientation = split.Orientation,
+                Weight = split.Weight,
+                Children = split.Children.Select(CaptureNode).ToList(),
+            };
+        }
+
+        var pane = ((LayoutLeaf<PaneViewModel>)node).Value;
+        var tabs = pane.Tabs.Where(t => t.CurrentPath.Length > 0).ToList();
+
+        return new SessionLayout
+        {
+            Weight = node.Weight,
+            Tabs = tabs.Select(t => new SessionTab
+            {
+                Path = t.CurrentPath,
+                SortBy = t.FileList.SortBy.ToString(),
+                SortDescending = t.FileList.SortDescending,
+            }).ToList(),
+            ActiveTabIndex = pane.ActiveTab is { } visible ? Math.Max(0, tabs.IndexOf(visible)) : 0,
+            IsActivePane = ReferenceEquals(pane, ActivePane),
+        };
     }
 
     // --- Panes and layout (IPaneHost) ---
@@ -550,6 +723,35 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
     [RelayCommand]
     private void CutSelection(IList<FileItemViewModel>? items) => SetClipboard(items, cut: true);
+
+    /// <summary>
+    /// Copies the selection as text rather than as files: quoted full paths, one per line.
+    /// </summary>
+    /// <remarks>
+    /// A separate clipboard shape from Copy on purpose. This one is for pasting into a terminal, an
+    /// editor or a message, and putting a file drop there instead would make the receiving app
+    /// offer to copy the files.
+    /// </remarks>
+    [RelayCommand]
+    private void CopyPaths(IList<FileItemViewModel>? items) =>
+        SetClipboardText(items, PathText.ForClipboard, "path");
+
+    [RelayCommand]
+    private void CopyNames(IList<FileItemViewModel>? items) =>
+        SetClipboardText(items, PathText.NamesForClipboard, "name");
+
+    private void SetClipboardText(
+        IList<FileItemViewModel>? items, Func<IEnumerable<string>, string> format, string noun)
+    {
+        var paths = items?.Select(i => i.FullPath).ToList();
+        if (paths is not { Count: > 0 }) return;
+
+        // The clipboard belongs to the whole session and another process can be holding it; a
+        // failed copy is worth a status line rather than an exception.
+        ActiveTab.StatusText = FileClipboard.TrySetText(format(paths))
+            ? $"Copied {paths.Count} {noun}{(paths.Count == 1 ? "" : "s")}"
+            : "Could not copy — the clipboard is in use by another program.";
+    }
 
     private void SetClipboard(IList<FileItemViewModel>? items, bool cut)
     {

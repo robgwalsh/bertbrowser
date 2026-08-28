@@ -329,4 +329,124 @@ public sealed class FsIndexRepositoryTests : IDisposable
         Assert.Empty(_repo.Search(@"C:\A\Dst", Q("stale"), 100).Hits);
         Assert.Single(_repo.Search(@"C:\A\Dst", Q("new"), 100).Hits);
     }
+
+    // --- LargestFiles (disk-space explorer) ---
+
+    [Fact]
+    public void LargestFiles_OrdersBySizeDescendingAndRespectsLimit()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\small.bin", size: 10),
+            Row(@"C:\Data\huge.bin", size: 3_000),
+            Row(@"C:\Data\medium.bin", size: 200),
+        }, crawlGen: 1);
+
+        var files = _repo.LargestFiles(@"C:\Data", limit: 2);
+
+        Assert.Equal(["huge.bin", "medium.bin"], files.Select(f => f.Name));
+        Assert.Equal(3_000, files[0].SizeBytes);
+    }
+
+    /// <summary>
+    /// The half-open-bounds guarantee, stated as a test: a scope of "C:\Data" reaches neither
+    /// neighbour whose name merely starts with it.
+    /// </summary>
+    /// <remarks>
+    /// Both siblings are load-bearing, and one of them is easy to get wrong. Bounds are
+    /// <c>["C:\DATA\", "C:\DATA]")</c>, so <c>C:\DATAX</c> is turned away by the <em>lower</em>
+    /// bound alone ('X' sorts below '\') — a test using only that one still passes with the upper
+    /// bound deleted. <c>C:\DATA_OLD</c> is the case only the upper bound catches, since '_' sorts
+    /// above ']'. Drop either half of the range and this goes red.
+    /// </remarks>
+    [Fact]
+    public void LargestFiles_ScopedToTheSubtree()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\big.bin", size: 10_000_000_000),
+            Row(@"C:\Datax\bigger.bin", size: 20_000_000_000),
+            Row(@"C:\Data_old\biggest.bin", size: 30_000_000_000),
+        }, crawlGen: 1);
+
+        var files = _repo.LargestFiles(@"C:\Data", limit: 10);
+
+        Assert.Equal("big.bin", Assert.Single(files).Name);
+    }
+
+    /// <summary>
+    /// Folder totals live in dir_size_cache; a row here is only ever a file's own bytes. The query
+    /// must exclude directories itself rather than relying on the indexer writing them as zero.
+    /// </summary>
+    [Fact]
+    public void LargestFiles_ExcludesDirectories()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\Sub", isDir: true, size: 9_000_000),
+            Row(@"C:\Data\file.bin", size: 5),
+        }, crawlGen: 1);
+
+        var files = _repo.LargestFiles(@"C:\Data", limit: 10);
+
+        Assert.Equal("file.bin", Assert.Single(files).Name);
+    }
+
+    [Fact]
+    public void LargestFiles_ExcludesHiddenUnlessRequested()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\visible.bin", size: 10),
+            Row(@"C:\Data\secret.bin", size: 5_000, hidden: true),
+        }, crawlGen: 1);
+
+        Assert.Equal(2, _repo.LargestFiles(@"C:\Data", limit: 10).Count);
+
+        var visibleOnly = _repo.LargestFiles(@"C:\Data", limit: 10, includeHidden: false);
+        Assert.Equal("visible.bin", Assert.Single(visibleOnly).Name);
+    }
+
+    /// <summary>Display paths are reassembled from ancestor rows, so original casing survives a
+    /// table that only stores uppercase keys.</summary>
+    [Fact]
+    public void LargestFiles_ReconstructsDisplayPaths()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\Sub", isDir: true),
+            Row(@"C:\Data\Sub\deep.bin", size: 77),
+        }, crawlGen: 1);
+
+        var file = Assert.Single(_repo.LargestFiles(@"C:\Data", limit: 10));
+
+        Assert.Equal("Sub", file.RelativeDirDisplay);
+        Assert.Equal(@"C:\Data\Sub\deep.bin", file.DisplayPath);
+    }
+
+    [Fact]
+    public void LargestFiles_WholePc_SpansVolumesAndCarriesFullPaths()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data", isDir: true),
+            Row(@"C:\Data\c-file.bin", size: 100),
+            Row(@"D:\Media", isDir: true),
+            Row(@"D:\Media\d-file.bin", size: 900),
+        }, crawlGen: 1);
+
+        var files = _repo.LargestFiles(rootPath: null, limit: 10);
+
+        Assert.Equal(["d-file.bin", "c-file.bin"], files.Select(f => f.Name));
+        Assert.Equal(@"D:\Media\d-file.bin", files[0].DisplayPath);
+        Assert.Equal(@"D:\Media", files[0].RelativeDirDisplay);
+    }
+
+    [Fact]
+    public void LargestFiles_NonPositiveLimitReturnsNothingRatherThanEverything()
+    {
+        _repo.UpsertEntries(new[] { Row(@"C:\Data\file.bin", size: 5) }, crawlGen: 1);
+
+        Assert.Empty(_repo.LargestFiles(@"C:\Data", limit: 0));
+    }
 }

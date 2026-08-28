@@ -1,0 +1,35 @@
+# The disk-usage view: what is taking up space, read straight from the search index.
+#
+# A harness run is unelevated, so MftVolumeIndexer.Open() fails soft on every volume and no
+# dir_size_cache rows exist. That means this script can only photograph the *unknown* states —
+# which is the coverage worth having here, since those are exactly the ones that regress into
+# rendering zeros. What a populated view looks like is settled by the Core tests.
+
+tree .
+refresh
+
+# Files come from the enumeration, so their sizes are real even with nothing indexed. Folders have
+# no cached total, so they must read "Not measured" — never "0 B".
+dialog disk-usage 01-unindexed
+
+theme light-plus
+dialog disk-usage 02-unindexed-light
+theme dark-plus
+
+# Drilling must not move anything. Clicking a rectangle reloads the view, and three things used to
+# come and go with it — the progress bar, the "never been measured" footnote, and the banner — so
+# the whole dialog shifted on every click. The progress bar and footnote now sit in containers that
+# reserve their space, and the banner is docked at the bottom, where appearing cannot push the rest
+# down (its height depends on its wording, so no fixed slot could hold it).
+#
+# These two are the same view over folders with different contents, one with subfolders and one
+# without. Every fixed part must land on the same row in both: the headers, the map, the top of the
+# list, the footnote and the banner. Put any of those three back in the flow and they separate.
+dialog disk-usage 03-drill-before
+go Documents
+settle 300
+dialog disk-usage 04-drill-after
+
+# Nothing here may have tried to put another program's window on screen.
+assert-not-launched
+state

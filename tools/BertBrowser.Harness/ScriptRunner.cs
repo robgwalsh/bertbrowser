@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -10,6 +11,8 @@ using BertBrowser.App.Views;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services.Delete;
+using BertBrowser.Core.Services.DiskUsage;
+using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
 using BertBrowser.Core.Services.Transfer;
@@ -111,6 +114,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             // tabs and panes
             case "newtab": NewTab(rest); break;
             case "closetab": Invoke(() => session.Shell.ActivePane.CloseTab(session.Tab)); break;
+            case "reopen": Invoke(() => session.Shell.ActivePane.ReopenClosedTab()); break;
             case "tab": ActivateTab(rest); break;
             case "split": Split(rest, out _); break;
             case "closepane": Invoke(() => session.Shell.ClosePane(session.Shell.ActivePane)); break;
@@ -141,6 +145,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "shot": Shot(rest); break;
             case "dialog": Dialog(rest); break;
             case "state": output.WriteLine("STATE " + State()); break;
+            case "session": Session(); break;
             case "probe": Probe(rest); break;
             case "rows": output.WriteLine("ROWS " + string.Join(", ", RowNames())); break;
 
@@ -688,10 +693,35 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         "theme-editor" => new ThemeEditorWindow(new AppearanceViewModel(
             session.Services.GetRequiredService<IThemeService>())),
 
+        "disk-usage" => DiskUsageWindowFor(),
+
         _ => throw new FormatException(
             $"'{kind}' is not a dialog. Try: new-folder, new-file, rename, delete, " +
-            "delete-permanent, message, warning, properties, settings, theme-editor."),
+            "delete-permanent, message, warning, properties, settings, theme-editor, disk-usage."),
     };
+
+    /// <summary>
+    /// The disk-usage view on the folder being shown.
+    /// </summary>
+    /// <remarks>
+    /// A harness run is unelevated, so <c>MftVolumeIndexer.Open()</c> fails soft on every volume and
+    /// there are no dir_size_cache rows to read — which means this can only ever photograph the
+    /// <em>unknown</em> states. That is deliberate coverage rather than a shortcoming: those are
+    /// precisely the states that regress into rendering zeros, and what a populated one looks like
+    /// is settled by the Core tests instead.
+    /// </remarks>
+    private Window DiskUsageWindowFor()
+    {
+        var vm = new DiskUsageViewModel(
+            session.Services.GetRequiredService<IDiskUsageService>(),
+            session.Services.GetRequiredService<IMftIndexService>(),
+            session.Services.GetRequiredService<AppSettings>().ShowHiddenItems);
+
+        // Revealing would navigate the window behind this one, which a capture has no use for.
+        var window = DiskUsageWindow.Create(vm, (_, _) => { });
+        window.Load(session.Tab.CurrentPath);
+        return window;
+    }
 
     /// <summary>The New dialog as the menu opens it, suggested name and all.</summary>
     private Window NewItemDialogFor(NewItemKind kind)
@@ -735,6 +765,33 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     /// output is read as a transcript where a pretty-printed object would bury the commands around
     /// it.
     /// </remarks>
+    /// <summary>
+    /// Saves the current arrangement the way closing the window does, then reopens it in place —
+    /// the whole session round trip, against the real shell.
+    /// </summary>
+    /// <remarks>
+    /// Doing both halves in one command is what makes it an assertion rather than a dump: the panes
+    /// and tabs that come back can be checked with the ordinary <c>assert-panes</c> and
+    /// <c>assert-tabs</c>, so a rebuild that quietly loses one shows up. The saved JSON is printed
+    /// too, since that is what lands in settings.json.
+    /// </remarks>
+    private void Session()
+    {
+        var saved = session.Dispatcher.Invoke(() => session.Shell.CaptureLayout());
+
+        // What a launch does with it: drop anything no longer on disk before rebuilding.
+        var pruned = SessionLayoutRules.Prune(saved, Directory.Exists);
+        output.WriteLine("SESSION " + JsonSerializer.Serialize(pruned));
+
+        if (pruned is null)
+            throw new AssertionException("The captured session pruned away to nothing.");
+
+        // Await, not Invoke().Result: the continuations want the UI thread, so blocking this one on
+        // them is a deadlock. Await pumps instead.
+        if (!Await(() => session.Shell.RestoreSessionAsync(pruned)))
+            throw new AssertionException("The captured session would not restore.");
+    }
+
     private string State() => session.Dispatcher.Invoke(() =>
     {
         var shell = session.Shell;

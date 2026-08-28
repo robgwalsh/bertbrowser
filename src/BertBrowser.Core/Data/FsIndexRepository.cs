@@ -193,17 +193,7 @@ public sealed class FsIndexRepository
             for (var i = 0; i < query.GlobPatterns.Count; i++)
                 cmd.Parameters.AddWithValue($"@g{i}", query.GlobPatterns[i]);
 
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
-            {
-                rows.Add((
-                    reader.GetString(0),
-                    reader.GetString(1),
-                    reader.GetInt32(2) != 0,
-                    reader.GetInt64(3),
-                    DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind),
-                    reader.GetInt32(5) != 0));
-            }
+            ReadRows(cmd, rows);
         }
 
         var truncated = rows.Count > cap;
@@ -260,17 +250,7 @@ public sealed class FsIndexRepository
             for (var i = 0; i < query.GlobPatterns.Count; i++)
                 cmd.Parameters.AddWithValue($"@g{i}", query.GlobPatterns[i]);
 
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
-            {
-                rows.Add((
-                    reader.GetString(0),
-                    reader.GetString(1),
-                    reader.GetInt32(2) != 0,
-                    reader.GetInt64(3),
-                    DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind),
-                    reader.GetInt32(5) != 0));
-            }
+            ReadRows(cmd, rows);
         }
 
         var truncated = rows.Count > cap;
@@ -289,6 +269,102 @@ public sealed class FsIndexRepository
             hits.Add(new SearchHit(display, parentFull, row.Name, row.IsDir, row.Size, row.Modified, row.Hidden));
         }
         return (hits, truncated);
+    }
+
+    /// <summary>Reads the six-column entry projection every query in this file selects, in the
+    /// order they all declare it.</summary>
+    private static void ReadRows(
+        SqliteCommand cmd,
+        List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)> rows)
+    {
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            rows.Add((
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetInt32(2) != 0,
+                reader.GetInt64(3),
+                DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                reader.GetInt32(5) != 0));
+        }
+    }
+
+    /// <summary>
+    /// The biggest files under <paramref name="rootPath"/> — or across every indexed volume when
+    /// it is null — largest first.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="Search"/> this <em>does</em> order, because "the largest files" means
+    /// nothing otherwise. So LIMIT no longer lets the scan stop early; it bounds SQLite's sorter
+    /// to N rows instead of the result set. A scoped call costs one range scan of that subtree —
+    /// the access pattern the clustered key is built for. An unscoped one is a full scan of the
+    /// index and takes seconds on a large disk, which is why this is only ever reached from an
+    /// explicit "go and compute this" screen rather than from a keystroke.
+    /// <para>
+    /// Directories are excluded by the query rather than by trusting them to be zero: a folder's
+    /// total lives in dir_size_cache, and a row here is only ever a file's own bytes.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<SearchHit> LargestFiles(string? rootPath, int limit, bool includeHidden = true)
+    {
+        if (limit <= 0) return [];
+
+        var scoped = rootPath is { Length: > 0 };
+        var rootKey = scoped ? PathKey.Canonicalize(rootPath!) : "";
+        var rootDisplay = scoped ? PathKey.NormalizeDisplay(rootPath!) : "";
+        var (lo, hi) = scoped ? PathKey.PrefixBounds(rootKey) : ("", "");
+
+        using var conn = _db.Open();
+
+        var rows = new List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)>();
+        using (var cmd = conn.CreateCommand())
+        {
+            var scope = scoped ? "path_key >= @lo AND path_key < @hi AND " : "";
+            var hiddenFilter = includeHidden ? "" : "AND hidden = 0 ";
+            cmd.CommandText =
+                $"""
+                SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden
+                FROM fs_entry
+                WHERE {scope}is_dir = 0 {hiddenFilter}
+                ORDER BY size_bytes DESC
+                LIMIT @limit;
+                """;
+            if (scoped)
+            {
+                cmd.Parameters.AddWithValue("@lo", lo);
+                cmd.Parameters.AddWithValue("@hi", hi);
+            }
+            cmd.Parameters.AddWithValue("@limit", limit);
+
+            ReadRows(cmd, rows);
+        }
+
+        // Same reconstruction the two search paths do: a scoped result is relative to the root it
+        // was asked about, an unscoped one carries the full path from its drive root.
+        var prefixLength = scoped ? lo.Length : DriveRootLength;
+        var ancestorNames = LookupAncestorNames(conn, rows, prefixLength);
+
+        var hits = new List<SearchHit>(rows.Count);
+        foreach (var row in rows)
+        {
+            var relDir = BuildRelativeDir(row.Key, prefixLength, ancestorNames);
+            if (scoped)
+            {
+                hits.Add(new SearchHit(
+                    Path.Combine(rootDisplay, relDir, row.Name),
+                    relDir, row.Name, row.IsDir, row.Size, row.Modified, row.Hidden));
+            }
+            else
+            {
+                var driveRoot = row.Key[..DriveRootLength]; // "C:\"
+                var parentFull = relDir.Length == 0 ? driveRoot : driveRoot + relDir;
+                var display = parentFull.EndsWith('\\') ? parentFull + row.Name : parentFull + '\\' + row.Name;
+                hits.Add(new SearchHit(
+                    display, parentFull, row.Name, row.IsDir, row.Size, row.Modified, row.Hidden));
+            }
+        }
+        return hits;
     }
 
     /// <summary>

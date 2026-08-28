@@ -69,7 +69,7 @@ tree-click <path>           click a folder in the sidebar tree (it must be showi
 
 select <name>[, <name>…] | select-all | deselect
 
-newtab [path] | closetab | tab <n>
+newtab [path] | closetab | reopen | tab <n>
 split right|down [path] | closepane | pane <n>
 
 search <text>               this folder's box, debounce and search waited out
@@ -89,9 +89,13 @@ hidden on|off | thumbnails <0..1> | sort name|size|modified|type | theme <id>
 
 shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, delete,
-                            delete-permanent, message, warning, properties, settings, theme-editor
+                            delete-permanent, message, warning, properties, settings, theme-editor,
+                            disk-usage
                             (new-folder/new-file need no selection; every other kind uses one)
 state                       one JSON line of everything worth asserting on
+session                     save the pane/tab arrangement the way closing the window does,
+                            prune it the way a launch does, and reopen it in place — assert on
+                            what came back with assert-panes / assert-tabs / assert-path
 rows                        the row names, for when an assertion is about to fail
 probe <token> [element]     where a theme token's colour came out: the resolver, the app and
                             window resources, and the element's own Background/Foreground

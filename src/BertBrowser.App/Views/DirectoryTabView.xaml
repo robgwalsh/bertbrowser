@@ -180,6 +180,18 @@
                         <MenuItem Header="Open in VS Code" Click="ContextOpenVSCode_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE943;"/></MenuItem.Icon>
                         </MenuItem>
+                        <!-- Folders only: a single file's size is already in the Size column, so
+                             analysing one would only ever restate it. -->
+                        <MenuItem x:Name="DiskUsageMenuItem" Header="Analyse disk usage…"
+                                  InputGestureText="Ctrl+Shift+D" Click="ContextDiskUsage_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE9A9;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <Separator/>
+                        <MenuItem x:Name="CopyPathMenuItem" Header="Copy as path"
+                                  InputGestureText="Ctrl+Shift+C" Click="ContextCopyPath_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C8;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem x:Name="CopyNameMenuItem" Header="Copy name" Click="ContextCopyName_Click"/>
                         <Separator/>
                         <MenuItem x:Name="CutMenuItem" Header="Cut" InputGestureText="Ctrl+X" Click="ContextCut_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C6;"/></MenuItem.Icon>

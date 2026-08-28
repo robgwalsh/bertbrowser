@@ -1,0 +1,34 @@
+# Live refresh: a file created by something else appears without an F5, and — the point of the
+# whole design — the selection survives it.
+#
+# The merge exists because a load replaces FileListViewModel.Items and the view focuses the list
+# when that happens. That is right for a navigation the user asked for and ruinous for a refresh
+# nobody asked for, so a watcher-driven update diffs instead of clearing.
+
+tree .
+refresh
+assert-count 8
+
+# Something to lose. `write` puts a file on disk behind the app's back, exactly as another
+# program would.
+select notes.txt
+assert-selected 1
+
+write appeared.txt 1024
+settle 600
+
+# It arrived on its own — no refresh command anywhere above.
+assert-row appeared.txt
+assert-count 9
+
+# And the selection is still there. Replace the merge with a reload and this goes red.
+assert-selected 1
+
+# Removal is the same path.
+delete-permanent appeared.txt
+settle 600
+assert-no-row appeared.txt
+assert-count 8
+
+assert-not-launched
+state

@@ -164,6 +164,113 @@ public sealed partial class FileListViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Brings the list up to date with what is on disk, touching only the rows that actually
+    /// changed — what a watcher-driven refresh uses instead of <see cref="LoadDirectoryAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The difference that matters is that <see cref="Items"/> is never replaced. The view focuses
+    /// the file list whenever that collection changes, and a load clears the selection with it —
+    /// right for a navigation the user asked for, wrong for a refresh nobody asked for. Merging
+    /// leaves untouched rows as the very same objects, so the selection, the scroll position and
+    /// the keyboard focus all survive a file appearing on disk.
+    /// </para>
+    /// <para>
+    /// <see cref="IsLoading"/> is deliberately not set: it drives the progress bar and the harness's
+    /// idea of quiescence, and a background refresh is not a load anyone is waiting for.
+    /// </para>
+    /// </remarks>
+    public async Task<bool> MergeDirectoryAsync(string path, bool includeHidden, CancellationToken ct)
+    {
+        // A flattened search result is not a folder listing, and an errored list has nothing to
+        // merge into — both want a real reload if they want anything.
+        if (IsFlattened || ErrorMessage is not null) return false;
+
+        try
+        {
+            var entries = await Task.Run(
+                () => _fileSystem.ListDirectory(path)
+                    .Where(e => includeHidden || !e.Attributes.HasFlag(FileAttributes.Hidden))
+                    .ToList(),
+                ct);
+            ct.ThrowIfCancellationRequested();
+
+            var current = Items.Select(i => i.ToEntry()).ToList();
+            var changes = await Task.Run(() => FileListDiff.Compute(current, entries), ct);
+            ct.ThrowIfCancellationRequested();
+
+            if (!changes.Any) return true;
+
+            ApplyChanges(changes);
+            EmptyMessage = null;
+
+            // Only the folders that arrived need a size; the ones already listed keep theirs.
+            await HydrateDirSizesAsync(
+                changes.Added.Where(e => e.IsDirectory)
+                    .Select(e => Items.FirstOrDefault(i => i.FullPath == e.FullPath))
+                    .OfType<FileItemViewModel>()
+                    .ToList(),
+                ct);
+
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The folder went, or closed to us. That is a navigation problem, not a refresh one —
+            // the caller decides what to do about it.
+            return false;
+        }
+    }
+
+    private void ApplyChanges(FileListChanges changes)
+    {
+        foreach (var key in changes.Removed)
+        {
+            var index = IndexOfKey(key);
+            if (index >= 0) Items.RemoveAt(index);
+        }
+
+        // Replaced rather than mutated in place: a FileItemViewModel takes its values in its
+        // constructor, and one row swapping is far cheaper than the whole collection doing so.
+        foreach (var entry in changes.Updated)
+        {
+            var index = IndexOfKey(PathKey.Canonicalize(entry.FullPath));
+            if (index >= 0) Items[index] = new FileItemViewModel(entry);
+        }
+
+        foreach (var entry in changes.Added)
+            Items.Insert(InsertionPointFor(entry), new FileItemViewModel(entry));
+    }
+
+    private int IndexOfKey(string key)
+    {
+        for (var i = 0; i < Items.Count; i++)
+        {
+            if (PathKey.Canonicalize(Items[i].FullPath).Equals(key, StringComparison.Ordinal))
+                return i;
+        }
+        return -1;
+    }
+
+    /// <summary>Where a new row belongs under the sort that is showing, so an arriving file lands
+    /// in place rather than at the bottom until the next reload.</summary>
+    private int InsertionPointFor(FileEntry entry)
+    {
+        var candidate = new FileItemViewModel(entry);
+        var comparer = CurrentComparer();
+
+        for (var i = 0; i < Items.Count; i++)
+        {
+            if (comparer(candidate, Items[i]) < 0) return i;
+        }
+        return Items.Count;
+    }
+
+    /// <summary>
     /// What to say about a folder Windows will not open for us.
     /// </summary>
     /// <remarks>
@@ -224,7 +331,9 @@ public sealed partial class FileListViewModel : ObservableObject
         }
     }
 
-    private static FileItemViewModel CreateSearchItem(SearchHit hit) =>
+    /// <summary>Turns an index hit into a list row. Internal because the disk-usage view builds
+    /// its "largest files" list from the same shape and must not grow a second version of this.</summary>
+    internal static FileItemViewModel CreateSearchItem(SearchHit hit) =>
         new(new FileEntry(hit.Name, hit.DisplayPath, hit.IsDirectory,
                 hit.IsDirectory ? -1 : hit.SizeBytes, hit.ModifiedUtc,
                 hit.Hidden ? FileAttributes.Hidden : 0),
@@ -275,7 +384,14 @@ public sealed partial class FileListViewModel : ObservableObject
     private void ReplaceItems(IReadOnlyList<FileItemViewModel> items) =>
         Items = new ObservableCollection<FileItemViewModel>(items);
 
-    private void SortInPlace(List<FileItemViewModel> items)
+    private void SortInPlace(List<FileItemViewModel> items) => items.Sort(CurrentComparer());
+
+    /// <summary>
+    /// The order the list is showing. Shared with the live-refresh merge, which has to place an
+    /// arriving row — a second implementation there would drift from this one and put new files in
+    /// the wrong place under any sort but the default.
+    /// </summary>
+    private Comparison<FileItemViewModel> CurrentComparer()
     {
         Comparison<FileItemViewModel> cmp = SortBy switch
         {
@@ -286,7 +402,7 @@ public sealed partial class FileListViewModel : ObservableObject
             _ => (a, b) => NaturalStringComparer.Instance.Compare(a.Name, b.Name),
         };
 
-        items.Sort((a, b) =>
+        return (a, b) =>
         {
             // Layout bands (folders, then non-media files as rows, then media tiles) always
             // sort ahead of the column direction, so rows stay grouped above the thumbnails.
@@ -297,7 +413,7 @@ public sealed partial class FileListViewModel : ObservableObject
             if (result == 0)
                 result = NaturalStringComparer.Instance.Compare(a.Name, b.Name);
             return SortDescending ? -result : result;
-        });
+        };
     }
 
     /// <summary>Ordering band: directories (0) first, then non-media files (1), then — only

@@ -60,9 +60,21 @@ public partial class App : Application
         var shell = Services.GetRequiredService<ShellViewModel>();
         var startup = CommandLine.Parse(e.Args);
         if (startup.Targets.FirstOrDefault(t => Directory.Exists(t.Path)) is { } target)
+        {
+            // Someone who named a folder on the command line asked for that folder. Reopening last
+            // session's panes over the top of it would bury the thing they asked for.
             shell.StartPath = target.Path;
-        else if (settings.LastPath is { } last && Directory.Exists(last))
-            shell.StartPath = last;
+        }
+        else
+        {
+            // Pruned here rather than inside the shell so "is this still a directory?" stays with
+            // the caller, the way the rest of the startup path already decides that.
+            shell.StartLayout = BertBrowser.Core.Layout.SessionLayoutRules.Prune(
+                settings.Session, Directory.Exists);
+
+            if (settings.LastPath is { } last && Directory.Exists(last))
+                shell.StartPath = last;
+        }
 
         var window = Services.GetRequiredService<MainWindow>();
         window.Show();
@@ -150,6 +162,8 @@ public partial class App : Application
         services.AddSingleton<IIndexTransportFactory, NamedPipeIndexTransportFactory>();
         services.AddSingleton<IMftIndexService, MftIndexClient>();
         services.AddSingleton<ISearchService, SearchService>();
+        services.AddSingleton<BertBrowser.Core.Services.DiskUsage.IDiskUsageService,
+            BertBrowser.Core.Services.DiskUsage.DiskUsageService>();
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddSingleton<IProcessLauncher, ProcessLauncher>();
         services.AddSingleton<PaneFactory>();

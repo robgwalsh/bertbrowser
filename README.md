@@ -6,7 +6,12 @@
 
 An offline Windows 10/11 file browser built for my personal preferences.
 
-<img src="docs/images/main_screenshot.png" alt="BertBrowser main window" width="500">
+<table>
+<tr>
+<td width="57%"><img src="docs/images/main_screenshot.png" alt="Routes page" width="100%"></td>
+<td width="43%"><img src="docs/images/preview2.png" alt="Tools page" width="100%"></td>
+</tr>
+</table>
 
 - **Offline** - BertBrowser does not connect to the Internet except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates.
 - **[Fast global search](docs/search-indexing.md)** - MFT indexing and USN journal tracking for fastest possible performance.

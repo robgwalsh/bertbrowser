@@ -11,6 +11,16 @@ public sealed class AppSettings
     public bool WindowMaximized { get; set; }
     public string? LastPath { get; set; }
 
+    /// <summary>
+    /// The pane and tab arrangement from the last session.
+    /// </summary>
+    /// <remarks>
+    /// Nullable for the reason <see cref="NewFileTypes"/> and <see cref="ThemeId"/> are: null means
+    /// never saved, and a first launch then behaves exactly as it always did. <see cref="LastPath"/>
+    /// stays as the fallback for that case, and for a session too damaged to restore.
+    /// </remarks>
+    public BertBrowser.Core.Layout.SessionLayout? Session { get; set; }
+
     /// <summary>When false (default), hidden files/folders are excluded from listings and
     /// search; when true they appear with a dimmed icon, like Explorer.</summary>
     public bool ShowHiddenItems { get; set; }

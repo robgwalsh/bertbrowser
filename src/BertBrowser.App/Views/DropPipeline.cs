@@ -17,14 +17,13 @@ namespace BertBrowser.App.Views;
 internal sealed class DropPipeline(ShellViewModel shell, Action<string> report)
 {
     /// <summary>
-    /// Private clipboard format, and the <em>only</em> one this pipeline reads.
+    /// Private clipboard format, and the one that identifies a drag as <em>ours</em>.
     /// </summary>
     /// <remarks>
-    /// A drag out of this app also carries <see cref="DataFormats.FileDrop"/> so other applications
-    /// can take it — but nothing here looks at that, deliberately. Reading only the private format
-    /// means an in-app drop is decided by exactly the same code and the same plan it always was,
-    /// and it is what keeps drops arriving <em>from</em> other applications out of scope rather
-    /// than half-supported.
+    /// A drag out of this app carries <see cref="DataFormats.FileDrop"/> as well, so other
+    /// applications can take it. Both formats are read here now, but which one a payload arrived in
+    /// still decides everything below: it is what tells an in-app move apart from a foreign one,
+    /// and those must not be treated alike — see <see cref="DropInContract"/>.
     /// </remarks>
     public const string ItemsFormat = "BertBrowser.FileItems";
 
@@ -41,20 +40,23 @@ internal sealed class DropPipeline(ShellViewModel shell, Action<string> report)
         e.Handled = true;
         e.Effects = DragDropEffects.None;
 
-        if (Sources(e) is not { Length: > 0 } sources || destination is null || shell.IsTransferring)
+        if (Payload(e) is not { Paths.Length: > 0 } payload || destination is null ||
+            shell.IsTransferring || !DropInContract.CanAccept(Allowed(e)))
         {
             ClearHighlight();
             return;
         }
 
-        var verb = VerbFor(e.KeyStates);
-        if (!IsAllowed(sources, destination, verb))
+        var decision = DecideFor(payload.Origin, e);
+        if (!IsAllowed(payload.Paths, destination, decision.Verb))
         {
             ClearHighlight();
             return;
         }
 
-        e.Effects = verb == TransferVerb.Copy ? DragDropEffects.Copy : DragDropEffects.Move;
+        // While hovering, the cursor should show the verb in both cases — the "report nothing"
+        // rule applies to the drop, where it stops our own drag source acting on it.
+        e.Effects = decision.Verb == TransferVerb.Copy ? DragDropEffects.Copy : DragDropEffects.Move;
         SetHighlight(highlight);
     }
 
@@ -82,16 +84,29 @@ internal sealed class DropPipeline(ShellViewModel shell, Action<string> report)
         ClearHighlight();
         InvalidateHoverCache();
 
-        if (Sources(e) is not { Length: > 0 } sources || destination is null) return;
+        if (Payload(e) is not { Paths.Length: > 0 } payload || destination is null) return;
 
-        // This drop is ours, so the drag source must not also act on it. Both of the next two lines
-        // say so independently: the session flag, and an effect of None for DoDragDrop to return.
-        // Without them, our own move would be read as an external one and the items we just placed
-        // would be deleted from where they came from — which they have already left.
-        DragSession.ClaimInApp();
-        e.Effects = DragDropEffects.None;
+        var sources = payload.Paths;
+        var decision = DecideFor(payload.Origin, e);
+        var verb = decision.Verb;
 
-        var verb = VerbFor(e.KeyStates);
+        if (payload.Origin == DropOrigin.InApp)
+        {
+            // This drop is ours, so the drag source must not also act on it. Both of the next two
+            // lines say so independently: the session flag, and an effect of None for DoDragDrop to
+            // return. Without them, our own move would be read as an external one and the items we
+            // just placed would be deleted from where they came from — which they have already left.
+            DragSession.ClaimInApp();
+            e.Effects = DragDropEffects.None;
+        }
+        else
+        {
+            // The opposite obligation for a foreign drag: the source is waiting to be told what
+            // happened, and a move it is not told about leaves its copy behind.
+            e.Effects = decision.Report == DropEffect.Move
+                ? DragDropEffects.Move
+                : DragDropEffects.Copy;
+        }
 
         try
         {
@@ -127,11 +142,37 @@ internal sealed class DropPipeline(ShellViewModel shell, Action<string> report)
         }
     }
 
-    public static string[]? Sources(DragEventArgs e) =>
-        e.Data.GetDataPresent(ItemsFormat) ? e.Data.GetData(ItemsFormat) as string[] : null;
+    /// <summary>The paths being dragged, and which format carried them.</summary>
+    internal readonly record struct DropPayload(string[] Paths, DropOrigin Origin);
 
-    private static TransferVerb VerbFor(DragDropKeyStates keys) =>
-        (keys & DragDropKeyStates.ControlKey) != 0 ? TransferVerb.Copy : TransferVerb.Move;
+    /// <summary>
+    /// Reads the payload, preferring the private format.
+    /// </summary>
+    /// <remarks>
+    /// The order matters and is not cosmetic: our own drag carries <em>both</em> formats, so
+    /// checking <see cref="DataFormats.FileDrop"/> first would make every in-app drop look foreign
+    /// — and a foreign drop is the one that reports an effect back to the source.
+    /// </remarks>
+    internal static DropPayload? Payload(DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(ItemsFormat) && e.Data.GetData(ItemsFormat) is string[] ours)
+            return new DropPayload(ours, DropOrigin.InApp);
+
+        if (e.Data.GetDataPresent(DataFormats.FileDrop) &&
+            e.Data.GetData(DataFormats.FileDrop) is string[] foreign)
+            return new DropPayload(foreign, DropOrigin.External);
+
+        return null;
+    }
+
+    private static DropInDecision DecideFor(DropOrigin origin, DragEventArgs e) =>
+        DropInContract.Decide(
+            origin,
+            (e.KeyStates & DragDropKeyStates.ControlKey) != 0,
+            (e.KeyStates & DragDropKeyStates.ShiftKey) != 0,
+            Allowed(e));
+
+    private static DropEffect Allowed(DragEventArgs e) => (DropEffect)(int)e.AllowedEffects;
 
     // --- Drop-target highlight ---
 

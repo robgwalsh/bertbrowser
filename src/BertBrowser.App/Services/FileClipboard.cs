@@ -57,5 +57,26 @@ public static class FileClipboard
         return (paths, cut);
     }
 
+    /// <summary>
+    /// Puts plain text on the clipboard — what "Copy as path" and "Copy name" hand over.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not a file drop: the point of these is to paste into a terminal, an editor or a
+    /// chat window, and a CF_HDROP payload would make Explorer offer to copy the files instead.
+    /// Guarded like <see cref="HasFiles"/>, since another process can hold the clipboard open.
+    /// </remarks>
+    public static bool TrySetText(string text)
+    {
+        try
+        {
+            Clipboard.SetText(text);
+            return true;
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            return false;
+        }
+    }
+
     public static void Clear() => Clipboard.Clear();
 }

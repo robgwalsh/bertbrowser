@@ -222,7 +222,16 @@ public partial class DirectoryTabView : UserControl
         // Clipboard shortcuts belong to the list, not to a text box that happens to be in the
         // same pane — Ctrl+C in the search field must still copy text. (Ctrl+F is handled by the
         // window, so it reaches the active pane even from the sidebar.)
-        if (FileListView.IsKeyboardFocusWithin && Keyboard.Modifiers == ModifierKeys.Control &&
+        // Ctrl+Shift+C, checked before plain Ctrl+C: the modifier comparison below is exact, so it
+        // would not swallow this, but keeping the more specific gesture first is what stops the
+        // next edit to that condition from doing so.
+        if (FileListView.IsKeyboardFocusWithin &&
+            Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.C)
+        {
+            _shell.CopyPathsCommand.Execute(SelectedFileItems());
+            e.Handled = true;
+        }
+        else if (FileListView.IsKeyboardFocusWithin && Keyboard.Modifiers == ModifierKeys.Control &&
                  e.Key is Key.C or Key.X or Key.V)
         {
             switch (e.Key)
@@ -490,12 +499,20 @@ public partial class DirectoryTabView : UserControl
 
         var selection = SelectedFileItems();
         CopyMenuItem.IsEnabled = CutMenuItem.IsEnabled = selection.Count > 0;
+        CopyPathMenuItem.IsEnabled = CopyNameMenuItem.IsEnabled = selection.Count > 0;
+        CopyPathMenuItem.Header = selection.Count > 1 ? "Copy as paths" : "Copy as path";
+        CopyNameMenuItem.Header = selection.Count > 1 ? "Copy names" : "Copy name";
         PasteMenuItem.IsEnabled = FileClipboard.HasFiles();
 
         // "Open in new tab/pane" only makes sense for folders.
         var folders = selection.Count(i => i.IsDirectory);
         OpenInNewTabMenuItem.IsEnabled = OpenInNewPaneMenuItem.IsEnabled = folders > 0;
         OpenInNewTabMenuItem.Header = folders > 1 ? $"Open {folders} folders in new tabs" : "Open in new tab";
+
+        // One folder, since the view analyses a single root. With nothing selected this still
+        // offers itself and analyses the folder being shown, which is the useful reading of an
+        // empty-space right-click.
+        DiskUsageMenuItem.IsEnabled = selection.Count == 0 || (selection.Count == 1 && folders == 1);
 
         // Only ever one file: "run this folder as administrator" means nothing, and a whole
         // selection of programs started elevated at once is not something to offer from a menu.
@@ -599,6 +616,16 @@ public partial class DirectoryTabView : UserControl
             _shell.OpenInTerminal(item.FullPath, item.IsDirectory);
     }
 
+    /// <summary>A selected folder, or — with nothing selected — the folder being shown.</summary>
+    private void ContextDiskUsage_Click(object sender, RoutedEventArgs e)
+    {
+        var target = FileListView.SelectedItem is FileItemViewModel { IsDirectory: true } item
+            ? item.FullPath
+            : Tab.CurrentPath;
+
+        _shell.OpenDiskUsage(target is { Length: > 0 } ? target : null);
+    }
+
     private void ContextOpenVSCode_Click(object sender, RoutedEventArgs e)
     {
         if (FileListView.SelectedItem is FileItemViewModel item)
@@ -613,6 +640,12 @@ public partial class DirectoryTabView : UserControl
 
     private void ContextPaste_Click(object sender, RoutedEventArgs e) =>
         _shell.PasteCommand.Execute(null);
+
+    private void ContextCopyPath_Click(object sender, RoutedEventArgs e) =>
+        _shell.CopyPathsCommand.Execute(SelectedFileItems());
+
+    private void ContextCopyName_Click(object sender, RoutedEventArgs e) =>
+        _shell.CopyNamesCommand.Execute(SelectedFileItems());
 
     private void ContextRename_Click(object sender, RoutedEventArgs e) => _ = RenameSelectionAsync();
 

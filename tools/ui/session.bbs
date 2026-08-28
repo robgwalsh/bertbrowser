@@ -1,0 +1,38 @@
+# Saving the pane and tab arrangement and reopening it — the whole session round trip against the
+# real shell. `session` captures what closing the window would save, prunes it the way a launch
+# does, and rebuilds it in place, so the assertions after it are about what actually came back.
+
+tree .
+refresh
+
+# An arrangement worth losing: two panes, and three tabs in the first.
+newtab Documents
+newtab Pictures
+assert-tabs 3
+split right Documents
+assert-panes 2
+
+session
+
+# Everything survived the round trip.
+assert-panes 2
+assert-tabs 1
+
+# The pane that was active is the one still active, and it is showing the folder it was showing.
+assert-path Documents
+
+# Back to the first pane (panes are 1-indexed here): its three tabs came back too.
+pane 1
+assert-tabs 3
+
+assert-not-launched
+state
+
+# Ctrl+Shift+T: the pane remembers what it closed.
+newtab Documents
+assert-tabs 4
+closetab
+assert-tabs 3
+reopen
+assert-tabs 4
+assert-path Documents

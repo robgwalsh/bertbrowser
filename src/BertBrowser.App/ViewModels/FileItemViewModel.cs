@@ -37,6 +37,18 @@ public sealed partial class FileItemViewModel : ObservableObject
     /// <summary>Path relative to the search root; only set in flattened search-results mode.</summary>
     public string RelativePath { get; }
 
+    /// <summary>
+    /// The listing entry this row was built from, for comparing against a fresh listing.
+    /// </summary>
+    /// <remarks>
+    /// A directory's <see cref="SizeBytes"/> is deliberately left out — it is hydrated from the
+    /// size cache rather than read from disk, so including it would make every folder look changed
+    /// the moment its cached total arrived, and the live refresh would rebuild rows for nothing.
+    /// </remarks>
+    public FileEntry ToEntry() => new(
+        Name, FullPath, IsDirectory, IsDirectory ? 0 : SizeBytes ?? 0, ModifiedUtc,
+        IsHidden ? FileAttributes.Hidden : FileAttributes.Normal);
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SizeDisplay), nameof(SizeSortKey))]
     private long? _sizeBytes;

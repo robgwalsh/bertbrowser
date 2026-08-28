@@ -256,8 +256,16 @@ internal sealed class MftVolumeIndexer : IDisposable
         return true;
     }
 
-    /// <summary>Fallback build via FSCTL_ENUM_USN_DATA — names only (size 0, no timestamp);
-    /// the DFS scanner still provides sizes for these volumes on demand.</summary>
+    /// <summary>Fallback build via FSCTL_ENUM_USN_DATA — names only: every row is written with
+    /// size 0 and no timestamp, and <see cref="MftDirectorySizeBuilder"/> is not run, so this path
+    /// fills no dir_size_cache either.</summary>
+    /// <remarks>
+    /// A volume built this way is searchable but <em>unmeasured</em>, and there is no longer any
+    /// on-demand scanner to fill the gap in — the post-order DFS that once did was removed when
+    /// sizes became a byproduct of the raw pass. Anything reading sizes has to treat this volume as
+    /// unknown rather than empty; <see cref="Services.DiskUsage.DiskUsageRules"/> is where that
+    /// judgement is made, and it recognises the shape by the largest size in range being zero.
+    /// </remarks>
     private void BuildFromUsnEnum(CancellationToken ct, long crawlGen)
     {
         var map = EnumerateMft(ct);

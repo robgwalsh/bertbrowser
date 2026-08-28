@@ -108,12 +108,52 @@ public sealed partial class PaneViewModel : ObservableObject
         }
 
         var index = Tabs.IndexOf(tab);
+
+        // Remembered before the tab is torn down, so Ctrl+Shift+T can put it back. Only the folder
+        // is kept, not the tab: history and in-flight work belong to the object being disposed.
+        if (tab.CurrentPath is { Length: > 0 } closedPath)
+            RememberClosed(closedPath);
+
         Tabs.Remove(tab);
         tab.LocationChanged -= OnTabLocationChanged;
         tab.Dispose();
 
         if (ReferenceEquals(ActiveTab, tab) || ActiveTab is null)
             ActiveTab = Tabs[Math.Min(index, Tabs.Count - 1)];
+    }
+
+    /// <summary>Folders of recently closed tabs, most recent last.</summary>
+    /// <remarks>
+    /// Bounded because it is a convenience, not a history: an unbounded list would hold on to paths
+    /// for the life of the session for no benefit anyone would notice.
+    /// </remarks>
+    private readonly List<string> _closedPaths = [];
+
+    private const int MaxClosedPaths = 16;
+
+    private void RememberClosed(string path)
+    {
+        _closedPaths.Add(path);
+        if (_closedPaths.Count > MaxClosedPaths)
+            _closedPaths.RemoveAt(0);
+    }
+
+    public bool CanReopenClosedTab => _closedPaths.Count > 0;
+
+    /// <summary>Ctrl+Shift+T: reopens the most recently closed tab in this pane.</summary>
+    /// <remarks>
+    /// A no-op rather than an error when there is nothing to reopen — the same reading Ctrl+Z has
+    /// with an empty undo slot. Closing the last tab closes the pane, so a pane that has gone takes
+    /// its list with it; that is the one case this cannot reach back into.
+    /// </remarks>
+    [RelayCommand]
+    public void ReopenClosedTab()
+    {
+        if (_closedPaths.Count == 0) return;
+
+        var path = _closedPaths[^1];
+        _closedPaths.RemoveAt(_closedPaths.Count - 1);
+        AddTab(path);
     }
 
     [RelayCommand]

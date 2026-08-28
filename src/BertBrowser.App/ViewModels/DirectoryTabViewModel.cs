@@ -155,6 +155,7 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
 
         FileList = new FileListViewModel(fileSystem, dirSizeRepository, settings);
         FileList.PropertyChanged += OnFileListPropertyChanged;
+        _refreshTimer.Tick += OnRefreshTick;
     }
 
     /// <summary>Cancels anything in flight and unsubscribes. A tab is closable, unlike the shell,
@@ -164,6 +165,108 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         _navigationCts.Cancel();
         _searchDebounceCts.Cancel();
         FileList.PropertyChanged -= OnFileListPropertyChanged;
+        StopWatching();
+    }
+
+    // --- Live refresh ---
+
+    /// <summary>
+    /// Watches the folder this tab is showing, so a file created, deleted or renamed by anything
+    /// else appears without an F5.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Separate from <see cref="IndexWatcherService"/>, which watches indexed <em>roots</em> to keep
+    /// the search index fresh. This one is per open folder, not recursive, and exists purely so the
+    /// visible list is true.
+    /// </para>
+    /// <para>
+    /// The refresh goes through <see cref="FileListViewModel.MergeDirectoryAsync"/>, never a load:
+    /// a load replaces the collection, and the view focuses the list when that happens — which
+    /// would drop the selection and steal the caret out of another pane every time a file landed
+    /// on disk.
+    /// </para>
+    /// </remarks>
+    private FileSystemWatcher? _watcher;
+
+    /// <summary>Coalesces a burst of events into one refresh; a single save can raise several.</summary>
+    private readonly System.Windows.Threading.DispatcherTimer _refreshTimer = new()
+    {
+        Interval = TimeSpan.FromMilliseconds(250),
+    };
+
+    private void StartWatching(string path)
+    {
+        StopWatching();
+        if (path.Length == 0) return;
+
+        try
+        {
+            _watcher = new FileSystemWatcher(path)
+            {
+                // Everything a row shows. Not IncludeSubdirectories: this list is one folder deep,
+                // and watching a tree would raise an event for every file under it.
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName |
+                               NotifyFilters.Size | NotifyFilters.LastWrite | NotifyFilters.Attributes,
+                EnableRaisingEvents = true,
+            };
+
+            _watcher.Created += OnFolderChanged;
+            _watcher.Deleted += OnFolderChanged;
+            _watcher.Renamed += OnFolderChanged;
+            _watcher.Changed += OnFolderChanged;
+
+            // An overflow means events were missed, so the coalesced merge is exactly the right
+            // answer — it compares against disk rather than trying to apply what it was told.
+            _watcher.Error += OnFolderChanged;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // A folder that cannot be watched — a network share, a device that went away — is not
+            // an error worth reporting. It simply behaves as it did before: F5 refreshes it.
+            _watcher = null;
+        }
+    }
+
+    private void StopWatching()
+    {
+        _refreshTimer.Stop();
+        if (_watcher is null) return;
+
+        _watcher.EnableRaisingEvents = false;
+        _watcher.Created -= OnFolderChanged;
+        _watcher.Deleted -= OnFolderChanged;
+        _watcher.Renamed -= OnFolderChanged;
+        _watcher.Changed -= OnFolderChanged;
+        _watcher.Error -= OnFolderChanged;
+        _watcher.Dispose();
+        _watcher = null;
+    }
+
+    /// <summary>Watcher events arrive on a thread-pool thread; the timer restarts on the UI one.</summary>
+    private void OnFolderChanged(object sender, EventArgs e) =>
+        System.Windows.Application.Current?.Dispatcher.InvokeAsync(() =>
+        {
+            _refreshTimer.Stop();
+            _refreshTimer.Start();
+        });
+
+    private async void OnRefreshTick(object? sender, EventArgs e)
+    {
+        _refreshTimer.Stop();
+
+        // A search result is not a folder listing, and a transfer's own fan-out through
+        // RefreshTabsShowingAsync already owns the refresh while one is running.
+        if (FileList.IsFlattened || CurrentPath.Length == 0) return;
+
+        try
+        {
+            await FileList.MergeDirectoryAsync(CurrentPath, IncludeHidden, _navigationCts.Token);
+            StatusText = $"{FileList.Items.Count} item(s)";
+        }
+        catch (OperationCanceledException)
+        {
+        }
     }
 
     // --- Navigation ---
@@ -251,6 +354,7 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     {
         ClearSearchState(); // navigating exits search mode, like Explorer
         CurrentPath = path;
+        StartWatching(path); // so anything else changing this folder shows up without an F5
         ApplyDirectoryThumbnailScale(path); // restore this folder's tile/list preference
         BackCommand.NotifyCanExecuteChanged();
         ForwardCommand.NotifyCanExecuteChanged();

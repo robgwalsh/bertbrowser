@@ -9,6 +9,8 @@ using System.Windows.Threading;
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services.Delete;
+using BertBrowser.Core.Services.DiskUsage;
+using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Services.NewItem;
 
 namespace BertBrowser.App.Views;
@@ -18,6 +20,10 @@ public partial class MainWindow : ThemedWindow
     private readonly ShellViewModel _shell;
     private readonly BertBrowser.App.Services.AppSettings _settings;
     private readonly PaneLayoutHost _layoutHost;
+
+    /// <summary>The modeless disk-usage window while one is open, so a second request re-points
+    /// it instead of stacking another.</summary>
+    private DiskUsageWindow? _diskUsage;
 
     public MainWindow(ShellViewModel shell, BertBrowser.App.Services.AppSettings settings)
     {
@@ -43,6 +49,7 @@ public partial class MainWindow : ThemedWindow
         _shell.TreeRevealRequested += OnTreeRevealRequested;
         _shell.PaneFocusRequested += OnPaneFocusRequested;
         _shell.GlobalSearchFocusRequested += FocusGlobalSearchBox;
+        _shell.DiskUsageRequested += ShowDiskUsage;
 
         Loaded += async (_, _) => await _shell.InitializeAsync();
         Closing += (_, _) =>
@@ -90,6 +97,10 @@ public partial class MainWindow : ThemedWindow
         _settings.LastPath = _shell.ActiveTab.CurrentPath.Length > 0 && !IsHiddenDirectory(_shell.ActiveTab.CurrentPath)
             ? _shell.ActiveTab.CurrentPath
             : null;
+
+        // The whole arrangement, so an elaborate split survives the session that built it.
+        // LastPath stays as the fallback for a first launch and for a layout too damaged to reopen.
+        _settings.Session = _shell.CaptureLayout();
         _settings.Save(); // per-directory thumbnail scales are already updated live in the map
     }
 
@@ -126,6 +137,47 @@ public partial class MainWindow : ThemedWindow
             _shell.ShowHiddenItems = _settings.ShowHiddenItems;
             _shell.RefreshTileAspect();
         }
+    }
+
+    /// <summary>
+    /// The one construction site for the disk-usage view, reached only through
+    /// <see cref="ShellViewModel.OpenDiskUsage"/> — the toolbar, both context menus and
+    /// Ctrl+Shift+D all arrive here.
+    /// </summary>
+    /// <remarks>
+    /// Modeless and re-used: opening it again on a different folder points the window that is
+    /// already up at the new root rather than stacking a second one. Analysing is something you do
+    /// repeatedly while browsing, and a pile of windows is the wrong answer to that.
+    /// </remarks>
+    private void ShowDiskUsage(string? path)
+    {
+        if (_diskUsage is { IsLoaded: true })
+        {
+            _diskUsage.Load(path);
+            _diskUsage.Activate();
+            return;
+        }
+
+        var vm = new DiskUsageViewModel(
+            App.Services.GetRequiredService<IDiskUsageService>(),
+            App.Services.GetRequiredService<IMftIndexService>(),
+            _settings.ShowHiddenItems);
+
+        _diskUsage = new DiskUsageWindow(vm, RevealFromDiskUsage) { Owner = this };
+        _diskUsage.Closed += (_, _) => _diskUsage = null;
+        _diskUsage.Show();
+        _diskUsage.Load(path);
+    }
+
+    /// <summary>Acting on what the analysis says: a folder opens in a new tab, a file opens its
+    /// folder with the file highlighted — the same reading of "show me this" the command line and
+    /// the bookmarks list already use.</summary>
+    private void RevealFromDiskUsage(string path, bool isDirectory)
+    {
+        if (isDirectory)
+            _shell.OpenInNewTab(path);
+        else
+            _ = _shell.ActiveTab.RevealFileAsync(path);
     }
 
     // --- Whole-PC search (header) ---
@@ -812,6 +864,22 @@ public partial class MainWindow : ThemedWindow
     {
         if (_treeContextNode is { } node && PropertiesPrompt.Show(node.FullPath, isDirectory: true))
             _shell.ActiveTab.RefreshCommand.Execute(null); // hidden-bit toggles can add/remove rows
+    }
+
+    private void TreeCopyPath_Click(object sender, RoutedEventArgs e)
+    {
+        if (_treeContextNode is not { } node) return;
+
+        _shell.ActiveTab.StatusText = BertBrowser.App.Services.FileClipboard.TrySetText(
+            BertBrowser.Core.Paths.PathText.Quote(node.FullPath))
+            ? "Copied 1 path"
+            : "Could not copy — the clipboard is in use by another program.";
+    }
+
+    private void TreeDiskUsage_Click(object sender, RoutedEventArgs e)
+    {
+        if (_treeContextNode is { } node)
+            _shell.OpenDiskUsage(node.FullPath);
     }
 
     private void TreeOpenTerminal_Click(object sender, RoutedEventArgs e)
