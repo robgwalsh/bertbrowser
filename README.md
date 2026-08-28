@@ -17,6 +17,7 @@ An offline Windows 10/11 file browser built for my personal preferences.
 - **[Fast global search](docs/search-indexing.md)** - MFT indexing and USN journal tracking for fastest possible performance.
 - **Directory sizes** — Show total size on directories, just like files.
 - **Split panes with tabs** - Infinite pane splitting and tabs per pane.
+- **Tree Map browser by filesize** - Visualize recursive directory sizes, easily find whats taking the most space.
 - **Themes** - Rich theming system, with many pre-loaded themes.
 
 ## Install
