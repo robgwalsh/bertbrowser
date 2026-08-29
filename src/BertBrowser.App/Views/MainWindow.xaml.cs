@@ -571,9 +571,11 @@ public partial class MainWindow : ThemedWindow
     {
         if ((sender as FrameworkElement)?.DataContext is not BookmarkItemViewModel item) return;
 
+        // Middle-click opens a pane of its own to the right, as it does over a folder anywhere
+        // else. A file bookmark takes the folder it is in, which is what the pane menu items do.
         if (e.ChangedButton == MouseButton.Middle)
         {
-            OpenBookmarkInNewTab(item);
+            OpenBookmarkInNewPane(sender, SplitOrientation.Vertical);
             e.Handled = true;
             return;
         }
@@ -776,13 +778,13 @@ public partial class MainWindow : ThemedWindow
         _treeItemMouseDownNode = null;
         if (sender is not FrameworkElement { DataContext: ISidebarNode node }) return;
 
-        // Middle-click opens a background tab instead of navigating. Handling it here also stops
-        // TreeViewItem selecting the row, which is what would otherwise navigate the active tab
-        // as well.
+        // Middle-click opens a pane of its own to the right instead of navigating. Handling it here
+        // also stops TreeViewItem selecting the row, which is what would otherwise navigate the
+        // active tab as well.
         if (e.ChangedButton == MouseButton.Middle)
         {
             if (node is DirectoryNodeViewModel { FullPath.Length: > 0 } target)
-                _shell.OpenInNewTab(target.FullPath);
+                _shell.OpenInNewPane(target.FullPath, SplitOrientation.Vertical);
             e.Handled = true;
             return;
         }

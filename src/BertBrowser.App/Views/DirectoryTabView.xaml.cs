@@ -199,15 +199,15 @@ public partial class DirectoryTabView : UserControl
         e.Handled = true;
     }
 
-    /// <summary>Middle-clicking a breadcrumb segment opens that ancestor in a background tab,
-    /// without leaving where you are.</summary>
+    /// <summary>Middle-clicking a breadcrumb segment opens that ancestor in a pane of its own to
+    /// the right, without leaving where you are.</summary>
     private void Breadcrumb_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Middle) return;
         if (VisualTreeUtil.FindAncestor<Button>(e.OriginalSource as DependencyObject)
             is not { Tag: string path }) return;
 
-        _shell.OpenInNewTab(path);
+        _shell.OpenInNewPane(path, SplitOrientation.Vertical);
         e.Handled = true;
     }
 
@@ -382,14 +382,15 @@ public partial class DirectoryTabView : UserControl
         FileListView.SelectedItem = item;
     }
 
-    /// <summary>Middle-clicking a folder opens it in a background tab, as in a browser.</summary>
+    /// <summary>Middle-clicking a folder opens it in a pane of its own to the right — the same
+    /// thing the context menu's "Open in pane right" does.</summary>
     private void FileList_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Middle) return;
         if (VisualTreeUtil.FindAncestor<ListViewItem>(e.OriginalSource as DependencyObject)
             is not { DataContext: FileItemViewModel { IsDirectory: true } folder }) return;
 
-        _shell.OpenInNewTab(folder.FullPath);
+        _shell.OpenInNewPane(folder.FullPath, SplitOrientation.Vertical);
         e.Handled = true;
     }
 
