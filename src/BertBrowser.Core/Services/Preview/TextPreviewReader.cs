@@ -37,6 +37,39 @@ public static class TextPreviewReader
     /// millions; both need a ceiling, and the line ceiling is the one a text control cares about.</summary>
     public const int DefaultMaxLines = 5_000;
 
+    /// <summary>
+    /// Whether a read is convincing enough to show as text when nothing <em>said</em> it was text.
+    /// </summary>
+    /// <remarks>
+    /// The stricter half of the pair. <see cref="TextPreview.LooksBinary"/> answers "did this file
+    /// with a text extension turn out to be binary?", which only has to catch the obvious case; this
+    /// answers "we are guessing — is this worth showing?", and a wrong yes puts a screen of mojibake
+    /// where an honest "no preview available" belonged.
+    ///
+    /// The extra test is the proportion of control characters. A binary file with no NUL in its
+    /// first 8 KB gets past the NUL check, but decoding it as Latin-1 turns bytes 0x00–0x1F and
+    /// 0x80–0x9F into control characters, and real text has almost none of those — tab, newline and
+    /// carriage return being the three that are ordinary and so are not counted.
+    /// </remarks>
+    public static bool IsConvincingText(TextPreview preview)
+    {
+        if (preview.LooksBinary) return false;
+
+        // An empty file is empty text, not a mystery — showing it as a blank text pane is a better
+        // answer than refusing it.
+        if (preview.Text.Length == 0) return true;
+
+        var sample = Math.Min(preview.Text.Length, 4096);
+        var control = 0;
+        for (var i = 0; i < sample; i++)
+        {
+            var c = preview.Text[i];
+            if (char.IsControl(c) && c is not ('\t' or '\n' or '\r')) control++;
+        }
+
+        return control * 100 < sample * 2; // under 2%
+    }
+
     public static TextPreview Read(Stream stream, long byteBudget, int maxLines = DefaultMaxLines)
     {
         var budget = (int)Math.Clamp(byteBudget, 0, int.MaxValue - 1);

@@ -214,6 +214,16 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         File.WriteAllText(Path.Combine(root, "sample.md"), SampleMarkdown);
         Sandbox.Write(Path.Combine(root, "plain.txt"), 400);
 
+        // The two shapes of "the shell has nothing and the extension table has no entry either".
+        // A .manifest is now in the table; a .qqq never will be, and is here because the content
+        // sniff is what has to carry it.
+        File.WriteAllText(Path.Combine(root, "app.exe.manifest"), SampleManifest, new UTF8Encoding(true));
+        File.WriteAllText(Path.Combine(root, "mystery.qqq"), "Not a format anyone has heard of,\nand plainly readable anyway.\n");
+
+        // And the other half of the rule: something that really is binary must still be refused
+        // rather than shown as a screen of mojibake.
+        File.WriteAllBytes(Path.Combine(root, "opaque.qqq"), OpaqueBytes());
+
         Sandbox.Stamp(root);
         output.WriteLine($"# preview fixture: {root}");
     }
@@ -285,6 +295,32 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             }
         }
         """;
+
+    /// <summary>A side-application manifest, shaped like the ones that sit beside an .exe — the
+    /// case that started this: plainly XML, no shell handler, and previously refused outright.</summary>
+    private const string SampleManifest = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+          <assemblyIdentity version="1.0.0.0" name="sample.app"/>
+          <trustInfo>
+            <security>
+              <requestedPrivileges>
+                <!-- asInvoker, like the app itself -->
+                <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+              </requestedPrivileges>
+            </security>
+          </trustInfo>
+        </assembly>
+        """;
+
+    /// <summary>Bytes with no NUL in them, so the loose binary check passes — but a wall of control
+    /// characters once decoded, which is what the strict check is for.</summary>
+    private static byte[] OpaqueBytes()
+    {
+        var bytes = new byte[2048];
+        for (var i = 0; i < bytes.Length; i++) bytes[i] = (byte)(1 + i % 0x1F);
+        return bytes;
+    }
 
     private const string SampleMarkdown = """
         # Sample document

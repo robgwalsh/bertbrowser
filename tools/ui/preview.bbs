@@ -8,7 +8,7 @@ tree .
 preview-fixture
 refresh
 go Preview
-assert-count 5
+assert-count 8
 
 # --- off by default, and toggling is per tab ---
 
@@ -51,6 +51,27 @@ select plain.txt
 settle 400
 assert-preview text
 shot 06-text PreviewPane
+
+# --- the shell has no preview for these, so the bytes get a look before giving up ---
+#
+# A .manifest is XML that Explorer's pane refuses outright. The .qqq beside it is an extension no
+# table will ever carry, and is the real test: a list of extensions has an endless tail, and the
+# content sniff is what covers it.
+
+select app.exe.manifest
+settle 400
+assert-preview text
+shot 11-manifest PreviewPane
+
+select mystery.qqq
+settle 400
+assert-preview text
+
+# ...and the other half of the rule: something genuinely binary is still refused rather than shown
+# as a screen of mojibake. Mutate IsConvincingText to return true and this line goes red.
+select opaque.qqq
+settle 400
+assert-preview none
 
 # --- a folder and a multi-selection both say what they are rather than going blank ---
 

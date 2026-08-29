@@ -237,8 +237,7 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            Kind = plan.Kind;
-            Apply(payload, plan);
+            Apply(payload);
         }
         catch (OperationCanceledException)
         {
@@ -305,8 +304,12 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         Raise();
     }
 
-    private void Apply(Payload payload, PreviewRequest plan)
+    /// <summary>The payload's own kind, not the plan's: a document the shell could not preview but
+    /// which reads as text arrives here as text, and the pane has to render what it got rather than
+    /// what was expected.</summary>
+    private void Apply(Payload payload)
     {
+        Kind = payload.Kind;
         Image = payload.Image;
         Lines = payload.Lines;
         TextForCopy = payload.TextForCopy;
@@ -317,7 +320,7 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         FontFooter = payload.FontFooter;
         Metadata = payload.Metadata;
         MediaSource = null;
-        CanPlayMedia = plan.Kind == PreviewKind.Media;
+        CanPlayMedia = payload.Kind == PreviewKind.Media;
         FitImageToPane = true;
 
         if (payload.ImageWidth > 0)
@@ -359,6 +362,12 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
 
     private sealed record Payload
     {
+        /// <summary>What this actually turned out to be, which is not always what the classifier
+        /// planned: a document the shell cannot preview but which reads as text comes back as
+        /// <see cref="PreviewKind.Text"/>. <see cref="PreviewKind.None"/> means the payload is
+        /// nothing but its <see cref="Message"/>.</summary>
+        public PreviewKind Kind { get; init; }
+
         public ImageSource? Image { get; init; }
         public int ImageWidth { get; init; }
         public int ImageHeight { get; init; }
@@ -385,8 +394,8 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
                 PreviewKind.Font => BuildFont(path),
                 // Media shows a poster frame if the shell has one, and says nothing if it does not
                 // — there is still a transport to press, so "no preview available" would be wrong.
-                PreviewKind.Media => BuildShell(path, stamp) with { Message = null },
-                _ => BuildShell(path, stamp),
+                PreviewKind.Media => BuildShell(path, stamp) with { Kind = PreviewKind.Media, Message = null },
+                _ => BuildDocument(path, stamp, plan, ct),
             };
 
             ct.ThrowIfCancellationRequested();
@@ -454,17 +463,21 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
             image.EndInit();
             image.Freeze();
 
-            return new Payload { Image = image, ImageWidth = width, ImageHeight = height };
+            return new Payload { Kind = PreviewKind.Image, Image = image, ImageWidth = width, ImageHeight = height };
         }
         catch (Exception ex) when (ex is NotSupportedException or FileFormatException or ArgumentException or OverflowException or InvalidOperationException)
         {
             // No WIC codec for this format — HEIC and camera raw on a machine without the
             // extensions, most often. The shell may still have a handler for it.
-            return BuildShell(path, stamp);
+            return BuildShell(path, stamp) with { Kind = PreviewKind.Image };
         }
     }
 
-    private static Payload BuildText(string path, PreviewRequest plan, CancellationToken ct)
+    /// <param name="guessing">True when nothing about the file <em>said</em> it was text and this
+    /// is the document fallback having a look. The bar for showing it is higher, and so is the bar
+    /// for the message: "binary file" is a fact when a .txt turns out not to be text, and a guess
+    /// dressed as one when we only opened it on spec.</param>
+    private static Payload BuildText(string path, PreviewRequest plan, CancellationToken ct, bool guessing = false)
     {
         using var file = new FileStream(
             path, FileMode.Open, FileAccess.Read,
@@ -474,8 +487,15 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         var preview = TextPreviewReader.Read(file, plan.ByteBudget);
         ct.ThrowIfCancellationRequested();
 
-        if (preview.LooksBinary)
+        if (guessing)
+        {
+            if (!TextPreviewReader.IsConvincingText(preview))
+                return new Payload { Message = "No preview available" };
+        }
+        else if (preview.LooksBinary)
+        {
             return new Payload { Message = "Binary file — nothing to show as text." };
+        }
 
         var coloured = preview.LineCount <= MaxColouredLines;
         IReadOnlyList<SyntaxSpan> spans = coloured
@@ -491,6 +511,7 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
 
         return new Payload
         {
+            Kind = PreviewKind.Text,
             Lines = SplitLines(preview.Text, spans),
             TextForCopy = preview.Text,
             TextFooter = footer,
@@ -547,7 +568,7 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
             contents.CompressionRatio > 0 ? $"{contents.CompressionRatio:P0} saved" : "",
             contents.Truncated ? $"showing the first {contents.Entries.Count:N0}" : "");
 
-        return new Payload { Archive = contents.Entries, ArchiveFooter = footer };
+        return new Payload { Kind = PreviewKind.Archive, Archive = contents.Entries, ArchiveFooter = footer };
     }
 
     private static Payload BuildFont(string path)
@@ -574,7 +595,7 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
                 $"{typeface.CharacterToGlyphMap.Count:N0} glyphs",
                 typeface.VersionStrings.Values.FirstOrDefault() ?? "");
 
-            return new Payload { FontSource = source, FontFooter = footer };
+            return new Payload { Kind = PreviewKind.Font, FontSource = source, FontFooter = footer };
         }
         catch (Exception ex) when (ex is FileFormatException or NotSupportedException or ArgumentException or UriFormatException)
         {
@@ -589,7 +610,34 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
 
         return image is null
             ? new Payload { Message = "No preview available" }
-            : new Payload { Image = image };
+            : new Payload { Kind = PreviewKind.Document, Image = image };
+    }
+
+    /// <summary>
+    /// A document: whatever the shell can produce, and failing that, a look at the actual bytes.
+    /// </summary>
+    /// <remarks>
+    /// The fallback is the point. An extension table cannot be the whole answer — its tail is
+    /// endless, and every entry missing from it is a file the pane refuses to show for no reason
+    /// the user can see. <c>choco.exe.manifest</c> is plainly XML; <c>.ignore</c> beside it is
+    /// plainly a list of names. Explorer gives up at exactly this point, and it is the most common
+    /// way its preview pane is useless.
+    ///
+    /// The shell goes first because when it does have a handler its answer is better: a .docx is a
+    /// zip and reads as gibberish, but the shell has a page-one thumbnail of it. Only when the
+    /// shell declines outright is the file read — so this costs nothing for the formats that
+    /// already worked.
+    /// </remarks>
+    private static Payload BuildDocument(string path, DateTime stamp, PreviewRequest plan, CancellationToken ct)
+    {
+        var shell = BuildShell(path, stamp);
+
+        // A budget of zero is the classifier saying "don't guess at this one" — an image too big to
+        // decode is still an image.
+        if (shell.Image is not null || plan.ByteBudget <= 0) return shell;
+
+        var text = BuildText(path, plan, ct, guessing: true);
+        return text.Lines.Count > 0 ? text : shell;
     }
 
     private static string Join(params string[] parts) =>

@@ -628,12 +628,31 @@ Five rules are the design, and each is a thing Explorer's pane gets wrong:
   immediate refusal, because the classifier cannot know which handlers this machine has. Office and
   OpenDocument extensions are deliberately **not** archives even though they are zips: the shell
   makes a real page-one thumbnail of them, which beats a listing of their guts.
+
+  **The extension table is not the answer on its own, and must not be treated as one.** Its tail is
+  endless, and every name missing from it was a file the pane refused for no reason the user could
+  see — `choco.exe.manifest` is plainly XML, and the `.ignore` beside it is plainly a list. So a
+  `Document` carries a **text budget**, and `PreviewPaneViewModel.BuildDocument` asks the shell
+  first and then *reads the bytes* if the shell declines. The shell goes first because where it has
+  a handler its answer is better (a .docx read as text is gibberish). Adding an extension to the
+  table now only buys colouring and one saved round-trip — it is no longer what decides whether a
+  file can be previewed at all. The one case that deliberately gets a **zero** budget is an image
+  too large to decode: it is still an image, and reading a gigantic TIFF as text would be nonsense.
 - **`TextPreviewReader`** is pure over a `Stream`: BOM, then strict UTF-8 validation, then a
   UTF-16-without-a-BOM heuristic (the one case where NUL bytes mean text), then **Latin-1** — chosen
   over the machine's ANSI codepage because it maps every byte, never throws, and gives the same
   answer on every machine, which is what makes the tests mean anything. Whether the read was
   truncated is passed *into* the UTF-8 validation: a sequence running off the end is evidence of the
   cut when there was one and evidence against UTF-8 when there wasn't.
+
+  It answers **two** questions, and the pair is load-bearing. `TextPreview.LooksBinary` is "did this
+  file with a text extension turn out to be binary?" — a NUL in the first 8 KB, which only has to
+  catch the obvious case. `IsConvincingText` is the stricter one the document fallback uses, where
+  we are *guessing*: it adds a control-character ratio, because a binary with no NUL in its first
+  8 KB passes the loose check and then decodes as a wall of mojibake. Tab, newline and carriage
+  return are not counted, so an indented file is not mistaken for rubbish. The messages differ for
+  the same reason — "binary file" is a fact when a `.txt` isn't text, and a guess dressed as one
+  when we opened the file on spec, where the honest answer is "no preview available".
 - **`SyntaxTokenizer`** is hand-rolled and dependency-free, spans rather than a tree. The property
   that matters is not colour but the **cover**: ordered, gap-free, non-overlapping, never past the
   end — the view builds runs from it and would throw otherwise. `Merge` degrades to one plain span

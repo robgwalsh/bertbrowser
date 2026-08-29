@@ -65,6 +65,8 @@ public static class PreviewClassifier
         {
             // Too big to decode ourselves is not too big to preview: the shell's handler can
             // produce a thumbnail of a 500 MB TIFF without us reading one byte of it.
+            // A zero budget, unlike an ordinary document's: this is still an image, and reading a
+            // gigantic TIFF as text if the shell declines would be nonsense.
             PreviewKind.Image when target.SizeBytes > MaxImageBytes =>
                 new PreviewRequest(PreviewKind.Document, PreviewRefusal.None, 0, SyntaxLanguage.None),
 
@@ -81,7 +83,17 @@ public static class PreviewClassifier
             PreviewKind.Archive => new PreviewRequest(kind, PreviewRefusal.None, target.SizeBytes, SyntaxLanguage.None),
             PreviewKind.Font => new PreviewRequest(kind, PreviewRefusal.None, target.SizeBytes, SyntaxLanguage.None),
 
-            // Media and documents are the shell's to stream; we read nothing ourselves.
+            // A document carries a text budget even though the shell is asked first: it is what the
+            // text fallback may read when the shell turns out to have no preview for it. That
+            // fallback is the answer to an extension table's endless tail — a `.manifest`, a config
+            // file with a name nobody standardised, an extensionless script — and it is exactly
+            // where Explorer's pane gives up.
+            PreviewKind.Document => new PreviewRequest(
+                kind, PreviewRefusal.None,
+                Math.Min(target.SizeBytes, Math.Max(0, textBudget)),
+                SyntaxTokenizer.LanguageFor(target.Name)),
+
+            // Media is the shell's to stream, and there is nothing to read as text.
             _ => new PreviewRequest(kind, PreviewRefusal.None, 0, SyntaxLanguage.None),
         };
     }
@@ -148,6 +160,17 @@ public static class PreviewClassifier
         ".json .jsonc .json5 .webmanifest .ipynb .yml .yaml .toml .ini .cfg .conf .properties .env " +
         ".xml .xaml .html .htm .xhtml .svg .csproj .fsproj .vbproj .sln .slnx .props .targets " +
         ".config .resx .nuspec .plist .csv .tsv .psv " +
+        // The XML family the extension table used to miss. Listed rather than left to the content
+        // sniff purely so they arrive coloured and without a wasted shell round-trip; the sniff is
+        // still what catches everything not named here.
+        ".manifest .appxmanifest .xsd .xsl .xslt .dtd .rss .atom .opml .sitemap .axaml " +
+        ".vcxproj .shproj .pubxml .ruleset .runsettings .wxs .wxi .storyboard " +
+        ".cshtml .razor .vbhtml .aspx .ascx .ashx .asmx .master .jsp " +
+        ".erb .hbs .mustache .twig .pug .ejs .liquid " +
+        ".gitmodules .gitconfig .npmignore .prettierrc .eslintrc .babelrc .stylelintrc " +
+        ".clang-format .htaccess .ignore .po .pot .strings .desktop .service .cue .ics .vcf " +
+        ".f90 .for .pas .cr .rkt .scm .lisp .el .ahk .au3 .bas .vbs .wsf .applescript " +
+        ".ninja .bzl .gn .gni .pro .in .ac .am " +
         ".css .scss .less .sass .styl " +
         ".js .mjs .cjs .jsx .ts .tsx .vue .svelte .astro " +
         ".cs .csx .fs .fsx .vb .c .h .cpp .hpp .cc .hh .cxx .m .mm .java .kt .kts .swift .go .rs " +

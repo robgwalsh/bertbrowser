@@ -199,6 +199,49 @@ public class TextPreviewReaderTests
         Assert.Equal("ab", preview.Text);
     }
 
+    // --- guessing: is this worth showing when nothing said it was text? ---
+
+    [Fact]
+    public void OrdinaryTextIsConvincing() =>
+        Assert.True(TextPreviewReader.IsConvincingText(Read("<?xml version=\"1.0\"?>\n<a b=\"c\"/>\n"u8.ToArray())));
+
+    [Fact]
+    public void AnEmptyFileIsConvincing() =>
+        // Showing it as a blank text pane beats refusing it.
+        Assert.True(TextPreviewReader.IsConvincingText(Read([])));
+
+    [Fact]
+    public void SomethingWithANulIsNotConvincing() =>
+        Assert.False(TextPreviewReader.IsConvincingText(Read([(byte)'M', (byte)'Z', 0x00, (byte)'x'])));
+
+    [Fact]
+    public void BinaryWithNoNulIsStillNotConvincing()
+    {
+        // The case LooksBinary alone misses: no NUL in the first 8 KB, but decoded as Latin-1 it
+        // is a wall of control characters.
+        var bytes = new byte[2048];
+        for (var i = 0; i < bytes.Length; i++) bytes[i] = (byte)(1 + i % 0x1F);
+
+        var preview = Read(bytes);
+        Assert.False(preview.LooksBinary);                            // the loose check passes it
+        Assert.False(TextPreviewReader.IsConvincingText(preview));    // the strict one does not
+    }
+
+    [Fact]
+    public void TabsAndNewlinesDoNotCountAgainstIt()
+    {
+        var text = string.Concat(Enumerable.Repeat("\tindented\r\n", 200));
+        Assert.True(TextPreviewReader.IsConvincingText(Read(Encoding.UTF8.GetBytes(text))));
+    }
+
+    [Fact]
+    public void AStrayControlCharacterIsToleratedInOtherwiseGoodText()
+    {
+        // A form feed in a source file must not cost the whole preview.
+        var text = new string('x', 500) + "\f" + new string('y', 500);
+        Assert.True(TextPreviewReader.IsConvincingText(Read(Encoding.ASCII.GetBytes(text))));
+    }
+
     [Fact]
     public void ABudgetOfZeroReadsNothingButStillNoticesThereIsMore()
     {

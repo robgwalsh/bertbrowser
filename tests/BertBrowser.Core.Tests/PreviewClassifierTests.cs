@@ -35,6 +35,39 @@ public class PreviewClassifierTests
         // Not a refusal: the shell may well have a handler, and only it can say.
         Assert.Equal(PreviewKind.Document, PreviewClassifier.KindFor("model.qqq"));
 
+    [Theory]
+    [InlineData("choco.exe.manifest")]
+    [InlineData("app.appxmanifest")]
+    [InlineData("Schema.xsd")]
+    [InlineData("Index.cshtml")]
+    [InlineData("Native.vcxproj")]
+    [InlineData("catalog.rss")]
+    [InlineData("build.ninja")]
+    [InlineData("messages.po")]
+    public void KindFor_ReadsTheObviouslyTextualOnesAsText(string name) =>
+        Assert.Equal(PreviewKind.Text, PreviewClassifier.KindFor(name));
+
+    [Fact]
+    public void ADocumentCarriesATextBudget_ForTheFallbackWhenTheShellDeclines()
+    {
+        // The whole point of the fallback: an unrecognised file gets read rather than refused,
+        // once the shell has had its turn and produced nothing.
+        var plan = PreviewClassifier.Classify(File("mystery.qqq", 5000));
+        Assert.Equal(PreviewKind.Document, plan.Kind);
+        Assert.Equal(5000, plan.ByteBudget);
+    }
+
+    [Fact]
+    public void AnEnormousImageDowngradedToTheShellCarriesNoTextBudget() =>
+        // "Too big to decode" is not an invitation to read a gigantic TIFF as text.
+        Assert.Equal(0, PreviewClassifier.Classify(File("scan.tiff", PreviewClassifier.MaxImageBytes + 1)).ByteBudget);
+
+    [Fact]
+    public void ADocumentCarriesItsLanguageToo() =>
+        // So a file whose extension the syntax table knows still arrives coloured if the shell
+        // declines and the text fallback takes over.
+        Assert.Equal(SyntaxLanguage.Xml, PreviewClassifier.Classify(File("plugin.wxs")).Language);
+
     [Fact]
     public void KindFor_ReadsAnExtensionlessFileAsText() =>
         Assert.Equal(PreviewKind.Text, PreviewClassifier.KindFor("LICENSE"));
@@ -137,11 +170,9 @@ public class PreviewClassifierTests
         Assert.Equal(64, PreviewClassifier.Classify(File("notes.txt", 5000), textBudget: 64).ByteBudget);
 
     [Fact]
-    public void MediaAndDocumentsReadNothingThemselves()
-    {
+    public void MediaReadsNothingItself() =>
+        // The shell streams it, and there is no sense in which a video is text.
         Assert.Equal(0, PreviewClassifier.Classify(File("clip.mp4", 900_000_000)).ByteBudget);
-        Assert.Equal(0, PreviewClassifier.Classify(File("report.pdf", 900_000)).ByteBudget);
-    }
 
     [Fact]
     public void ATextPlanCarriesItsLanguage() =>
