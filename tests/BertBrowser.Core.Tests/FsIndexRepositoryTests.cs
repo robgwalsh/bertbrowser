@@ -449,4 +449,197 @@ public sealed class FsIndexRepositoryTests : IDisposable
 
         Assert.Empty(_repo.LargestFiles(@"C:\Data", limit: 0));
     }
+
+    // --- DuplicateCandidates: the shortlist a duplicate scan starts from ---
+
+    /// <summary>Two files of one length are the shortlist; the odd one out is not on it.</summary>
+    [Fact]
+    public void DuplicateCandidates_ReturnsOnlyCollidingLengths()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\a.bin", size: 4096),
+            Row(@"C:\Data\b.bin", size: 4096),
+            Row(@"C:\Data\lonely.bin", size: 999),
+        }, crawlGen: 1);
+
+        var shortlist = _repo.DuplicateCandidates(@"C:\Data", minSizeBytes: 1, includeHidden: true);
+
+        Assert.Equal(2, shortlist.Files.Count);
+        Assert.All(shortlist.Files, f => Assert.Equal(4096, f.SizeBytes));
+    }
+
+    /// <summary>
+    /// Directories are stored with size 0 and would otherwise all collide with each other. The
+    /// query excludes them outright rather than relying on the floor to hide them.
+    /// </summary>
+    [Fact]
+    public void DuplicateCandidates_NeverReturnsDirectories()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\One", isDir: true),
+            Row(@"C:\Data\Two", isDir: true),
+            Row(@"C:\Data\a.bin", size: 4096),
+            Row(@"C:\Data\b.bin", size: 4096),
+        }, crawlGen: 1);
+
+        var shortlist = _repo.DuplicateCandidates(@"C:\Data", minSizeBytes: 1, includeHidden: true);
+
+        Assert.Equal(2, shortlist.Files.Count);
+        Assert.All(shortlist.Files, f => Assert.False(f.IsDirectory));
+    }
+
+    [Fact]
+    public void DuplicateCandidates_HonoursTheSizeFloor()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\small-a.bin", size: 10),
+            Row(@"C:\Data\small-b.bin", size: 10),
+            Row(@"C:\Data\big-a.bin", size: 5000),
+            Row(@"C:\Data\big-b.bin", size: 5000),
+        }, crawlGen: 1);
+
+        var shortlist = _repo.DuplicateCandidates(@"C:\Data", minSizeBytes: 1000, includeHidden: true);
+
+        Assert.Equal(2, shortlist.Files.Count);
+        Assert.All(shortlist.Files, f => Assert.Equal(5000, f.SizeBytes));
+    }
+
+    /// <summary>
+    /// A floor of zero would sweep in every file the sizeless build path could not measure and
+    /// compare them all against each other, which is the one shape this feature must never take.
+    /// </summary>
+    [Fact]
+    public void DuplicateCandidates_ZeroLengthFilesAreNeverCandidates()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\empty-a.bin", size: 0),
+            Row(@"C:\Data\empty-b.bin", size: 0),
+        }, crawlGen: 1);
+
+        Assert.Empty(_repo.DuplicateCandidates(@"C:\Data", minSizeBytes: 0, includeHidden: true).Files);
+    }
+
+    [Fact]
+    public void DuplicateCandidates_ExcludesHiddenUnlessRequested()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\visible.bin", size: 4096),
+            Row(@"C:\Data\secret.bin", size: 4096, hidden: true),
+        }, crawlGen: 1);
+
+        Assert.Equal(2, _repo.DuplicateCandidates(@"C:\Data", 1, includeHidden: true).Files.Count);
+
+        // With the hidden row gone the other has nothing to collide with, so the pair vanishes
+        // rather than leaving a group of one.
+        Assert.Empty(_repo.DuplicateCandidates(@"C:\Data", 1, includeHidden: false).Files);
+    }
+
+    /// <summary>
+    /// The exclusion runs in both passes. Applying it only to the second would let an excluded file
+    /// prop up a size group that then comes back with a single member — a "duplicate" of nothing.
+    /// </summary>
+    [Fact]
+    public void DuplicateCandidates_AnExcludedFileCannotPropUpAGroup()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\keep.bin", size: 4096),
+            Row(@"C:\Data\skip.bin", size: 4096),
+        }, crawlGen: 1);
+
+        var shortlist = _repo.DuplicateCandidates(
+            @"C:\Data", 1, includeHidden: true,
+            exclude: key => key.EndsWith(@"\SKIP.BIN", StringComparison.Ordinal));
+
+        Assert.Empty(shortlist.Files);
+    }
+
+    [Fact]
+    public void DuplicateCandidates_ScopesToTheSubtree()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\a.bin", size: 4096),
+            Row(@"C:\Data\b.bin", size: 4096),
+            Row(@"C:\Other\a.bin", size: 4096),
+        }, crawlGen: 1);
+
+        var scoped = _repo.DuplicateCandidates(@"C:\Data", 1, includeHidden: true);
+        Assert.Equal(2, scoped.Files.Count);
+
+        var global = _repo.DuplicateCandidates(null, 1, includeHidden: true);
+        Assert.Equal(3, global.Files.Count);
+    }
+
+    /// <summary>
+    /// Full display paths are not stored, so each hit's is rebuilt from its ancestors' rows — the
+    /// same reconstruction the search paths do, which is why they share one function.
+    /// </summary>
+    [Fact]
+    public void DuplicateCandidates_RebuildsDisplayPathsFromAncestors()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\Nested", isDir: true),
+            Row(@"C:\Data\Nested\Report.pdf", size: 4096),
+            Row(@"C:\Data\Report.pdf", size: 4096),
+        }, crawlGen: 1);
+
+        var shortlist = _repo.DuplicateCandidates(@"C:\Data", 1, includeHidden: true);
+
+        var nested = Assert.Single(shortlist.Files, f => f.RelativeDirDisplay.Length > 0);
+        Assert.Equal("Nested", nested.RelativeDirDisplay);
+        Assert.Equal(@"C:\Data\Nested\Report.pdf", nested.DisplayPath);
+    }
+
+    /// <summary>
+    /// The two scope counts are the evidence behind the availability verdict, and they describe
+    /// what the index holds rather than what this caller asked to see — so they are taken before
+    /// both the floor and the exclusion.
+    /// </summary>
+    [Fact]
+    public void DuplicateCandidates_CountsWhatTheIndexHolds_NotWhatWasAskedFor()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\tiny.bin", size: 1),
+            Row(@"C:\Data\a.bin", size: 4096),
+            Row(@"C:\Data\b.bin", size: 4096),
+        }, crawlGen: 1);
+
+        var shortlist = _repo.DuplicateCandidates(
+            @"C:\Data", minSizeBytes: 4096, includeHidden: true, exclude: _ => true);
+
+        Assert.Empty(shortlist.Files);
+        Assert.Equal(3, shortlist.FilesInScope);
+        Assert.Equal(3, shortlist.SizedFilesInScope);
+    }
+
+    /// <summary>
+    /// The shape that makes the whole feature refuse to run: rows in scope, not one with a length.
+    /// That is the FSCTL_ENUM_USN_DATA build, and it has to be distinguishable from an empty
+    /// folder — which is what the second count is for.
+    /// </summary>
+    [Fact]
+    public void DuplicateCandidates_ASizelessIndexIsRowsWithNoLengths()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\a.bin", size: 0),
+            Row(@"C:\Data\b.bin", size: 0),
+        }, crawlGen: 1);
+
+        var sizeless = _repo.DuplicateCandidates(@"C:\Data", 1, includeHidden: true);
+        Assert.Equal(2, sizeless.FilesInScope);
+        Assert.Equal(0, sizeless.SizedFilesInScope);
+
+        var empty = _repo.DuplicateCandidates(@"C:\Nowhere", 1, includeHidden: true);
+        Assert.Equal(0, empty.FilesInScope);
+        Assert.Equal(0, empty.SizedFilesInScope);
+    }
 }

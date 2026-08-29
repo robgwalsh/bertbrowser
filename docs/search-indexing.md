@@ -225,6 +225,22 @@ fact, since the fallback enumeration path can leave those blank.
 still on disk — that is the whole point, so Ctrl+Z can restore them — but they have been deleted as
 far as the user is concerned, and search saying otherwise reads as a delete that silently failed.
 
+### The other reader: duplicates
+
+The search box is not the only thing that reads these rows. The duplicate finder
+(`Core/Services/Duplicates`) shortlists on `size_bytes` — two files of different lengths cannot be
+duplicates — so the expensive half of finding them is already paid for by the pass above, and only
+the files that collide are ever opened.
+
+Two consequences worth knowing here rather than there. It is **two streaming scans with no
+`GROUP BY`**, because there is no index on `size_bytes` and grouping would make SQLite materialise a
+temp B-tree over most of every qualifying row; an index was refused for the same reason the one on
+`name_key` was — `WITHOUT ROWID` means a secondary index carries the whole `path_key`, and the build
+that would have to write it runs at every launch. And the **`FSCTL_ENUM_USN_DATA` fallback disables
+the feature outright**: that path writes every row with `size_bytes = 0`, so every file would collide
+with every other. The shortlist counts sized rows as it walks and reports `NoSizeData` rather than
+reading a whole disk to discover nothing.
+
 ## The fallback path
 
 Not everything is a fixed NTFS volume. For roots the MFT indexer does not cover, `SearchService`

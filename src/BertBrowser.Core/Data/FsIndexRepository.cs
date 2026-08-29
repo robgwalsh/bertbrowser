@@ -342,29 +342,7 @@ public sealed class FsIndexRepository
 
         // Same reconstruction the two search paths do: a scoped result is relative to the root it
         // was asked about, an unscoped one carries the full path from its drive root.
-        var prefixLength = scoped ? lo.Length : DriveRootLength;
-        var ancestorNames = LookupAncestorNames(conn, rows, prefixLength);
-
-        var hits = new List<SearchHit>(rows.Count);
-        foreach (var row in rows)
-        {
-            var relDir = BuildRelativeDir(row.Key, prefixLength, ancestorNames);
-            if (scoped)
-            {
-                hits.Add(new SearchHit(
-                    Path.Combine(rootDisplay, relDir, row.Name),
-                    relDir, row.Name, row.IsDir, row.Size, row.Modified, row.Hidden));
-            }
-            else
-            {
-                var driveRoot = row.Key[..DriveRootLength]; // "C:\"
-                var parentFull = relDir.Length == 0 ? driveRoot : driveRoot + relDir;
-                var display = parentFull.EndsWith('\\') ? parentFull + row.Name : parentFull + '\\' + row.Name;
-                hits.Add(new SearchHit(
-                    display, parentFull, row.Name, row.IsDir, row.Size, row.Modified, row.Hidden));
-            }
-        }
-        return hits;
+        return BuildHits(conn, rows, scoped, rootDisplay, lo);
     }
 
     /// <summary>
@@ -511,5 +489,187 @@ public sealed class FsIndexRepository
         }
 
         tx.Commit();
+    }
+
+    /// <summary>
+    /// Every file at or above <paramref name="minSizeBytes"/> that shares its byte length with at
+    /// least one other — the shortlist a duplicate scan starts from, with no file opened.
+    /// </summary>
+    /// <param name="exclude">
+    /// Given a canonical path key, true to drop the row. Applied in <em>both</em> passes so an
+    /// excluded file cannot prop up a size group that then turns out to have one member.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// <b>Two streaming scans, and deliberately no <c>GROUP BY</c>.</b> Grouping or ordering by
+    /// <c>size_bytes</c> would make SQLite materialise a temp B-tree over every qualifying
+    /// (size, path_key) pair — hundreds of megabytes on a real index, since there is no index on
+    /// size and the pair is most of the row. Two ordered walks of the clustered table need no
+    /// sorter at all: the first counts sizes into a dictionary bounded by the number of
+    /// <em>distinct</em> sizes, the second collects only the rows whose size was seen twice. The
+    /// second walk reads the pages the first one just warmed.
+    /// </para>
+    /// <para>
+    /// <b>An index on <c>size_bytes</c> was considered and refused.</b> <c>fs_entry</c> is
+    /// <c>WITHOUT ROWID</c>, so a secondary index carries the whole <c>path_key</c> as its row
+    /// reference — several hundred megabytes added to the database, and a second B-tree to write on
+    /// every upsert chunk of a build that runs at every launch. This is the same trade
+    /// <c>002_search_index.sql</c> already made against an index on <c>name</c>.
+    /// </para>
+    /// <para>
+    /// <b>The first pass counts two things it does not need</b> — files in scope, and files in scope
+    /// with a real length — because they are what tells a volume indexed by the sizeless
+    /// <c>FSCTL_ENUM_USN_DATA</c> path apart from one that genuinely holds no duplicates. Both come
+    /// free from a walk that is happening anyway, and asking separately would mean a third scan.
+    /// They are counted <em>before</em> <paramref name="exclude"/> runs: they describe what the
+    /// index knows, not what this caller asked to see.
+    /// </para>
+    /// <para>
+    /// Like <see cref="LargestFiles"/> this is only ever reached from an explicit "go and compute
+    /// this" gesture, never from a keystroke.
+    /// </para>
+    /// </remarks>
+    public DuplicateShortlist DuplicateCandidates(
+        string? rootPath,
+        long minSizeBytes,
+        bool includeHidden,
+        Func<string, bool>? exclude = null,
+        CancellationToken ct = default)
+    {
+        // Zero would sweep in every file the sizeless build path could not measure, and compare
+        // them all against each other. One byte is the smallest honest floor.
+        var floor = Math.Max(1, minSizeBytes);
+
+        var scoped = rootPath is { Length: > 0 };
+        var rootKey = scoped ? PathKey.Canonicalize(rootPath!) : "";
+        var rootDisplay = scoped ? PathKey.NormalizeDisplay(rootPath!) : "";
+        var (lo, hi) = scoped ? PathKey.PrefixBounds(rootKey) : ("", "");
+
+        var scope = scoped ? "path_key >= @lo AND path_key < @hi AND " : "";
+        var hiddenFilter = includeHidden ? "" : "AND hidden = 0 ";
+
+        using var conn = _db.Open();
+
+        // --- pass one: which byte lengths occur more than once ---
+        var counts = new Dictionary<long, int>();
+        var filesInScope = 0;
+        var sizedFilesInScope = 0;
+
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText =
+                $"""
+                SELECT size_bytes, path_key
+                FROM fs_entry
+                WHERE {scope}is_dir = 0 {hiddenFilter};
+                """;
+            if (scoped)
+            {
+                cmd.Parameters.AddWithValue("@lo", lo);
+                cmd.Parameters.AddWithValue("@hi", hi);
+            }
+
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var size = reader.GetInt64(0);
+                filesInScope++;
+                if (size > 0) sizedFilesInScope++;
+
+                if (size < floor) continue;
+                if (exclude is not null && exclude(reader.GetString(1))) continue;
+
+                counts[size] = counts.TryGetValue(size, out var seen) ? seen + 1 : 1;
+            }
+        }
+
+        var colliding = new HashSet<long>();
+        foreach (var (size, seen) in counts)
+            if (seen > 1) colliding.Add(size);
+
+        if (colliding.Count == 0)
+            return new DuplicateShortlist([], filesInScope, sizedFilesInScope);
+
+        // --- pass two: the rows at those lengths ---
+        var rows = new List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)>();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText =
+                $"""
+                SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden
+                FROM fs_entry
+                WHERE {scope}is_dir = 0 AND size_bytes >= @min {hiddenFilter};
+                """;
+            if (scoped)
+            {
+                cmd.Parameters.AddWithValue("@lo", lo);
+                cmd.Parameters.AddWithValue("@hi", hi);
+            }
+            cmd.Parameters.AddWithValue("@min", floor);
+
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var size = reader.GetInt64(3);
+                if (!colliding.Contains(size)) continue;
+
+                var key = reader.GetString(0);
+                if (exclude is not null && exclude(key)) continue;
+
+                rows.Add((
+                    key,
+                    reader.GetString(1),
+                    reader.GetInt32(2) != 0,
+                    size,
+                    DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                    reader.GetInt32(5) != 0));
+            }
+        }
+
+        return new DuplicateShortlist(
+            BuildHits(conn, rows, scoped, rootDisplay, lo), filesInScope, sizedFilesInScope);
+    }
+
+    /// <summary>
+    /// Turns raw rows into hits with display paths rebuilt from their ancestors' names — the
+    /// reconstruction <see cref="LargestFiles"/> and the duplicate shortlist both need, since full
+    /// display paths are not stored.
+    /// </summary>
+    private static IReadOnlyList<SearchHit> BuildHits(
+        SqliteConnection conn,
+        List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)> rows,
+        bool scoped,
+        string rootDisplay,
+        string lo)
+    {
+        if (rows.Count == 0) return [];
+
+        var prefixLength = scoped ? lo.Length : DriveRootLength;
+        var ancestorNames = LookupAncestorNames(conn, rows, prefixLength);
+
+        var hits = new List<SearchHit>(rows.Count);
+        foreach (var row in rows)
+        {
+            var relDir = BuildRelativeDir(row.Key, prefixLength, ancestorNames);
+            if (scoped)
+            {
+                hits.Add(new SearchHit(
+                    Path.Combine(rootDisplay, relDir, row.Name),
+                    relDir, row.Name, row.IsDir, row.Size, row.Modified, row.Hidden));
+            }
+            else
+            {
+                var driveRoot = row.Key[..DriveRootLength]; // "C:\"
+                var parentFull = relDir.Length == 0 ? driveRoot : driveRoot + relDir;
+                var display = parentFull.EndsWith('\\') ? parentFull + row.Name : parentFull + '\\' + row.Name;
+                hits.Add(new SearchHit(
+                    display, parentFull, row.Name, row.IsDir, row.Size, row.Modified, row.Hidden));
+            }
+        }
+        return hits;
     }
 }

@@ -51,6 +51,9 @@
              collide with typing the way Ctrl+F or Ctrl+Z can. -->
         <KeyBinding Key="D" Modifiers="Ctrl+Shift" Command="{Binding AnalyseDiskUsageCommand}"/>
 
+        <!-- Duplicates. Same reasoning as Ctrl+Shift+D above; U because D is taken. -->
+        <KeyBinding Key="U" Modifiers="Ctrl+Shift" Command="{Binding FindDuplicatesCommand}"/>
+
         <!-- Reopen the last tab closed in this pane. -->
         <KeyBinding Key="T" Modifiers="Ctrl+Shift" Command="{Binding ActivePane.ReopenClosedTabCommand}"/>
 
@@ -153,6 +156,13 @@
                         Command="{Binding AnalyseDiskUsageCommand}"
                         AutomationProperties.Name="Disk usage">
                     <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE9A9;"/>
+                </Button>
+
+                <Button Style="{StaticResource ToolbarButton}"
+                        ToolTip="Duplicates — files you have more than one of (Ctrl+Shift+U)"
+                        Command="{Binding FindDuplicatesCommand}"
+                        AutomationProperties.Name="Duplicates">
+                    <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE8C8;"/>
                 </Button>
 
                 <Button Style="{StaticResource ToolbarButton}"
@@ -407,6 +417,9 @@
                         <!-- Right-clicking a drive here is the gesture this feature exists for. -->
                         <MenuItem Header="Analyse disk usage…" Click="TreeDiskUsage_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE9A9;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="Find duplicates…" Click="TreeDuplicates_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C8;"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator x:Name="TreeCustomCommandsSeparator" Visibility="Collapsed"/>
                         <Separator/>

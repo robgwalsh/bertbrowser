@@ -213,6 +213,12 @@
                                   InputGestureText="Ctrl+Shift+D" Click="ContextDiskUsage_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE9A9;"/></MenuItem.Icon>
                         </MenuItem>
+                        <!-- Folders only, for the same reason: one file cannot be a duplicate of
+                             itself, so a single selected file has nothing to search. -->
+                        <MenuItem x:Name="DuplicatesMenuItem" Header="Find duplicates…"
+                                  InputGestureText="Ctrl+Shift+U" Click="ContextDuplicates_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C8;"/></MenuItem.Icon>
+                        </MenuItem>
                         <Separator/>
                         <MenuItem x:Name="CopyPathMenuItem" Header="Copy as path"
                                   InputGestureText="Ctrl+Shift+C" Click="ContextCopyPath_Click">

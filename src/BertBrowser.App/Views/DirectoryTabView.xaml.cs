@@ -558,6 +558,7 @@ public partial class DirectoryTabView : UserControl
         // offers itself and analyses the folder being shown, which is the useful reading of an
         // empty-space right-click.
         DiskUsageMenuItem.IsEnabled = selection.Count == 0 || (selection.Count == 1 && folders == 1);
+        DuplicatesMenuItem.IsEnabled = DiskUsageMenuItem.IsEnabled;
 
         // Only ever one file: "run this folder as administrator" means nothing, and a whole
         // selection of programs started elevated at once is not something to offer from a menu.
@@ -669,6 +670,16 @@ public partial class DirectoryTabView : UserControl
             : Tab.CurrentPath;
 
         _shell.OpenDiskUsage(target is { Length: > 0 } ? target : null);
+    }
+
+    /// <summary>A selected folder, or — with nothing selected — the folder being shown.</summary>
+    private void ContextDuplicates_Click(object sender, RoutedEventArgs e)
+    {
+        var target = FileListView.SelectedItem is FileItemViewModel { IsDirectory: true } item
+            ? item.FullPath
+            : Tab.CurrentPath;
+
+        _shell.OpenDuplicates(target is { Length: > 0 } ? target : null);
     }
 
     private void ContextOpenVSCode_Click(object sender, RoutedEventArgs e)

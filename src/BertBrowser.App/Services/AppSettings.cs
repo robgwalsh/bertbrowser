@@ -47,6 +47,21 @@ public sealed class AppSettings
     /// so — a preview that silently stops looks like the whole file.</summary>
     public int PreviewTextMaxBytes { get; set; } = 1024 * 1024;
 
+    /// <summary>The floor the duplicate finder starts from, in bytes.</summary>
+    /// <remarks>
+    /// Not cosmetic: it bounds both the shortlist's memory and how much has to be read, and
+    /// duplicate 400-byte files are not what anyone opens that window for. The picker offers
+    /// magnitudes; this is what a session starts from and what changing it writes back.
+    /// </remarks>
+    public long DuplicateMinSizeBytes { get; set; } = 1024 * 1024;
+
+    /// <summary>Whether the duplicate finder leaves Windows and Program Files out.</summary>
+    /// <remarks>
+    /// On by default. Those trees are largely one file under several names, and what genuine
+    /// duplicates they hold are not the user's to remove.
+    /// </remarks>
+    public bool DuplicateSkipSystemFolders { get; set; } = true;
+
     /// <summary>Shape of a thumbnail tile as "width:height" — the zoom slider sets the width and
     /// this decides the height. Anything unparseable falls back to 4:3 (see
     /// <see cref="BertBrowser.Core.Models.AspectRatio"/>), so hand-editing this can't break the

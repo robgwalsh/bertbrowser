@@ -1,0 +1,66 @@
+# The duplicate finder, end to end: shortlist from the index, separate on content, then remove
+# the extra copies through the ordinary reversible delete and put them back.
+#
+# The fixture is built so all three outcomes are exercised:
+#   - twin.txt        500 bytes, copied  -> identical, and settled by the 64 KB sample alone
+#   - photo.jpg       96 KB, copied      -> identical, and only after the full hash
+#   - archive.zip     512 KB, copied     -> the same, larger
+#   - same-a/b.bin    5,000 bytes each   -> the same LENGTH and different bytes, so never a pair
+#
+# That last one is the point of the whole shortlist-then-read design, and it is free here because
+# 'write' fills every file with its own name repeated — two files of one size are never the same
+# file unless something really copied one.
+
+tree .
+write same-a.bin 5000
+write same-b.bin 5000
+write twin.txt 500
+refresh
+assert-count 11
+
+# Real copies, made by TransferExecutor — the same code a drag-and-drop runs, so these are
+# byte-for-byte the originals rather than something the test wrote twice.
+select photo.jpg, archive.zip, twin.txt
+copy to Empty
+settle
+assert-exists Empty/photo.jpg
+
+# The scan itself. 'duplicates' crawls the folder into fs_entry first: a harness run is unelevated,
+# so the MFT pass indexes nothing and there would otherwise be no shortlist to draw from.
+duplicates
+assert-duplicate-groups 3
+assert-duplicate-row photo.jpg
+assert-duplicate-row archive.zip
+assert-duplicate-row twin.txt
+
+# Same length, different content. If these ever pair up, the sampling pass has stopped reading and
+# started trusting the size — which is the one failure that would offer to delete unrelated files.
+assert-no-duplicate-row same-a.bin
+assert-no-duplicate-row same-b.bin
+
+shot 01-duplicates
+dialog duplicates 02-duplicates-window
+
+# Keeping the shallowest copy keeps the original and ticks the one under Empty, which is what makes
+# the assertions below name a definite file rather than whichever way a tiebreak fell.
+duplicates-keep shallowest
+assert-duplicate-selected 3
+
+# Photographed through 'dialog', not 'shot': shot captures the main window, and the ticks are in
+# this one.
+dialog duplicates 03-duplicates-selected
+
+# The delete goes through PlanDelete/DeleteAsync, so it lands in the Recycle Bin, fills the shared
+# undo slot, and Ctrl+Z brings it back. A duplicate finder with its own delete path would pass none
+# of the next five lines.
+duplicates-remove
+assert-missing Empty/photo.jpg
+assert-missing Empty/twin.txt
+assert-exists photo.jpg
+assert-can-undo
+undo
+assert-exists Empty/photo.jpg
+
+# Nothing in this run may have tried to put another program's window on screen.
+assert-not-launched
+state

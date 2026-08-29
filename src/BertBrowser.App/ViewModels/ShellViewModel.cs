@@ -147,6 +147,25 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private void AnalyseDiskUsage() =>
         OpenDiskUsage(ActiveTab.CurrentPath is { Length: > 0 } path ? path : null);
 
+    /// <summary>
+    /// Raised with the folder to search for duplicates, or null for "This PC". Shaped exactly like
+    /// <see cref="DiskUsageRequested"/>, and for the same reason: the window builds the view, and
+    /// every entry point goes through <see cref="OpenDuplicates"/> so there is one route and one
+    /// place it can be opened wrongly.
+    /// </summary>
+    public event Action<string?>? DuplicatesRequested;
+
+    /// <summary>Opens the duplicates view on <paramref name="path"/>, or on the whole PC when it
+    /// is null.</summary>
+    public void OpenDuplicates(string? path) => DuplicatesRequested?.Invoke(path);
+
+    /// <summary>The Ctrl+Shift+U arm: search whatever the active tab is showing. A tab with no path
+    /// yet (or one showing a search result) falls back to the whole PC rather than refusing.
+    /// </summary>
+    [RelayCommand]
+    private void FindDuplicates() =>
+        OpenDuplicates(ActiveTab.CurrentPath is { Length: > 0 } path ? path : null);
+
     public ShellViewModel(
         IFileSystemService fileSystem,
         ISearchService searchService,

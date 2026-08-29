@@ -163,6 +163,15 @@ public partial class App : Application
         services.AddSingleton<ISearchService, SearchService>();
         services.AddSingleton<BertBrowser.Core.Services.DiskUsage.IDiskUsageService,
             BertBrowser.Core.Services.DiskUsage.DiskUsageService>();
+        // Finding duplicates starts from the byte lengths the MFT pass already wrote, then reads
+        // only the files that collide — so the shortlist, the hasher and the facade over both are
+        // three registrations rather than one service that does its own I/O.
+        services.AddSingleton<BertBrowser.Core.Services.Duplicates.IDuplicateCandidateSource,
+            BertBrowser.Core.Services.Duplicates.IndexedDuplicateCandidateSource>();
+        services.AddSingleton<BertBrowser.Core.Services.Duplicates.IFileHasher,
+            BertBrowser.Core.Services.Duplicates.FileSystemFileHasher>();
+        services.AddSingleton<BertBrowser.Core.Services.Duplicates.IDuplicateFinder,
+            BertBrowser.Core.Services.Duplicates.DuplicateFinder>();
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddSingleton<IProcessLauncher, ProcessLauncher>();
         services.AddSingleton<PaneFactory>();

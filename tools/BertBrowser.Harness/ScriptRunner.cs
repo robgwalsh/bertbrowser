@@ -14,6 +14,7 @@ using BertBrowser.Core.Data;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.DiskUsage;
+using BertBrowser.Core.Services.Duplicates;
 using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
@@ -138,6 +139,9 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "copy": Transfer(rest, TransferVerb.Copy); break;
             case "undo": Undo(); break;
             case "progress-demo": ProgressDemo(rest); break;
+            case "duplicates": Duplicates(rest); break;
+            case "duplicates-keep": DuplicatesKeep(rest); break;
+            case "duplicates-remove": DuplicatesRemove(); break;
 
             // browse settings
             case "hidden": Hidden(rest); break;
@@ -172,6 +176,10 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-not-flattened": AssertFlattened(expected: false); break;
             case "assert-can-undo": AssertCanUndo(expected: true); break;
             case "assert-cannot-undo": AssertCanUndo(expected: false); break;
+            case "assert-duplicate-groups": AssertDuplicateGroups(rest); break;
+            case "assert-duplicate-selected": AssertDuplicateSelected(rest); break;
+            case "assert-duplicate-row": AssertDuplicateRow(rest, expected: true); break;
+            case "assert-no-duplicate-row": AssertDuplicateRow(rest, expected: false); break;
             case "assert-exists": AssertOnDisk(rest, expected: true); break;
             case "assert-missing": AssertOnDisk(rest, expected: false); break;
             case "assert-visible": AssertVisibility(rest, expected: true); break;
@@ -848,6 +856,171 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         session.Settle();
     }
 
+
+    // --- duplicates ---
+
+    /// <summary>
+    /// The duplicates view for this run, kept between commands so a scan, the ticking and the
+    /// delete are three script lines rather than one that does everything.
+    /// </summary>
+    private DuplicatesViewModel? _duplicates;
+
+    /// <summary>
+    /// Scans a folder for identical files. <c>duplicates [path]</c>, defaulting to the folder the
+    /// active tab is showing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It crawls the folder into the index first,</b> and has to: a harness run is unelevated,
+    /// so <c>MftVolumeIndexer.Open()</c> fails soft on every volume and there are no fs_entry rows
+    /// for the sandbox to shortlist from. <c>IndexCrawler</c> writes the same rows with the
+    /// same sizes the MFT pass would, so what is scanned is what the app would scan — this is the
+    /// fallback path a network share takes, not a special case invented for testing.
+    /// </para>
+    /// <para>
+    /// The scan is awaited rather than left running. <c>UiSession.IsBusy</c> knows about listings
+    /// and transfers, not about this, so a bare <c>settle</c> after it would return while the
+    /// hashing was still going.
+    /// </para>
+    /// </remarks>
+    private void Duplicates(string rest)
+    {
+        var path = rest.Length == 0
+            ? session.Dispatcher.Invoke(() => session.Tab.CurrentPath)
+            : _sandbox.Resolve(rest);
+
+        if (!Directory.Exists(path))
+            throw new AssertionException($"There is no folder at '{path}' to search.");
+
+        var crawler = session.Services.GetRequiredService<BertBrowser.Core.Services.IndexCrawler>();
+        Await(() => crawler.CrawlAsync(path, CancellationToken.None));
+
+        var view = DuplicatesView();
+        Await(() => view.ScanAsync(path));
+
+        if (options.Verbose)
+            output.WriteLine($"# {view.Groups.Count} groups, {view.ReclaimableBytes} bytes reclaimable");
+    }
+
+    /// <summary>Ticks every copy but one, the way the view's own buttons do.</summary>
+    private void DuplicatesKeep(string rest)
+    {
+        var view = RequireDuplicates("duplicates-keep");
+
+        var strategy = rest.Trim().ToLowerInvariant() switch
+        {
+            "newest" => KeepStrategy.Newest,
+            "oldest" => KeepStrategy.Oldest,
+            "shallowest" => KeepStrategy.Shallowest,
+            var other => throw new FormatException(
+                $"'{other}' is not a keep strategy. Try: newest, oldest, shallowest."),
+        };
+
+        session.Dispatcher.Invoke(() =>
+        {
+            foreach (var group in view.Groups) group.TickAllBut(strategy);
+        });
+
+        session.Settle();
+
+        if (options.Verbose)
+            output.WriteLine("# groups: " + string.Join(", ", view.Groups.Select(g => $"{g.Files.Count} files/{g.TickedCount} ticked")) + $" total={view.TickedCount}");
+    }
+
+    /// <summary>Deletes the ticked copies, through the planner and executor a real one goes through.</summary>
+    private void DuplicatesRemove()
+    {
+        var view = RequireDuplicates("duplicates-remove");
+
+        if (view.TickedCount == 0)
+            throw new AssertionException("Nothing is ticked. Run 'duplicates-keep' first.");
+
+        Await(() => view.RemoveTickedCommand.ExecuteAsync(null));
+    }
+
+    private void AssertDuplicateGroups(string rest)
+    {
+        var expected = Number(rest, "assert-duplicate-groups");
+        var actual = RequireDuplicates("assert-duplicate-groups").Groups.Count;
+
+        if (actual != expected)
+            throw new AssertionException($"Expected {expected} duplicate groups, found {actual}.");
+    }
+
+    private void AssertDuplicateSelected(string rest)
+    {
+        var expected = Number(rest, "assert-duplicate-selected");
+        var actual = RequireDuplicates("assert-duplicate-selected").TickedCount;
+
+        if (actual != expected)
+            throw new AssertionException($"Expected {expected} copies ticked, found {actual}.");
+    }
+
+    /// <summary>Asserts some group does, or does not, hold a copy with this name.</summary>
+    private void AssertDuplicateRow(string rest, bool expected)
+    {
+        var verb = expected ? "assert-duplicate-row" : "assert-no-duplicate-row";
+        var name = Require(rest, verb);
+        var view = RequireDuplicates(verb);
+
+        var names = view.Groups.SelectMany(g => g.Files).Select(f => f.Item.Name).ToList();
+        var found = names.Any(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
+
+        if (found != expected)
+            throw new AssertionException(expected
+                ? $"No duplicate named '{name}'. Found: {string.Join(", ", names.Distinct())}"
+                : $"'{name}' was reported as a duplicate, and should not have been.");
+    }
+
+    private DuplicatesViewModel RequireDuplicates(string verb) =>
+        _duplicates ?? throw new AssertionException($"Run 'duplicates' before '{verb}'.");
+
+    /// <summary>
+    /// The view model, made once per run.
+    /// </summary>
+    /// <remarks>
+    /// Its remover goes straight through the planner and executor rather than through
+    /// <c>DeleteDialog</c>: the dialog is modal, and <c>ShowDialog</c> would run a nested message
+    /// loop on the script's own thread and hang the run until the watchdog fired. Every path is
+    /// still fenced to the sandbox first, since this drives the real delete executor.
+    /// </remarks>
+    private DuplicatesViewModel DuplicatesView()
+    {
+        if (_duplicates is { } existing) return existing;
+
+        return _duplicates = session.Dispatcher.Invoke(() => new DuplicatesViewModel(
+            session.Services.GetRequiredService<IDuplicateFinder>(),
+            session.Services.GetRequiredService<IMftIndexService>(),
+            RemoveDuplicatesFenced,
+            includeHidden: session.Services.GetRequiredService<AppSettings>().ShowHiddenItems,
+
+            // The sandbox's files are a few hundred bytes each, so the shipped one-megabyte floor
+            // would shortlist nothing at all.
+            minSizeBytes: 1,
+            skipSystemFolders: false));
+    }
+
+    private async Task<IReadOnlyCollection<string>> RemoveDuplicatesFenced(IReadOnlyList<string> paths)
+    {
+        var sources = paths
+            .Select(p => new DeleteSource(_sandbox.RequireInside(p, "duplicates-remove"), false))
+            .ToList();
+
+        var plan = session.Shell.PlanDelete(sources, DeleteMode.Recycle);
+
+        if (plan.Problems is { Count: > 0 } problems)
+            throw new AssertionException(
+                $"The delete was refused: {string.Join("; ", problems.Select(p => p.Message))}");
+
+        if (!plan.HasWork) return [];
+
+        var outcome = await session.Shell.DeleteAsync(plan);
+
+        if (outcome.Failed is { Count: > 0 } failures)
+            throw new AssertionException(string.Join("; ", failures.Select(f => f.Message)));
+
+        return [.. outcome.Deleted.Select(d => d.SourcePath)];
+    }
     // ---- browse settings --------------------------------------------------------------
 
     private void Hidden(string rest) => Invoke(() =>
@@ -1033,6 +1206,13 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         "disk-usage" => DiskUsageWindowFor(),
 
+        // Needs a 'duplicates' first, so the window shows the results that run found rather than
+        // starting a scan of its own while a capture waits on it.
+        "duplicates" => _duplicates is { } view
+            ? DuplicatesWindow.Create(view, (_, _) => { })
+            : throw new AssertionException(
+                "There are no duplicate results to show. Run 'duplicates' before 'dialog duplicates'."),
+
         // Posed rather than run, for the reasons on ProgressDemo. Needs a progress-demo first, so
         // the window shows the same fixed figures the status bar does.
         "transfer" => session.Shell.TransferProgress is { } progress
@@ -1043,7 +1223,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         _ => throw new FormatException(
             $"'{kind}' is not a dialog. Try: new-folder, new-file, rename, rename-advanced, " +
             "delete, delete-permanent, message, warning, properties, settings, theme-editor, " +
-            "disk-usage, transfer."),
+            "disk-usage, duplicates, transfer."),
     };
 
     /// <summary>

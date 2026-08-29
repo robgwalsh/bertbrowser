@@ -11,6 +11,7 @@ using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.DiskUsage;
+using BertBrowser.Core.Services.Duplicates;
 using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Services.NewItem;
 
@@ -25,6 +26,9 @@ public partial class MainWindow : ThemedWindow
     /// <summary>The modeless disk-usage window while one is open, so a second request re-points
     /// it instead of stacking another.</summary>
     private DiskUsageWindow? _diskUsage;
+
+    /// <summary>The modeless duplicates window while one is open, re-pointed rather than stacked.</summary>
+    private DuplicatesWindow? _duplicates;
 
     private TransferProgressWindow? _transferDetails;
 
@@ -53,6 +57,7 @@ public partial class MainWindow : ThemedWindow
         _shell.PaneFocusRequested += OnPaneFocusRequested;
         _shell.GlobalSearchFocusRequested += FocusGlobalSearchBox;
         _shell.DiskUsageRequested += ShowDiskUsage;
+        _shell.DuplicatesRequested += ShowDuplicates;
         _shell.PropertyChanged += Shell_TransferProgressChanged;
 
         Loaded += async (_, _) => await _shell.InitializeAsync();
@@ -201,6 +206,95 @@ public partial class MainWindow : ThemedWindow
         _diskUsage.Closed += (_, _) => _diskUsage = null;
         _diskUsage.Show();
         _diskUsage.Load(path);
+    }
+
+    /// <summary>
+    /// The one construction site for the duplicates view, reached only through
+    /// <see cref="ShellViewModel.OpenDuplicates"/> — the toolbar, both context menus and
+    /// Ctrl+Shift+U all arrive here.
+    /// </summary>
+    /// <remarks>
+    /// Modeless and re-used, like the disk-usage view. It deliberately does <em>not</em> start
+    /// scanning: unlike that one, this reads real files, and a window that began churning through a
+    /// disk the moment it appeared would be a nasty surprise. It opens pointed at the folder, with
+    /// Scan waiting to be pressed.
+    /// </remarks>
+    private void ShowDuplicates(string? path)
+    {
+        if (_duplicates is { IsLoaded: true })
+        {
+            _duplicates.Load(path);
+            _duplicates.Activate();
+            return;
+        }
+
+        var vm = new DuplicatesViewModel(
+            App.Services.GetRequiredService<IDuplicateFinder>(),
+            App.Services.GetRequiredService<IMftIndexService>(),
+            RemoveDuplicateCopies,
+            _settings.ShowHiddenItems,
+            _settings.DuplicateMinSizeBytes,
+            _settings.DuplicateSkipSystemFolders);
+
+        _duplicates = new DuplicatesWindow(vm, RevealFromDiskUsage) { Owner = this };
+        _duplicates.Closed += (_, _) =>
+        {
+            // The knobs are remembered rather than reset: someone who scans at 100 MB once will
+            // scan at 100 MB again, and re-picking it every time is the kind of small friction
+            // that stops a feature being used.
+            _settings.DuplicateMinSizeBytes = vm.MinSizeBytes;
+            _settings.DuplicateSkipSystemFolders = vm.SkipSystemFolders;
+            _settings.Save();
+
+            // This window was handed the view model, so closing it is where the subscriptions to
+            // the index service go — the window itself does not dispose what it did not make.
+            vm.Dispose();
+            _duplicates = null;
+        };
+        _duplicates.Show();
+        _duplicates.Load(path);
+    }
+
+    /// <summary>
+    /// Removes the copies the duplicates view has marked, through the same plan, confirmation and
+    /// undo slot as any other delete in this app.
+    /// </summary>
+    /// <remarks>
+    /// <b>Nothing here calls File.Delete.</b> Going through the planner is what keeps the
+    /// protected-location refusals, the Recycle Bin, Ctrl+Z and the tab fan-out in force — a
+    /// duplicate finder with its own delete path would be a second thing to audit and the more
+    /// dangerous of the two.
+    /// </remarks>
+    private async Task<IReadOnlyCollection<string>> RemoveDuplicateCopies(IReadOnlyList<string> paths)
+    {
+        var plan = _shell.PlanDelete(
+            [.. paths.Select(p => new DeleteSource(p, IsDirectory: false))], DeleteMode.Recycle);
+
+        if (!plan.HasWork)
+        {
+            if (plan.Problems is { Count: > 0 } problems)
+                MessageDialog.Show(this, string.Join("\n\n", problems.Select(p => p.Message)),
+                    "Delete", MessageDialogKind.Warning);
+            return [];
+        }
+
+        var owner = _duplicates is { IsLoaded: true } window ? (Window)window : this;
+        if (!DeleteDialog.Confirm(owner, plan, _shell.SurveyDelete)) return [];
+
+        var outcome = await _shell.DeleteAsync(plan);
+        if (outcome.Failed.Count > 0)
+            MessageDialog.Show(owner, string.Join("\n\n", outcome.Failed.Select(f => f.Message)),
+                "Delete", MessageDialogKind.Warning);
+
+        // Only what really went: an item the executor refused is still there, and dropping its row
+        // would tell the user it had gone.
+        return [.. outcome.Deleted.Select(d => d.SourcePath)];
+    }
+
+    private void TreeDuplicates_Click(object sender, RoutedEventArgs e)
+    {
+        if (_treeContextNode is { } node)
+            _shell.OpenDuplicates(node.FullPath);
     }
 
     /// <summary>Acting on what the analysis says: a folder opens in a new tab, a file opens its

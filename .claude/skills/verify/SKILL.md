@@ -94,6 +94,14 @@ delete | delete-permanent [names]
 move|copy [names] to <folder>
 undo
 
+duplicates [folder]         scan for byte-identical files, defaulting to the folder on show. It
+                            crawls the folder into fs_entry first — a harness run is unelevated, so
+                            the MFT pass indexes nothing and there is no shortlist otherwise — and
+                            awaits the scan, because `settle` does not know about it
+duplicates-keep <strategy>  tick every copy but one: newest, oldest or shallowest
+duplicates-remove           delete the ticked copies through PlanDelete/DeleteAsync, so they land
+                            in the Recycle Bin and `undo` puts them back
+
 hidden on|off | thumbnails <0..1> | sort name|size|modified|type | theme <id>
 preview on|off              the active tab's preview pane, with its debounce and off-thread read
                             waited out (so assert after this, not straight after a `select`)
@@ -101,7 +109,7 @@ preview on|off              the active tab's preview pane, with its debounce and
 shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, rename-advanced,
                             delete, delete-permanent, message, warning, properties, settings,
-                            theme-editor, disk-usage
+                            theme-editor, disk-usage, duplicates
                             (new-folder/new-file need no selection; every other kind uses one.
                             rename-advanced is the rename dialog with its options panel open —
                             the panel is opened by a click, and this never clicks)
@@ -117,6 +125,8 @@ assert-path <substring> | assert-status <substring> | assert-count <n>
 assert-row <name> | assert-no-row <name> | assert-selected <n>
 assert-tabs <n> | assert-panes <n> | assert-flattened | assert-not-flattened
 assert-can-undo | assert-cannot-undo | assert-exists <path> | assert-missing <path>
+assert-duplicate-groups <n> | assert-duplicate-selected <n>
+assert-duplicate-row <name> | assert-no-duplicate-row <name>
 assert-visible <Name> | assert-hidden <Name> | assert-not-launched
 assert-preview <kind>       image | document | text | archive | font | media | loading | none
 

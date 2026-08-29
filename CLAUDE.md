@@ -459,6 +459,154 @@ a `stagingRoot` purely so tests do not create folders at the root of a real disk
 confirm a test goes red — `DispositionFor` returning `Recycle` unconditionally, or the executor
 erasing when there is no bin, both go red.
 
+### Disk usage
+
+"What is taking up my disk?", answered **entirely from what the MFT pass already wrote** — the
+per-file rows in `fs_entry` and the per-directory totals in `dir_size_cache`. Nothing here walks the
+filesystem to size a folder, which is the rule the file list and the folder tree already follow.
+
+`Core/Services/DiskUsage` splits the way the rest of the app does, except that there is nothing to
+execute: `DiskUsageService` is the async facade (`Task.Run` over synchronous ADO.NET, shaped like
+`SearchService`), and **`DiskUsageRules` is the pure half worth testing**. Two views over one root —
+the biggest files anywhere beneath it (`FsIndexRepository.LargestFiles`) and what its immediate
+children weigh (`BreakdownAsync`), drillable, which is how you follow the weight down.
+
+**`DiskUsageAvailability` is the whole point of the feature's shape.** An unmeasured folder is
+unknown, never zero, and a size column cannot tell those apart — so the decision is made once, in
+`Classify`, where a test can hold it still. Its five states are five different things having gone
+wrong and their wordings are deliberately distinct: an unindexed drive must not read like an empty
+one. The state that matters is **`NoSizeData`**: `MftVolumeIndexer.BuildFromUsnEnum`, the
+`FSCTL_ENUM_USN_DATA` fallback taken when the raw `$MFT` read fails, writes **every row with
+`size_bytes = 0`** and fills no `dir_size_cache` at all. Since `LargestFiles` orders by size
+descending, a zero in the *largest* slot proves it — and reporting `Ready` there is what would put a
+screenful of "0 B" in front of the user.
+
+`ClassifyBreakdown` is deliberately **not** `Classify`, and the doc comment says why: it weighs
+different evidence. A breakdown's file sizes come from the enumeration and are always real, so only
+the *directory* totals depend on the index; and a folder holding three empty files really is all
+zeros, so reading that as "no size data" would be a lie about ordinary content. `Unaccounted`
+returns **null rather than a smaller number** whenever any child is unmeasured — a remainder computed
+from an incomplete sum is not smaller, it is wrong, and would silently attribute a missing child's
+bytes to the parent's own files.
+
+`Views/DiskUsageWindow` is **modeless**, for the reason the theme editor is: acting on what it says
+means going to a folder in a tab behind it. It is constructed in exactly one place
+(`MainWindow.ShowDiskUsage`) and **re-pointed rather than stacked** — analysing is something you do
+repeatedly while browsing. Four entry points (toolbar, Ctrl+Shift+D, both context menus) all funnel
+through `ShellViewModel.OpenDiskUsage` → `DiskUsageRequested`, so there is one route and one place it
+can be opened wrongly. `TreemapCanvas` draws the children with `TreemapLayout` (squarified, pure,
+unit-tested) and `TreemapPalette`; only *measured* children get area, since an unknown size has no
+share to draw.
+
+Tests: `DiskUsageRulesTests`, `DiskUsageServiceTests` (real temp database + real temp tree, so the
+seam between enumerated file sizes and cached folder totals is exercised), `TreemapLayoutTests`,
+`TreemapPaletteTests`. `tools/ui/diskusage.bbs` covers the wiring — and note what it can *only*
+cover: a harness run is unelevated, so `MftVolumeIndexer.Open()` fails soft and there are no
+`dir_size_cache` rows, which means it photographs the **unknown** states. That is deliberate
+coverage, not a shortcoming: those are precisely the ones that regress into rendering zeros.
+
+### Duplicates
+
+"What do I have two of?" — and the answer's cheap half is already paid for. **Two files of different
+lengths cannot be duplicates, and the MFT pass already wrote a length for every file on every fixed
+volume**, so the pass that would otherwise mean walking millions of directory entries is a query.
+Only the collisions are ever opened, and only the survivors of a 64 KB sample are ever read whole.
+
+`Core/Services/Duplicates` is three stages behind two seams:
+
+- **The shortlist** is `FsIndexRepository.DuplicateCandidates`, reached through
+  **`IDuplicateCandidateSource`** so the scanner can be tested with no SQLite. It is **two streaming
+  scans and deliberately no `GROUP BY`**: grouping or ordering by `size_bytes` makes SQLite
+  materialise a temp B-tree over every qualifying (size, path_key) pair — hundreds of megabytes on a
+  real index, since there is no index on size and the pair is most of the row. Two ordered walks of
+  the clustered table need no sorter at all; the first counts sizes into a dictionary bounded by the
+  number of *distinct* sizes, the second collects only rows whose size was seen twice, off pages the
+  first walk just warmed.
+- **The sample** hashes the first `DuplicateRules.HeadSampleBytes` (64 KB) of each candidate. A file
+  that size or smaller is thereby hashed *in full*, so it never reaches the third stage — which is
+  what stops every small file on the shortlist being read twice.
+- **The full hash** reads the survivors end to end. Grouping is on **`BytesRead`, not the indexed
+  size**: a row can be stale, and a file that shrank since it was indexed must not be compared
+  against one that did not.
+
+**An index on `size_bytes` was considered and refused**, and the reasoning is on the repository
+method. `fs_entry` is `WITHOUT ROWID`, so a secondary index carries the whole `path_key` as its row
+reference — several hundred megabytes onto a database already well over a gigabyte, plus a second
+B-tree to write on every 20,000-row upsert chunk of a build that runs at *every launch*. This is the
+same trade `002_search_index.sql` already made against an index on `name`. **There is no schema
+change for this feature at all.**
+
+**Measured, not assumed**, against a real 1.6 GB index with 1,092,442 file rows: `EXPLAIN QUERY PLAN`
+reports `SCAN fs_entry` for both passes and **no temp B-tree**, pass one takes 0.8 s and pass two
+0.5 s. Above a 1 MB floor that index yields 11,256 candidates totalling 109 GB — of which the sample
+pass reads **703 MB** before anything is read whole. That ratio is the entire design: a second and a
+bit of index scanning, then two thirds of a gigabyte, in place of a hundred and nine.
+
+Four things are load-bearing:
+
+- **`DuplicateScanAvailability` is deliberately not `DiskUsageAvailability`**, for the reason
+  `ClassifyBreakdown` is deliberately not `Classify`: different evidence. That rule can read "the
+  largest row is 0 bytes" because it orders by size; a duplicate scan applies a size *floor* before
+  it looks at anything, so an empty result tells it nothing. `DuplicateCandidates` therefore counts
+  **files in scope** and **files in scope with a real length** during its first walk — free, from a
+  pass that is happening anyway, and taken *before* the floor and the exclusion because they describe
+  what the index knows rather than what the caller asked for. Rows with not one length is the
+  `FSCTL_ENUM_USN_DATA` build, where every file collides with every other; `NoSizeData` refuses to
+  scan rather than reading a whole disk to discover nothing.
+- **Hardlinks are folded, and that is what makes a whole-PC scan usable.** `C:\Windows\WinSxS` is
+  built almost entirely of one file under several names — same size, same bytes, and deleting one
+  frees nothing. `Interop/FileIdentityNative` reads `nNumberOfLinks` from the handle the hasher
+  already has open, and only when that is above one does it take the volume serial and file index
+  too. Names sharing an identity collapse into a single entry carrying the others; a group left with
+  fewer than two entries is **not a result** and is dropped. `SkipSystemFolders` is the other half,
+  on by default — and `DuplicateRules.IsSystemSubtree` is deliberately **not**
+  `ProtectedLocations.Default`: that set is exact-match folders-only, this needs whole subtrees, and
+  it must *not* include the profile root, which is exactly where a person's real duplicates live.
+- **Nothing is ever held open, and cancelling gives back a floor rather than nothing.** Every read
+  shares `ReadWrite | Delete` — the preview pane's rule, and here it is this app's *own* rename, move
+  and delete executors that a read lock would block. A reparse point and a cloud placeholder are
+  refused rather than followed or hydrated (the same attributes `PreviewClassifier` names). An
+  unreadable file marks the outcome `Incomplete` and costs the others nothing; a **cancel throws**
+  instead, because conflating the two would make a stopped run look like a disk full of broken files.
+  On a cancel the scanner reports what it had genuinely confirmed — but never a group whose members
+  only agreed on their *first 64 KB*, so a cancel during sampling yields only the files small enough
+  to have been hashed in full by it.
+- **`SHA-256` is the answer, with no byte-for-byte pass after it.** It is hardware-accelerated, needs
+  no package, and its equality is strong enough to act on — which matters, because what the user does
+  with the answer is delete files. A faster non-cryptographic hash would have needed a full compare
+  behind it, costing more than the stronger hash did.
+
+The surface is `Views/DuplicatesWindow` over `DuplicatesViewModel`, modeless and re-pointed rather
+than stacked, with four entry points funnelling through `ShellViewModel.OpenDuplicates` — the same
+shape as disk usage, down to the availability banner. Two differences from that view, both
+deliberate: it **does not scan when it opens**, because unlike disk usage this reads real files and a
+window that started churning through a disk on sight would be a nasty surprise; and it is the only
+analysis screen with a **cancel**. The window does **not** dispose the view model it was handed —
+`MainWindow` does, the way it owns `TransferProgressViewModel` — because the harness photographs a
+finished scan by wrapping the same one, and a window that disposed what it did not make would kill a
+scan the caller still wanted.
+
+**Deleting goes through `PlanDelete` → `DeleteDialog.Confirm` → `DeleteAsync` and nothing else.**
+That is what keeps the protected-location refusals, the Recycle Bin, the shared one-level undo slot
+and the tab fan-out in force; a duplicate finder with its own delete path would be a second thing to
+audit and the more dangerous of the two. `DuplicateRules.CanRemove` and `DuplicateGroupViewModel`
+both enforce that **a group may never have every copy ticked** — the last unticked box is disabled
+rather than springing back, since the point of the feature is to reclaim what a redundant copy costs.
+`ChooseKeeper` breaks ties on ordinal path, and has to: several copies from one unzip share a
+timestamp to the tick, and an auto-selection that shuffled between presses would be impossible to
+trust with a delete on the end of it.
+
+Tests: `DuplicateRulesTests` (availability, the system-subtree rule, `CanRemove`, `ChooseKeeper`),
+`DuplicateScannerTests` (the three stages against a fake index and a `FakeHasher` that really hashes
+in-memory bytes in fixed chunks with a hook between them — the `SteppedCopier` pattern — so a cancel
+lands mid-file every time), `FileSystemFileHasherTests` (real files; the sharing rule is the one no
+scanner test could catch), plus `DuplicateCandidates` coverage in `FsIndexRepositoryTests`.
+`tools/ui/duplicates.bbs` drives the whole thing including the delete and its undo, and `themes.bbs`
+photographs the window in both palettes — a group header, a disabled checkbox and a muted hardlink
+note are a lot of new surface for a colour to go missing in. Mutate a rule and confirm a test goes
+red: group on size alone and three go, drop the hardlink fold and two go, narrow the hasher's share
+flags to `FileShare.Read` and one goes.
+
 ### The elevated index helper
 
 **The app is `asInvoker`.** Exactly one thing needs an administrator token — `MftVolumeIndexer.Open()`

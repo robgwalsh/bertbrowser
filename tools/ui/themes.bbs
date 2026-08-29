@@ -6,7 +6,11 @@
 # picture and looks fine in the other nine.
 
 tree .
+write twin.txt 500
 refresh
+select twin.txt
+copy to Empty
+settle
 select notes.txt, report.md
 
 shot 01-dark-plus
@@ -20,6 +24,12 @@ dialog theme-editor 06-theme-editor-dark
 progress-demo
 dialog transfer     06b-transfer-dark
 
+# The duplicates window is a lot of new surface for a colour to go missing in: a group header, a
+# disabled checkbox on the copy being kept, and a third-level muted line for a hardlink note.
+duplicates
+duplicates-keep shallowest
+dialog duplicates   06c-duplicates-dark
+
 theme light-plus
 shot 07-light-plus
 dialog new-file    08-new-file-light
@@ -29,6 +39,7 @@ dialog delete     09-delete-light
 dialog settings   10-settings-light
 dialog properties 11-properties-light
 dialog transfer   11b-transfer-light
+dialog duplicates 11c-duplicates-light
 progress-demo off
 
 # A search result and the tile view in a light theme: the flattened list's Folder column and the
