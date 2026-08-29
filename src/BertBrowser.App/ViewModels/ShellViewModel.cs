@@ -824,6 +824,13 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     public RenamePlan PlanRename(IReadOnlyList<RenameSource> sources, string pattern) =>
         _renamePlanner.Plan(sources, pattern);
 
+    /// <summary>The same question for the dialog's expanded panel, where the name comes from a
+    /// find/replace, a case transform, a counter and a date rather than from typed text.</summary>
+    /// <remarks>Only the naming differs: this goes through the same planner, and everything it
+    /// decides about collisions and refusals is shared with the plain path.</remarks>
+    public RenamePlan PlanRename(IReadOnlyList<RenameSource> sources, RenameRule rule) =>
+        _renamePlanner.Plan(sources, rule);
+
     /// <summary>Carries out a rename the dialog already planned, then refreshes the tree and every
     /// tab showing an affected folder — a selection made in a search result can span several. The
     /// outcome comes back so the view can report whatever failed.</summary>

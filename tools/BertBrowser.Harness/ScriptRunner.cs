@@ -131,6 +131,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "newfolder": NewItem(rest, NewItemKind.Folder); break;
             case "newfile": NewItem(rest, NewItemKind.File); break;
             case "rename": Rename(rest); break;
+            case "rename-rule": RenameByRule(rest); break;
             case "delete": Delete(rest, DeleteMode.Recycle); break;
             case "delete-permanent": Delete(rest, DeleteMode.Permanent); break;
             case "move": Transfer(rest, TransferVerb.Move); break;
@@ -570,22 +571,115 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     private void Rename(string rest)
     {
         var pattern = Require(rest, "rename");
-        var sources = Selection()
-            .Select(i => new RenameSource(_sandbox.RequireInside(i.FullPath, "rename"), i.IsDirectory))
-            .ToList();
+        Carry(RenameSources("rename"), RenameRule.Simple(pattern), $"Renaming to '{pattern}'");
+    }
 
-        var plan = session.Dispatcher.Invoke(() => session.Shell.PlanRename(sources, pattern));
+    /// <summary>
+    /// Renames the selection through the dialog's expanded panel — <c>rename-rule find=IMG_
+    /// replace=Holiday template="{base} {n:000}{ext}"</c>.
+    /// </summary>
+    /// <remarks>
+    /// Settings are <c>key=value</c>, quoted when they contain a space: <c>template</c>,
+    /// <c>find</c>, <c>replace</c>, <c>regex</c>, <c>matchcase</c>, <c>scope</c>, <c>case</c>,
+    /// <c>start</c>, <c>step</c>. It goes through the same <c>PlanRename</c> and <c>RenameAsync</c>
+    /// the dialog does, so nothing between the rule and the disk is skipped — use
+    /// 'dialog rename-advanced' to photograph the panel itself.
+    /// </remarks>
+    private void RenameByRule(string rest)
+    {
+        if (rest.Trim().Length == 0)
+            throw new FormatException("rename-rule needs key=value settings.");
+
+        Carry(RenameSources("rename-rule"), ParseRule(rest), "That rule");
+    }
+
+    private List<RenameSource> RenameSources(string verb) => Selection()
+        .Select(i => new RenameSource(
+            _sandbox.RequireInside(i.FullPath, verb), i.IsDirectory, Modified(i)))
+        .ToList();
+
+    private void Carry(List<RenameSource> sources, RenameRule rule, string what)
+    {
+        var plan = session.Dispatcher.Invoke(() => session.Shell.PlanRename(sources, rule));
 
         if (plan.Rejected is { Count: > 0 } rejected)
             throw new AssertionException(
                 $"The rename was refused: {string.Join("; ", rejected.Select(r => r.Message))}");
 
-        if (!plan.HasWork) throw new AssertionException($"Renaming to '{pattern}' would change nothing.");
+        if (!plan.HasWork) throw new AssertionException($"{what} would change nothing.");
 
         var outcome = Await(() => session.Shell.RenameAsync(plan));
 
         if (outcome.Failed is { Count: > 0 } failures)
             throw new AssertionException(string.Join("; ", failures.Select(f => f.Message)));
+    }
+
+    /// <summary>The row's modified time as the dialog hands it over: local, and null when the row
+    /// has never been hydrated.</summary>
+    private static DateTime? Modified(FileItemViewModel item) =>
+        item.ModifiedUtc == default ? null : item.ModifiedUtc.ToLocalTime();
+
+    private static RenameRule ParseRule(string rest)
+    {
+        var rule = new RenameRule("{name}");
+
+        foreach (var (key, value) in Settings(rest))
+            rule = key switch
+            {
+                "template" => rule with { Template = value },
+                "find" => rule with { Find = value },
+                "replace" => rule with { Replace = value },
+                "regex" => rule with { UseRegex = Switch(value, "regex") },
+                "matchcase" => rule with { MatchCase = Switch(value, "matchcase") },
+                "scope" => rule with { Scope = Choice<RenameScope>(value, "scope") },
+                "case" => rule with { Case = Choice<RenameCase>(value, "case") },
+                "start" => rule with { CounterStart = Number(value, "start") },
+                "step" => rule with { CounterStep = Number(value, "step") },
+                _ => throw new FormatException(
+                    $"'{key}' is not a rename-rule setting. Try template, find, replace, regex, " +
+                    "matchcase, scope, case, start, step."),
+            };
+
+        return rule;
+    }
+
+    private static TEnum Choice<TEnum>(string value, string key) where TEnum : struct, Enum =>
+        Enum.TryParse<TEnum>(value, ignoreCase: true, out var parsed)
+            ? parsed
+            : throw new FormatException(
+                $"'{value}' is not a {key}. Try {string.Join(", ", Enum.GetNames<TEnum>())}.");
+
+    /// <summary>Splits <c>key=value key="value with spaces"</c> into pairs. An empty value is a
+    /// real setting — <c>replace=</c> is how a find is deleted rather than substituted.</summary>
+    private static IEnumerable<(string Key, string Value)> Settings(string text)
+    {
+        var i = 0;
+        while (i < text.Length)
+        {
+            while (i < text.Length && text[i] == ' ') i++;
+            if (i >= text.Length) yield break;
+
+            var equals = text.IndexOf('=', i);
+            if (equals < 0)
+                throw new FormatException($"rename-rule wants key=value, got '{text[i..].Trim()}'.");
+
+            var key = text[i..equals].Trim().ToLowerInvariant();
+            i = equals + 1;
+
+            if (i < text.Length && text[i] == '"')
+            {
+                var close = text.IndexOf('"', i + 1);
+                if (close < 0) throw new FormatException($"rename-rule's {key} has an unclosed quote.");
+                yield return (key, text[(i + 1)..close]);
+                i = close + 1;
+                continue;
+            }
+
+            var space = text.IndexOf(' ', i);
+            if (space < 0) { yield return (key, text[i..]); yield break; }
+            yield return (key, text[i..space]);
+            i = space;
+        }
     }
 
     /// <summary>Creates a folder or a file in the active tab's directory, as the New menu does.</summary>
@@ -896,8 +990,14 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     private Window Build(string kind) => kind switch
     {
         "rename" => RenameDialog.Create(
-            Selection().Select(i => new RenameSource(i.FullPath, i.IsDirectory)).ToList(),
+            Selection().Select(i => new RenameSource(i.FullPath, i.IsDirectory, Modified(i))).ToList(),
             session.Shell.PlanRename),
+
+        // The same dialog with its options panel already open, which is the only way to photograph
+        // it: the panel is opened by a click, and the harness never clicks.
+        "rename-advanced" => RenameDialog.Create(
+            Selection().Select(i => new RenameSource(i.FullPath, i.IsDirectory, Modified(i))).ToList(),
+            session.Shell.PlanRename, expanded: true),
 
         "delete" => DeleteDialog.Create(
             DeletePlanFor(DeleteMode.Recycle), session.Shell.SurveyDelete),
@@ -941,9 +1041,9 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
                 "There is no transfer to show. Run 'progress-demo' before 'dialog transfer'."),
 
         _ => throw new FormatException(
-            $"'{kind}' is not a dialog. Try: new-folder, new-file, rename, delete, " +
-            "delete-permanent, message, warning, properties, settings, theme-editor, disk-usage, " +
-            "transfer."),
+            $"'{kind}' is not a dialog. Try: new-folder, new-file, rename, rename-advanced, " +
+            "delete, delete-permanent, message, warning, properties, settings, theme-editor, " +
+            "disk-usage, transfer."),
     };
 
     /// <summary>

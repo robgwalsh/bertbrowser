@@ -1,0 +1,84 @@
+# The advanced rename rule: find/replace, a counter, a case transform and a date, placed by
+# tokens in the same box the plain rename uses. Everything goes through the same PlanRename and
+# RenameAsync the dialog does — and through RenamePlanner and RenameExecutor under those — so a
+# rule mutated in any of them shows up here. The rules themselves are asserted in
+# RenamePatternTests and RenameRuleTests; a script stops on the first failing command, so this
+# covers the wiring.
+
+tree .
+refresh
+
+# Fixture paths are relative to the run's sandbox root, not to the folder being shown.
+mkdir Shoot
+write Shoot/IMG_0001.jpg 1200
+write Shoot/IMG_0002.jpg 1400
+write Shoot/IMG_0003.png 900
+refresh
+enter Shoot
+assert-count 3
+
+# Find and replace, with the template keeping each item's own name. Nothing is numbered: the
+# plain box numbers a multi-item rename, and a template that placed no counter must not, or a
+# find/replace across twenty files would silently renumber them.
+select IMG_0001.jpg, IMG_0002.jpg, IMG_0003.png
+rename-rule find=IMG_ replace=Holiday template={name}
+settle
+assert-row Holiday0001.jpg
+assert-row Holiday0002.jpg
+assert-row Holiday0003.png
+assert-no-row IMG_0001.jpg
+
+# And back, which is the same execution with every path swapped.
+undo
+settle
+assert-row IMG_0001.jpg
+
+# A counter, padded by the token, keeping each file's own extension. This is the shape that
+# loses every extension if {ext} is left off — the dialog warns about it, and the warning is
+# only worth having because this is what people write.
+select IMG_0001.jpg, IMG_0002.jpg, IMG_0003.png
+rename-rule template="Photo {n:000}{ext}" start=1 step=1
+settle
+assert-row "Photo 001.jpg"
+assert-row "Photo 002.jpg"
+assert-row "Photo 003.png"
+undo
+settle
+assert-row IMG_0001.jpg
+
+# A regular expression reordering its own captures. $1 is why there is no {\1} token.
+select IMG_0001.jpg
+rename-rule regex=on find="^(.+)_(.+)$" replace="$2_$1" template={name}
+settle
+assert-row 0001_IMG.jpg
+undo
+settle
+assert-row IMG_0001.jpg
+
+# The case transform, scoped to the extension alone — the stem is left exactly as it was.
+select IMG_0003.png
+rename-rule scope=extension case=upper template={name}
+settle
+assert-row IMG_0003.PNG
+undo
+settle
+assert-row IMG_0003.png
+
+# A rename still owns the one-level undo slot, shared with moves and deletes.
+select IMG_0001.jpg
+rename-rule template="{base} copy{ext}"
+settle
+assert-row "IMG_0001 copy.jpg"
+assert-can-undo
+undo
+settle
+assert-row IMG_0001.jpg
+
+# Both faces of the dialog. The plain one is what F2 opens; the panel is opened by a click, and
+# the harness never clicks, so 'rename-advanced' is the only way to photograph it.
+select IMG_0001.jpg, IMG_0002.jpg
+dialog rename 01-rename
+dialog rename-advanced 02-rename-advanced
+
+assert-not-launched
+state

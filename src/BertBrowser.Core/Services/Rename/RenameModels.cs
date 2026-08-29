@@ -4,7 +4,18 @@ namespace BertBrowser.Core.Services.Rename;
 /// <param name="Path">Full path of the item as it stands now.</param>
 /// <param name="IsDirectory">True for a folder — a folder has no extension to preserve, so
 /// "My.Project" renamed in a batch must not have ".Project" treated as one.</param>
-public sealed record RenameSource(string Path, bool IsDirectory)
+/// <param name="Modified">When the item was last written, in <b>local</b> time, or null when that
+/// is not known. What <c>{modified}</c> puts in a name.</param>
+/// <remarks>
+/// The date rides on the source rather than being read from disk by the naming rule, which is what
+/// keeps <see cref="RenamePattern.Apply(IReadOnlyList{RenameSource}, RenameRule)"/> pure and its
+/// tests free of the clock — the same reason <c>TransferRate</c> takes its timestamps as arguments.
+/// Local rather than UTC because the file list's own Modified column is local, and a date-stamped
+/// rename that disagreed with the column the user was reading would look like a bug. Null is a real
+/// answer: search results arrive without a timestamp until <c>HydrateSearchMetadata</c> fills it in,
+/// and a name is refused rather than stamped 0001-01-01.
+/// </remarks>
+public sealed record RenameSource(string Path, bool IsDirectory, DateTime? Modified = null)
 {
     public string Name => System.IO.Path.GetFileName(Path);
 }
@@ -31,6 +42,14 @@ public enum RenameRejection
     /// from under it. Reachable from a flattened search result, where a selection can hold both a
     /// folder and something inside it.</summary>
     InsideARenamedFolder,
+
+    /// <summary>The rule could not produce a name — an expression that will not compile, a
+    /// template with a token nobody recognises, a date format that is not one, or an item with no
+    /// date for the <c>{modified}</c> the template asked for. When the rule is unusable outright
+    /// this is nobody's fault in particular, so it carries an empty
+    /// <see cref="RejectedRename.SourcePath"/> and belongs in the dialog's banner rather than
+    /// against a row; when one item alone fell over, it names that item.</summary>
+    InvalidRule,
 }
 
 /// <param name="SourcePath">The item the planner refused.</param>

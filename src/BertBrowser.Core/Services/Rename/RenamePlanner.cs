@@ -39,12 +39,28 @@ public sealed class RenamePlanner
     {
     }
 
-    public RenamePlan Plan(IReadOnlyList<RenameSource> sources, string pattern)
+    /// <summary>What renaming these to this typed name would produce — the plain rename box.</summary>
+    public RenamePlan Plan(IReadOnlyList<RenameSource> sources, string pattern) =>
+        Plan(sources, RenameRule.Simple(pattern));
+
+    /// <summary>What renaming these under this rule would produce.</summary>
+    /// <remarks>
+    /// Every rule below the naming is shared with the plain path, deliberately: an advanced rename
+    /// produces a different set of names, but "nothing lands on a taken name" and "two items can
+    /// never be planned onto one name" are the same questions either way, and there is one place
+    /// to audit them.
+    /// </remarks>
+    public RenamePlan Plan(IReadOnlyList<RenameSource> sources, RenameRule rule)
     {
+        // A rule that cannot be used at all is not any one item's problem, so it is reported once
+        // with no source path rather than repeated against every row.
+        if (RenamePattern.ValidateRule(rule) is { } unusable)
+            return new RenamePlan([], [new RejectedRename("", RenameRejection.InvalidRule, unusable)]);
+
         var distinct = Distinct(sources);
         if (distinct.Count == 0) return RenamePlan.Empty;
 
-        var names = RenamePattern.Apply(distinct.Select(d => d.Source).ToList(), pattern);
+        var names = RenamePattern.Apply(distinct.Select(d => d.Source).ToList(), rule);
 
         var renames = new List<PlannedRename>();
         var rejected = new List<RejectedRename>();
@@ -65,7 +81,7 @@ public sealed class RenamePlanner
         for (var i = 0; i < distinct.Count; i++)
         {
             var (source, key) = distinct[i];
-            var name = names[i];
+            var (name, itemProblem) = names[i];
             var path = source.Path;
 
             var isDirectory = _probe.DirectoryExists(path);
@@ -88,6 +104,15 @@ public sealed class RenamePlanner
             {
                 rejected.Add(new RejectedRename(path, RenameRejection.InsideARenamedFolder,
                     $"'{Path.GetFileName(path)}' is inside a folder that is being renamed too."));
+                continue;
+            }
+
+            // This one item's name could not be built — no date for the {modified} the template
+            // asked for, or an expression that ran past its deadline against this name in
+            // particular. Reported against the item, since the rule itself is fine.
+            if (itemProblem is not null)
+            {
+                rejected.Add(new RejectedRename(path, RenameRejection.InvalidRule, itemProblem));
                 continue;
             }
 

@@ -701,9 +701,13 @@ public partial class DirectoryTabView : UserControl
         if (selection.Count == 0) return;
 
         // SelectedItems is in the order things were clicked, which is not the order they are read in.
+        // The date goes across local, matching the Modified column the user was just reading, and
+        // stays null when the row has never been hydrated — a search result arrives that way, and
+        // {modified} refuses such an item rather than stamping it year one.
         var ordered = Tab.FileList.Items
             .Where(selection.Contains)
-            .Select(i => new RenameSource(i.FullPath, i.IsDirectory))
+            .Select(i => new RenameSource(i.FullPath, i.IsDirectory,
+                i.ModifiedUtc == default ? null : i.ModifiedUtc.ToLocalTime()))
             .ToList();
 
         var owner = Window.GetWindow(this);

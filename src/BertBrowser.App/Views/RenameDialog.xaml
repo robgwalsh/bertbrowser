@@ -7,6 +7,23 @@
                 WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
                 Background="{StaticResource Theme.Surface.Background}"
                 TextElement.Foreground="{StaticResource Theme.Text.Primary}">
+    <!-- Deliberately still NoResize, even though the options panel makes this window grow.
+         WindowChrome's caption template collapses Minimise and Maximise only under NoResize, and
+         a modal ShowInTaskbar="False" dialog with a Minimise button can be hidden with no taskbar
+         button to bring it back, leaving the owner modally blocked and the app looking hung.
+         SizeToContent="Height" carries the growth instead; the width is set in code. -->
+    <v:ThemedWindow.Resources>
+        <DataTemplate x:Key="ChoiceTemplate">
+            <TextBlock Text="{Binding Label}"/>
+        </DataTemplate>
+
+        <Style x:Key="FieldLabel" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="Foreground" Value="{StaticResource Theme.Text.Secondary}"/>
+        </Style>
+    </v:ThemedWindow.Resources>
+
     <DockPanel Margin="16">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
                     HorizontalAlignment="Right" Margin="0,16,0,0">
@@ -15,18 +32,132 @@
                     Style="{StaticResource PrimaryButton}" Click="Ok_Click"/>
         </StackPanel>
 
-        <StackPanel>
+        <TextBlock x:Name="ProblemText" DockPanel.Dock="Bottom" Margin="0,10,0,0" TextWrapping="Wrap"
+                   Foreground="{StaticResource Theme.Error.Foreground}"
+                   Visibility="Collapsed"/>
+
+        <!-- Not a refusal: the rule works, it just probably isn't doing what was meant — a
+             find/replace with nothing in the template to act on, or a counter with the extension
+             left off. -->
+        <TextBlock x:Name="HintText" DockPanel.Dock="Bottom" Margin="0,10,0,0" TextWrapping="Wrap"
+                   Foreground="{StaticResource Theme.Warning.Foreground}"
+                   Visibility="Collapsed"/>
+
+        <StackPanel DockPanel.Dock="Top">
             <TextBlock x:Name="PromptText" Margin="0,0,0,6" TextWrapping="Wrap"/>
             <TextBox x:Name="NameBox" TextChanged="NameBox_TextChanged"/>
 
-            <!-- What the pattern actually produces, so a numbered rename is never a guess. -->
-            <TextBlock x:Name="PreviewText" Margin="0,10,0,0" TextWrapping="NoWrap"
-                       Foreground="{StaticResource Theme.Text.Secondary}"
-                       Visibility="Collapsed"/>
+            <Button x:Name="OptionsToggle" Content="More options" HorizontalAlignment="Left"
+                    Margin="0,8,0,0" Style="{StaticResource LinkButton}" Click="Options_Click"/>
 
-            <TextBlock x:Name="ProblemText" Margin="0,10,0,0" TextWrapping="Wrap"
-                       Foreground="{StaticResource Theme.Error.Foreground}"
-                       Visibility="Collapsed"/>
+            <Grid x:Name="OptionsPanel" Margin="0,10,0,0" Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Find" Style="{StaticResource FieldLabel}"/>
+                <TextBox x:Name="FindBox" Grid.Row="0" Grid.Column="1" Margin="0,0,12,0"
+                         TextChanged="Option_Changed"/>
+                <TextBlock Grid.Row="0" Grid.Column="2" Text="Replace with"
+                           Style="{StaticResource FieldLabel}"/>
+                <TextBox x:Name="ReplaceBox" Grid.Row="0" Grid.Column="3" TextChanged="Option_Changed"/>
+
+                <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,8,12,0">
+                    <CheckBox x:Name="RegexCheck" Content="Regular expression" Margin="0,0,14,0"
+                              Checked="Option_Toggled" Unchecked="Option_Toggled"/>
+                    <CheckBox x:Name="MatchCaseCheck" Content="Match case"
+                              Checked="Option_Toggled" Unchecked="Option_Toggled"/>
+                </StackPanel>
+
+                <TextBlock Grid.Row="1" Grid.Column="2" Text="Apply to" Margin="0,8,8,0"
+                           VerticalAlignment="Center"
+                           Foreground="{StaticResource Theme.Text.Secondary}"/>
+                <ComboBox x:Name="ScopeBox" Grid.Row="1" Grid.Column="3" Margin="0,8,0,0"
+                          ItemTemplate="{StaticResource ChoiceTemplate}"
+                          SelectionChanged="Option_Selected"/>
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Case" Margin="0,8,8,0"
+                           VerticalAlignment="Center"
+                           Foreground="{StaticResource Theme.Text.Secondary}"/>
+                <ComboBox x:Name="CaseBox" Grid.Row="2" Grid.Column="1" Margin="0,8,12,0"
+                          ItemTemplate="{StaticResource ChoiceTemplate}"
+                          SelectionChanged="Option_Selected"/>
+
+                <TextBlock Grid.Row="2" Grid.Column="2" Text="Counter" Margin="0,8,8,0"
+                           VerticalAlignment="Center"
+                           Foreground="{StaticResource Theme.Text.Secondary}"/>
+                <StackPanel Grid.Row="2" Grid.Column="3" Orientation="Horizontal" Margin="0,8,0,0">
+                    <TextBlock Text="start" Style="{StaticResource FieldLabel}"/>
+                    <TextBox x:Name="StartBox" Width="52" Margin="0,0,10,0" TextChanged="Option_Changed"/>
+                    <TextBlock Text="step" Style="{StaticResource FieldLabel}"/>
+                    <TextBox x:Name="StepBox" Width="52" TextChanged="Option_Changed"/>
+                </StackPanel>
+
+                <TextBlock Grid.Row="3" Grid.ColumnSpan="4" Margin="0,10,0,0" TextWrapping="Wrap"
+                           FontSize="11" Foreground="{StaticResource Theme.Text.Secondary}"
+                           Text="Name tokens: {name} {base} {ext} {parent} {n} {n:000} {modified} {modified:yyyy-MM} — {ext} brings its own dot, and {{ writes a literal brace."/>
+            </Grid>
         </StackPanel>
+
+        <!-- Two preview surfaces, because the collapsed dialog is the fast path and should keep
+             looking like the one line of text it always was. -->
+        <TextBlock x:Name="PreviewText" Margin="0,10,0,0" TextWrapping="NoWrap"
+                   Foreground="{StaticResource Theme.Text.Secondary}"
+                   Visibility="Collapsed"/>
+
+        <Border x:Name="PreviewBox" Margin="0,12,0,0" Visibility="Collapsed"
+                BorderBrush="{StaticResource Theme.Border.Default}" BorderThickness="1"
+                CornerRadius="3" MaxHeight="280">
+            <ListView x:Name="PreviewList" BorderThickness="0" Background="Transparent"
+                      Focusable="False"
+                      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListView.View>
+                    <GridView>
+                        <GridViewColumn Header="Name" Width="245">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Header="New name" Width="480">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock"
+                                                   BasedOn="{StaticResource {x:Type TextBlock}}">
+                                                <Style.Triggers>
+                                                    <!-- Dimmed, not hidden: with a Find that
+                                                         matches three rows of three hundred, most
+                                                         of the list is unchanged and a page of
+                                                         identical lines reads as broken. -->
+                                                    <DataTrigger Binding="{Binding IsUnchanged}" Value="True">
+                                                        <Setter Property="Opacity" Value="0.5"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsProblem}" Value="True">
+                                                        <Setter Property="Foreground"
+                                                                Value="{StaticResource Theme.Error.Foreground}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                    </GridView>
+                </ListView.View>
+            </ListView>
+        </Border>
     </DockPanel>
 </v:ThemedWindow>

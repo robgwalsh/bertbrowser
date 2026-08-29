@@ -83,7 +83,13 @@ newfolder <name>            create a folder in the active tab's directory, throu
                             PlanNewItem/CreateNewItemAsync (acts on the folder, not the selection)
 newfile <name>              same for a file; a name ending in a configured type's extension
                             picks up that type's template, otherwise the file starts empty
-rename <pattern>            the selection, through PlanRename/RenameAsync
+rename <pattern>            the selection, through PlanRename/RenameAsync — the plain box, so the
+                            pattern is literal and braces stay braces
+rename-rule <key=value ...> the same, through the dialog's options panel. Quote a value with a
+                            space in it. template= find= replace= regex=on matchcase=on
+                            scope=stem|extension|wholename case=lower|upper|title|sentence
+                            start=<n> step=<n>. Tokens: {name} {base} {ext} {parent} {n} {n:000}
+                            {modified} {modified:<format>}, and {{ for a literal brace
 delete | delete-permanent [names]
 move|copy [names] to <folder>
 undo
@@ -93,10 +99,12 @@ preview on|off              the active tab's preview pane, with its debounce and
                             waited out (so assert after this, not straight after a `select`)
 
 shot <name> [element]       PNG of the window, or of any x:Name'd element in it
-dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, delete,
-                            delete-permanent, message, warning, properties, settings, theme-editor,
-                            disk-usage
-                            (new-folder/new-file need no selection; every other kind uses one)
+dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, rename-advanced,
+                            delete, delete-permanent, message, warning, properties, settings,
+                            theme-editor, disk-usage
+                            (new-folder/new-file need no selection; every other kind uses one.
+                            rename-advanced is the rename dialog with its options panel open —
+                            the panel is opened by a click, and this never clicks)
 state                       one JSON line of everything worth asserting on
 session                     save the pane/tab arrangement the way closing the window does,
                             prune it the way a launch does, and reopen it in place — assert on

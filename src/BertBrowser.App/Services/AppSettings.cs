@@ -80,6 +80,26 @@ public sealed class AppSettings
     /// switching away and back doesn't discard the edits made to either one.</summary>
     public Dictionary<string, Dictionary<string, string>> ThemeOverrides { get; set; } = new();
 
+    /// <summary>Whether the rename dialog opens with its options panel already showing.</summary>
+    public bool AdvancedRenameExpanded { get; set; }
+
+    /// <summary>
+    /// The rename options to bring back next time the panel is opened, or null when it never has
+    /// been.
+    /// </summary>
+    /// <remarks>
+    /// <b>The knobs persist; the text does not.</b> Counter start and step, the case transform, the
+    /// scope and the two toggles are preferences and come back; <c>Template</c>, <c>Find</c> and
+    /// <c>Replace</c> are blanked before this is written, because they are the content of one
+    /// rename rather than a setting — a regular expression from last week sitting behind F2 is a
+    /// trap, not a convenience.
+    ///
+    /// <para>The plain box never reads this. It always renames through
+    /// <c>RenameRule.Simple</c>, or a persisted <c>Case = Upper</c> would quietly upper-case an
+    /// ordinary F2 rename.</para>
+    /// </remarks>
+    public BertBrowser.Core.Services.Rename.RenameRule? AdvancedRename { get; set; }
+
     private static string FilePath => AppPaths.SettingsPath;
 
     public static AppSettings Load()

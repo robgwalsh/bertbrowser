@@ -151,4 +151,66 @@ public sealed class RenamePatternTests
     [Fact]
     public void ANameAtTheLimit_IsAccepted() =>
         Assert.Null(RenamePattern.Validate(new string('a', RenamePattern.MaxNameLength)));
+
+    // --- the plain box is unchanged, including where it was never covered ---
+    //
+    // These are the cases the advanced-rename engine could have broken silently: every multi-item
+    // test above uses an already-clean pattern, and none of them types a brace.
+
+    [Fact]
+    public void ADirtyPattern_IsCleanedBeforeNumbering_NotAfter()
+    {
+        // Cleaning the finished name instead would give "Holiday   1.jpg": the trim cannot reach
+        // the middle, because by then the name ends in ".jpg".
+        var names = RenamePattern.Apply([File_(@"C:\p\a.jpg"), File_(@"C:\p\b.jpg")], "  Holiday  ");
+
+        Assert.Equal(["Holiday 1.jpg", "Holiday 2.jpg"], names);
+    }
+
+    [Fact]
+    public void ATrailingDot_IsDroppedBeforeNumbering()
+    {
+        var names = RenamePattern.Apply([File_(@"C:\p\a.txt"), File_(@"C:\p\b.txt")], "notes.");
+
+        Assert.Equal(["notes 1.txt", "notes 2.txt"], names);
+    }
+
+    [Fact]
+    public void BracesAreTakenLiterally_BecauseTheyAreLegalInAName()
+    {
+        // "{6B99A0C1}.tmp" is an ordinary name to give a file and the plain box has always
+        // accepted it. Tokens belong to the expanded panel and nowhere else.
+        var names = RenamePattern.Apply([File_(@"C:\p\old.tmp")], "{6B99A0C1}.tmp");
+
+        Assert.Equal(["{6B99A0C1}.tmp"], names);
+    }
+
+    [Fact]
+    public void AnEmptyPatternOverSeveralItems_ProducesNamesThatAreRefused()
+    {
+        // Numbering an empty pattern gives " 1.jpg", which Validate accepts — so a box the user
+        // had merely cleared would leave Rename enabled.
+        var names = RenamePattern.Apply([File_(@"C:\p\a.jpg"), File_(@"C:\p\b.jpg")], "");
+
+        Assert.All(names, name => Assert.NotNull(RenamePattern.Validate(name)));
+    }
+
+    // --- the stem/extension split the scopes and case transforms are built on ---
+
+    [Fact]
+    public void Split_OfAFile_SeparatesTheExtension() =>
+        Assert.Equal(("report", ".pdf"), RenamePattern.Split(File_(@"C:\p\report.pdf")));
+
+    [Fact]
+    public void Split_OfAFolder_KeepsTheWholeName_BecauseAFolderHasNoExtension() =>
+        Assert.Equal(("My.Project", ""), RenamePattern.Split(Dir(@"C:\p\My.Project")));
+
+    [Fact]
+    public void Split_OfADotfile_KeepsTheWholeName()
+    {
+        // Path calls ".gitignore" all extension and no stem. Taking that literally would leave a
+        // stem-scoped find/replace nothing to work on, and let an extension-scoped one rewrite
+        // the entire filename.
+        Assert.Equal((".gitignore", ""), RenamePattern.Split(File_(@"C:\p\.gitignore")));
+    }
 }

@@ -166,6 +166,7 @@ as having one). The count follows the order the *list* shows, not the order rows
 
 - **`RenamePattern`** is the naming and legal-name rule, pure and shared: the dialog previews every
   keystroke with the same function the rename obeys, so a preview cannot drift from the result.
+  Both faces of the box go through it — see "More options" below.
 - **`RenamePlanner`** decides, touching nothing, through **`IRenameProbe`**. Nothing may land on a
   taken name — but a name held by *another selected item* is fair game, since that item is about to
   vacate it, which is what makes rotating or shifting a numbered set work. Only if it really is
@@ -193,9 +194,66 @@ reports per-item failures afterwards in a `MessageDialog`. `ShellViewModel.Renam
 like a transfer does, plus `FollowRenamedFoldersAsync`: a tab sitting inside a folder that was just
 renamed is re-pointed at the new path instead of being left on a name that no longer exists.
 
-Tests: `RenamePatternTests` (naming and validation), `RenamePlannerTests` (rules, fake filesystem),
+**"More options" opens the same dialog onto a naming engine, not a second rename.** Find/replace
+(literal or regular expression), a case transform, a counter and a date, placed by tokens in the
+same box — and *only* the naming changes. `RenamePlanner.Plan` gains a `RenameRule` overload that
+shares every collision rule with the plain path, and `RenameExecutor`, the undo slot, the staging
+and `FollowRenamedFoldersAsync` never learn the feature exists: they only ever see `PlannedRename`
+pairs.
+
+- **`RenameRule`** is the request; **`RenameTemplate`** parses a template into segments once, so
+  the expander does no scanning per item; `RenamePattern.Apply` runs the pipeline and
+  `ValidateRule` explains a rule that cannot be used at all. `ValidateRule` is deliberately *not*
+  `Validate` — that one judges a finished name, is shared with `NewItemPattern`, and must not learn
+  about braces.
+- **Tokens are advanced-mode only, and that is the load-bearing part.** `{` and `}` are legal
+  filename characters: `{6B99A0C1-…}.tmp` and `{id}.tsx` are ordinary things to rename a file to.
+  So `RenameRule.Simple` carries `IsLiteral`, the plain box is byte-identical to what it always
+  was, and an unrecognised token is only a refusal once the token list is on screen beside the box.
+- **The pipeline order is fixed and each step earns its place**: clean the template (*before*
+  numbering, where it has always happened — cleaning only at the end turns `"  Holiday  "` over two
+  files into `Holiday   1.jpg`), split stem/extension through the one helper that honours folders
+  and dotfiles, find/replace over the scoped part then **trim the stem** (a replace routinely
+  leaves `report ` behind, and the final clean cannot reach it past `.txt`), re-case **invariantly**
+  (`tr-TR` turns `FILE` into `fıle`; title case lower-cases first or `HOLIDAY PHOTO` comes back
+  untouched), expand, clean, validate.
+- **`Apply` still never throws**, and it has to: the planner calls it unguarded and the dialog
+  calls that on the UI thread. A regular expression that will not compile, one that backtracks past
+  its 250 ms deadline (`(a+)+$` is three keystrokes away), and a date format the framework rejects
+  all come back as text — a `ValidateRule` message, or a per-item `RenamedName.Problem`. The dialog
+  additionally debounces at 200 ms once the panel is open.
+- **Auto-numbering fires only for a literal template**, so a find/replace across twenty files is
+  not silently renumbered. The other half of that trade is that `Holiday {n}` loses every
+  extension — numbering used to add it for free — which the dialog warns about rather than fixing.
+- `{name}` is the *whole* name, because `Core/Services/CommandTemplate` already spends that word on
+  the whole name; `{base}` is the stem and `{ext}` brings its own dot. `{modified}` reads
+  `RenameSource.Modified`, which the callers fill in **local** time (matching the Modified column)
+  and leave null for an unhydrated search row — refused rather than stamped `0001-01-01`. Keeping
+  the date on the source is what keeps `Apply` pure and clock-free, the same reason `TransferRate`
+  takes its timestamps as arguments.
+
+The dialog is one window in two states, and stays **`NoResize`** in both: `Controls/Window.xaml`
+collapses Minimise and Maximise only under that mode, and a modal `ShowInTaskbar="False"` dialog
+with a Minimise button can be hidden with nothing to bring it back, leaving the owner blocked and
+the app looking hung. `SizeToContent="Height"` carries the growth and the width is set in code,
+followed by a re-centre on the owner — `CenterOwner` has long since fired. Two smaller decisions:
+the preview list is built by **left-joining the selection against the plan**, never by merging the
+plan's own two lists, because an unusable rule is a single refusal with no source path and merging
+would show one row where there are three hundred items; and opening the panel seeds the box with
+what the collapsed box was *about* to do (`Holiday {n}{ext}`), so one click never changes the
+pending result or greys out Rename. `AppSettings.AdvancedRename` persists the knobs and blanks the
+text — a stale regular expression waiting behind F2 is a trap — and the plain box never reads it.
+
+Tests: `RenamePatternTests` (naming and validation, plus the compatibility cases the advanced work
+could have broken silently — a dirty pattern over several items, a brace taken literally, an empty
+pattern, the split helper), `RenameRuleTests` (the whole engine, including a real catastrophic
+backtrack and a `tr-TR` case pass), `RenamePlannerTests` (rules, fake filesystem),
 `RenameExecutorTests` (real files, contents asserted, undo included, with a meta-test that the
-"nothing stranded" check can fail). Mutate a rule and confirm a test goes red.
+"nothing stranded" check can fail). `tools/ui/rename.bbs` covers the wiring through `rename-rule`,
+and `dialog rename-advanced` photographs the open panel — which `themes.bbs` does in both palettes,
+since a tokened panel is a lot of new surface for a colour to go missing in. Mutate a rule and
+confirm a test goes red: make auto-numbering fire on a tokened template, or re-case with
+`CurrentCulture`, and one goes red on its own.
 
 ### Creating
 
