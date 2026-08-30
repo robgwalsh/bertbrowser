@@ -162,6 +162,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             // assertions
             case "assert-path": AssertPath(rest); break;
             case "assert-status": AssertStatus(rest); break;
+            case "assert-error": AssertError(rest); break;
             case "assert-indexing": AssertIndexing(rest); break;
             case "assert-transfer": AssertTransfer(rest); break;
             case "assert-transfer-indeterminate": AssertTransferIndeterminate(); break;
@@ -1178,6 +1179,10 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         "delete-permanent" => DeleteDialog.Create(
             DeletePlanFor(DeleteMode.Permanent), session.Shell.SurveyDelete),
 
+        // Needs no selection and no fixture: its content is SearchSyntax.Sections, which is a
+        // constant in Core.
+        "search-syntax" => SearchSyntaxDialog.Create(),
+
         "message" => MessageDialog.Create(
             "The harness built this dialog to photograph it. Nothing went wrong.",
             "Message", MessageDialogKind.Information),
@@ -1474,6 +1479,32 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         if (!actual.Contains(expected, StringComparison.OrdinalIgnoreCase))
             throw new AssertionException($"expected the status to contain '{expected}', got '{actual}'.");
+    }
+
+    /// <summary>
+    /// Asserts on the warning banner above the list — <c>FileList.ErrorMessage</c>. With no
+    /// argument, asserts there is no banner at all.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <c>assert-status</c>: the status line always says something, so a check
+    /// against it cannot tell "the query was refused" from "the query ran and found nothing".
+    /// The banner appears only for the first.
+    /// </remarks>
+    private void AssertError(string rest)
+    {
+        var actual = session.Dispatcher.Invoke(() => session.Tab.FileList.ErrorMessage);
+
+        if (string.IsNullOrWhiteSpace(rest))
+        {
+            if (actual is not null)
+                throw new AssertionException($"expected no error banner, got '{actual}'.");
+            return;
+        }
+
+        if (actual is null)
+            throw new AssertionException($"expected an error banner containing '{rest}', there was none.");
+        if (!actual.Contains(rest, StringComparison.OrdinalIgnoreCase))
+            throw new AssertionException($"expected the error banner to contain '{rest}', got '{actual}'.");
     }
 
     /// <summary>

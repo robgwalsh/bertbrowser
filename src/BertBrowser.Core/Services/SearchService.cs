@@ -5,6 +5,7 @@ using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.Mft;
+using BertBrowser.Core.Services.Search;
 
 namespace BertBrowser.Core.Services;
 
@@ -70,29 +71,66 @@ public sealed class SearchService : ISearchService, IDisposable
             ? hits.Where(h => !DeleteExecutor.IsHeldPath(h.DisplayPath)).ToList()
             : hits;
 
+    /// <summary>
+    /// What to return when the text did not yield a runnable query. A parse <em>problem</em> is
+    /// an outcome with no hits and a message; "nothing to run" is null, which is what tells the
+    /// caller to go back to showing the plain directory listing.
+    /// </summary>
+    private static SearchOutcome? Refused(SearchQueryParse parse) =>
+        parse.Problem is null
+            ? null
+            : new SearchOutcome([], Truncated: false, SearchResultSource.Index,
+                RefreshPending: false, Problem: parse.Problem);
+
+    /// <summary>
+    /// Whether this run should surface hidden entries. Search normally excludes them whatever
+    /// the browse setting says — hidden entries are index noise (AppData, system junk) that
+    /// buries the results a search is for — but a query that explicitly asks for them has to
+    /// override that, or <c>is:hidden</c> returns nothing every time and reads as broken.
+    /// </summary>
+    private static bool ShowHidden(SearchQuery query, bool includeHidden) =>
+        includeHidden || query.WantsHidden;
+
+    /// <summary>
+    /// Whether an empty result means "nothing matched" or "nothing could have matched": a size
+    /// or date filter over an index built by the names-only fallback can never return a row.
+    /// Asked only when the answer could change what the user is told — a filtered search that
+    /// found nothing — so the scan it may cost is paid once, on a path that already failed.
+    /// </summary>
+    private async Task<bool> UnansweredForWantOfMetadataAsync(
+        SearchQuery query, IReadOnlyList<SearchHit> hits, string? rootPath, CancellationToken ct)
+    {
+        if (hits.Count > 0 || !query.NeedsMetadata) return false;
+        return !await Task.Run(() => _repository.HasSizeData(rootPath), ct).ConfigureAwait(false);
+    }
+
     public async Task<SearchOutcome?> SearchAllAsync(string queryText, CancellationToken ct, bool includeHidden = true)
     {
-        var query = SearchQuery.Parse(queryText);
-        if (query is null)
-            return null;
+        var parse = SearchQuery.Parse(queryText);
+        if (parse.Query is not { } query)
+            return Refused(parse);
 
         var (hits, truncated) = await Task.Run(
-            () => _repository.SearchGlobal(query, MaxResults, includeHidden), ct).ConfigureAwait(false);
+            () => _repository.SearchGlobal(query, MaxResults, ShowHidden(query, includeHidden)),
+            ct).ConfigureAwait(false);
 
         // While volumes are still enumerating the results are partial; the ViewModel re-queries
         // on IMftIndexService.IndexRefreshed.
         return new SearchOutcome(
-            Visible(hits), truncated, SearchResultSource.Index, RefreshPending: _mft.IsBuilding);
+            Visible(hits), truncated, SearchResultSource.Index, RefreshPending: _mft.IsBuilding,
+            ScopeLacksMetadata: await UnansweredForWantOfMetadataAsync(query, hits, null, ct)
+                .ConfigureAwait(false));
     }
 
     public async Task<SearchOutcome?> SearchAsync(
         string rootPath, string queryText, CancellationToken ct,
         IProgress<IReadOnlyList<SearchHit>>? liveBatches = null, bool includeHidden = true)
     {
-        var query = SearchQuery.Parse(queryText);
-        if (query is null)
-            return null;
+        var parse = SearchQuery.Parse(queryText);
+        if (parse.Query is not { } query)
+            return Refused(parse);
 
+        var showHidden = ShowHidden(query, includeHidden);
         var rootKey = PathKey.Canonicalize(rootPath);
         var covering = await Task.Run(() => _repository.FindCoveringRoot(rootKey), ct).ConfigureAwait(false);
 
@@ -110,15 +148,17 @@ public sealed class SearchService : ISearchService, IDisposable
                 EnsureIndexed(covering.PathKey, covering.DisplayPath);
 
             var (hits, truncated) = await Task.Run(
-                () => _repository.Search(rootPath, query, MaxResults, includeHidden), ct).ConfigureAwait(false);
+                () => _repository.Search(rootPath, query, MaxResults, showHidden), ct).ConfigureAwait(false);
             return new SearchOutcome(
                 Visible(hits), truncated,
                 fresh ? SearchResultSource.Index : SearchResultSource.StaleIndex,
-                RefreshPending: !fresh);
+                RefreshPending: !fresh,
+                ScopeLacksMetadata: await UnansweredForWantOfMetadataAsync(query, hits, rootPath, ct)
+                    .ConfigureAwait(false));
         }
 
         EnsureIndexed(rootKey, PathKey.NormalizeDisplay(rootPath));
-        return await Task.Run(() => LiveScan(rootPath, query, ct, liveBatches, includeHidden), ct).ConfigureAwait(false);
+        return await Task.Run(() => LiveScan(rootPath, query, ct, liveBatches, showHidden), ct).ConfigureAwait(false);
     }
 
     private SearchOutcome LiveScan(
@@ -133,7 +173,9 @@ public sealed class SearchService : ISearchService, IDisposable
 
         FileSystemWalker.Walk(rootPath, entry =>
         {
-            if (!query.Matches(entry.Name))
+            if (!query.Matches(new SearchCandidate(
+                    entry.NameKey, entry.PathKey, entry.IsDirectory,
+                    entry.SizeBytes, entry.ModifiedUtc, entry.Hidden)))
                 return true;
             if (DeleteExecutor.IsHeldPath(entry.DisplayPath))
                 return true; // deleted, just not committed yet

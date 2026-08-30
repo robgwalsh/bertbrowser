@@ -1,13 +1,43 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:conv="clr-namespace:BertBrowser.App.Converters"
-                    xmlns:v="clr-namespace:BertBrowser.App.Views">
+                    xmlns:v="clr-namespace:BertBrowser.App.Views"
+                    xmlns:search="clr-namespace:BertBrowser.Core.Services.Search;assembly=BertBrowser.Core">
 
     <!-- Merged, not merely listed alongside in App.xaml: StaticResource resolves against a
          dictionary's own merged children, never its siblings. -->
     <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="Theme/Tokens.xaml"/>
     </ResourceDictionary.MergedDictionaries>
+    <!--
+      The search syntax cheat-sheet, on both search boxes. Its rows come from
+      SearchSyntax.Entries in Core — the same table the parser resolves keys against — so the
+      help cannot advertise a filter that does not exist.
+
+      x:Shared="False" is load-bearing: a ToolTip is an element instance, and one instance
+      cannot be the tooltip of two elements (the same rule that keeps GridView and ContextMenu
+      declared inline per ListView). This hands out a fresh one per request instead.
+    -->
+    <ToolTip x:Key="SearchSyntaxToolTip" x:Shared="False" MaxWidth="420">
+        <StackPanel>
+            <TextBlock Text="Filters" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <ItemsControl ItemsSource="{x:Static search:SearchSyntax.Entries}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="0,0,0,3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="140"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding Example}" FontFamily="Consolas, Courier New, monospace"/>
+                            <TextBlock Grid.Column="1" Text="{Binding Meaning}" TextWrapping="Wrap"
+                                       Foreground="{StaticResource Theme.Text.Secondary}"/>
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </ToolTip>
 
     <conv:BoolToVisibilityConverter x:Key="BoolToVisibility"/>
     <conv:BoolToVisibilityConverter x:Key="InverseBoolToVisibility" Invert="True"/>
@@ -151,6 +181,27 @@
             </Trigger>
         </Style.Triggers>
     </Style>
+
+    <!--
+      A field sitting in the title bar rather than on a page.
+
+      `Theme.Input.Background` and `Theme.TitleBar.Background` are the same colour in Dark+
+      (#3C3C3C), so the whole-PC field was invisible up there until it took focus — which did not
+      matter while it was collapsed behind a button and matters a great deal now it is always on
+      show. It therefore takes the *content* background instead: the field belongs to what you are
+      looking at, not to the chrome around it, and that reads correctly in both directions — darker
+      than the chrome in a dark theme, lighter in a light one, which is the well every OS draws a
+      search box as.
+
+      BasedOn keeps FieldBorder's height, radius and — the part worth being careful about — its
+      focus trigger. The brushes are overridden with Setters rather than assigned on the element,
+      because a local value outranks a Style trigger and would silently kill the focus highlight.
+    -->
+    <Style x:Key="HeaderFieldBorder" TargetType="Border" BasedOn="{StaticResource FieldBorder}">
+        <Setter Property="Background" Value="{StaticResource Theme.Window.Background}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Theme.Border.Subtle}"/>
+    </Style>
+
 
     <!-- ✕ inside the search box; hidden while the box is empty. -->
     <Style x:Key="SearchClearButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">

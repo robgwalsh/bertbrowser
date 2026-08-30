@@ -84,7 +84,7 @@
 
                     <CheckBox Content="Show hidden items" IsChecked="{Binding ShowHiddenItems}"/>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="Show hidden files and folders in listings and search results (dimmed, like Explorer)."/>
+                               Text="Show hidden files and folders in listings and search results"/>
 
                     <DockPanel>
                         <TextBlock Text="Vertical scroll speed" VerticalAlignment="Center"/>
@@ -95,8 +95,6 @@
                                 TickFrequency="0.5" IsSnapToTickEnabled="True"
                                 Value="{Binding ScrollSpeed, Mode=TwoWay}"/>
                     </DockPanel>
-                    <TextBlock Style="{StaticResource Hint}"
-                               Text="How fast the mouse wheel scrolls the file list (1× = system default)."/>
 
                     <DockPanel>
                         <TextBlock Text="Tile aspect ratio" VerticalAlignment="Center"/>
@@ -113,8 +111,6 @@
                             </ComboBox.ItemTemplate>
                         </ComboBox>
                     </DockPanel>
-                    <TextBlock Style="{StaticResource Hint}"
-                               Text="Shape of the tiles in thumbnail view, as width:height. The zoom slider under the file list sets the tile width; this sets the height."/>
 
                     <!-- Machine state, not a stored setting: this writes the shell's Directory and
                          Drive open verbs under HKCU the moment it is ticked. Cancel cannot un-write
@@ -124,8 +120,6 @@
 
                         <CheckBox Content="Open folders in BertBrowser instead of File Explorer"
                                   IsChecked="{Binding OpenFoldersHere}"/>
-                        <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,4"
-                                   Text="Applies straight away — it is not held until you press Save. Double-clicking a folder or a drive opens it here, as does &quot;Open containing folder&quot; in apps that ask Windows to open the folder."/>
                         <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,16"
                                    Text="This PC, Control Panel and zip files keep opening in File Explorer, and so does anything that runs explorer.exe by name — Win+E, the taskbar icon, and some apps' &quot;Show in folder&quot;."/>
 
@@ -166,10 +160,10 @@
                                 Value="{Binding PreviewTextLimitKb, Mode=TwoWay}"/>
                     </DockPanel>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="How much of a text file the preview reads. Anything past this is not shown, and the pane says so rather than looking like the whole file."/>
+                               Text="Trim text after this amount."/>
 
                     <TextBlock Style="{StaticResource Hint}" Margin="0,14,0,0"
-                               Text="The preview never holds a file open, so a file you are previewing can still be renamed, moved or deleted. A file stored in the cloud and not downloaded is left alone rather than fetched."/>
+                               Text="Previews don't hold file locks!"/>
                 </StackPanel>
 
                 <!--
@@ -206,8 +200,6 @@
                                   AutomationProperties.AutomationId="ThemePicker"
                                   AutomationProperties.Name="Theme"/>
                     </DockPanel>
-                    <TextBlock Style="{StaticResource Hint}"
-                               Text="Appearance changes apply straight away — they are not held until you press Save."/>
                     <TextBlock TextWrapping="Wrap" Margin="0,0,0,12"
                                Foreground="{StaticResource Theme.Warning.Foreground}"
                                Text="{Binding Appearance.IssueText}"

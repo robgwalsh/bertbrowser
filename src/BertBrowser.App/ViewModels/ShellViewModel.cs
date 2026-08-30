@@ -92,36 +92,22 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// collapses to. Window state rather than tab state: it is one control in the title bar, while
     /// the query behind it belongs to whichever tab is active (<c>ActiveTab.GlobalSearchText</c>),
     /// since that is the list the hits land in.</summary>
-    [ObservableProperty]
-    private bool _isGlobalSearchExpanded;
-
     /// <summary>Asks the view to put the caret in the header search field and select what's there.
-    /// Expanding is a view-model decision; moving focus is the one part it can't do itself.</summary>
+    /// The one part of "focus the search box" a view model cannot do itself.</summary>
     public event Action? GlobalSearchFocusRequested;
 
+    /// <summary>
+    /// Ctrl+Shift+F, and the only thing the whole-PC field needs from the shell now.
+    /// </summary>
+    /// <remarks>
+    /// The field used to collapse into a magnifier button, and three separate rules existed to
+    /// decide when it could fold away: not while a search was live (the query is the only thing
+    /// saying what the list is showing), not while the caret was in it, and forced open when a
+    /// tab carrying a query came to the front. All of that was machinery in service of hiding a
+    /// search box in a file browser. It stays open; the rules are gone with it.
+    /// </remarks>
     [RelayCommand]
-    private void ExpandGlobalSearch()
-    {
-        IsGlobalSearchExpanded = true;
-        GlobalSearchFocusRequested?.Invoke();
-    }
-
-    /// <summary>Collapses back to the button — refused while a whole-PC search is live, because the
-    /// field is then the only thing saying what the file list is showing.</summary>
-    [RelayCommand]
-    private void CollapseGlobalSearch()
-    {
-        if (ActivePane.ActiveTab is { GlobalSearchText.Length: > 0 }) return;
-        IsGlobalSearchExpanded = false;
-    }
-
-    /// <summary>Keeps the field open when the tab (or pane) coming to the front has a whole-PC
-    /// search of its own, so switching to it doesn't hide the query producing its listing.</summary>
-    private void SyncGlobalSearchExpansion()
-    {
-        if (ActivePane.ActiveTab is { GlobalSearchText.Length: > 0 })
-            IsGlobalSearchExpanded = true;
-    }
+    private void FocusGlobalSearch() => GlobalSearchFocusRequested?.Invoke();
 
     /// <summary>Raised when the active tab's folder changes (or a different tab or pane becomes
     /// active), so the window can reveal it in the folder tree. Only ever raised for the active
@@ -407,7 +393,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         newValue.IsActivePane = true;
         newValue.PropertyChanged += OnActivePanePropertyChanged;
         OnPropertyChanged(nameof(ActiveTab));
-        SyncGlobalSearchExpansion();
         if (newValue.ActiveTab is { } tab)
             ActiveLocationChanged?.Invoke(tab.CurrentPath);
     }
@@ -418,7 +403,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         // Every window-chrome binding hangs off ActiveTab, so switching tabs has to look like the
         // shell's own property changed.
         OnPropertyChanged(nameof(ActiveTab));
-        SyncGlobalSearchExpansion();
     }
 
     public void ActivatePane(PaneViewModel pane)

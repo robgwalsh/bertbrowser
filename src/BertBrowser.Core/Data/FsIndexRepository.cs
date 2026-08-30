@@ -1,6 +1,7 @@
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.Search;
 using Microsoft.Data.Sqlite;
 
 namespace BertBrowser.Core.Data;
@@ -158,13 +159,21 @@ public sealed class FsIndexRepository
     }
 
     /// <summary>
-    /// Range-scans the subtree under <paramref name="rootPath"/> applying every query
-    /// term as a GLOB on name_key, capped at <paramref name="cap"/> hits. No ORDER BY:
-    /// LIMIT lets SQLite stop scanning as soon as enough matches are found; callers
-    /// sort the small result page. Relative display paths are reconstructed from the
-    /// ancestor directory rows (full display paths are not stored — they would roughly
-    /// double the index size).
+    /// Range-scans the subtree under <paramref name="rootPath"/> applying the query, capped at
+    /// <paramref name="cap"/> hits. No ORDER BY: LIMIT lets SQLite stop scanning as soon as
+    /// enough matches are found; callers sort the small result page. Relative display paths are
+    /// reconstructed from the ancestor directory rows (full display paths are not stored — they
+    /// would roughly double the index size).
     /// </summary>
+    /// <remarks>
+    /// The compiled predicate is a filter on a range scan, not a seek: there is no index on
+    /// size_bytes or modified_utc, and deliberately so — fs_entry is WITHOUT ROWID, so a
+    /// secondary index would carry the whole path_key as its row reference, adding hundreds of
+    /// megabytes and a second B-tree to write on every upsert chunk of a build that runs at
+    /// every launch. That is the same trade 002_search_index.sql made against indexing name, and
+    /// the one DuplicateCandidates measured at 0.8 s for a full scan of 1.09 M rows. A selective
+    /// filter therefore costs a longer scan before the cap fills, never a different plan.
+    /// </remarks>
     public (IReadOnlyList<SearchHit> Hits, bool Truncated) Search(
         string rootPath, SearchQuery query, int cap, bool includeHidden = true)
     {
@@ -174,29 +183,27 @@ public sealed class FsIndexRepository
 
         using var conn = _db.Open();
 
+        var predicate = query.Compile();
         var rows = new List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)>();
+        bool truncated;
         using (var cmd = conn.CreateCommand())
         {
-            var globs = string.Join(" AND ", Enumerable.Range(0, query.GlobPatterns.Count)
-                .Select(i => $"name_key GLOB @g{i}"));
             var hiddenFilter = includeHidden ? "" : "AND hidden = 0 ";
             cmd.CommandText =
                 $"""
-                SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden
+                SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden, name_key
                 FROM fs_entry
-                WHERE path_key >= @lo AND path_key < @hi AND {globs} {hiddenFilter}
-                LIMIT @limit;
+                WHERE path_key >= @lo AND path_key < @hi AND ({predicate.Sql}) {hiddenFilter}
+                {Limit(predicate)};
                 """;
             cmd.Parameters.AddWithValue("@lo", lo);
             cmd.Parameters.AddWithValue("@hi", hi);
             cmd.Parameters.AddWithValue("@limit", cap + 1);
-            for (var i = 0; i < query.GlobPatterns.Count; i++)
-                cmd.Parameters.AddWithValue($"@g{i}", query.GlobPatterns[i]);
+            Bind(cmd, predicate);
 
-            ReadRows(cmd, rows);
+            truncated = ReadMatchingRows(cmd, rows, query, cap);
         }
 
-        var truncated = rows.Count > cap;
         if (truncated)
             rows.RemoveAt(rows.Count - 1);
 
@@ -218,12 +225,50 @@ public sealed class FsIndexRepository
         return (hits, truncated);
     }
 
+    /// <summary>
+    /// Whether anything in scope carries a real byte length — <c>null</c> for the whole index.
+    /// </summary>
+    /// <remarks>
+    /// <para>The <c>FSCTL_ENUM_USN_DATA</c> fallback build records names only: every row lands
+    /// with <c>size_bytes = 0</c> and no timestamp. A size or date filter over such a volume
+    /// therefore matches nothing however the disk actually looks, and "no results" would be a
+    /// lie — the same trap <c>DiskUsageRules</c> exists to keep out of the disk-usage view,
+    /// recognised the same way: by there being rows but not one length among them.</para>
+    /// <para>Asked only when a metadata-filtered search came back empty, which is both rare and
+    /// already the slow path. On a measured volume it stops at the first row; on an unmeasured
+    /// one it scans, and that is the one case where the answer is worth the scan.</para>
+    /// </remarks>
+    public bool HasSizeData(string? rootPath)
+    {
+        using var conn = _db.Open();
+        using var cmd = conn.CreateCommand();
+
+        if (rootPath is null)
+        {
+            cmd.CommandText = "SELECT EXISTS(SELECT 1 FROM fs_entry WHERE size_bytes > 0);";
+        }
+        else
+        {
+            var (lo, hi) = PathKey.PrefixBounds(PathKey.Canonicalize(rootPath));
+            cmd.CommandText =
+                """
+                SELECT EXISTS(
+                    SELECT 1 FROM fs_entry
+                    WHERE path_key >= @lo AND path_key < @hi AND size_bytes > 0);
+                """;
+            cmd.Parameters.AddWithValue("@lo", lo);
+            cmd.Parameters.AddWithValue("@hi", hi);
+        }
+
+        return Convert.ToInt64(cmd.ExecuteScalar()) != 0;
+    }
+
     /// <summary>The drive root prefix length in a canonical key: "C:\" — MFT-indexed roots
     /// are always local NTFS drives, so every global hit shares this 3-char root.</summary>
     private const int DriveRootLength = 3;
 
     /// <summary>
-    /// Whole-index ("This PC") search: the same GLOB filter as <see cref="Search"/> but with
+    /// Whole-index ("This PC") search: the same predicate as <see cref="Search"/> but with
     /// no subtree bound, so it scans every indexed volume. Results carry full display paths
     /// (Everything-style) reconstructed from each row's ancestor directory names up to its
     /// drive root. <see cref="SearchHit.RelativeDirDisplay"/> holds the full parent path.
@@ -233,27 +278,25 @@ public sealed class FsIndexRepository
     {
         using var conn = _db.Open();
 
+        var predicate = query.Compile();
         var rows = new List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)>();
+        bool truncated;
         using (var cmd = conn.CreateCommand())
         {
-            var globs = string.Join(" AND ", Enumerable.Range(0, query.GlobPatterns.Count)
-                .Select(i => $"name_key GLOB @g{i}"));
             var hiddenFilter = includeHidden ? "" : "AND hidden = 0 ";
             cmd.CommandText =
                 $"""
-                SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden
+                SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden, name_key
                 FROM fs_entry
-                WHERE {globs} {hiddenFilter}
-                LIMIT @limit;
+                WHERE ({predicate.Sql}) {hiddenFilter}
+                {Limit(predicate)};
                 """;
             cmd.Parameters.AddWithValue("@limit", cap + 1);
-            for (var i = 0; i < query.GlobPatterns.Count; i++)
-                cmd.Parameters.AddWithValue($"@g{i}", query.GlobPatterns[i]);
+            Bind(cmd, predicate);
 
-            ReadRows(cmd, rows);
+            truncated = ReadMatchingRows(cmd, rows, query, cap);
         }
 
-        var truncated = rows.Count > cap;
         if (truncated)
             rows.RemoveAt(rows.Count - 1);
 
@@ -269,6 +312,63 @@ public sealed class FsIndexRepository
             hits.Add(new SearchHit(display, parentFull, row.Name, row.IsDir, row.Size, row.Modified, row.Hidden));
         }
         return (hits, truncated);
+    }
+
+    /// <summary>
+    /// The LIMIT clause for a compiled predicate — and only when it is exact.
+    /// </summary>
+    /// <remarks>
+    /// An incomplete predicate is a <em>superset</em> of the query (a regex term compiles to
+    /// <c>1</c>), so the rows SQLite returns are filtered again in C#. Letting it stop at
+    /// <c>cap + 1</c> rows would then cap the wrong population: the first thousand rows the scan
+    /// happened to reach, most of which the re-check throws away. The cap is applied by
+    /// <see cref="ReadMatchingRows"/> instead, which counts rows that actually matched.
+    /// </remarks>
+    private static string Limit(SqlPredicate predicate) => predicate.Complete ? "LIMIT @limit" : "";
+
+    /// <summary>Binds the values a compiled predicate carries.</summary>
+    private static void Bind(SqliteCommand cmd, SqlPredicate predicate)
+    {
+        foreach (var (name, value) in predicate.Parameters)
+            cmd.Parameters.AddWithValue(name, value);
+    }
+
+    /// <summary>
+    /// Reads rows, keeping only those the query really matches, and stops one past
+    /// <paramref name="cap"/>. Returns whether that extra row was reached.
+    /// </summary>
+    /// <remarks>
+    /// <strong>This re-check is what makes the SQL an optimisation rather than a second
+    /// implementation.</strong> <c>SearchNode.Matches</c> is the definition of a hit; a
+    /// <c>WriteSql</c> that is too wide costs a longer scan and nothing else, because the extra
+    /// rows die here. Delete this and a regex search returns every row in the subtree.
+    /// </remarks>
+    private static bool ReadMatchingRows(
+        SqliteCommand cmd,
+        List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)> rows,
+        SearchQuery query,
+        int cap)
+    {
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var key = reader.GetString(0);
+            var name = reader.GetString(1);
+            var isDir = reader.GetInt32(2) != 0;
+            var size = reader.GetInt64(3);
+            var modified = DateTime.Parse(
+                reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind);
+            var hidden = reader.GetInt32(5) != 0;
+            var nameKey = reader.GetString(6);
+
+            if (!query.Matches(new SearchCandidate(nameKey, key, isDir, size, modified, hidden)))
+                continue;
+
+            rows.Add((key, name, isDir, size, modified, hidden));
+            if (rows.Count > cap)
+                return true;
+        }
+        return false;
     }
 
     /// <summary>Reads the six-column entry projection every query in this file selects, in the

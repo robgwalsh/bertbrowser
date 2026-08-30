@@ -109,8 +109,9 @@ preview on|off              the active tab's preview pane, with its debounce and
 shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, rename-advanced,
                             delete, delete-permanent, message, warning, properties, settings,
-                            theme-editor, disk-usage, duplicates
-                            (new-folder/new-file need no selection; every other kind uses one.
+                            theme-editor, disk-usage, duplicates, search-syntax
+                            (new-folder/new-file/search-syntax need no selection; every other
+                            kind uses one.
                             rename-advanced is the rename dialog with its options panel open —
                             the panel is opened by a click, and this never clicks)
 state                       one JSON line of everything worth asserting on
@@ -122,6 +123,7 @@ probe <token> [element]     where a theme token's colour came out: the resolver,
                             window resources, and the element's own Background/Foreground
 
 assert-path <substring> | assert-status <substring> | assert-count <n>
+assert-error [substring]     the warning banner above the list; bare = assert there is none
 assert-row <name> | assert-no-row <name> | assert-selected <n>
 assert-tabs <n> | assert-panes <n> | assert-flattened | assert-not-flattened
 assert-can-undo | assert-cannot-undo | assert-exists <path> | assert-missing <path>

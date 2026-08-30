@@ -1,3 +1,4 @@
+using BertBrowser.Core.Services.Search;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
@@ -43,7 +44,7 @@ public sealed class IndexWatcherApplyTests : IDisposable
             Directory.Delete(_rootDir, recursive: true);
     }
 
-    private static SearchQuery Q(string text) => SearchQuery.Parse(text)!;
+    private static SearchQuery Q(string text) => SearchQuery.Parse(text).Query!;
 
     private void Apply(WatcherChangeTypes type, string fullPath, string? oldFullPath = null) =>
         _service.Apply(new[] { new IndexWatcherService.FsChange(_rootKey, type, fullPath, oldFullPath) });

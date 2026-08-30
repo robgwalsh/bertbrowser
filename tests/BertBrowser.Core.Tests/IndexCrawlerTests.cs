@@ -1,3 +1,4 @@
+using BertBrowser.Core.Services.Search;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
@@ -47,7 +48,7 @@ public sealed class IndexCrawlerTests : IDisposable
         File.WriteAllBytes(full, new byte[bytes]);
     }
 
-    private static SearchQuery Q(string text) => SearchQuery.Parse(text)!;
+    private static SearchQuery Q(string text) => SearchQuery.Parse(text).Query!;
 
     [Fact]
     public async Task Crawl_IndexesFilesAndDirectoriesRecursively()

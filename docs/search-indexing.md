@@ -178,32 +178,119 @@ Applying a batch (`Apply`) is where the subtlety is:
 
 ## Query: what happens when you type
 
-`SearchQuery.Parse` splits the input on whitespace into terms that are ANDed, uppercases them, and
-**returns null below two literal (non-wildcard) characters** — a one-character substring search over
-a whole PC is not a useful query. `*` and `?` are passed through as wildcards.
+### The query language
 
-A scoped search (`FsIndexRepository.Search`) is then one statement:
+A bare word means what it always did — a case-insensitive substring of the name, `*` and `?`
+honoured, several of them ANDed — and on top of that `Core/Services/Search` adds filters:
+
+| Form | Meaning |
+|---|---|
+| `report 2026` | both words, in any order |
+| `"annual report"` | a literal phrase; wildcards lose their meaning inside quotes |
+| `ext:jpg;png` | one of these extensions |
+| `size:>100mb` | also `<`, `>=`, `<=`, `=`, `1mb..2mb`, and `empty` |
+| `dm:today` | also `yesterday`, `thisweek`, `last7days`, `2026`, `2026-08`, `>2026-01-01`, `A..B` |
+| `path:projects` | a substring of the whole path, not just the name |
+| `is:dir` | also `is:file`, `is:hidden` |
+| `re:^IMG_\d+` | a regular expression over the name |
+| `!tmp`, `NOT tmp` | exclusion |
+| `draft OR final` | alternation; adjacency is still AND, and AND binds tighter |
+| `(a OR b) ext:txt` | brackets group |
+
+Four rules keep this from breaking what people already type:
+
+- **An unrecognised `key:` is ordinary text.** `C:\Users` pasted into the box still searches for
+  that text. Only the keys in `SearchSyntax` mean anything, which is the same trade the advanced
+  rename made by treating `{` as a token only in advanced mode.
+- **`OR`/`NOT`/`AND` are operators only in uppercase**, so a file called `Report or Draft` stays
+  findable and no existing query silently changes meaning.
+- **A stray `!`, an unbalanced `)` and an unclosed `(` are all literal or forgiving** rather than
+  errors. Quoting is the escape where a name really contains a bracket.
+- **`dc:`/`da:`/`content:` are refused with a message.** They plainly mean something this index
+  cannot answer, and degrading them to a substring search would return nothing while implying the
+  disk holds no such files.
+
+`SearchGrammar.Parse` **never throws** — a bad regular expression, an unreadable size, a half-typed
+`size:>` all come back as text, because this runs on the UI thread on a keystroke. It returns three
+outcomes, not two: a query, a *problem* (the view stays in search mode and shows the banner), or
+nothing at all (the view goes back to the directory listing). The floor is unchanged — two literal
+characters, **summed across the query** so `a b` still clears it — except that a filter specific
+enough to stand alone (`ext:jpg`) now clears it with no text at all, while `is:dir` deliberately
+does not.
+
+### The two faces of a query, and why they cannot drift
+
+`SearchNode` has **two** abstract members: `Matches(in SearchCandidate)` and `WriteSql`. A new
+filter key cannot be added with only one wired up — it is a compile error, not a silent difference
+between an indexed drive and a live scan.
+
+Beyond that, **`Matches` is the definition and the SQL is only an optimisation**: the repository
+re-applies `Matches` to every row it reads back. SQL that is too *wide* costs a longer scan and
+nothing else; SQL that is too *narrow* drops rows and `SearchAgreementTests` — which runs ~40
+queries through both paths over one corpus and compares — goes red. This is what lets `re:` compile
+to `1`.
+
+Two consequences fall out of that and are easy to undo by accident:
+
+- **`LIMIT` is pushed down only when the predicate is exact.** An incomplete one returns a superset,
+  so stopping at `cap + 1` rows would cap the wrong population — the rows the scan happened to
+  reach, most of which the re-check discards. `ReadMatchingRows` counts rows that actually matched.
+- **A superset cannot be negated.** `NOT (something wider than the truth)` is *narrower* than the
+  truth and drops real matches, so `NotNode` emits `1` when its child's SQL is inexact. Without it
+  `!re:foo` compiles to `NOT 1` and returns nothing.
+
+### The SQL
+
+A scoped search (`FsIndexRepository.Search`) is one statement:
 
 ```sql
-SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden
+SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden, name_key
 FROM fs_entry
-WHERE path_key >= @lo AND path_key < @hi AND name_key GLOB @g0 [AND name_key GLOB @g1 …]
-LIMIT @limit;
+WHERE path_key >= @lo AND path_key < @hi AND (<compiled predicate>)
+LIMIT @limit;          -- only when the predicate is exact
 ```
 
 - **`@lo`/`@hi` come from `PathKey.PrefixBounds`**, a half-open range `[dir\, dir])` — `]` is the
   character immediately after `\` in ASCII, so "everything under this directory" is a pure index
   range scan on the clustered key rather than a `LIKE 'dir%'` full scan.
-- **The GLOB patterns are `*TERM*`**, with `[` escaped as `[[]` since it opens a character class.
-  This is a linear substring test, but only over rows already inside the range.
+- **A name term compiles to `name_key GLOB '*TERM*'`**, with `[` escaped as `[[]` since it opens a
+  character class. `ext:` rides the same scan (`name_key GLOB '?*.JPG'`); `size:`, `dm:`, `is:` and
+  `path:` are comparisons on columns already in the row.
 - **There is no `ORDER BY`.** That is deliberate: with `LIMIT`, SQLite can stop the moment it has
   enough rows, whereas any sort forces the whole matching set to be materialised first. The capped
   page (1,000 hits) is sorted in the caller, where it is cheap.
 - **The limit is `cap + 1`.** If the extra row comes back, the result set was truncated; it is
   dropped and the status bar says "showing first 1,000".
+- **`modified_utc` is TEXT written with `"O"`** — fixed-width and zero-padded — so BINARY collation
+  is already a correct chronological order and a date bound is a plain string comparison. Rows from
+  the fallback build carry `0001-01-01…`, which sorts below the 1601 floor every date term applies,
+  so an unmeasured row satisfies no date filter rather than matching every open-ended one.
 
 A whole-PC search (`SearchGlobal`) is the identical query with the range bound removed, so it scans
 every indexed volume.
+
+### What that costs, measured
+
+A filter is a predicate on a scan that was happening anyway, never a seek: **there is no index on
+`size_bytes` or `modified_utc`, and adding one is refused** for the reason spelled out below for
+duplicates. So a selective filter costs a *longer* scan before the 1,000-row cap fills, and one that
+matches nothing costs a full scan.
+
+Against a real 1,646 MB index — 1,912,992 rows, 1,601,024 of them with a length — read-only, warm:
+
+| Query | Scoped | Global | Plan |
+|---|---|---|---|
+| `report` | 278 ms | 230 ms | range scan / `SCAN fs_entry` |
+| `ext:txt` | 27 ms | 28 ms | " |
+| `dm:today` | 81 ms | 25 ms | " |
+| `size:>100mb` | 262 ms | 482 ms | " |
+| `size:>100gb` (matches nothing — worst case) | 257 ms | 508 ms | " |
+| `report ext:cs size:>1kb` | 295 ms | 614 ms | " |
+| `re:^img_` (no `LIMIT` pushdown) | 1,216 ms | 2,460 ms | " |
+
+`EXPLAIN QUERY PLAN` reports `SEARCH fs_entry USING PRIMARY KEY` scoped and `SCAN fs_entry` global
+for every one of them, and **no temp B-tree anywhere**. A regular expression is the slow one and
+visibly so: it cannot stop early, so it always reads the whole scope.
 
 ### Rebuilding display paths
 
@@ -273,7 +360,14 @@ the canonical path.
   `%USERPROFILE%\.bertbrowser\bertbrowser.db`. Deleting that folder resets it; the next launch
   rebuilds.
 - **Results are capped at 1,000** per query.
-- **Names only.** There is no content indexing, and none is planned.
+- **Names only.** There is no content indexing, and none is planned. `content:` says so rather than
+  searching for the literal text.
+- **`size:` and `dm:` need a fully indexed drive.** The `FSCTL_ENUM_USN_DATA` fallback records names
+  only, so those filters can never match on a volume built that way. A filtered search that comes
+  back empty asks `FsIndexRepository.HasSizeData` before reporting "no results", and says the drive
+  is unmeasured instead — the same distinction `DiskUsageRules` draws, and for the same reason.
+- **Only modified time is indexed**, not created or accessed; `dc:`/`da:` are refused with a message
+  pointing at `dm:`.
 - **A full rebuild runs at every launch.** It is a sequential read, it is off-thread, and searches
   work against the previous contents while it runs — but it is not free on a very large disk.
 
@@ -285,7 +379,10 @@ the canonical path.
 | `UsnRecordParserTests` | Journal record parsing |
 | `MftPathBuilderTests` | Parent-chain resolution, memoization, broken chains, hidden inheritance |
 | `MftDirectorySizeBuilderTests` | Post-order rollup totals |
-| `SearchQueryTests` | Term parsing, the two-literal-character floor, wildcard matching, GLOB escaping |
+| `SearchQueryTests` | What a bare query has always meant: the two-literal-character floor, wildcards, GLOB escaping — plus the compatibility cases the filter syntax could have broken silently (an unrecognised key, lowercase `or`, a trailing `!`) |
+| `SearchGrammarTests` | The filter language: every key, the operators, the refusals, a real catastrophic backtrack |
+| `SearchAgreementTests` | ~40 queries run through **both** SQL and the matcher over one corpus, asserted identical — the test that makes drift impossible — plus the cap and the size-data probe |
+| `SizeTextTests`, `DateShorthandTests` | The literal parsers; the clock is injected, and the units are pinned to `ByteSizeFormatter`'s |
 | `FsIndexRepositoryTests` | Range scans, truncation, ancestor path reconstruction, rename/delete subtree rewrites, the vanish sweep |
 | `SearchServiceTests` | Fresh / stale / unindexed routing and live-scan streaming |
 | `IndexCrawlerTests`, `IndexWatcherApplyTests` | The fallback crawler and watcher apply path |

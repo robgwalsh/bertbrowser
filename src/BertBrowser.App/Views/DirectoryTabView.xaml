@@ -65,9 +65,13 @@
             <Border Grid.Column="1" Style="{StaticResource FieldBorder}" Margin="6,0,0,0"
                     Width="280" MinWidth="150">
                 <DockPanel>
+                    <!-- The glyph carries the syntax help: an unexplained filter language is an
+                         undiscoverable one, and this is the only fixed thing beside the box. -->
                     <TextBlock DockPanel.Dock="Left" FontFamily="{StaticResource SymbolFont}"
                                Text="&#xE721;" FontSize="13" Margin="8,0,6,0"
-                               VerticalAlignment="Center" Foreground="{StaticResource Theme.Text.Secondary}"/>
+                               VerticalAlignment="Center" Foreground="{StaticResource Theme.Text.Secondary}"
+                               ToolTipService.InitialShowDelay="300"
+                               ToolTip="{StaticResource SearchSyntaxToolTip}"/>
                     <Button DockPanel.Dock="Right" ToolTip="Clear search (Esc)"
                             Command="{Binding ClearSearchCommand}"
                             Style="{StaticResource SearchClearButton}">
@@ -83,7 +87,7 @@
                                  AutomationProperties.Name="Search this folder"
                                  Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                                  KeyDown="SearchBox_KeyDown"
-                                 ToolTip="Search this folder and everything under it (Ctrl+F)"/>
+                                 ToolTip="Search this folder and everything under it (Ctrl+F). Filters: ext: size: dm: path: is: re:, plus OR and !"/>
                         <TextBlock Text="Search this folder" Foreground="{StaticResource Theme.Text.Placeholder}" Margin="4,0,0,0"
                                    VerticalAlignment="Center" IsHitTestVisible="False">
                             <TextBlock.Style>

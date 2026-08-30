@@ -1,0 +1,92 @@
+<v:ThemedWindow x:Class="BertBrowser.App.Views.SearchSyntaxDialog"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:v="clr-namespace:BertBrowser.App.Views"
+                xmlns:search="clr-namespace:BertBrowser.Core.Services.Search;assembly=BertBrowser.Core"
+                Title="Search syntax"
+                Width="580" SizeToContent="Height"
+                ResizeMode="NoResize"
+                WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+                PreviewKeyDown="Dismiss_Key" PreviewMouseDown="Dismiss_Mouse"
+                Background="{StaticResource Theme.Surface.Background}"
+                TextElement.Foreground="{StaticResource Theme.Text.Primary}">
+    <!--
+      The whole query language on one page. Its rows come from SearchSyntax.Sections in Core —
+      the same table SearchGrammar resolves keys against — so this cannot advertise a filter the
+      parser does not implement, the way ResolvedNewFileTypes is the one place file types resolve.
+
+      SizeToContent rather than a fixed height with a ScrollViewer: this is a reference card, and
+      a card you have to scroll is one you cannot take in at a glance. It also means adding a
+      filter row grows the window instead of silently pushing the last line out of sight — the
+      spacing below is tight enough that all four sections fit on any ordinary display.
+
+      Everything about it is dismissive: NoResize (there is nothing to resize to, and it lets
+      Controls/Window.xaml drop the Minimise and Maximise buttons a modal dialog must not have),
+      and any key or click closes it — see the handlers in the code-behind.
+    -->
+    <v:ThemedWindow.Resources>
+        <!-- The example column. Monospace because every one of these is literal text to type,
+             and the link colour because it is the part the eye is looking for. -->
+        <Style x:Key="Example" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Consolas, Cascadia Mono, Courier New, monospace"/>
+            <Setter Property="Foreground" Value="{StaticResource Theme.Text.Link}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+        </Style>
+
+        <Style x:Key="Meaning" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource Theme.Text.Secondary}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+        </Style>
+
+        <Style x:Key="SectionTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+    </v:ThemedWindow.Resources>
+
+    <DockPanel Margin="18,14,18,12">
+        <!-- The dismissal hint takes the place of a Close button: with any key or click closing
+             the window, a button would be the least likely way anyone shuts it, and it costs more
+             height than the sentence explaining the gesture. -->
+        <TextBlock DockPanel.Dock="Bottom" Margin="0,12,0,0" HorizontalAlignment="Center"
+                   FontSize="11" Foreground="{StaticResource Theme.Text.Muted}"
+                   Text="Click anywhere or press any key to close"/>
+
+        <ItemsControl ItemsSource="{x:Static search:SearchSyntax.Sections}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Margin="0,0,0,10">
+                        <TextBlock Text="{Binding Title}" Style="{StaticResource SectionTitle}"/>
+                        <TextBlock Text="{Binding Blurb}" Style="{StaticResource Meaning}"
+                                   Margin="0,1,0,6"/>
+
+                        <Border Background="{StaticResource Theme.Surface.Raised}"
+                                BorderBrush="{StaticResource Theme.Border.Subtle}"
+                                BorderThickness="1" CornerRadius="4" Padding="12,6">
+                            <ItemsControl ItemsSource="{Binding Entries}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,1">
+                                            <Grid.ColumnDefinitions>
+                                                <!-- Wide enough for the longest example, so the
+                                                     meanings line up into a readable column. -->
+                                                <ColumnDefinition Width="152"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding Example}"
+                                                       Style="{StaticResource Example}"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding Meaning}"
+                                                       Style="{StaticResource Meaning}"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Border>
+                    </StackPanel>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </DockPanel>
+</v:ThemedWindow>

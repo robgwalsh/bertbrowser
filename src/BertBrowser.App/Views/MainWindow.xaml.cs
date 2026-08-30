@@ -326,18 +326,16 @@ public partial class MainWindow : ThemedWindow
     {
         if (e.Key != Key.Escape) return;
 
-        // Clear first: collapsing is refused while the search is live, and this is the gesture that
-        // ends it. Focus goes back to the list, which is what the results were showing.
+        // Escape ends the search and hands focus back to the list, which is what the results were
+        // showing. The field itself stays where it is — it is part of the chrome now.
         _shell.ActiveTab.ClearSearchCommand.Execute(null);
-        _shell.CollapseGlobalSearchCommand.Execute(null);
         _layoutHost.ActivePaneView?.FocusActiveTabList();
         e.Handled = true;
     }
 
-    /// <summary>Clicking away tidies the field back into its button — but only when it is empty,
-    /// which <see cref="ShellViewModel.CollapseGlobalSearchCommand"/> enforces.</summary>
-    private void GlobalSearchBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) =>
-        _shell.CollapseGlobalSearchCommand.Execute(null);
+    /// <summary>The query language, on one page. Modal, unlike the analysis windows: it is read
+    /// and dismissed rather than worked alongside, and nothing behind it moves while it is up.</summary>
+    private void SearchSyntax_Click(object sender, RoutedEventArgs e) => SearchSyntaxDialog.Show(this);
 
     private void Scroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
@@ -363,7 +361,7 @@ public partial class MainWindow : ThemedWindow
         // otherwise be reachable only with the mouse.
         if (e.Key == Key.F && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
         {
-            _shell.ExpandGlobalSearchCommand.Execute(null);
+            _shell.FocusGlobalSearchCommand.Execute(null);
             e.Handled = true;
         }
         else if ((e.Key == Key.F || e.Key == Key.E) && Keyboard.Modifiers == ModifierKeys.Control)
@@ -489,12 +487,6 @@ public partial class MainWindow : ThemedWindow
     /// tab or pane came to the front. Only the active one ever reaches here.</summary>
     private void OnActiveLocationChanged(string path)
     {
-        // Navigating ends any search, so tidy the header field back into its button rather than
-        // leaving an empty box open — unless the caret is still in it, which means the user opened
-        // it and is about to type. (Collapsing is refused outright while a search is still live.)
-        if (!GlobalSearchBox.IsKeyboardFocusWithin)
-            _shell.CollapseGlobalSearchCommand.Execute(null);
-
         // Navigating anywhere but the clicked row retires its anchor: from here on the reveal is
         // free to position the tree, and a much later return to that folder mustn't snap back to
         // a viewport offset the row held during some earlier click.

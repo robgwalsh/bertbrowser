@@ -6,10 +6,14 @@ namespace BertBrowser.Core.Services;
 /// <summary>One filesystem entry produced by <see cref="FileSystemWalker"/>.
 /// <see cref="Hidden"/> is effective (the entry's own Hidden attribute or that of any
 /// ancestor within the walked subtree).</summary>
+/// <param name="NameKey">The name uppercased invariantly. Carried rather than recomputed by
+/// consumers: the walker already folds it on its way to building <paramref name="PathKey"/>, so
+/// it is free here and one allocation per entry saved in the search matcher.</param>
 internal readonly record struct WalkEntry(
     string DisplayPath,
     string PathKey,
     string Name,
+    string NameKey,
     bool IsDirectory,
     long SizeBytes,
     DateTime ModifiedUtc,
@@ -52,12 +56,14 @@ internal static class FileSystemWalker
                     {
                         var isDir = entry.IsDirectory;
                         var name = entry.FileName.ToString();
+                        var nameKey = name.ToUpperInvariant();
                         // Effective hidden: this entry, or any ancestor within the subtree.
                         var hidden = dirHidden || (entry.Attributes & FileAttributes.Hidden) != 0;
                         var walkEntry = new WalkEntry(
                             entry.ToFullPath(),
-                            keyPrefix + name.ToUpperInvariant(),
+                            keyPrefix + nameKey,
                             name,
+                            nameKey,
                             isDir,
                             isDir ? 0 : entry.Length,
                             entry.LastWriteTimeUtc.UtcDateTime,

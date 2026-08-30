@@ -6,6 +6,7 @@ using BertBrowser.Core.Data;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.Search;
 
 namespace BertBrowser.App.ViewModels;
 
@@ -396,7 +397,7 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
 
         try
         {
-            if (SearchQuery.Parse(ActiveSearchText) is not null)
+            if (HasActiveSearch)
             {
                 await RunSearchAsync(ct);
             }
@@ -503,6 +504,17 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     {
         var queryText = ActiveSearchText;
         var global = IsGlobalSearch;
+
+        // A query that cannot be used is reported *before* the list is cleared, so what is on
+        // screen stays there under the banner. Emptying the list first would make a query
+        // half-way through being typed look like one that found nothing.
+        if (ParsedSearch.Problem is { } problem)
+        {
+            FileList.ErrorMessage = problem;
+            StatusText = problem;
+            return;
+        }
+
         FileList.BeginSearch();
 
         SearchOutcome? outcome;
@@ -543,6 +555,11 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
 
         var suffix = outcome.Source switch
         {
+            // A size or date filter against an index that holds no lengths cannot match anything,
+            // so "0 results" would report an empty disk rather than an unmeasured one. Said first
+            // because it explains the count, which every other suffix assumes is meaningful.
+            _ when outcome.ScopeLacksMetadata =>
+                " — this drive has no size or date data, so those filters can't match",
             _ when noIndex => " — the search index is off",
             SearchResultSource.LiveScan => " — indexing in background…",
             SearchResultSource.StaleIndex => " — refreshing index…",
@@ -572,7 +589,32 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         });
     }
 
-    public bool HasActiveSearch => SearchQuery.Parse(ActiveSearchText) is not null;
+    private (string Text, SearchQueryParse Parse) _parsedSearch = ("", default);
+
+    /// <summary>
+    /// The parsed search box, memoised on its text. Parsing is cheap but no longer trivial — it
+    /// lexes, builds a node tree and may compile a regular expression — and this is read several
+    /// times per keystroke and again on every index-refresh callback, so re-parsing per read
+    /// would do that work for nothing.
+    /// </summary>
+    private SearchQueryParse ParsedSearch
+    {
+        get
+        {
+            var text = ActiveSearchText;
+            if (!string.Equals(_parsedSearch.Text, text, StringComparison.Ordinal))
+                _parsedSearch = (text, SearchQuery.Parse(text));
+            return _parsedSearch.Parse;
+        }
+    }
+
+    /// <summary>
+    /// Whether the box holds something the user means as a search. Deliberately true for a query
+    /// that <em>cannot</em> be used as well as one that can: a half-typed <c>size:&gt;</c> must
+    /// leave the view in search mode showing the reason, not flip back to the directory listing
+    /// for one keystroke and then flip forward again.
+    /// </summary>
+    public bool HasActiveSearch => ParsedSearch.Query is not null || ParsedSearch.Problem is not null;
 
     // --- Index callbacks (fanned out to every tab by the shell) ---
 

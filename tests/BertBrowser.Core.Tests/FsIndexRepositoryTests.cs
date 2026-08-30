@@ -1,3 +1,4 @@
+using BertBrowser.Core.Services.Search;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
@@ -30,7 +31,7 @@ public sealed class FsIndexRepositoryTests : IDisposable
     private static FsEntryRow Row(string displayPath, bool isDir = false, long size = 0, bool hidden = false) =>
         new(PathKey.Canonicalize(displayPath), Path.GetFileName(displayPath), isDir, size, DateTime.UtcNow, hidden);
 
-    private static SearchQuery Q(string text) => SearchQuery.Parse(text)!;
+    private static SearchQuery Q(string text) => SearchQuery.Parse(text).Query!;
 
     [Fact]
     public void Search_MatchesSubstringCaseInsensitively()

@@ -95,23 +95,24 @@
                 <!--
                   Whole-PC search. It lives up here, once per window, because the per-tab box below
                   is folder-local only now — one box, one scope, nothing to choose before typing.
-                  Collapsed to a square button by default so the caption strip stays a toolbar; the
-                  two states share a Grid cell, and a Collapsed child measures to zero, so the
-                  button's width is all this occupies until it is opened. The query itself belongs
-                  to the active tab, since that is the list the hits appear in.
+                  It is always open: it used to fold into a magnifier button, which saved a little
+                  caption strip and cost a click before every search, in the one place a file
+                  browser is most often reached for. The query itself belongs to the active tab,
+                  since that is the list the hits appear in.
                 -->
-                <Grid VerticalAlignment="Center" Margin="0,0,2,0">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,2,0">
+                    <!-- The syntax reference. A button rather than the tooltip alone, because the
+                         filter list outgrew the shape of a tooltip: this one can be scrolled, and
+                         kept open while the query is typed. -->
                     <Button Style="{StaticResource ToolbarButton}"
-                            Command="{Binding ExpandGlobalSearchCommand}"
-                            AutomationProperties.AutomationId="GlobalSearchButton"
-                            AutomationProperties.Name="Search this PC"
-                            ToolTip="Search this PC (Ctrl+Shift+F)"
-                            Visibility="{Binding IsGlobalSearchExpanded, Converter={StaticResource InverseBoolToVisibility}}">
-                        <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE721;"/>
+                            Click="SearchSyntax_Click"
+                            AutomationProperties.AutomationId="SearchSyntaxButton"
+                            AutomationProperties.Name="Search syntax"
+                            ToolTip="What you can type here">
+                        <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE946;"/>
                     </Button>
 
-                    <Border Style="{StaticResource FieldBorder}" Width="300"
-                            Visibility="{Binding IsGlobalSearchExpanded, Converter={StaticResource BoolToVisibility}}">
+                    <Border Style="{StaticResource HeaderFieldBorder}" Width="300">
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Left" FontFamily="{StaticResource SymbolFont}"
                                        Text="&#xE721;" FontSize="13" Margin="8,0,6,0"
@@ -129,7 +130,6 @@
                                          AutomationProperties.Name="Search this PC"
                                          Text="{Binding ActiveTab.GlobalSearchText, UpdateSourceTrigger=PropertyChanged}"
                                          KeyDown="GlobalSearchBox_KeyDown"
-                                         LostKeyboardFocus="GlobalSearchBox_LostKeyboardFocus"
                                          ToolTip="Search every indexed drive (Ctrl+Shift+F)"/>
                                 <TextBlock Text="Search this PC" Foreground="{StaticResource Theme.Text.Placeholder}"
                                            Margin="4,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
@@ -147,7 +147,7 @@
                             </Grid>
                         </DockPanel>
                     </Border>
-                </Grid>
+                </StackPanel>
 
                 <!-- "Show hidden items" lives in the Settings dialog only; it is a preference
                      you set once, not something the caption strip needs a button for. -->

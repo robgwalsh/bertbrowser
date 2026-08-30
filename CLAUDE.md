@@ -607,6 +607,74 @@ note are a lot of new surface for a colour to go missing in. Mutate a rule and c
 red: group on size alone and three go, drop the hardlink fold and two go, narrow the hasher's share
 flags to `FileShare.Read` and one goes.
 
+### Search: the query language
+
+`Core/Services/Search` turns the box into filters — `ext:`, `size:`, `dm:`, `path:`, `is:`, `re:`,
+plus `OR`, `!` and brackets — over the columns the MFT pass **already writes on every `fs_entry`
+row**. There is no schema change and no new index; see `docs/search-indexing.md` for the grammar,
+the SQL and the measured cost.
+
+**A bare word means exactly what it always did**, and that is the constraint the design is bent
+around. Colons are ordinary in what people type at a file browser, so an unrecognised `key:` stays a
+name term — `C:\Users` pasted in still searches for that text — and `OR`/`NOT`/`AND` are operators
+only in **uppercase**, so a file called `Report or Draft` is still findable. `SearchQueryTests` is
+kept as the compatibility proof: every theory in it predates the feature.
+
+Four things here are load-bearing:
+
+- **`SearchNode` has two abstract members**, `Matches` and `WriteSql`, so a filter cannot be added
+  with only one side wired up — a compile error rather than an indexed drive and a live scan quietly
+  disagreeing. It is the `NavigationRequest.IsAcceptablePath` discipline made structural.
+- **`Matches` is the definition; the SQL is only an optimisation.** `FsIndexRepository` re-applies
+  `Matches` to every row it reads, so SQL that is too *wide* costs a longer scan and nothing else,
+  and SQL that is too *narrow* goes red in `SearchAgreementTests` (~40 queries, both paths, one
+  corpus, compared). That is what lets `re:` compile to `1`. Two corollaries are easy to undo:
+  **`LIMIT` is pushed down only for an exact predicate** (otherwise it caps the rows the scan
+  reached rather than the rows that matched), and **a superset cannot be negated** — `NotNode` emits
+  `1` when its child is inexact, or `!re:foo` becomes `NOT 1` and returns nothing.
+- **`Parse` never throws and is three-valued.** A query, a *problem*, or nothing. A problem keeps
+  the view in search mode with the banner up and the previous results on screen; only "nothing"
+  falls back to the directory listing. Half-typing `size:>` must not flip the pane back and forth.
+  It is `RenamePattern.ValidateRule`'s contract, for the same reason: this runs on the UI thread
+  behind a 200 ms debounce.
+- **`size:` and `dm:` are not universally answerable.** `MftVolumeIndexer.BuildFromUsnEnum` — the
+  fallback when the raw `$MFT` read fails — writes **every row with size 0 and no timestamp**, so
+  those filters can never match there. An empty filtered result therefore asks
+  `FsIndexRepository.HasSizeData` before reporting "no results" and says the drive is unmeasured
+  instead: the same distinction `DiskUsageRules.Classify` exists to draw, recognised the same way.
+  Two smaller consequences of the same fact — a date term applies a 1601 floor so a timestampless
+  row satisfies no filter rather than every open-ended one, and `is:hidden` has to override the
+  caller's blanket `includeHidden: false` (`SearchService.ShowHidden`) or it returns nothing every
+  time and reads as broken.
+
+**The whole-PC field in the title bar is always open**, with an ⓘ beside it opening
+`Views/SearchSyntaxDialog` — the grammar on one page, built from `SearchSyntax.Sections`, so it
+cannot advertise a filter the parser does not implement. That dialog is `SizeToContent="Height"`
+with **no `ScrollViewer`**: a reference card you have to scroll is one you cannot take in at a
+glance, and sizing to content means adding a filter row grows the window rather than silently
+pushing the last line out of sight. Any key or click dismisses it, so it has no Close button
+either — which leaves it with **nothing focusable in it at all**. That is measured, not assumed:
+WPF then focuses the `Window` itself and `PreviewKeyDown` fires (and a focusable child added later
+would still tunnel through it first). The title bar is the one place a click does not close it —
+`WindowChrome` declares the top 32px non-client, so the press never reaches WPF; making it close
+would mean marking the caption hit-test-visible and costing every window that chrome the drag. It used to fold into a magnifier button,
+which cost a click before every search and needed three rules to decide when it could fold away
+(not while a search was live, not while it had the caret, forced open when a tab carrying a query
+came forward); `ShellViewModel` now has one `FocusGlobalSearch` command and none of that. Two
+details: the field uses `HeaderFieldBorder`, not `FieldBorder`, because `Theme.Input.Background`
+and `Theme.TitleBar.Background` are **the same colour** in Dark+ and the field was invisible until
+focused — it takes the *content* background instead, which inverts correctly in a light theme; and
+that style overrides the brushes with `Setter`s rather than assigning them on the element, since a
+local value outranks a `Style` trigger and would silently kill the focus highlight.
+
+`tools/ui/search.bbs` drives it through the real window, which is where a harness run earns its
+keep: unelevated, so there is no MFT index and the searches go through **`FileSystemWalker`** — a
+filter honoured only in the SQL builder would return the wrong rows and no unit test would notice.
+`assert-error` is the new verb, for the warning banner nothing could assert before. Mutate a rule
+and confirm a test goes red: drop the repository's row re-check and seven go, let `NotNode` invert
+an inexact child and three go, make a size bound off by one and the agreement test catches the
+matcher and the SQL disagreeing.
+
 ### The elevated index helper
 
 **The app is `asInvoker`.** Exactly one thing needs an administrator token — `MftVolumeIndexer.Open()`
@@ -1328,12 +1396,12 @@ CF_HDROP *as well as* the private `BertBrowser.FileItems` format, but `DropPipel
 the private one**. So an in-app drop is decided by exactly the code and plan it always was, while
 Explorer, editors, browsers and mail clients see an ordinary file drop.
 
-Accepting drops *from* other applications is **now possible but not implemented**, and that changed
-without anyone touching this code: UIPI used to block it because the app was elevated, and the app
-is `asInvoker` now. WPF will therefore accept such a drop and `DropPipeline`, which reads only the
-private format, will **silently ignore it** — a worse experience than the OS refusing outright.
-Handling external `CF_HDROP` is a separate piece of work; until then this is a known gap rather than
-a mystery.
+Accepting drops *from* other applications became possible when the manifest changed — UIPI used to
+block it because the app was elevated, and the app is `asInvoker` now — and is **implemented**:
+`Core/Services/Transfer/DropInContract` decides what an external `CF_HDROP` means, `DropPipeline`
+consumes it, and `DropInContractTests` carries the truth table. The asymmetry with dragging *out*
+is the point: an external source acts on the payload itself, so reporting `Move` for something the
+user meant as a copy would delete another application's files on our say-so.
 
 The source sets `Preferred DropEffect` = `Copy`. That is documented as a clipboard-paste convention,
 but Explorer honours it during a drag too — verified: a same-volume drag that would otherwise have

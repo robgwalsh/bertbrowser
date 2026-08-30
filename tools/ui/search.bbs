@@ -1,0 +1,94 @@
+# The filter syntax, driven through the real window.
+#
+# What this covers that no unit test can: the same query going through the *live scan* rather
+# than through SQL. A harness run is unelevated, so there is no MFT index and the first search
+# of a subtree falls to FileSystemWalker — which is precisely where a filter honoured only in
+# the SQL builder would return the wrong rows and nobody would notice.
+
+tree .
+refresh
+assert-count 8
+
+# A bare word still means exactly what it always meant: a recursive substring of the name,
+# flattened, with the folder each hit came from. Three report.md, one per level.
+search report
+assert-flattened
+assert-count 3
+assert-error
+shot 01-plain
+
+# ext: — four .md files across three levels. The hidden ones stay out, as they always have.
+search ext:md
+assert-count 4
+assert-row draft.md
+assert-no-row notes.txt
+shot 02-extension
+
+# Hidden entries stay out of search whatever the browse setting says — and this is the
+# assertion that guards it, because is:hidden had to be given a way to override the caller's
+# blanket exclusion. Get that wrong in the other direction and every search leaks AppData.
+search ext:txt
+assert-count 3
+assert-row notes.txt
+assert-no-row .hidden-notes.txt
+assert-no-row secret.txt
+
+# size: — archive.zip (512,000) and Pictures/holiday.jpg (240,000) clear 100kb;
+# photo.jpg at 96,000 does not, which is the boundary worth having in a script.
+search size:>100kb
+assert-count 2
+assert-row archive.zip
+assert-row holiday.jpg
+assert-no-row photo.jpg
+shot 03-size
+
+# Combining filters ANDs them, and a bare word joins in.
+search report ext:md size:>1kb
+assert-count 2
+assert-no-row old.txt
+
+# OR is uppercase-only — the lowercase word stays a search term, so no existing query
+# changed meaning when the operator arrived.
+search report OR draft
+assert-count 4
+assert-row draft.md
+
+# Exclusion, and a path: filter to exclude by folder rather than by name.
+search report !path:archive
+assert-count 2
+assert-no-row old.txt
+
+# is:dir is not a search on its own (half the disk is not a result), but it filters one.
+search is:dir report
+assert-count 0
+
+# A regular expression. It has no SQL at all, so the rows come back through the repository's
+# re-check — drop that and this returns the whole subtree.
+search re:^report
+assert-count 3
+assert-row report.md
+
+# A half-typed filter is a message, not an empty list: the previous results stay on screen
+# under the banner, and the view does not fall back to the directory listing for a keystroke.
+search size:>
+assert-error size
+assert-flattened
+shot 04-problem
+
+# And typing the rest of it clears the banner and runs.
+search size:>400kb
+assert-error
+assert-count 1
+assert-row archive.zip
+
+# A key this index cannot answer says so rather than searching for the literal text.
+search dc:today
+assert-error created
+
+clear-search
+assert-not-flattened
+assert-error
+assert-count 8
+
+assert-not-launched
+state
