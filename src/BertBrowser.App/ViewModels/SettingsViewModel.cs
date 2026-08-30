@@ -6,6 +6,7 @@ using BertBrowser.App.Theming;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
+using BertBrowser.Core.Services.ShellIntegration;
 
 namespace BertBrowser.App.ViewModels;
 
@@ -123,6 +124,11 @@ public sealed partial class SettingsViewModel : ObservableObject
 {
     private readonly AppSettings _settings;
     private readonly IShellNewCatalog? _shellNew;
+    private readonly IFolderHandlerService? _folderHandler;
+
+    /// <summary>Guards the live-apply handler against the revert it performs on failure, which
+    /// would otherwise come straight back round as another change.</summary>
+    private bool _applyingFolderHandler;
 
     public ObservableCollection<CustomCommandItemViewModel> Commands { get; }
 
@@ -185,8 +191,39 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// </summary>
     public AppearanceViewModel Appearance { get; }
 
+    // --- Opening folders (the Windows shell's Directory and Drive verbs) ---
+
+    /// <summary>
+    /// Whether Windows opens folders and drives in BertBrowser.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This one applies immediately, like <see cref="Appearance"/> and unlike everything else on
+    /// this page.</b> It is machine state rather than a stored preference — the registry is the
+    /// single source of truth, and there is deliberately no mirrored flag in
+    /// <c>AppSettings</c> for it to drift from. Cancel cannot un-write a registry key, so holding
+    /// the change until Save would be a promise the dialog cannot keep.
+    /// </para>
+    /// </remarks>
+    [ObservableProperty]
+    private bool _openFoldersHere;
+
+    /// <summary>False when there is no folder-handler service — a construction site that did not
+    /// pass one, the way <see cref="NewFileTypes"/> import is hidden without a catalog.</summary>
+    public bool CanChooseFolderHandler => _folderHandler is not null;
+
+    /// <summary>Set when the registry refused a write, or when another program holds the verb.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasFolderHandlerWarning))]
+    private string _folderHandlerWarning = "";
+
+    public bool HasFolderHandlerWarning => FolderHandlerWarning.Length > 0;
+
     public SettingsViewModel(
-        AppSettings settings, IThemeService theme, IShellNewCatalog? shellNew = null)
+        AppSettings settings,
+        IThemeService theme,
+        IShellNewCatalog? shellNew = null,
+        IFolderHandlerService? folderHandler = null)
     {
         Categories = new[]
         {
@@ -200,7 +237,12 @@ public sealed partial class SettingsViewModel : ObservableObject
 
         Appearance = new AppearanceViewModel(theme);
         _shellNew = shellNew;
+        _folderHandler = folderHandler;
         _settings = settings;
+
+        // Read rather than restored: the registry is the state, so a change made outside this app
+        // is simply what the box shows next time it opens.
+        ReadFolderHandlerState();
 
         // Null means never configured, which is what ships the defaults; an empty list means the
         // user removed them all and must stay empty.
@@ -221,6 +263,65 @@ public sealed partial class SettingsViewModel : ObservableObject
         Commands = new ObservableCollection<CustomCommandItemViewModel>(
             settings.CustomCommands.Select(d => new CustomCommandItemViewModel(d)));
         SelectedCommand = Commands.FirstOrDefault();
+    }
+
+    // --- Opening folders ---
+
+    /// <summary>
+    /// Applies the change straight away, and says so if the registry refused rather than leaving a
+    /// ticked box that means nothing.
+    /// </summary>
+    partial void OnOpenFoldersHereChanged(bool value)
+    {
+        if (_folderHandler is null || _applyingFolderHandler) return;
+
+        if (_folderHandler.TrySet(value))
+        {
+            ReadFolderHandlerState();
+            return;
+        }
+
+        _applyingFolderHandler = true;
+        try
+        {
+            OpenFoldersHere = !value;
+            FolderHandlerWarning = value
+                ? "Windows would not let BertBrowser register as the folder handler."
+                : "Windows would not let BertBrowser hand folders back to File Explorer.";
+        }
+        finally
+        {
+            _applyingFolderHandler = false;
+        }
+    }
+
+    /// <summary>
+    /// Seeds the box from what the registry actually says. The assignment is fenced by
+    /// <see cref="_applyingFolderHandler"/> so reading the state never writes it back.
+    /// </summary>
+    private void ReadFolderHandlerState()
+    {
+        if (_folderHandler is null) return;
+
+        var state = _folderHandler.State();
+
+        _applyingFolderHandler = true;
+        try
+        {
+            OpenFoldersHere = state is FolderHandlerState.RegisteredToThisApp
+                or FolderHandlerState.RegisteredToThisAppStale;
+        }
+        finally
+        {
+            _applyingFolderHandler = false;
+        }
+
+        // Naming the other program rather than quietly taking the verb over. Ticking the box is
+        // still allowed — that is the user asking — but they should know what it displaces.
+        FolderHandlerWarning = state == FolderHandlerState.RegisteredToAnotherApp
+            ? $"{Path.GetFileNameWithoutExtension(_folderHandler.OtherProgram()) ?? "Another program"} " +
+              "currently opens folders. Turning this on will replace it."
+            : "";
     }
 
     [RelayCommand]

@@ -1199,7 +1199,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         "settings" => new SettingsWindow(new SettingsViewModel(
             session.Services.GetRequiredService<AppSettings>(),
             session.Services.GetRequiredService<IThemeService>(),
-            session.Services.GetRequiredService<IShellNewCatalog>())),
+            session.Services.GetRequiredService<IShellNewCatalog>(),
+            session.Services.GetRequiredService<IFolderHandlerService>())),
 
         "theme-editor" => new ThemeEditorWindow(new AppearanceViewModel(
             session.Services.GetRequiredService<IThemeService>())),

@@ -129,6 +129,11 @@ public sealed class SingleInstance : IDisposable
 
             client.Connect((int)ConnectTimeout.TotalMilliseconds);
 
+            // Before the write, not after: this process holds the foreground rights (the shell just
+            // started it from a double-click) and the copy doing the work does not. Without the
+            // hand-over its window opens the folder behind whatever the user was looking at.
+            BertBrowser.App.Interop.ForegroundWindow.GrantTo(client.SafePipeHandle);
+
             LineChannel.WriteLine(client, NavigationRequest.Format(request));
             return true;
         }

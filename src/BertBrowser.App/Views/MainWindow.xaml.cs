@@ -137,7 +137,8 @@ public partial class MainWindow : ThemedWindow
         var vm = new SettingsViewModel(
             _settings,
             App.Services.GetRequiredService<IThemeService>(),
-            App.Services.GetRequiredService<BertBrowser.App.Services.IShellNewCatalog>());
+            App.Services.GetRequiredService<BertBrowser.App.Services.IShellNewCatalog>(),
+            App.Services.GetRequiredService<BertBrowser.App.Services.IFolderHandlerService>());
         if (new SettingsWindow(vm) { Owner = this }.ShowDialog() == true)
         {
             // Push a "Show hidden items" change made in the dialog through the shell; its setter

@@ -1,4 +1,5 @@
 using System.Windows;
+using BertBrowser.App.Interop;
 using BertBrowser.App.Services;
 using BertBrowser.App.Services.Indexing;
 using BertBrowser.App.Theming;
@@ -24,7 +25,15 @@ public partial class App : Application
     {
         // Must run before any WPF code: handles Velopack install/update/uninstall
         // hooks and exits the process when invoked as one.
-        VelopackApp.Build().Run();
+        VelopackApp.Build()
+            // Uninstalling deletes the whole install directory, so a folder-handler registration
+            // left behind would point the Windows shell at an executable that is gone — and since
+            // it owns the Directory and Drive open verbs, *every folder double-click on the
+            // machine* would fail, with the registry as the only way back. This runs inside the
+            // uninstall with a 30-second budget, which is ample for six registry deletes, and
+            // deliberately touches nothing but the registry: the process exits straight after.
+            .OnBeforeUninstallFastCallback(_ => FolderHandlerRegistry.TryUnregister())
+            .Run();
 
         // After Velopack, whose hooks exit the process and must not be gated behind an instance
         // check — and before anything else, so a second launch costs no WPF, no DI and no database.
@@ -86,6 +95,12 @@ public partial class App : Application
 
         ListenForOtherInstances(window, shell);
 
+        // The backstop behind the uninstall hook: if this app owns the shell's folder verb and the
+        // registration has gone stale — an install moved, a write interrupted part-way — put a live
+        // path back. Narrow on purpose: it never creates a registration that is absent and never
+        // touches one belonging to another program. See FolderHandlerRules.ShouldRepair.
+        FolderHandlerRegistry.RepairIfStale();
+
         // Build the global MFT search index in the background. This is what raises the one
         // elevation prompt the app asks for: reading the MFT needs an administrator token, so it
         // happens in BertBrowser.Indexer.exe rather than here. Declining costs instant global
@@ -133,6 +148,7 @@ public partial class App : Application
         services.AddSingleton<BertBrowser.Core.Services.NewItem.NewItemPlanner>();
         services.AddSingleton<BertBrowser.Core.Services.NewItem.NewItemExecutor>();
         services.AddSingleton<IShellNewCatalog, ShellNewCatalog>();
+        services.AddSingleton<IFolderHandlerService, FolderHandlerService>();
         // One instance serving both roles: it caches per-volume answers, and the planner and the
         // executor should agree about what has a Recycle Bin.
         services.AddSingleton<Interop.ShellRecycleBin>();
@@ -213,11 +229,11 @@ public partial class App : Application
 
         instance.RequestReceived += request => window.Dispatcher.BeginInvoke(() =>
         {
-            // Restore first: the request is worthless if the window it opens in stays minimized
-            // behind whatever the user was actually looking at.
-            if (window.WindowState == WindowState.Minimized)
-                window.WindowState = WindowState.Normal;
-            window.Activate();
+            // Restore and raise: the request is worthless if the window it opens in stays behind
+            // whatever the user was actually looking at. Activate() alone is not enough from a
+            // background process — see ForegroundWindow, and note the sending copy has already
+            // handed over its right to do this.
+            ForegroundWindow.Raise(window);
 
             _ = shell.OpenRequestAsync(request);
         });

@@ -787,6 +787,184 @@ selects nothing:
 It clears on success; a failure only clears when the listing it was waiting for has actually
 arrived. Applied *before* `FocusFileList`, since selecting scrolls.
 
+### Being the shell's folder handler
+
+Opt-in, off by default, one checkbox at the bottom of Settings ▸ General. When it is on, Windows
+opens folders and drives in BertBrowser: double-clicking a folder, opening a drive, and every
+"Open containing folder" that asks the shell rather than naming `explorer.exe`. The app already knew
+how to be on the receiving end — `CommandLine.Parse`, `NavigationRequest.IsAcceptablePath`,
+`SingleInstance`'s hand-off and `ShellViewModel.OpenRequestAsync` — so this feature is only the
+registration that makes anything call it.
+
+**Windows has no "default file manager" setting, and that is not something to keep looking for.**
+File Explorer's own `Capabilities` key registers three URL associations (burn, erase, zip) and no
+file or folder associations at all, so nothing in Default Apps, `RegisteredApplications` or
+`IApplicationAssociationRegistration` can express this — folders have no "Open with" entry for a
+user to change. Overriding the shell verb is the only mechanism there has ever been.
+
+**The scope is `Directory` and `Drive`, deliberately never `Folder`, and that one decision is most
+of the design.** `HKLM\Software\Classes\Directory\shell\open` and `Drive\shell\open` do not exist:
+folders and drives inherit their open verb from the `Folder` class, whose command is `Explorer.exe`
+behind `DelegateExecute = {11dbb47c-a525-400b-9e80-a54615a090c0}` (`CLSID_ExecuteFolder`). Writing
+*more specific* verbs on `Directory` and `Drive` therefore takes the filesystem cases and leaves
+`Folder` alone — This PC, Control Panel, `.zip` browsing, FTP and Explorer's own in-window
+navigation all keep working, and keep working even if the registration is somehow left pointing at
+nothing. The Files app takes `Folder` instead and has the bug reports that follow from it, Control
+Panel dying with "Application not found" among them; it needs a native `IShellWindows` shim and a
+hard-coded God Mode exclusion to paper over what that costs. Not worth it for the folders this app
+can actually browse.
+
+Two consequences of that choice are easy to undo by accident:
+
+- **`DelegateExecute = ""` on each command key is mandatory, and the reason it looks optional is
+  the trap.** There is no HKLM `Directory\shell\open` key, so there is no HKCU-over-HKLM value to
+  mask and the empty shadow appears pointless. But `Directory` and `Drive` **derive from** `Folder`,
+  and the verb they inherit carries `DelegateExecute = {11dbb47c-…}` (`CLSID_ExecuteFolder`, in
+  `ExplorerFrame.dll`). A `DelegateExecute` that resolves makes the shell instantiate that COM
+  object and **ignore the command line entirely** — so without the empty shadow the registration is
+  completely inert: every folder goes to Explorer while all six keys read exactly right. Reasoning
+  about hive merging instead of class inheritance is how that gets missed.
+  `EachCommandBlanksTheInheritedDelegateExecute` is the test.
+- **`(Default)` on the `shell` key must name the verb, and writing it is the most dangerous thing
+  here.** Both `Directory\shell` and `Drive\shell` ship with `"none"`. Measured, not assumed: with
+  `"none"` in place **the shell uses its own built-in folder navigation and never consults a verb at
+  all** — a complete and correct `Directory\shell\open` with the command right and `DelegateExecute`
+  blanked is simply ignored, and folders keep opening in Explorer. Naming a verb there is what makes
+  the shell invoke one. The danger is what happens when the named verb is *missing*: the shell falls
+  through to the first verb it enumerates, which is whatever a third party installed. An early
+  version wrote this value **first**, before creating the verb, and on a machine with a
+  `NordVPN-file-share` entry under `HKCU\...\Directory\shell` the result was that **double-clicking
+  a folder opened NordVPN.**
+- **Hence `GuardValues` is separate from `ValuesFor`, and registration is all-or-nothing.** The
+  order is: command key first (it creates its parent verb key with it), then decoration, then
+  **read the command back off the registry**, and only then write the default verb. Any failure at
+  any step rolls the whole registration back. Inferring "the write worked" from "`SetValue` did not
+  throw" is not good enough for the one value whose failure mode is handing the user's folders to
+  another program. `TheDefaultVerbIsNotWrittenAlongsideTheVerbItNames` and
+  `TheCommandIsWrittenBeforeTheVerbKey` pin this.
+- `Classify` reports a named verb with no command behind it as `RegisteredToThisAppStale` — ours and
+  broken — rather than `NotRegistered`, so the checkbox shows something to switch off and switching
+  it off clears the value. That is what repairs a machine an earlier build damaged.
+
+The split is the house one. **`Core/Services/ShellIntegration` decides and `App/Interop` touches the
+registry**, so what to write, what a reading means and what may be removed are all testable in a
+project that cannot open a registry key — the same seam `ShellNewImport`/`ShellNewRegistry` use, and
+`ShellNewRegistry`'s read-only contract now says so explicitly rather than being quietly untrue.
+`FolderHandlerRegistration` is the key/value description, `FolderHandlerRules.Classify` turns a
+reading into `NotRegistered` / `RegisteredToThisApp` / `RegisteredToThisAppStale` /
+`RegisteredToAnotherApp`, and `FolderHandlerRegistry` is the only thing in the app that writes to
+the registry at all. Everything is under **HKCU**, which is what keeps this an `asInvoker` feature.
+
+**Removal is not the mirror image of writing, and treating it as one broke a real machine.**
+`Directory\shell` is a key other installers keep their own verbs under, so unregistering deletes the
+`open` subtree and *only* a default value that still says `open` — never the shared key, and never a
+value another program has since changed. It also prunes an emptied key **only if it actually removed
+something**: an unregister on a machine that was never registered must be a pure no-op. The first
+version pruned anything it found empty and deleted a pre-existing `HKCU\Software\Classes\Drive\shell`
+during verification. `OnlyTheDefaultVerbThisAppWroteIsRemovable` and
+`RemovalTakesTheVerbSubtreeButNotTheSharedShellKey` are what stand behind that now.
+
+**A registration outliving its executable is the failure that matters**, because it makes *every
+folder double-click on the machine* fail with the registry as the only way back — Files has exactly
+that on record, from an antivirus interrupting its write. Velopack deletes the whole install
+directory on uninstall, so there are two guards:
+
+- **`OnBeforeUninstallFastCallback`** on the `VelopackApp.Build()` chain in `App.xaml.cs` — the
+  first hook this app has ever chained there. It runs inside the uninstall with a 30-second budget
+  and touches nothing but the registry, since the process exits straight after.
+- **`FolderHandlerRules.ShouldRepair`**, run from `OnStartup`, is the backstop. Deliberately narrow:
+  it never creates a registration that is absent (removing it outside the app is not undone by
+  launching the app), never touches one belonging to another program, and repairs a stale one only
+  when the registered executable is **gone** or is already this one. That last clause is what stops
+  a debug build run beside a working install from quietly repointing the shell at `bin\Debug`.
+
+The registered path is `AppContext.BaseDirectory` + `BertBrowser.exe`, which on a Velopack install
+lands inside `current\` — a fixed folder, not a per-version one, so it survives updates. Paths are
+compared through `PathKey`, not string equality, or a registration differing only in casing would
+read as stale and be rewritten on every single launch. The **arguments** are compared too
+(`ArgumentTail`): a build that changes them leaves a registration that still launches the app and no
+longer means what the new version means by it, and comparing only the program would leave that in
+place forever.
+
+**Opening from the shell is a new tab** — `CommandFor` writes `--new-tab`, so double-clicking a
+folder shows you that folder rather than taking away whichever tab you were using, the way
+Explorer's own double-click does. The flag lives on the *registration* rather than inside
+`OpenRequestAsync` so `bertbrowser <path>` typed at a prompt keeps its documented meaning; the
+shell's intent is carried by the command line the shell was given. A cold start is unaffected —
+`OnStartup` takes the first browsable target as `StartPath` and `RemainingAfterStart` drops it, so
+there is no duplicate tab.
+
+**A hand-off has to raise the window itself, and `Activate()` is not enough.** Windows will not let
+a background process take the foreground, so the running copy's `Activate()` is silently downgraded
+to a flashing taskbar button: the request really did arrive and really did open the folder, behind
+whatever the user was looking at. `Interop/ForegroundWindow` is the fix — the *second* copy holds
+foreground rights (the shell just started it from a double-click) and gives them away with
+`AllowSetForegroundWindow`, targeted at the exact process serving the pipe via
+`GetNamedPipeServerProcessId` rather than `ASFW_ANY`. It is granted **before** the request is
+written, so the permission is in place by the time the other copy acts on it. This is not the
+`AllowSetForegroundWindow` dance that went with `ShellLauncher` and must stay gone — that one
+launched other people's programs through `explorer.exe` to borrow a lesser token; this is one copy
+of the app handing foreground rights to another, which is what the API is for.
+
+**There is deliberately no `AppSettings` property for this.** The registry *is* the state; a
+mirrored bool would be a second source of truth that drifts the moment the user, another file
+manager or a Windows update changes the keys. So the checkbox reads the live state when Settings
+opens, and — like Appearance and unlike everything else on that page — **applies immediately rather
+than on Save**, because Cancel cannot un-write a registry key. `IFolderHandlerService` is the seam,
+for the reason `IShellNewCatalog` is one: `RefusingFolderHandlerService` gives a harness run
+something that reads and writes nothing, so a scripted capture neither depends on the machine it
+runs on nor changes which program opens the user's folders.
+
+Known limits, none of them fixable from here:
+
+- Anything that runs **`explorer.exe` by name** bypasses the shell entirely — `explorer /select,`
+  from Chrome's "Show in folder", Task Manager's "Open file location", most Electron apps. Only
+  callers that ask the shell to open a folder are redirected.
+- Win+E and the taskbar Explorer icon stay Explorer. They can be taken via
+  `HKCU\Software\Classes\CLSID\{52205fd8-…}\shell\opennewwindow\command`, and Files does, but it is
+  the most fragile part of this area (it is what Windows 11 24H2 troubleshooting tells people to
+  delete), so it is out of scope.
+- A caller using `SHOpenFolderAndSelectItems` gets the folder opened but **not the item selected**,
+  because selecting it needs a fake `IShellWindows` browser registered at the target PIDL. Files
+  ships a native C++ shim for exactly this. Ours opens the folder, which is the useful nine tenths.
+
+Tests: `FolderHandlerRegistrationTests` — the written key set, every `Classify` arm, the casing rule,
+the repair rule, and that a drive root's `%1` (which expands to `C:\` and escapes its own closing
+quote) is still parsed correctly by `CommandLine`. The settings page is photographed in both
+palettes by `themes.bbs` for free, since `dialog settings` opens on General. Mutate a rule and
+confirm a test goes red: write the default verb, reverse the write order, compare paths ordinally,
+or let the repair fire on any stale registration, and one goes on its own.
+
+**Two things this area has already taught, both found by running the real code against a real
+machine rather than by reading documentation.** A unit test cannot see either, and the second one
+cost a user their folder double-click:
+
+- Removal must delete only what this app wrote. The first version pruned any key it found empty and
+  deleted a pre-existing `HKCU\Software\Classes\Drive\shell` that was none of its business.
+- Verb resolution is not "what I registered wins", and it took three wrong models to find that out.
+  A registration can be complete, correct, visible in the merged `HKCR` view, and **still never
+  consulted**, because the `"none"` default verb keeps the shell on its own navigation path. The
+  same value, written a moment too early, hands the double-click to a third party instead. Both
+  failures look identical in the registry.
+
+**When changing this, the only real test is toggling it on and double-clicking a folder.** No unit
+test reaches shell verb resolution, and the harness cannot either — `RefusingFolderHandlerService`
+exists precisely so a scripted run never touches these keys. A finished registration is
+`Directory\shell\open\command` holding the command *and* an empty `DelegateExecute`, with
+`Directory\shell\(Default)` = `open`:
+
+```powershell
+reg query "HKCU\Software\Classes\Directory\shell" /v ""            # open
+reg query "HKCU\Software\Classes\Directory\shell\open\command" /s  # command + empty DelegateExecute
+```
+
+If a change ever sends folders somewhere unexpected, this undoes it instantly:
+
+```powershell
+reg delete "HKCU\Software\Classes\Directory\shell" /v "" /f
+reg delete "HKCU\Software\Classes\Drive\shell" /v "" /f
+```
+
 ### The preview pane
 
 Docked right of the file list **inside `DirectoryTabView`**, per tab, behind a `GridSplitter`.

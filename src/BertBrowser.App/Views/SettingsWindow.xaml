@@ -115,6 +115,25 @@
                     </DockPanel>
                     <TextBlock Style="{StaticResource Hint}"
                                Text="Shape of the tiles in thumbnail view, as width:height. The zoom slider under the file list sets the tile width; this sets the height."/>
+
+                    <!-- Machine state, not a stored setting: this writes the shell's Directory and
+                         Drive open verbs under HKCU the moment it is ticked. Cancel cannot un-write
+                         a registry key, so it says so rather than pretending to be held until Save. -->
+                    <StackPanel Visibility="{Binding CanChooseFolderHandler, Converter={StaticResource BoolToVisibility}}">
+                        <Separator Margin="0,4,0,14"/>
+
+                        <CheckBox Content="Open folders in BertBrowser instead of File Explorer"
+                                  IsChecked="{Binding OpenFoldersHere}"/>
+                        <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,4"
+                                   Text="Applies straight away — it is not held until you press Save. Double-clicking a folder or a drive opens it here, as does &quot;Open containing folder&quot; in apps that ask Windows to open the folder."/>
+                        <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,16"
+                                   Text="This PC, Control Panel and zip files keep opening in File Explorer, and so does anything that runs explorer.exe by name — Win+E, the taskbar icon, and some apps' &quot;Show in folder&quot;."/>
+
+                        <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,16"
+                                   Foreground="{StaticResource Theme.Warning.Foreground}"
+                                   Text="{Binding FolderHandlerWarning}"
+                                   Visibility="{Binding HasFolderHandlerWarning, Converter={StaticResource BoolToVisibility}}"/>
+                    </StackPanel>
                 </StackPanel>
 
                 <!-- Preview -->

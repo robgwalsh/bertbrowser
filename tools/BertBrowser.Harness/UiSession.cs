@@ -109,6 +109,11 @@ internal sealed class UiSession : IDisposable
         {
             s.AddSingleton<IProcessLauncher>(launcher);
 
+            // The settings page can make BertBrowser the Windows shell's folder handler, which is a
+            // registry write outside the sandbox affecting every folder double-click on the machine.
+            // A scripted run gets one that reads and writes nothing.
+            s.AddSingleton<IFolderHandlerService>(new RefusingFolderHandlerService());
+
             // The app's own registration starts BertBrowser.Indexer.exe elevated, which means a
             // UAC dialog on the user's desktop — the one thing parking the window offscreen cannot
             // fix. A scripted run gets nothing, the in-process indexer (--index), or the real

@@ -17,6 +17,12 @@ namespace BertBrowser.App.Interop;
 /// keeps its own list and only ever *reads* this one to populate it.
 /// </para>
 /// <para>
+/// That contract is this file's, not the app's: <see cref="FolderHandlerRegistry"/> writes, and is
+/// the only thing that does. The difference is what the write is <i>for</i> — it is the folder
+/// handler the user turned on in Settings, under their own HKCU, reversible from the same
+/// checkbox, and it changes nothing about Explorer's New menu.
+/// </para>
+/// <para>
 /// Nothing but raw values leaves here: which of them are worth offering, what a type is called and
 /// where its template is are all decided by <see cref="ShellNewImport"/>, in Core, where they can be
 /// tested by a project that cannot open a registry key.
