@@ -37,6 +37,14 @@ public static class TextPreviewReader
     /// millions; both need a ceiling, and the line ceiling is the one a text control cares about.</summary>
     public const int DefaultMaxLines = 5_000;
 
+    /// <summary>Characters beyond this are folded onto the next line. The line <em>count</em> cap
+    /// above does not bound the work a text control does, because one line can be the whole budget:
+    /// a minified bundle is one, and a binary read under <c>forceText</c> almost always is. A single
+    /// megabyte-long run in a non-wrapping <c>RichTextBox</c> is a stall, so the length is capped
+    /// here, beside the count, rather than in the view where no test could reach it. At 4,096 it is
+    /// inert for anything a person wrote.</summary>
+    public const int DefaultMaxLineLength = 4_096;
+
     /// <summary>
     /// Whether a read is convincing enough to show as text when nothing <em>said</em> it was text.
     /// </summary>
@@ -70,7 +78,16 @@ public static class TextPreviewReader
         return control * 100 < sample * 2; // under 2%
     }
 
-    public static TextPreview Read(Stream stream, long byteBudget, int maxLines = DefaultMaxLines)
+    /// <param name="forceText">Decode the bytes even when they are plainly not text. This is raw
+    /// mode: it skips the NUL rung of the ladder and <em>only</em> that rung, so a forced read of a
+    /// UTF-16 file is still UTF-16 and everything else lands on Latin-1, which maps every byte.
+    /// It is what lets the pane show a PDF's header.</param>
+    public static TextPreview Read(
+        Stream stream,
+        long byteBudget,
+        int maxLines = DefaultMaxLines,
+        int maxLineLength = DefaultMaxLineLength,
+        bool forceText = false)
     {
         var budget = (int)Math.Clamp(byteBudget, 0, int.MaxValue - 1);
         var (bytes, moreRemains) = ReadAtMost(stream, budget);
@@ -78,7 +95,7 @@ public static class TextPreviewReader
         if (bytes.Length == 0)
             return new TextPreview("", "UTF-8", "", 0, moreRemains, LooksBinary: false);
 
-        var (encoding, name, bomLength) = DetectEncoding(bytes, moreRemains);
+        var (encoding, name, bomLength) = DetectEncoding(bytes, moreRemains, forceText);
         if (encoding is null)
             return new TextPreview("", "Binary", "", 0, moreRemains, LooksBinary: true);
 
@@ -93,6 +110,8 @@ public static class TextPreviewReader
         var text = encoding.GetString(body);
         var lineEnding = DetectLineEnding(text);
         text = Normalise(text);
+        if (forceText) text = Dot(text);
+        text = FoldLongLines(text, maxLineLength);
 
         var truncated = moreRemains;
         var lineCount = CountLines(text);
@@ -125,7 +144,8 @@ public static class TextPreviewReader
     }
 
     /// <summary>Null encoding means the bytes are not text.</summary>
-    private static (Encoding? Encoding, string Name, int BomLength) DetectEncoding(byte[] bytes, bool truncated)
+    private static (Encoding? Encoding, string Name, int BomLength) DetectEncoding(
+        byte[] bytes, bool truncated, bool forceText = false)
     {
         if (StartsWith(bytes, 0xEF, 0xBB, 0xBF)) return (new UTF8Encoding(false), "UTF-8 (BOM)", 3);
         if (StartsWith(bytes, 0xFF, 0xFE, 0x00, 0x00)) return (new UTF32Encoding(false, false), "UTF-32 LE", 4);
@@ -136,7 +156,10 @@ public static class TextPreviewReader
         var bomless = DetectBomlessUtf16(bytes);
         if (bomless is not null) return bomless.Value;
 
-        if (HasNul(bytes)) return (null, "Binary", 0);
+        // Raw mode skips this rung and only this one. The BOM checks and the bomless-UTF-16
+        // heuristic above still ran, so a forced read of a UTF-16 file is still UTF-16; what is
+        // given up is the right to say "binary", which is exactly what raw mode was asked for.
+        if (!forceText && HasNul(bytes)) return (null, "Binary", 0);
 
         return IsValidUtf8(bytes, truncated)
             ? (new UTF8Encoding(false), "UTF-8", 0)
@@ -259,6 +282,83 @@ public static class TextPreviewReader
     {
         if (!text.Contains('\r')) return text;
         return text.Replace("\r\n", "\n").Replace('\r', '\n');
+    }
+
+    /// <summary>
+    /// Raw mode only: every control character but tab and newline becomes a dot, the way the hex
+    /// dump's ASCII column already spells them.
+    /// </summary>
+    /// <remarks>
+    /// This is not cosmetic. WPF's text layout treats U+000B, U+000C, U+0085, U+2028 and U+2029 as
+    /// line breaks in their own right, and Latin-1 turns byte 0x85 into the third of those — so a
+    /// binary read of any file containing one renders more rows than the string has lines, and the
+    /// gutter beside it stops lining up from that point down. It is also the honest rendering: in a
+    /// file being read as bytes, 0x85 is a byte, not a paragraph mark.
+    ///
+    /// Ordinary text is deliberately left alone. There those characters really are separators, and
+    /// they are rare enough that dotting them would cost more than it saved.
+    /// </remarks>
+    private static string Dot(string text)
+    {
+        var needed = false;
+        foreach (var c in text)
+        {
+            if (!IsUnshowable(c)) continue;
+            needed = true;
+            break;
+        }
+        if (!needed) return text;
+
+        var clean = new char[text.Length];
+        for (var i = 0; i < text.Length; i++)
+            clean[i] = IsUnshowable(text[i]) ? '.' : text[i];
+        return new string(clean);
+    }
+
+    private static bool IsUnshowable(char c) =>
+        // char.IsControl covers C0 and C1 — which is where 0x85 lives — but not the two Unicode
+        // separators, and WPF breaks a line on those just as readily. Written as escapes because a
+        // literal U+2028 in a source file is a line terminator to the C# compiler too.
+        (char.IsControl(c) && c is not ('\t' or '\n')) || c is '\u2028' or '\u2029';
+
+    /// <summary>Breaks any line longer than <paramref name="maxLength"/> into pieces of that
+    /// length. Runs after <see cref="Normalise"/> so there is one line terminator to look for, and
+    /// before the line count, so the count describes what will actually be shown.</summary>
+    private static string FoldLongLines(string text, int maxLength)
+    {
+        if (maxLength <= 0) return text;
+
+        // Almost every file is under the cap on every line, and walking once to find that out
+        // costs nothing next to building a second string that would be identical.
+        var longest = 0;
+        var start = 0;
+        for (var i = 0; i <= text.Length; i++)
+        {
+            if (i != text.Length && text[i] != '\n') continue;
+            longest = Math.Max(longest, i - start);
+            start = i + 1;
+        }
+        if (longest <= maxLength) return text;
+
+        var folded = new StringBuilder(text.Length + text.Length / maxLength + 1);
+        var run = 0;
+        foreach (var c in text)
+        {
+            if (c == '\n')
+            {
+                folded.Append(c);
+                run = 0;
+                continue;
+            }
+            if (run == maxLength)
+            {
+                folded.Append('\n');
+                run = 0;
+            }
+            folded.Append(c);
+            run++;
+        }
+        return folded.ToString();
     }
 
     private static int CountLines(string text)

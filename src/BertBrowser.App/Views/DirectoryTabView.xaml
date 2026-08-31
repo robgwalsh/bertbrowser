@@ -216,10 +216,12 @@
                             <MenuItem Header="To the right" Click="ContextOpenInPaneRight_Click"/>
                             <MenuItem Header="Below" Click="ContextOpenInPaneBelow_Click"/>
                         </MenuItem>
-                        <MenuItem Header="Open in Terminal" Click="ContextOpenTerminal_Click">
+                        <MenuItem x:Name="OpenInTerminalMenuItem" Header="Open in Terminal"
+                                  Click="ContextOpenTerminal_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE756;"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem Header="Open in VS Code" Click="ContextOpenVSCode_Click">
+                        <MenuItem x:Name="OpenInVSCodeMenuItem" Header="Open in VS Code"
+                                  Click="ContextOpenVSCode_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE943;"/></MenuItem.Icon>
                         </MenuItem>
                         <!-- Folders only: a single file's size is already in the Size column, so

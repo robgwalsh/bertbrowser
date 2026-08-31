@@ -249,4 +249,106 @@ public class TextPreviewReaderTests
         Assert.Equal("", preview.Text);
         Assert.True(preview.Truncated);
     }
+
+    // --- raw mode: decode it anyway ---
+
+    private static TextPreview Raw(byte[] bytes, int maxLineLength = TextPreviewReader.DefaultMaxLineLength) =>
+        TextPreviewReader.Read(new MemoryStream(bytes), 1 << 20, 5000, maxLineLength, forceText: true);
+
+    [Fact]
+    public void ForcedTextDecodesWhatWouldOtherwiseBeCalledBinary()
+    {
+        // This is what lets the pane show a PDF's header instead of refusing the file.
+        byte[] bytes = [.. "%PDF-1.7"u8, 0x00, 0x01, .. "endobj"u8];
+
+        Assert.True(Read(bytes).LooksBinary);
+
+        var raw = Raw(bytes);
+        Assert.False(raw.LooksBinary);
+        Assert.StartsWith("%PDF-1.7", raw.Text);
+        Assert.EndsWith("endobj", raw.Text);
+    }
+
+    [Fact]
+    public void ForcedTextStillHonoursAByteOrderMark()
+    {
+        // Forcing skips the NUL rung of the ladder and only that rung — a UTF-16 file is full of
+        // NULs and is still UTF-16.
+        byte[] all = [.. Encoding.Unicode.GetPreamble(), .. Encoding.Unicode.GetBytes("hello")];
+        var raw = Raw(all);
+        Assert.Equal("hello", raw.Text);
+        Assert.Equal("UTF-16 LE", raw.EncodingName);
+    }
+
+    [Theory]
+    [InlineData((byte)0x00)]
+    [InlineData((byte)0x0B)]   // vertical tab
+    [InlineData((byte)0x0C)]   // form feed
+    [InlineData((byte)0x85)]   // NEL — the one that actually bites, since Latin-1 produces it
+    public void AForcedReadShowsAControlByteAsADotRatherThanAsALineBreak(byte value)
+    {
+        // WPF's text layout breaks a line on every one of these, so a row would appear that the
+        // string has no line for — and the gutter beside it would stop lining up from there down.
+        byte[] bytes = [(byte)'a', value, (byte)'b'];
+        var raw = Raw(bytes);
+        Assert.Equal("a.b", raw.Text);
+        Assert.Equal(1, raw.LineCount);
+    }
+
+    [Fact]
+    public void AForcedReadKeepsRealNewlinesAndTabs()
+    {
+        var raw = Raw("one\ttwo\r\nthree"u8.ToArray());
+        Assert.Equal("one\ttwo\nthree", raw.Text);
+        Assert.Equal(2, raw.LineCount);
+    }
+
+    [Fact]
+    public void OrdinaryTextKeepsItsSeparators()
+    {
+        // Not dotted outside raw mode: there a form feed really is a page break somebody typed.
+        var preview = Read(Encoding.ASCII.GetBytes("page\fbreak"));
+        Assert.Equal("page\fbreak", preview.Text);
+    }
+
+    [Fact]
+    public void EveryByteSurvivesAForcedRead()
+    {
+        // Latin-1 is the rung it lands on, and it maps all 256 of them — nothing is dropped and
+        // nothing becomes a replacement glyph.
+        var bytes = new byte[256];
+        for (var i = 0; i < 256; i++) bytes[i] = (byte)i;
+        Assert.Equal(256, Raw(bytes, maxLineLength: 0).Text.Length);
+    }
+
+    // --- one very long line ---
+
+    [Fact]
+    public void ALineLongerThanTheCapIsBrokenUp()
+    {
+        // A minified bundle is one line, and a binary read raw almost always is; a single
+        // megabyte-long run in a non-wrapping text control is a stall.
+        var preview = Read(Encoding.ASCII.GetBytes(new string('x', 250)), maxLines: 5000);
+        Assert.Equal(1, preview.LineCount);
+
+        var folded = TextPreviewReader.Read(
+            new MemoryStream(Encoding.ASCII.GetBytes(new string('x', 250))), 1 << 20, 5000, maxLineLength: 100);
+        Assert.Equal(3, folded.LineCount);
+        Assert.Equal(new string('x', 100), folded.Text.Split('\n')[0]);
+    }
+
+    [Fact]
+    public void OrdinaryTextIsUntouchedByTheLengthCap()
+    {
+        var text = "line one\nline two\nline three";
+        Assert.Equal(text, Read(Encoding.ASCII.GetBytes(text)).Text);
+    }
+
+    [Fact]
+    public void FoldingLeavesTheRealLineBreaksWhereTheyWere()
+    {
+        var folded = TextPreviewReader.Read(
+            new MemoryStream(Encoding.ASCII.GetBytes("aaaaa\nbb\nccccccc")), 1 << 20, 5000, maxLineLength: 3);
+        Assert.Equal(["aaa", "aa", "bb", "ccc", "ccc", "c"], folded.Text.Split('\n'));
+    }
 }

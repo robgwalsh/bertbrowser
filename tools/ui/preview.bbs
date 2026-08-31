@@ -73,6 +73,30 @@ select opaque.qqq
 settle 400
 assert-preview none
 
+# --- hex and raw: the two things the refusal above is now allowed to be an invitation to ---
+#
+# The dead-end is where hex is offered, not taken — nothing starts dumping bytes at someone
+# arrowing down a folder of executables. Switching is what asks for it.
+
+preview-mode hex
+assert-preview hex
+shot 12-hex PreviewPane
+
+# Raw over a PNG is the clearest picture of what forcing text is for: the header reads, the rest
+# is Latin-1 noise, and nothing was refused. It is also the case that proves the override beats
+# the extension table rather than sitting behind it.
+
+select sample.png
+preview-mode raw
+assert-preview text
+shot 13-raw PreviewPane
+
+# Sticky across selections, the way Lister's is — and reversible. Put the mode reset back into
+# Show() and the assertion above this one goes red.
+
+preview-mode auto
+assert-preview image
+
 # --- a folder and a multi-selection both say what they are rather than going blank ---
 
 select-all
@@ -114,6 +138,13 @@ select Renamed.cs
 settle 400
 theme light-plus
 shot 09-code-light PreviewPane
+
+# The dump borrows the same five syntax colours, so this is where a palette that reads on Dark+
+# and vanishes two shades lighter would show up.
+preview-mode hex
+shot 14-hex-light PreviewPane
+preview-mode auto
+
 theme dark-plus
 
 # --- off again, and the list gets its width back ---

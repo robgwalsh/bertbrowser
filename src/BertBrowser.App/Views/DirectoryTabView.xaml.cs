@@ -582,6 +582,11 @@ public partial class DirectoryTabView : UserControl
         OpenInNewTabMenuItem.IsEnabled = OpenInNewPaneMenuItem.IsEnabled = folders > 0;
         OpenInNewTabMenuItem.Header = folders > 1 ? $"Open {folders} folders in new tabs" : "Open in new tab";
 
+        // Both act on the selection or, with nothing selected, on the folder being shown — so an
+        // empty-space right-click opens this folder rather than doing nothing. Off inside a
+        // container: an entry's path is virtual and names nothing another program can open.
+        OpenInTerminalMenuItem.IsEnabled = OpenInVSCodeMenuItem.IsEnabled = LaunchTarget() is not null;
+
         // One folder, since the view analyses a single root. With nothing selected this still
         // offers itself and analyses the folder being shown, which is the useful reading of an
         // empty-space right-click.
@@ -729,10 +734,31 @@ public partial class DirectoryTabView : UserControl
     private List<FileItemViewModel> SelectedFolders() =>
         SelectedFileItems().Where(i => i.IsDirectory).Take(MaxFoldersOpenedAtOnce).ToList();
 
+    /// <summary>
+    /// What "Open in Terminal" and "Open in VS Code" act on: the selected item, or — with nothing
+    /// selected, which is what a right-click on empty space gives — the folder being shown.
+    /// </summary>
+    /// <remarks>
+    /// The empty-space reading is the one the rest of this menu already takes: New and "Analyse
+    /// disk usage…" both target the folder being shown rather than the selection. These two used to
+    /// answer an empty-space click by doing nothing at all, which is indistinguishable from the
+    /// launch having failed. Null inside a container, where a virtual path names nothing another
+    /// program can open, and null with no folder to fall back to.
+    /// </remarks>
+    private (string FullPath, bool IsDirectory)? LaunchTarget()
+    {
+        if (Tab.FileList.IsInsideArchive) return null;
+
+        if (FileListView.SelectedItem is FileItemViewModel item)
+            return (item.FullPath, item.IsDirectory);
+
+        return Tab.CurrentPath is { Length: > 0 } directory ? (directory, true) : null;
+    }
+
     private void ContextOpenTerminal_Click(object sender, RoutedEventArgs e)
     {
-        if (FileListView.SelectedItem is FileItemViewModel item)
-            _shell.OpenInTerminal(item.FullPath, item.IsDirectory);
+        if (LaunchTarget() is { } target)
+            _shell.OpenInTerminal(target.FullPath, target.IsDirectory);
     }
 
     /// <summary>A selected folder, or — with nothing selected — the folder being shown.</summary>
@@ -884,8 +910,8 @@ public partial class DirectoryTabView : UserControl
 
     private void ContextOpenVSCode_Click(object sender, RoutedEventArgs e)
     {
-        if (FileListView.SelectedItem is FileItemViewModel item)
-            _shell.OpenInVSCode(item.FullPath, item.IsDirectory);
+        if (LaunchTarget() is { } target)
+            _shell.OpenInVSCode(target.FullPath, target.IsDirectory);
     }
 
     private void ContextCopy_Click(object sender, RoutedEventArgs e) =>

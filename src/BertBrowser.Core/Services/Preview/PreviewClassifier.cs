@@ -44,21 +44,42 @@ public static class PreviewClassifier
     private const FileAttributes Placeholder =
         FileAttributes.Offline | RecallOnOpen | RecallOnDataAccess;
 
-    public static PreviewRequest Classify(IReadOnlyList<PreviewTarget> selection, long textBudget = DefaultTextBudget) =>
+    public static PreviewRequest Classify(
+        IReadOnlyList<PreviewTarget> selection,
+        long textBudget = DefaultTextBudget,
+        PreviewMode mode = PreviewMode.Auto) =>
         selection.Count switch
         {
             0 => Refuse(PreviewRefusal.NothingSelected),
-            1 => Classify(selection[0], textBudget),
+            1 => Classify(selection[0], textBudget, mode),
             _ => Refuse(PreviewRefusal.MultipleSelected),
         };
 
-    public static PreviewRequest Classify(PreviewTarget target, long textBudget = DefaultTextBudget)
+    public static PreviewRequest Classify(
+        PreviewTarget target,
+        long textBudget = DefaultTextBudget,
+        PreviewMode mode = PreviewMode.Auto)
     {
         if (target.IsDirectory)
             return Refuse(PreviewRefusal.Folder);
 
         if ((target.Attributes & Placeholder) != 0)
             return Refuse(PreviewRefusal.NotDownloaded);
+
+        // The override comes after the two refusals above and never before them. Forcing a mode
+        // says how to render bytes we were already willing to read; it is not permission to read
+        // bytes we refused — and a placeholder refused here is a download that does not happen.
+        // Neither forced mode carries a language: raw means uncoloured, which is the whole
+        // difference between it and the ordinary text path over a .cs.
+        if (mode is PreviewMode.Hex or PreviewMode.Text)
+        {
+            return new PreviewRequest(
+                mode == PreviewMode.Hex ? PreviewKind.Hex : PreviewKind.Text,
+                PreviewRefusal.None,
+                Math.Min(target.SizeBytes, Math.Max(0, textBudget)),
+                SyntaxLanguage.None,
+                mode);
+        }
 
         var kind = KindFor(target.Name);
         return kind switch

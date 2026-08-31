@@ -118,6 +118,8 @@ duplicates-remove           delete the ticked copies through PlanDelete/DeleteAs
 hidden on|off | thumbnails <0..1> | sort name|size|modified|type | theme <id>
 preview on|off              the active tab's preview pane, with its debounce and off-thread read
                             waited out (so assert after this, not straight after a `select`)
+preview-mode auto|raw|hex   the pane's view override; sticky across selections, settled the same
+                            way (`raw` is PreviewMode.Text — spelled the way the button is)
 
 shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, rename-advanced,
@@ -149,7 +151,7 @@ assert-elevation-offered | assert-no-elevation-offered
                             whether the run offered to retry something as administrator. The
                             negative form only means anything before the first offer — the
                             recording prompt accumulates over a run
-assert-preview <kind>       image | document | text | archive | font | media | loading | none
+assert-preview <kind>       image | document | text | hex | archive | font | media | loading | none
 
 echo <text> | sleep <ms> | settle [ms]      '#' at the start of a line is a comment
 ```

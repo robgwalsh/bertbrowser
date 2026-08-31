@@ -168,6 +168,16 @@
         <Setter Property="Cursor" Value="Hand"/>
     </Style>
 
+    <!-- One segment of the preview pane's Auto / Raw / Hex selector. A segmented set rather than
+         one cycling button: with three states, a button labelled with the current one cannot say
+         what comes next. Which segment is on is set per button, since the condition differs. -->
+    <Style x:Key="PreviewModeButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+        <Setter Property="Padding" Value="7,3"/>
+        <Setter Property="Margin" Value="0"/>
+        <Setter Property="MinWidth" Value="0"/>
+        <Setter Property="FontSize" Value="11"/>
+    </Style>
+
     <!-- Rounded toolbar field, shared by the address bar and the search box. -->
     <Style x:Key="FieldBorder" TargetType="Border">
         <Setter Property="Background" Value="{StaticResource Theme.Input.Background}"/>

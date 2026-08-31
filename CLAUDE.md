@@ -940,6 +940,26 @@ when a program is missing, where `ShellExecute` returned `void`), but its second
 browsed. `ExecutablePathTests` covers it, including that a path which isn't fully qualified is never
 probed.
 
+**But what `PATH` names is not always a program, and starting the wrong one costs a console window.**
+`code` is `…\Microsoft VS Code\bin\code.cmd`, a batch file that runs the editor's CLI inside
+`Code.exe` as a Node process — so a shell execute of it starts **cmd.exe**, and a console window sits
+beside the editor it opened for as long as the CLI takes to reach the running instance. It reads as
+the app having opened a terminal by mistake. Nothing about the window is fixable at the launch:
+hiding it means `UseShellExecute = false`, which is the switch that makes associations and the
+`runas` verb work. So `Core/Services/VSCodePath` steps over the shim instead — a `.cmd`/`.bat` in a
+folder called `bin` with a known editor name one level up — and `OpenInVSCode` puts the launcher
+**last** on its candidate list rather than first, because a console window still beats no editor on
+an install whose layout nothing here recognises. The rule refuses far more than it accepts, and
+`VSCodePathTests` is mostly those refusals: drop the `bin` requirement and it becomes "run the `.exe`
+beside any `.cmd`", which is a different program whenever the guess is wrong. This is deliberately
+**not** applied to custom commands — a `.cmd` someone typed into one is the thing they asked to run.
+
+**"Open in Terminal" and "Open in VS Code" act on the folder being shown when nothing is selected**,
+the way New and "Analyse disk usage…" do — `DirectoryTabView.LaunchTarget`. An empty-space
+right-click is a right-click *on this folder*, and answering it by doing nothing at all (which is
+what a `SelectedItem` guard does) is indistinguishable from the launch having failed. Both are off
+inside an archive: a virtual path names nothing another program can open.
+
 Elevation is offered three ways: the file list's **Run as administrator** item (one file only),
 Ctrl+Shift+double-click / Ctrl+Shift+Enter, and a per-command checkbox on custom commands. The
 plain-Enter arm of `FileList_KeyDown` needs its modifier guard or it swallows Ctrl+Shift+Enter
@@ -1359,12 +1379,69 @@ writes it back. Width is **global** — panes differ in width, so a per-tab widt
 splitter moving on its own. `ColumnDefinition.Width` is not bindable, so `UpdatePreviewPane` assigns
 it, the way `UpdateRelPathColumn` does.
 
-Tests: `PreviewClassifierTests`, `TextPreviewReaderTests`, `SyntaxTokenizerTests`,
-`ArchiveListingTests`, `PreviewMetadataTests`. `tools/ui/preview.bbs` covers the wiring, with
-`preview-fixture` laying down files that are really what their extension says — the ordinary `tree`
-fixture's `photo.jpg` is text, which is fine for a listing and useless for a preview. Mutate a rule
-and confirm a test goes red: drop the classifier's placeholder check and the `NotDownloaded`
-theories go, drop the tokenizer's string handling and the cover assertion does.
+#### Hex and raw
+
+`PreviewMode` — **Auto / Text / Hex** — is what the user asked for, over the top of what the file
+claims to be, and it is the pane's answer to Lister's F3. The buttons say **Auto / Raw / Hex**;
+`PreviewMode.Text` is spelled "raw" everywhere a person sees it, including the harness verb. It is
+sticky across selections and per pane, and **deliberately not persisted**: a pane that came back in
+hex after a restart reads as a bug rather than as a setting.
+
+**The override is applied after the refusals and never before them**, and that ordering is the one
+load-bearing thing in the feature. `Classify` still refuses a folder and a cloud placeholder first;
+forcing a mode says how to render bytes the pane was already willing to read, not that it may now
+read bytes it declined. Move the mode switch above those two lines and a placeholder becomes a
+silent multi-gigabyte download — `ACloudPlaceholderIsStillRefusedWhenHexIsForced` is what stands
+there. The mode rides on `PreviewRequest.Mode` rather than being read from the view model by the
+background build, so a plan cannot be executed under a mode it was not planned for, and
+`CanChooseMode` hides the buttons entirely for anything refused.
+
+A binary file is **offered** hex, not switched to it: `BuildText`'s dead-end message names the
+button and nothing else changes. Something arrowing down a folder of `.exe` files must not start
+dumping bytes — the same reason the duplicates window does not scan when it opens.
+
+- **`HexPreviewReader`** is pure over a `Stream` and never throws, the contract `ArchiveListing`
+  keeps. Sixteen bytes a row, split eight and eight; a short final row **pads both columns** so the
+  ASCII gutter does not slide left on the last line of nearly every file. **Rows carry their own
+  spans**, already line-split, rather than the dump arriving as one string for `SplitLines` to
+  rebase: `PreviewPane.Rebuild` renders *only* what a span covers, so a gap does not show as plain
+  text — it deletes the characters under it — and a per-row cover is a property one test can hold
+  still. `DefaultMaxRows` (5,000, so 80 KB) is the analogue of `DefaultMaxLines` and bounds the read
+  itself, because hex costs four characters a byte and the pane's megabyte budget would otherwise be
+  65,536 paragraphs. Colouring still stops at the shared 1,500-line ceiling: raising it to the row
+  cap was tried and **measured at 2.2 s** of extra layout, which is a visible stall.
+- **Raw** is `TextPreviewReader.Read(forceText: true)`, which skips **only** the `HasNul` rung of the
+  encoding ladder — a forced read of a UTF-16 file is still UTF-16, and everything else lands on
+  Latin-1, which maps every byte. Two things ride with it, both found by looking at the real pane
+  rather than at a test: **`maxLineLength`** folds a line past 4,096 characters, because a binary
+  read as Latin-1 is usually one line the length of the whole budget and a single run that long is a
+  stall (it fixes the same thing for a minified bundle); and **`Dot`** replaces every control
+  character but tab and newline, plus U+2028/U+2029. That second one is not cosmetic — WPF's text
+  layout breaks a line on U+000B, U+000C, U+0085, U+2028 and U+2029, Latin-1 turns byte 0x85 into the
+  third of those, and the result was more rows on screen than the string had lines with the gutter
+  beside them out of step from that point down. Ordinary text is left alone, where those characters
+  really are separators. (Note for whoever edits `IsUnshowable`: a *literal* U+2028 in a `.cs` file
+  is a line terminator to the C# compiler too, so those two must stay `\uXXXX` escapes.)
+
+**No new theme tokens.** The dump reuses `SyntaxClass` — `Comment` for the offset, `Text` for the
+bytes (which means the pane's own foreground, since that class maps to no brush), `String` for the
+ASCII column. `Comment` and `Number` were the obvious pair and are the wrong one: in Dark+ they are
+two greens and the offsets vanished into the bytes beside them. Reusing the syntax classes also
+inherits the contrast guarantees `ThemeCatalogTests.Code_stays_readable_in_the_preview_pane` already
+enforces, which minting `Theme.Preview.Hex*` would have needed duplicating.
+
+A 76-character row does not fit the default 360 px pane, so the ASCII column is behind a horizontal
+scroll until the splitter is dragged out to about 570 px. That is the cost of sixteen bytes a row,
+and sixteen is what every other dump uses and what a pasted comparison assumes.
+
+Tests: `PreviewClassifierTests`, `TextPreviewReaderTests`, `HexPreviewReaderTests`,
+`SyntaxTokenizerTests`, `ArchiveListingTests`, `PreviewMetadataTests`. `tools/ui/preview.bbs` covers
+the wiring, with `preview-fixture` laying down files that are really what their extension says — the
+ordinary `tree` fixture's `photo.jpg` is text, which is fine for a listing and useless for a preview.
+Mutate a rule and confirm a test goes red: drop the classifier's placeholder check and the
+`NotDownloaded` theories go, move the mode override above the refusals and three go, drop the hex
+row's padding or let a span gap through and two more go, drop the tokenizer's string handling and
+the cover assertion does.
 
 **Rendered Markdown and real PDF paging are the two things that want a package** (Markdig, PdfPig)
 and are deliberately absent: Markdown previews as its coloured source, PDF as page one from the

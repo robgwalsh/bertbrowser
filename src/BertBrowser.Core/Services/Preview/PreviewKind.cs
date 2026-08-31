@@ -25,6 +25,29 @@ public enum PreviewKind
     /// produce. Also the fall-back for an unrecognised extension, which is why an unknown file
     /// gets a real attempt rather than an immediate refusal.</summary>
     Document,
+
+    /// <summary>A hex dump: offset, bytes, ASCII. Never chosen by the extension table — it is only
+    /// ever what <see cref="PreviewMode.Hex"/> asked for.</summary>
+    Hex,
+}
+
+/// <summary>What the user asked the pane to show, over the top of what the file claims to be.</summary>
+/// <remarks>
+/// The override is applied <em>after</em> the classifier's refusals, never before: a folder and a
+/// cloud placeholder are still refused, because hexing a placeholder would trigger exactly the
+/// multi-gigabyte download the pane exists to avoid.
+/// </remarks>
+public enum PreviewMode
+{
+    /// <summary>Let the extension decide, which is what the pane has always done.</summary>
+    Auto,
+
+    /// <summary>Decode the bytes as text whatever the file claims to be, and do not colour them.
+    /// Total Commander's Lister calls this binary mode; it is how you read a PDF's header.</summary>
+    Text,
+
+    /// <summary>A hex dump.</summary>
+    Hex,
 }
 
 /// <summary>Why there is no preview. <see cref="None"/> means there is one.</summary>
@@ -66,11 +89,14 @@ public readonly record struct PreviewTarget(
 /// <param name="ByteBudget">The most that may be read from the file. Zero when nothing is read
 /// from it directly (media and documents go through the shell, which streams its own way).</param>
 /// <param name="Language">Which syntax table applies, for <see cref="PreviewKind.Text"/>.</param>
+/// <param name="Mode">What the user asked for. Carried on the plan rather than read from the view
+/// model by the background build, so a plan cannot be executed under a mode it was not made for.</param>
 public sealed record PreviewRequest(
     PreviewKind Kind,
     PreviewRefusal Refusal,
     long ByteBudget,
-    SyntaxLanguage Language)
+    SyntaxLanguage Language,
+    PreviewMode Mode = PreviewMode.Auto)
 {
     public bool IsRefused => Refusal != PreviewRefusal.None;
 }

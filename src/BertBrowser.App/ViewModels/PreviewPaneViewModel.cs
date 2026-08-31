@@ -1,3 +1,4 @@
+using System.Text;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using BertBrowser.App.Interop;
@@ -66,6 +67,10 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     private FileItemViewModel? _target;
     private int _selectionCount;
 
+    /// <summary>Whether the last plan was refused. What <see cref="CanChooseMode"/> asks, so that
+    /// the mode buttons cannot offer to read a cloud placeholder we have just declined to touch.</summary>
+    private bool _refused;
+
     private readonly IArchiveBrowser _archives;
     private readonly IArchiveReader _archiveReader;
     private readonly IArchivePasswords _passwords;
@@ -124,25 +129,54 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(ShowLineNumbers))]
     private bool _wrapText;
 
-    public bool ShowLineNumbers => !WrapText;
+    /// <summary>A hex row already carries its offset, and that offset is the gutter — a decimal
+    /// row number beside it would be a second, worse one.</summary>
+    public bool ShowLineNumbers => !WrapText && Kind != PreviewKind.Hex;
+
+    /// <summary>What the pane was told to show, over the top of what the file claims to be. Sticky
+    /// across selections, the way Lister's is, and per pane — it is not persisted, because a pane
+    /// that came back in hex after a restart would read as a bug rather than as a setting.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAutoMode))]
+    [NotifyPropertyChangedFor(nameof(IsRawMode))]
+    [NotifyPropertyChangedFor(nameof(IsHexMode))]
+    private PreviewMode _mode = PreviewMode.Auto;
+
+    /// <summary>Reload rather than <see cref="Show"/>: that one short-circuits on an unchanged
+    /// path and stamp, and would swallow this entirely.</summary>
+    partial void OnModeChanged(PreviewMode value) => Reload();
+
+    public bool IsAutoMode => Mode == PreviewMode.Auto;
+    public bool IsRawMode => Mode == PreviewMode.Text;
+    public bool IsHexMode => Mode == PreviewMode.Hex;
 
     public bool HasMessage => !string.IsNullOrEmpty(Message);
     public bool HasImage => !IsLoading && Image is not null && Kind is PreviewKind.Image or PreviewKind.Document;
-    public bool HasText => !IsLoading && Kind == PreviewKind.Text && Lines.Count > 0;
+    public bool HasText => !IsLoading && Kind is PreviewKind.Text or PreviewKind.Hex && Lines.Count > 0;
     public bool HasArchive => !IsLoading && Kind == PreviewKind.Archive && ArchiveEntries.Count > 0;
     public bool HasFont => !IsLoading && Kind == PreviewKind.Font && FontSpecimen is not null;
     public bool HasMedia => !IsLoading && Kind == PreviewKind.Media;
     public bool HasMetadata => Metadata.Count > 0;
 
+    /// <summary>Wrapping is offered for text and not for a dump: a hex row is a fixed width, and
+    /// wrapping one would put half of it under the offset of the next.</summary>
+    public bool ShowWrapButton => HasText && Kind != PreviewKind.Hex;
+
+    /// <summary>Whether the mode buttons are offered. Not while loading, not for a folder, and —
+    /// the one that matters — not for anything the classifier refused, so a cloud placeholder is
+    /// never one click from being read. It is deliberately true when a message is showing: the
+    /// binary dead-end is exactly where hex needs offering.</summary>
+    public bool CanChooseMode => !IsLoading && !_refused && _target is { IsDirectory: false };
+
     /// <summary>Whether the action strip has anything in it, so an empty row of buttons never
     /// takes a line of a pane that is already narrow.</summary>
-    public bool HasActions => HasImage || HasText;
+    public bool HasActions => HasImage || HasText || CanChooseMode;
 
     /// <summary>What the harness asserts on, and what a bug report can quote.</summary>
     public string StateName =>
         IsLoading ? "loading"
         : HasImage ? (Kind == PreviewKind.Image ? "image" : "document")
-        : HasText ? "text"
+        : HasText ? (Kind == PreviewKind.Hex ? "hex" : "text")
         : HasArchive ? "archive"
         : HasFont ? "font"
         : HasMedia ? "media"
@@ -160,6 +194,9 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
 
     [RelayCommand]
     private void ToggleWrap() => WrapText = !WrapText;
+
+    [RelayCommand]
+    private void SetMode(PreviewMode mode) => Mode = mode;
 
     // --- driving it ---
 
@@ -208,11 +245,13 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
             // hundred files never shows a spinner on its way to a one-line message.
             if (item is null)
             {
+                _refused = true;
                 Clear(_selectionCount > 1 ? $"{_selectionCount:N0} items selected" : "Select a file to preview");
                 return;
             }
             if (item.IsDirectory)
             {
+                _refused = true;
                 Describe(item);
                 Clear(item.SizeBytes is { } bytes
                     ? $"Folder  ·  {ByteSizeFormatter.Format(bytes)}"
@@ -231,15 +270,17 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
             var size = item.SizeBytes ?? 0;
             var name = item.Name;
             var budget = Math.Max(4096, _settings.PreviewTextMaxBytes);
+            var mode = Mode;
 
             var (plan, payload) = await Task.Run(() =>
             {
                 var request = PreviewClassifier.Classify(
-                    new PreviewTarget(name, size, AttributesOf(path), IsDirectory: false), budget);
+                    new PreviewTarget(name, size, AttributesOf(path), IsDirectory: false), budget, mode);
                 return (request, request.IsRefused ? null : Build(path, stamp, request, ct));
             }, ct);
 
             ct.ThrowIfCancellationRequested();
+            _refused = plan.IsRefused;
 
             if (payload is null)
             {
@@ -367,7 +408,13 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasMedia));
         OnPropertyChanged(nameof(HasMessage));
         OnPropertyChanged(nameof(HasMetadata));
+        OnPropertyChanged(nameof(CanChooseMode));
         OnPropertyChanged(nameof(HasActions));
+        OnPropertyChanged(nameof(ShowWrapButton));
+        OnPropertyChanged(nameof(ShowLineNumbers));
+        OnPropertyChanged(nameof(IsAutoMode));
+        OnPropertyChanged(nameof(IsRawMode));
+        OnPropertyChanged(nameof(IsHexMode));
         OnPropertyChanged(nameof(StateName));
     }
 
@@ -409,6 +456,10 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
 
             var payload = plan.Kind switch
             {
+                // Ahead of everything, and ahead of the in-archive arms in particular: a file
+                // inside a zip is hexable, because OpenBounded already knows how to reach one.
+                PreviewKind.Hex => BuildHex(path, plan),
+
                 PreviewKind.Image => BuildImage(path, stamp),
                 PreviewKind.Text => BuildText(path, plan, ct),
                 PreviewKind.Archive => BuildArchive(path),
@@ -564,7 +615,9 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     {
         using var file = OpenBounded(path, plan.ByteBudget);
 
-        var preview = TextPreviewReader.Read(file, plan.ByteBudget);
+        var raw = plan.Mode == PreviewMode.Text;
+        var preview = TextPreviewReader.Read(
+            file, plan.ByteBudget, forceText: raw);
         ct.ThrowIfCancellationRequested();
 
         if (guessing)
@@ -574,7 +627,9 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         }
         else if (preview.LooksBinary)
         {
-            return new Payload { Message = "Binary file — nothing to show as text." };
+            // Offered, not taken: nothing starts dumping bytes at someone arrowing down a folder
+            // of executables. The button that answers this is already on screen.
+            return new Payload { Message = "Binary file — nothing to show as text. Switch to Hex to see the bytes." };
         }
 
         var coloured = preview.LineCount <= MaxColouredLines;
@@ -583,6 +638,7 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
             : [];
 
         var footer = Join(
+            raw ? "Raw" : "",
             preview.EncodingName,
             preview.LineEnding,
             $"{preview.LineCount:N0} lines",
@@ -595,6 +651,48 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
             Lines = SplitLines(preview.Text, spans),
             TextForCopy = preview.Text,
             TextFooter = footer,
+        };
+    }
+
+    /// <summary>The hex dump. Rows arrive already formatted and already covered by spans, so this
+    /// only numbers them and decides whether they are coloured — the same ceiling the text path
+    /// uses, since a dump is more inline runs per line, not fewer.</summary>
+    private Payload BuildHex(string path, PreviewRequest plan)
+    {
+        var budget = Math.Min(plan.ByteBudget, HexPreviewReader.MaxBytes());
+        using var file = OpenBounded(path, budget);
+
+        var preview = HexPreviewReader.Read(file, budget);
+
+        if (preview.Rows.Count == 0)
+            return new Payload { Message = "This file is empty." };
+
+        // The same ceiling the text path uses, and it was tempting to raise it: a hex row is
+        // exactly three spans where a source line can be dozens. Measured instead of assumed —
+        // colouring a full 5,000-row dump (15,000 inlines) added 2.2 s to the harness run, which
+        // is a visible stall on arrowing onto a file. So a big dump is shown uncoloured, and the
+        // footer says so, exactly as a big source file is.
+        var coloured = preview.Rows.Count <= MaxColouredLines;
+        var lines = new List<PreviewLine>(preview.Rows.Count);
+        var text = new StringBuilder(preview.Rows.Count * 80);
+
+        for (var i = 0; i < preview.Rows.Count; i++)
+        {
+            var row = preview.Rows[i];
+            lines.Add(new PreviewLine(i + 1, row.Text, coloured ? row.Spans : []));
+            text.AppendLine(row.Text);
+        }
+
+        return new Payload
+        {
+            Kind = PreviewKind.Hex,
+            Lines = lines,
+            TextForCopy = text.ToString(),
+            TextFooter = Join(
+                "Hex",
+                $"{preview.BytesShown:N0} bytes shown",
+                preview.Truncated ? "truncated" : "",
+                coloured ? "" : "colouring off (large file)"),
         };
     }
 

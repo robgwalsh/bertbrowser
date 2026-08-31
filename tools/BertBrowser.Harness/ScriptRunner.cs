@@ -18,6 +18,7 @@ using BertBrowser.Core.Services.DiskUsage;
 using BertBrowser.Core.Services.Duplicates;
 using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Services.NewItem;
+using BertBrowser.Core.Services.Preview;
 using BertBrowser.Core.Services.Rename;
 using BertBrowser.Core.Services.Transfer;
 using Microsoft.Extensions.DependencyInjection;
@@ -158,6 +159,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "hidden": Hidden(rest); break;
             case "thumbnails": Thumbnails(rest); break;
             case "preview": Preview(rest); break;
+            case "preview-mode": PreviewViewMode(rest); break;
             case "preview-fixture": PreviewFixture(rest); break;
             case "sort": Sort(rest); break;
             case "theme": Theme(rest); break;
@@ -1270,6 +1272,26 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         session.Settle(quietMs: 400);
     }
 
+    /// <summary>The pane's Auto / Raw / Hex override. Spelled the way the buttons are, not the way
+    /// the enum is — <c>PreviewMode.Text</c> is "raw" on screen.</summary>
+    private void PreviewViewMode(string rest)
+    {
+        var mode = Require(rest, "preview-mode").ToLowerInvariant() switch
+        {
+            "auto" => PreviewMode.Auto,
+            "raw" or "text" => PreviewMode.Text,
+            "hex" => PreviewMode.Hex,
+            var other => throw new FormatException(
+                $"preview-mode wants auto, raw or hex, got '{other}'."),
+        };
+
+        Invoke(() => session.Tab.Preview.Mode = mode);
+
+        // The pane re-reads off-thread behind its 150 ms debounce, so an assertion made straight
+        // after this command would pass whatever the mode did.
+        session.Settle(quietMs: 400);
+    }
+
     private void Sort(string rest)
     {
         var column = Require(rest, "sort").ToLowerInvariant() switch
@@ -1583,6 +1605,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             ("thumbnails", tab.FileList.ThumbnailScale.ToString("0.##", CultureInfo.InvariantCulture)),
             ("preview", Bool(tab.IsPreviewVisible)),
             ("previewState", Quote(tab.Preview.StateName)),
+            ("previewMode", Quote(tab.Preview.Mode.ToString())),
             ("previewTitle", Quote(tab.Preview.Title)),
             ("previewMessage", Quote(tab.Preview.Message ?? "")),
             ("previewFooter", Quote(tab.Preview.TextFooter)),

@@ -185,4 +185,61 @@ public class PreviewClassifierTests
     [Fact]
     public void OneSelectedItem_IsClassifiedAsItself() =>
         Assert.Equal(PreviewKind.Image, PreviewClassifier.Classify([File("a.png")]).Kind);
+
+    // --- forcing a mode ---
+
+    [Theory]
+    [InlineData("holiday.jpg")]
+    [InlineData("clip.mp4")]
+    [InlineData("report.pdf")]
+    [InlineData("Program.cs")]
+    public void HexOverridesWhateverTheExtensionClaimed(string name) =>
+        Assert.Equal(PreviewKind.Hex, PreviewClassifier.Classify(File(name), mode: PreviewMode.Hex).Kind);
+
+    [Fact]
+    public void AForcedModeStillCostsNoMoreThanTheTextBudget() =>
+        Assert.Equal(
+            64,
+            PreviewClassifier.Classify(File("clip.mp4", 900_000_000), textBudget: 64, mode: PreviewMode.Hex).ByteBudget);
+
+    [Fact]
+    public void RawCarriesNoLanguageEvenForAFileThatHasOne() =>
+        // Raw means uncoloured, which is the whole difference between it and the ordinary text
+        // path over a source file.
+        Assert.Equal(
+            SyntaxLanguage.None,
+            PreviewClassifier.Classify(File("Program.cs"), mode: PreviewMode.Text).Language);
+
+    [Fact]
+    public void RawIsStillText() =>
+        Assert.Equal(PreviewKind.Text, PreviewClassifier.Classify(File("setup.exe"), mode: PreviewMode.Text).Kind);
+
+    [Theory]
+    [InlineData(PreviewMode.Hex)]
+    [InlineData(PreviewMode.Text)]
+    public void AFolderIsStillRefusedWhateverModeWasForced(PreviewMode mode) =>
+        Assert.Equal(
+            PreviewRefusal.Folder,
+            PreviewClassifier.Classify(new PreviewTarget("Pictures", 0, FileAttributes.Directory, IsDirectory: true), mode: mode).Refusal);
+
+    [Theory]
+    [MemberData(nameof(PlaceholderAttributes))]
+    public void ACloudPlaceholderIsStillRefusedWhenHexIsForced(FileAttributes placeholder) =>
+        // The rule the whole ordering exists for: forcing a mode says how to render bytes we were
+        // already willing to read, never that we may now read bytes we refused. Move the override
+        // above the refusals and this is a silent multi-gigabyte download.
+        Assert.Equal(
+            PreviewRefusal.NotDownloaded,
+            PreviewClassifier.Classify(
+                File("holiday.jpg", 2048, FileAttributes.Normal | placeholder), mode: PreviewMode.Hex).Refusal);
+
+    [Fact]
+    public void AForcedPlanSaysWhichModeItWasMadeUnder() =>
+        // The build reads this rather than the view model, so a plan cannot be executed under a
+        // mode it was not planned for.
+        Assert.Equal(PreviewMode.Hex, PreviewClassifier.Classify(File("a.png"), mode: PreviewMode.Hex).Mode);
+
+    [Fact]
+    public void AnUnforcedPlanIsAuto() =>
+        Assert.Equal(PreviewMode.Auto, PreviewClassifier.Classify(File("a.png")).Mode);
 }

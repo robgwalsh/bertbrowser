@@ -2102,22 +2102,33 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             SetStatus(message);
     }
 
-    /// <summary>Opens the file or folder in VS Code. Uses the <c>code</c> launcher on PATH,
-    /// then falls back to the standard user/system install locations of Code.exe.</summary>
+    /// <summary>Opens the file or folder in VS Code. Finds the editor behind the <c>code</c>
+    /// launcher on PATH, then falls back to the standard user/system install locations of
+    /// Code.exe, and only then to the launcher itself.</summary>
+    /// <remarks>
+    /// The launcher is deliberately the <em>last</em> candidate rather than the first, even though
+    /// it is what PATH points at: <c>code</c> is a batch file, and starting a batch file through
+    /// the shell puts a console window on screen beside the editor it opened. See
+    /// <see cref="VSCodePath"/>. It stays on the list because a console window is better than no
+    /// editor — an install whose layout nothing here recognises still opens.
+    /// </remarks>
     public void OpenInVSCode(string fullPath, bool isDirectory)
     {
         // Each candidate is resolved rather than attempted: a launch through the shell reports
         // nothing back, so "is VS Code installed?" has to be answered before anything is handed
         // over. This is what the old catch-and-try-the-next-one did.
+        var launcher = _launcher.Resolve("code");
+
         string?[] candidates =
         [
-            _launcher.Resolve("code"),
+            VSCodePath.BehindLauncher(launcher, _launcher.Resolve),
             _launcher.Resolve(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Programs", "Microsoft VS Code", "Code.exe")),
             _launcher.Resolve(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
                 "Microsoft VS Code", "Code.exe")),
+            launcher,
         ];
 
         if (candidates.FirstOrDefault(c => c is not null) is not { } exe)
