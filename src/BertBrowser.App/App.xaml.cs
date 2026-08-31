@@ -185,11 +185,11 @@ public partial class App : Application
         services.AddSingleton<IFolderHandlerService, FolderHandlerService>();
         // One instance serving both roles: it caches per-volume answers, and the planner and the
         // executor should agree about what has a Recycle Bin.
-        services.AddSingleton<Interop.ShellRecycleBin>();
+        services.AddSingleton<BertBrowser.Core.Services.Delete.ShellRecycleBin>();
         services.AddSingleton<BertBrowser.Core.Services.Delete.IRecycleBin>(
-            s => s.GetRequiredService<Interop.ShellRecycleBin>());
+            s => s.GetRequiredService<BertBrowser.Core.Services.Delete.ShellRecycleBin>());
         services.AddSingleton<BertBrowser.Core.Services.Delete.IRecycleProbe>(
-            s => s.GetRequiredService<Interop.ShellRecycleBin>());
+            s => s.GetRequiredService<BertBrowser.Core.Services.Delete.ShellRecycleBin>());
         services.AddSingleton(s => new BertBrowser.Core.Services.Delete.DeletePlanner(
             new BertBrowser.Core.Services.Delete.FileSystemDeleteProbe(),
             protectedPaths: null,
@@ -210,6 +210,20 @@ public partial class App : Application
         services.AddSingleton<IIndexHostLauncher, ElevatedIndexHostLauncher>();
         services.AddSingleton<IIndexTransportFactory, NamedPipeIndexTransportFactory>();
         services.AddSingleton<IMftIndexService, MftIndexClient>();
+        // The other elevated helper: one short-lived process per file operation Windows refused,
+        // started only from a click on a shield. Nothing here runs at launch, and nothing retries on
+        // a timer — every attempt is a UAC prompt.
+        services.AddSingleton<BertBrowser.Core.Services.Elevation.IElevationLauncher,
+            BertBrowser.App.Services.Elevation.ElevatedFileOperationLauncher>();
+        services.AddSingleton<BertBrowser.Core.Services.Elevation.IElevationTransportFactory,
+            BertBrowser.App.Services.Elevation.NamedPipeElevationTransportFactory>();
+        services.AddSingleton<BertBrowser.Core.Services.Elevation.IElevationPrompt,
+            Views.ElevationPrompt>();
+        services.AddSingleton<BertBrowser.Core.Services.Elevation.IElevatedOperationRunner>(
+            s => new BertBrowser.Core.Services.Elevation.ElevationClient(
+                s.GetRequiredService<BertBrowser.Core.Services.Elevation.IElevationLauncher>(),
+                s.GetRequiredService<BertBrowser.Core.Services.Elevation.IElevationTransportFactory>(),
+                BertBrowser.App.Services.Elevation.ElevatedProcess.CurrentUserSid ?? ""));
         services.AddSingleton<ISearchService, SearchService>();
         services.AddSingleton<BertBrowser.Core.Services.DiskUsage.IDiskUsageService,
             BertBrowser.Core.Services.DiskUsage.DiskUsageService>();

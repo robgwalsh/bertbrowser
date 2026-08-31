@@ -92,7 +92,23 @@ public sealed record CompletedRename(string SourcePath, string FinalPath, bool I
 
 /// <param name="SourcePath">The item that could not be renamed.</param>
 /// <param name="Message">The failure, phrased for the status bar.</param>
-public sealed record FailedRename(string SourcePath, string Message);
+/// <param name="AccessDenied">Windows refused permission. The only failure an administrator token
+/// could fix.</param>
+/// <param name="StrandedPath">Where the item actually is, when a failed rename left it parked under
+/// a staging name.</param>
+/// <remarks>
+/// <b><see cref="StrandedPath"/> is not decoration.</b> When one item's target is another's current
+/// name, the executor moves it aside to <c>.bertbrowser-rename-&lt;guid&gt;</c> first; if the rename
+/// then fails <em>and</em> the restore fails too, the item is sitting at that staged path. Until now
+/// that fact lived only in the prose of <see cref="Message"/>, which meant a retry derived from
+/// <see cref="SourcePath"/> would rename from somewhere that no longer holds anything and report
+/// success. So the fact is a field and the prose is built from it, rather than the other way round.
+/// </remarks>
+public sealed record FailedRename(
+    string SourcePath,
+    string Message,
+    bool AccessDenied = false,
+    string? StrandedPath = null);
 
 /// <summary>What actually happened on disk. <see cref="Completed"/> doubles as the undo record:
 /// a rename is its own inverse, so putting it back is the same operation with the paths swapped.</summary>

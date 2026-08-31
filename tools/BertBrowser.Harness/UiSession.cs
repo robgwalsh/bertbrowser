@@ -8,6 +8,7 @@ using BertBrowser.App.Theming;
 using BertBrowser.App.ViewModels;
 using BertBrowser.App.Views;
 using BertBrowser.Core.Data;
+using BertBrowser.Core.Services.Elevation;
 using BertBrowser.Core.Services.Mft;
 using Microsoft.Extensions.DependencyInjection;
 using AppShell = BertBrowser.App.App;
@@ -41,8 +42,10 @@ internal sealed class UiSession : IDisposable
         MainWindow window,
         IServiceProvider services,
         RefusingProcessLauncher launcher,
-        ForegroundGuard guard)
+        ForegroundGuard guard,
+        RecordingElevationPrompt elevationPrompt)
     {
+        ElevationPrompt = elevationPrompt;
         _options = options;
         Window = window;
         Services = services;
@@ -56,6 +59,12 @@ internal sealed class UiSession : IDisposable
 
     /// <summary>What the run was asked to start, and refused to.</summary>
     public RefusingProcessLauncher Launcher { get; }
+
+    /// <summary>Every offer of an administrator retry the run produced, and how it was answered.
+    /// This is the only way to prove, end to end and through the real executors, that a genuine
+    /// access-denied failure reached the offer — the discriminator and the dialog live on opposite
+    /// sides of that seam, and no unit test spans it.</summary>
+    public RecordingElevationPrompt ElevationPrompt { get; }
 
     public ShellViewModel Shell => (ShellViewModel)Window.DataContext;
 
@@ -105,6 +114,7 @@ internal sealed class UiSession : IDisposable
                 "an unstyled window.");
 
         var launcher = new RefusingProcessLauncher();
+        var elevationPrompt = new RecordingElevationPrompt();
         var services = AppShell.BuildServices(s =>
         {
             s.AddSingleton<IProcessLauncher>(launcher);
@@ -129,6 +139,12 @@ internal sealed class UiSession : IDisposable
                         provider.GetRequiredService<DirSizeRepository>())
                     : new NullMftIndexService();
             });
+
+            // The other elevating helper. Only the launcher is replaced, not the runner above it:
+            // the real client, the real protocol and the real merge still run, and what is removed
+            // is the process boundary and the token — which is the part a scripted run cannot have.
+            s.AddSingleton<IElevationLauncher>(new RefusingElevationLauncher());
+            s.AddSingleton<IElevationPrompt>(elevationPrompt);
         });
         AppShell.UseServices(services);
 
@@ -140,6 +156,14 @@ internal sealed class UiSession : IDisposable
             throw new InvalidOperationException(
                 "The harness resolved the elevating index client. A scripted run must never raise " +
                 "a UAC prompt; register NullMftIndexService or MftIndexService instead.");
+
+        // The same guard for the file-operation helper, and it needs its own: this one is reached
+        // by an ordinary move or delete that happens to hit an ACL, which is a great deal easier to
+        // arrive at by accident than the index.
+        if (services.GetRequiredService<IElevationLauncher>() is not RefusingElevationLauncher)
+            throw new InvalidOperationException(
+                "The harness resolved the elevating file-operation launcher. A scripted run must " +
+                "never raise a UAC prompt; register RefusingElevationLauncher instead.");
 
         services.GetRequiredService<Db>().Migrate();
 
@@ -174,7 +198,7 @@ internal sealed class UiSession : IDisposable
         window.Activated += (_, _) => Native.RestoreForeground(before.Handle);
         window.Show();
 
-        var session = new UiSession(options, window, services, launcher, guard);
+        var session = new UiSession(options, window, services, launcher, guard, elevationPrompt);
 
         // The MFT indexer is off unless asked for: it reads every NTFS volume's master file table,
         // which is minutes of disk on a machine someone is using. With --index it runs *in this

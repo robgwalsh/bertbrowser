@@ -1,4 +1,5 @@
 using BertBrowser.Core.Ipc;
+using BertBrowser.Core.Services.Elevation;
 using BertBrowser.Core.Services.Mft;
 
 namespace BertBrowser.Core.Tests;
@@ -225,4 +226,67 @@ internal sealed class ControllableIndexService : IMftIndexService
     }
 
     public void Dispose() { }
+}
+
+/// <summary>
+/// The app end of the elevated-operation pipe, driven by hand. The sibling of
+/// <see cref="ProtocolPeer"/>, and it exists for the same reason: the only thing standing between a
+/// test and the real helper is a UAC prompt, which no test can answer.
+/// </summary>
+internal sealed class ElevationPeer
+{
+    private readonly Stream _stream;
+    private readonly LineReader _reader;
+
+    public ElevationPeer(Stream stream)
+    {
+        _stream = stream;
+        _reader = new LineReader(stream, 64 * 1024);
+    }
+
+    public void Send(ElevationVerb verb, string payload = "") =>
+        LineChannel.WriteLine(_stream, ElevationProtocol.Format(new ElevationMessage(verb, payload)));
+
+    /// <summary>Sends a line the protocol will refuse, to prove a session survives one.</summary>
+    public void SendRaw(string line) => LineChannel.WriteLine(_stream, line);
+
+    /// <summary>Greets, then sends a whole request in the order the client does.</summary>
+    public void Request(string header, params string[] items)
+    {
+        Send(ElevationVerb.Hello, ElevationProtocol.ProtocolVersion.ToString());
+        Send(ElevationVerb.Begin, header);
+        foreach (var item in items) Send(ElevationVerb.Item, item);
+        Send(ElevationVerb.Go);
+    }
+
+    /// <summary>The next parseable message, skipping anything malformed. Null at end of stream.</summary>
+    public ElevationMessage? Receive()
+    {
+        while (true)
+        {
+            string? line;
+            try
+            {
+                line = _reader.ReadLine();
+            }
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+            {
+                return null;
+            }
+
+            if (line is null) return null;
+            if (ElevationProtocol.TryParse(line, out var message)) return message;
+        }
+    }
+
+    /// <summary>Everything the helper says until it stops, which is what a whole run looks like from
+    /// this end.</summary>
+    public List<ElevationMessage> ReceiveAll()
+    {
+        var messages = new List<ElevationMessage>();
+        while (Receive() is { } message) messages.Add(message);
+        return messages;
+    }
+
+    public void Close() => _stream.Dispose();
 }

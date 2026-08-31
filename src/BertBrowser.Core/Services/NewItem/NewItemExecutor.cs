@@ -61,7 +61,7 @@ public sealed class NewItemExecutor
         catch (Exception ex) when (IsFilesystemFailure(ex))
         {
             return new NewItemOutcome(null, new FailedNewItem(
-                $"Could not create '{plan.Name}' — {ex.Message}"));
+                $"Could not create '{plan.Name}' — {ex.Message}", AccessDenied.Caused(ex)));
         }
     }
 

@@ -88,4 +88,32 @@
           SkipUnchangedFiles="true" />
   </Target>
 
+  <!--
+    And the file-operation helper, beside the app for the same reason and with the same trap: the
+    launcher resolves it only next to the executable, so a bin without it reports the operation
+    unavailable having never raised a prompt. Every decision above about RemoveProperties, invoking
+    the build directly rather than through a ProjectReference, and naming the files individually with
+    no Exists condition applies here unchanged — see the comment on CopyIndexHelper for why.
+  -->
+  <Target Name="CopyElevateHelper" AfterTargets="Build">
+    <MSBuild Projects="..\BertBrowser.Elevator\BertBrowser.Elevator.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration)"
+             RemoveProperties="RuntimeIdentifier;SelfContained;PublishDir;PublishReadyToRun;PublishSingleFile;PublishTrimmed;TargetFramework;Platform">
+      <Output TaskParameter="TargetOutputs" ItemName="_ElevateHelperAssembly" />
+    </MSBuild>
+
+    <ItemGroup>
+      <_ElevateHelperFile Include="@(_ElevateHelperAssembly)" />
+      <_ElevateHelperFile Include="@(_ElevateHelperAssembly->'%(RootDir)%(Directory)%(Filename).exe')" />
+      <_ElevateHelperFile Include="@(_ElevateHelperAssembly->'%(RootDir)%(Directory)%(Filename).pdb')" />
+      <_ElevateHelperFile Include="@(_ElevateHelperAssembly->'%(RootDir)%(Directory)%(Filename).deps.json')" />
+      <_ElevateHelperFile Include="@(_ElevateHelperAssembly->'%(RootDir)%(Directory)%(Filename).runtimeconfig.json')" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(_ElevateHelperFile)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

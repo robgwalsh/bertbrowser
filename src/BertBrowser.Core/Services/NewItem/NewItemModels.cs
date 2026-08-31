@@ -57,7 +57,9 @@ public sealed record NewItemPlan(
 }
 
 /// <param name="Message">The failure, phrased for a message dialog.</param>
-public sealed record FailedNewItem(string Message);
+/// <param name="AccessDenied">Windows refused permission. The only failure an administrator token
+/// could fix.</param>
+public sealed record FailedNewItem(string Message, bool AccessDenied = false);
 
 /// <summary>What actually happened on disk. There is deliberately no undo record: creating is
 /// additive, exactly as copying is, and the item it makes is empty. Ctrl+Z is left pointing at

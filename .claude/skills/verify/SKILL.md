@@ -67,6 +67,9 @@ archive-fixture [dir]       the containers nothing here can write: locked.zip (A
                             hunter2), sealed.7z (encrypted headers, correct-horse) and plain.7z.
                             Base64 in Core so a script and a unit test see the same bytes
 mkdir <rel> | write <rel> [bytes] | sandbox
+deny <rel>                  a file the current account may not delete or move — a real Deny ACE,
+                            set with no privilege, lifted again on the way out. Its folder is
+                            denied too and inheritably, so give it one of its own
 
 go <path>                   navigate the active tab (relative paths resolve in the sandbox)
 up | back | forward | refresh
@@ -120,7 +123,7 @@ shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, rename-advanced,
                             delete, delete-permanent, message, warning, properties, settings,
                             theme-editor, disk-usage, duplicates, search-syntax, extract,
-                            compress, archive-password
+                            compress, archive-password, elevation
                             (new-folder/new-file/search-syntax need no selection; every other
                             kind uses one.
                             rename-advanced is the rename dialog with its options panel open —
@@ -142,6 +145,10 @@ assert-can-undo | assert-cannot-undo | assert-exists <path> | assert-missing <pa
 assert-duplicate-groups <n> | assert-duplicate-selected <n>
 assert-duplicate-row <name> | assert-no-duplicate-row <name>
 assert-visible <Name> | assert-hidden <Name> | assert-not-launched
+assert-elevation-offered | assert-no-elevation-offered
+                            whether the run offered to retry something as administrator. The
+                            negative form only means anything before the first offer — the
+                            recording prompt accumulates over a run
 assert-preview <kind>       image | document | text | archive | font | media | loading | none
 
 echo <text> | sleep <ms> | settle [ms]      '#' at the start of a line is a comment
@@ -167,6 +174,12 @@ Element names come from the XAML: window-level are `FolderTree`, `GlobalSearchBo
   through — without it.
 - **Writing outside the sandbox is refused.** This app deletes and moves real files, and the harness
   drives the real executors. `--allow-outside` is the deliberate way past, for when you mean it.
+- **No UAC prompt is ever raised.** A file operation Windows refuses can now be retried with an
+  administrator token, and a prompt takes the *secure desktop* — the one thing parking the window
+  offscreen cannot work around. The run gets `RefusingElevationLauncher`, and `UiSession` asserts it
+  did rather than trusting the registration. Everything above the launcher is real, so the
+  discriminator, the rules and the merge are genuinely exercised; only the process and the token are
+  missing. `dialog elevation` poses the consent window.
 - **No media is ever played.** The preview pane stops at a poster frame until someone presses play,
   and no script presses it. That keeps a run silent on a machine someone is using — and a
   `MediaElement` renders through its own composition surface, so it would come back as a hole in a

@@ -158,7 +158,9 @@ public sealed record DeletedItem(
 
 /// <param name="SourcePath">The item that could not be deleted.</param>
 /// <param name="Message">The failure, phrased for the status bar.</param>
-public sealed record FailedDelete(string SourcePath, string Message);
+/// <param name="AccessDenied">Windows refused permission, rather than the item being missing or in
+/// use. The only failure an administrator token could fix.</param>
+public sealed record FailedDelete(string SourcePath, string Message, bool AccessDenied = false);
 
 /// <summary>What actually happened on disk. <see cref="Deleted"/> doubles as the undo record:
 /// each entry knows where its data is being held.</summary>

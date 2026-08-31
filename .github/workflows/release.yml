@@ -41,6 +41,15 @@ jobs:
           -r win-x64 --self-contained true
           -p:Version=${{ steps.ver.outputs.version }} -o publish
 
+      # And the elevated file-operation helper, same folder, same reasoning. It is started only
+      # when the user clicks a shield after an operation was refused, and exits when that one
+      # operation is done.
+      - name: Publish the file-operation helper
+        run: >
+          dotnet publish src/BertBrowser.Elevator/BertBrowser.Elevator.csproj -c Release
+          -r win-x64 --self-contained true
+          -p:Version=${{ steps.ver.outputs.version }} -o publish
+
       - name: Pack and upload Velopack release
         shell: pwsh
         run: |

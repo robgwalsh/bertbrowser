@@ -94,14 +94,21 @@ public sealed class TransferExecutor
             }
             catch (Exception ex) when (IsTransferFailure(ex))
             {
-                failed.Add(new FailedTransfer(transfer.SourcePath, $"{transfer.Name}: {ex.Message}"));
+                failed.Add(new FailedTransfer(
+                    transfer.SourcePath, $"{transfer.Name}: {ex.Message}", AccessDenied.Caused(ex)));
             }
             run.EndItem();
         }
 
         run.Finished();
         return new TransferOutcome(
-            plan.Verb, plan.DestinationDirectory, completed, skipped, failed, stagingDirectory, cancelled);
+            plan.Verb,
+            plan.DestinationDirectory,
+            completed,
+            skipped,
+            failed,
+            stagingDirectory is null ? [] : [stagingDirectory],
+            cancelled);
     }
 
     /// <summary>Returns the completed record, or null when the item was skipped.</summary>
@@ -260,7 +267,7 @@ public sealed class TransferExecutor
             }
             catch (Exception ex) when (IsTransferFailure(ex))
             {
-                failed.Add(new FailedTransfer(item.SourcePath, $"{name}: {ex.Message}"));
+                failed.Add(new FailedTransfer(item.SourcePath, $"{name}: {ex.Message}", AccessDenied.Caused(ex)));
             }
         }
 
@@ -275,18 +282,20 @@ public sealed class TransferExecutor
     /// </summary>
     public void PurgeStaging(TransferOutcome outcome)
     {
-        if (outcome.StagingDirectory is not { } staging) return;
-        if (!Path.GetFileName(staging).StartsWith(StagingPrefix, StringComparison.Ordinal)) return;
+        foreach (var staging in outcome.StagingDirectories)
+        {
+            if (!IsStagingDirectory(staging)) continue;
 
-        try
-        {
-            if (!Directory.Exists(staging)) return;
-            if (Directory.EnumerateFileSystemEntries(staging).Any()) return; // still holds displaced data
-            Directory.Delete(staging);
-        }
-        catch (Exception ex) when (IsTransferFailure(ex))
-        {
-            // A leftover hidden folder is harmless; never let cleanup break the operation.
+            try
+            {
+                if (!Directory.Exists(staging)) continue;
+                if (Directory.EnumerateFileSystemEntries(staging).Any()) continue; // still holds displaced data
+                Directory.Delete(staging);
+            }
+            catch (Exception ex) when (IsTransferFailure(ex))
+            {
+                // A leftover hidden folder is harmless; never let cleanup break the operation.
+            }
         }
     }
 
@@ -298,20 +307,22 @@ public sealed class TransferExecutor
     /// </summary>
     public static void CommitStaging(TransferOutcome outcome)
     {
-        if (outcome.StagingDirectory is not { } staging) return;
-        if (!Path.GetFileName(staging).StartsWith(StagingPrefix, StringComparison.Ordinal)) return;
+        foreach (var staging in outcome.StagingDirectories)
+        {
+            if (!IsStagingDirectory(staging)) continue;
 
-        try
-        {
-            // DirectoryRemoval.RemoveTree, not Directory.Delete(recursive: true). What a Replace
-            // displaced into staging is the user's own folder and can contain a junction, and that
-            // call erases the rest of such a tree before throwing — swallowed here as harmless
-            // cleanup, so half a folder would be left behind for good without a word.
-            if (Directory.Exists(staging)) DirectoryRemoval.RemoveTree(staging);
-        }
-        catch (Exception ex) when (IsTransferFailure(ex))
-        {
-            // A leftover hidden folder is harmless; never let cleanup break the operation.
+            try
+            {
+                // DirectoryRemoval.RemoveTree, not Directory.Delete(recursive: true). What a Replace
+                // displaced into staging is the user's own folder and can contain a junction, and that
+                // call erases the rest of such a tree before throwing — swallowed here as harmless
+                // cleanup, so half a folder would be left behind for good without a word.
+                if (Directory.Exists(staging)) DirectoryRemoval.RemoveTree(staging);
+            }
+            catch (Exception ex) when (IsTransferFailure(ex))
+            {
+                // A leftover hidden folder is harmless; never let cleanup break the operation.
+            }
         }
     }
 
@@ -319,17 +330,28 @@ public sealed class TransferExecutor
     /// Surfaced so the user can be told where displaced items went instead of losing them.</summary>
     public static IReadOnlyList<string> StagedItems(TransferOutcome outcome)
     {
-        if (outcome.StagingDirectory is not { } staging || !Directory.Exists(staging))
-            return Array.Empty<string>();
-        try
+        var items = new List<string>();
+        foreach (var staging in outcome.StagingDirectories)
         {
-            return Directory.EnumerateFileSystemEntries(staging).ToList();
+            if (!IsStagingDirectory(staging) || !Directory.Exists(staging)) continue;
+            try
+            {
+                items.AddRange(Directory.EnumerateFileSystemEntries(staging));
+            }
+            catch (Exception ex) when (IsTransferFailure(ex))
+            {
+            }
         }
-        catch (Exception ex) when (IsTransferFailure(ex))
-        {
-            return Array.Empty<string>();
-        }
+        return items;
     }
+
+    /// <summary>
+    /// Whether a path is a staging folder <see cref="CreateStagingDirectory"/> made — the guard on
+    /// every recursive delete in this file. A path only qualifies if it is named the way this class
+    /// names them, so a mangled or hand-built outcome cannot direct the erase at a real folder.
+    /// </summary>
+    private static bool IsStagingDirectory(string path) =>
+        Path.GetFileName(path).StartsWith(StagingPrefix, StringComparison.Ordinal);
 
     // --- Filesystem primitives ---
 

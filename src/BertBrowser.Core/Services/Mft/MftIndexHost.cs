@@ -9,11 +9,13 @@ namespace BertBrowser.Core.Services.Mft;
 /// </summary>
 /// <remarks>
 /// <para>
-/// This is the only code in the product that runs with an administrator token, so what it will
-/// accept is the security surface of the whole design. It is <see cref="IndexVerb.Hello"/>,
-/// <see cref="IndexVerb.Start"/>, <see cref="IndexVerb.Shutdown"/> and <see cref="IndexVerb.Ping"/>
-/// — none of which names a file, a folder or a program. Adding a verb that does would undo the
-/// point of the split, however convenient it looked at the time.
+/// What this will accept is the security surface of the index design. It is
+/// <see cref="IndexVerb.Hello"/>, <see cref="IndexVerb.Start"/>, <see cref="IndexVerb.Shutdown"/>
+/// and <see cref="IndexVerb.Ping"/> — none of which names a file, a folder or a program. Adding a
+/// verb that does would undo the point of the split, however convenient it looked at the time, and
+/// the arrival of a second elevated helper changes nothing about that: this process is long-lived
+/// and starts itself at launch, which is precisely why it may not be told where to point. See
+/// <c>IndexProtocol</c> for the argument in full.
 /// </para>
 /// <para>
 /// <b>Losing the pipe is how this process learns to exit.</b> The kernel breaks it when the app

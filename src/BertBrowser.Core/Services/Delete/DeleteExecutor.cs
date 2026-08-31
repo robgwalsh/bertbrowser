@@ -132,7 +132,8 @@ public sealed class DeleteExecutor
             }
             catch (Exception ex) when (IsDeleteFailure(ex))
             {
-                failed.Add(new FailedDelete(item.SourcePath, $"{item.Name}: {ex.Message}"));
+                failed.Add(new FailedDelete(
+                    item.SourcePath, $"{item.Name}: {ex.Message}", AccessDenied.Caused(ex)));
             }
         }
 
@@ -435,7 +436,7 @@ public sealed class DeleteExecutor
             }
             catch (Exception ex) when (IsDeleteFailure(ex))
             {
-                failed.Add(new FailedDelete(item.SourcePath, $"{item.Name}: {ex.Message}"));
+                failed.Add(new FailedDelete(item.SourcePath, $"{item.Name}: {ex.Message}", AccessDenied.Caused(ex)));
             }
         }
 

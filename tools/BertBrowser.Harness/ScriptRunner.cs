@@ -13,6 +13,7 @@ using BertBrowser.App.Views;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services.Delete;
+using BertBrowser.Core.Services.Elevation;
 using BertBrowser.Core.Services.DiskUsage;
 using BertBrowser.Core.Services.Duplicates;
 using BertBrowser.Core.Services.Mft;
@@ -46,6 +47,7 @@ internal sealed class AssertionException(string message) : Exception(message);
 internal sealed class ScriptRunner(UiSession session, HarnessOptions options, TextWriter output)
 {
     private readonly Sandbox _sandbox = new(options);
+    private readonly DeniedFixture _denied = new();
     private int _shots;
 
     /// <summary>Runs every command. Returns the process exit code.</summary>
@@ -74,6 +76,10 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             }
         }
 
+        // Always, and before the scratch directory is swept: a Deny ACE left in place makes the
+        // sandbox undeletable, and every later run would leave another one behind in %TEMP%.
+        _denied.Release();
+
         return failed ? HarnessOptions.Exit.Failed : HarnessOptions.Exit.Ok;
     }
 
@@ -99,6 +105,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "mkdir": MakeDirectory(rest); break;
             case "write": WriteFile(rest); break;
             case "sandbox": output.WriteLine(_sandbox.Root); break;
+            case "deny": Deny(rest); break;
 
             // navigation
             case "go": Go(rest); break;
@@ -192,6 +199,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-visible": AssertVisibility(rest, expected: true); break;
             case "assert-hidden": AssertVisibility(rest, expected: false); break;
             case "assert-not-launched": AssertNotLaunched(); break;
+            case "assert-elevation-offered": AssertElevationOffered(expected: true); break;
+            case "assert-no-elevation-offered": AssertElevationOffered(expected: false); break;
 
             default:
                 throw new FormatException($"'{verb}' is not a command. Run with --help for the list.");
@@ -354,6 +363,12 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         The end.
         """;
+
+    /// <summary>Makes a file the current account may not delete or move — a real access-denied
+    /// failure, produced with no privilege and no prompt. See DeniedFixture for why the ACE goes on
+    /// the folder before the file exists.</summary>
+    private void Deny(string rest) =>
+        _denied.Deny(_sandbox.RequireInside(Require(rest, "deny"), "deny"));
 
     private void MakeDirectory(string rest) =>
         Directory.CreateDirectory(_sandbox.RequireInside(Require(rest, "mkdir"), "mkdir"));
@@ -679,7 +694,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         var outcome = Await(() => session.Shell.RenameAsync(plan));
 
-        if (outcome.Failed is { Count: > 0 } failures)
+        // See the note on Delete: a permission failure is what this harness is built to produce.
+        if (outcome.Failed is { Count: > 0 } failures && !failures.All(f => f.AccessDenied))
             throw new AssertionException(string.Join("; ", failures.Select(f => f.Message)));
     }
 
@@ -822,7 +838,11 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         var outcome = Await(() => session.Shell.DeleteAsync(plan));
 
-        if (outcome.Failed is { Count: > 0 } failures)
+        // A permission failure is not a script error here. This run never starts the elevated helper,
+        // so an item Windows refused is *expected* to come back failed — that is the harness working
+        // as designed, and assert-elevation-offered is how a script says it meant to produce one.
+        // Everything else still stops the run.
+        if (outcome.Failed is { Count: > 0 } failures && !failures.All(f => f.AccessDenied))
             throw new AssertionException(string.Join("; ", failures.Select(f => f.Message)));
     }
 
@@ -1373,6 +1393,13 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         "delete-permanent" => DeleteDialog.Create(
             DeletePlanFor(DeleteMode.Permanent), session.Shell.SurveyDelete),
 
+        // Posed at a fixed offer rather than provoked by a real refusal: producing a genuine
+        // access-denied failure needs an ACL fixture, and what this window is for is being looked
+        // at. The wiring behind it is proved by assert-elevation-offered instead.
+        "elevation" => ElevationDialog.Create(new ElevationOffer(
+            ElevationOperation.Delete,
+            [.. Selection().Select(i => i.FullPath)])),
+
         // Needs no selection and no fixture: its content is SearchSyntax.Sections, which is a
         // constant in Core.
         "search-syntax" => SearchSyntaxDialog.Create(),
@@ -1883,6 +1910,28 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         if (session.Launcher.Attempts is { Count: > 0 } attempts)
             throw new AssertionException(
                 $"the run tried to start: {string.Join(", ", attempts)} (all refused).");
+    }
+
+    /// <summary>
+    /// Whether the run has offered to retry something as administrator.
+    /// </summary>
+    /// <remarks>
+    /// The negative form is the more valuable one. A file that is merely read-only, or open in
+    /// something else, fails with an exception that looks a great deal like a permission problem
+    /// from a distance and is not one — and putting a UAC prompt in front of either would be a
+    /// regression no unit test spans, because the discriminator and the dialog sit on opposite
+    /// sides of the view model.
+    /// </remarks>
+    private void AssertElevationOffered(bool expected)
+    {
+        var offers = session.ElevationPrompt.Offers;
+        if (expected && offers.Count == 0)
+            throw new AssertionException("expected an administrator retry to be offered; none was.");
+
+        if (!expected && offers.Count > 0)
+            throw new AssertionException(
+                "an administrator retry was offered for: " +
+                string.Join("; ", offers.Select(o => $"{o.Operation} ({o.Items.Count} item(s))")));
     }
 
     // ---- finding elements -------------------------------------------------------------

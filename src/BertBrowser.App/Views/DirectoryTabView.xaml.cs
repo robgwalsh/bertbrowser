@@ -613,8 +613,15 @@ public partial class DirectoryTabView : UserControl
 
         // Only ever one file: "run this folder as administrator" means nothing, and a whole
         // selection of programs started elevated at once is not something to offer from a menu.
+        // Only where there is something to elevate. A runas verb is registered per file type —
+        // exefile has one, txtfile does not and never will — so offering it on a type without one
+        // produces ERROR_NO_ASSOCIATION and nothing else. Where there is no verb but the file has a
+        // handler, that handler is what gets elevated (a .sln opens VSLauncher as administrator);
+        // greyed out means neither was available. See RunAsVerbRules.Decide.
         RunAsAdminMenuItem.IsEnabled =
-            selection.Count == 1 && !selection[0].IsDirectory && !inArchive;
+            selection.Count == 1 &&
+            Interop.RunAsVerbRegistry.CanRunElevated(
+                selection[0].FullPath, selection[0].IsDirectory, inArchive);
 
         // Rename and Delete stay on inside a container, but they mean something different in
         // there: the container is rewritten beside itself and swapped in. Whether that is possible

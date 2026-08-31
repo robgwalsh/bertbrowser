@@ -35,7 +35,8 @@ To see the interface, use the harness (below), which hosts the same window where
 
 - `src/BertBrowser.Core` — plain net10.0, no UI dependencies: SQLite persistence, path canonicalization, search/size services. This is the only project with tests; keep anything testable here rather than in the App.
 - `src/BertBrowser.App` — WPF shell. MVVM via CommunityToolkit.Mvvm source generators (`[ObservableProperty]`, `[RelayCommand]` on `partial` classes), DI via `Microsoft.Extensions.DependencyInjection`. The composition root is `App.BuildServices()` in `App.xaml.cs` (`App.Services`): register new services/repositories there.
-- `src/BertBrowser.Indexer` — the elevated index helper: a small `net10.0` console exe with a `requireAdministrator` manifest, the only component that asks for one. It hosts the existing `MftIndexService` and reports over a pipe; see "The elevated index helper" below.
+- `src/BertBrowser.Indexer` — the elevated index helper: a small `net10.0` console exe with a `requireAdministrator` manifest, one of two components that ask for one. It hosts the existing `MftIndexService` and reports over a pipe; see "The elevated index helper" below.
+- `src/BertBrowser.Elevator` — the elevated file-operation helper: the same shape, started only when a move, copy, delete, rename or creation was refused for permissions and the user clicks a shield. It serves exactly one request and exits; see "Elevated file operations" below.
 - `tests/BertBrowser.Core.Tests` — xUnit; tests create real SQLite databases and directory trees under `%TEMP%`.
 - `tools/BertBrowser.Harness` — the UI harness; `tools/ui/*.bbs` are its scripts.
 
@@ -748,6 +749,174 @@ passes `RemoveProperties`, because a nested build inherits the outer one's globa
 Since the copy is not a reference, it does not propagate to projects referencing the App — a scratch
 driver that wants the real chain must copy the helper itself.
 
+### Elevated file operations
+
+Copying into `C:\Program Files`, renaming inside `C:\Windows`, deleting a file whose ACL denies you.
+The app is still `asInvoker`; what changed is that a *write* Windows refuses is now offered a second
+attempt behind a UAC prompt, carried out by a second short-lived helper —
+**`src/BertBrowser.Elevator`**, one request, then it exits.
+
+**Retry after denial, never pre-flight.** The operation runs unelevated exactly as it always did. The
+items that come back access-denied are collected and *only those* are re-run. Nothing probes an ACL
+in advance: effective-access probing is unreliable, and a pre-flight over a 200,000-file tree would
+cost more than the transfer. The executors' existing contract — *one item's failure never affects the
+others* — is what makes this work, because the failures are already itemised and the successes are
+already committed.
+
+**The index helper's "four verbs and never a path" rule survives unchanged, and the reason is worth
+having straight.** It was never "no elevated process may take a path". It is a rule about *that*
+helper, resting on three properties of it: it lives for the whole session, it is started at launch
+without anyone asking, and its job names no file. A path verb there would let anything reaching the
+pipe aim an always-on administrator-token process at a chosen file with no user gesture in between.
+The file-operation helper inverts all three — it lives for one operation, is started only by a click
+on a shield in a dialog naming the items, and exists *because* it takes paths. What replaces the rule
+is **one prompt per operation, one request per process, and the process exits when the request is
+done**, and that is structural rather than conventional: `ElevationHost` accepts `Begin` only when it
+has no header and `Item` only before `Go`; after `Go` the only verb it reads is `Cancel`.
+`ElevationHostTests.ASecondHeaderIsRefused` asserts the state machine directly, because after `Go`
+the pipe closes anyway and a test that only looked at disk would pass whatever the switch did.
+
+Four pieces, split the way the rest of the app is:
+
+- **The discriminator** (`Core/Services/AccessDenied.cs`). Until this existed, every executor caught
+  `IOException or UnauthorizedAccessException or SecurityException or NotSupportedException or
+  ArgumentException` in one clause and turned it into `ex.Message` — which is *localised*, so nothing
+  downstream could ever match on it: "this needs a token" and "this file is open in Word" left the
+  executor as the same thing. `AccessDenied.Caused` is two arms and no more —
+  `UnauthorizedAccessException`, and an `IOException` carrying `0x80070005`, because .NET's mapping is
+  not uniform across primitives. `SecurityException` is deliberately excluded even though it sits in
+  every one of those catch clauses: it is a CAS-era type the file APIs do not throw, and every false
+  positive costs the user a prompt that cannot help. The flag rides on the four failure records as a
+  trailing optional parameter, so no existing construction site changed. **`FailedRename` gained a
+  second field, `StrandedPath`**, and needed it: a failed rename that could not be put back leaves the
+  item under a `.bertbrowser-rename-*` name, a fact that lived only in the prose of the message, so a
+  retry from `SourcePath` would have renamed from somewhere empty and reported success.
+  **`ShellRecycleBin` gets the flag for free** — the shell hands back a per-item `hrDelete`, so on that
+  one path there is no exception to classify.
+- **The rules** (`Core/Services/Elevation/ElevationRules.cs`, `ElevatedRetry.cs`) — pure, and where
+  all the thinking is. `RetryFor` derives a plan containing exactly the denied items (`Rejected: []`,
+  because a planner's refusal is not a permission problem and repeating it would double it), carries
+  the **conflict resolutions** with it (or a `Replace` silently becomes `KeepBoth` and the operation
+  changes meaning half way through), and refuses a **cancelled** run outright — a consent prompt in
+  front of somebody who has just pressed Cancel is wrong whatever else is true. `Merge` folds the two
+  passes into one outcome that `RetireUndoable`, the one-level undo slot, `RefreshTabsShowingAsync`
+  and the tab fan-out cannot tell from an ordinary one, which is the whole reason for merging rather
+  than keeping two records.
+- **`ElevationRules.IsRefusedForElevation` is the new rule, and it lives at the escalation boundary
+  rather than in a planner.** Two planners were leaning on the manifest: `TransferPlanner` refuses
+  drive roots and nothing else, so `C:\Windows` dragged onto another folder is refused today *only*
+  by its ACL, and `NewItemPlanner` said so in as many words. Tightening them would cost legitimate
+  unelevated work — creating in the profile root is the ordinary thing this app is for — so the check
+  goes where the extra privilege is instead. It is asked about the item being **acted on**, never the
+  destination: copying into `C:\Program Files` is the headline case, moving `C:\Program Files` is not.
+- **The wire** (`Core/Ipc/ElevationProtocol.cs`, `ElevatorArguments.cs`) and the helper
+  (`Core/Services/Elevation/ElevationHost.cs`, run by `src/BertBrowser.Elevator`). The helper **hosts
+  the real Core executors**, and that is the safety argument rather than a convenience: every
+  invariant that matters — nothing deleted to make room, cross-volume copy-verify-then-delete,
+  junction trees refused, `DirectoryRemoval.RemoveTree`, the staging name guard, `ProtectedLocations`,
+  every planner rule re-applied against live disk — lives inside them. A helper taking "copy this
+  file" primitives would be *following instructions* from a medium-integrity peer; hosting the
+  executors means the process doing the dangerous thing is the process re-checking the rules.
+
+**The bound is two-dimensional, and neither half should ever need raising.** One record per line, so
+the line cap stays `NavigationRequest.MaxLineLength`; the number of records is capped separately by
+`ElevationProtocol.MaxItems`, refused as the host reads rather than after it has grown a buffer. The
+obvious alternative — the whole plan as one JSON document — needs a cap that has to be raised to fit a
+big operation, which is not a cap. Results stream back as lines too, which is what makes progress
+useful on a long copy rather than one lump at the end.
+
+**The helper's checks, in order, before a byte moves:** arguments parse (`--pipe` must carry the
+`BertBrowser.Elevate.` prefix, separate from the index helper's so neither can be handed the other's
+endpoint, and there is deliberately no `--data-dir` because this one never opens the database);
+connect; `PipeOwner.OwnsPipe`; the server's image path is the `BertBrowser.exe` beside it; the
+`--user-sid` matches its own identity; version greeting; then exactly one request, every path of which
+must pass `NavigationRequest.IsAcceptablePath`, refused **whole** rather than in part. Exit codes
+mirror the indexer's: 0 ok, 1 unhandled, 2 bad args, 3 no listener, 4 wrong pipe owner, 5 wrong server
+image, 6 malformed request.
+
+**Two of those deserve a caveat each.** The image check is a **coherence check, not a boundary** —
+nothing between two processes of one user is a security boundary, a program running as this user
+could copy the command line or raise its own prompt, and what protects the user is the UAC dialog
+naming the helper. Writing it down as a security property is the mistake to avoid. And `--user-sid` is
+a **check, never a source of truth**: UAC gives the same user a different token, not a different user,
+so `WindowsIdentity.GetCurrent().User` already *is* the caller's SID; the argument exists only so a
+mismatch can be refused, which covers the over-the-shoulder credential prompt.
+
+**Staging the helper creates has to be handed back, and this is the one piece with no test behind it
+and a silent failure mode.** A folder created at a volume root inherits that root's ACL, which grants
+ordinary users read and create but *not* delete — so a `.bertbrowser-trash` batch the helper makes is
+one the unelevated app can neither `CommitStaging`, nor `PurgeAbandonedStaging`, nor move an item back
+out of on Ctrl+Z. `Db.cs`'s note about Administrators-owned files does **not** cover this and must not
+be read as covering it: that reasoning is about the profile, which carries inheritable full control
+for the interactive user, and a volume root does not. `Elevator/StagingAcl.cs` adds an inheritable
+full-control grant for the calling account to every staging folder a run created. Verify it by hand
+with `icacls` after an elevated staged delete. Most deletes never reach this at all — a recycled item
+has no staging lifecycle, which is the structural gain of the Recycle Bin being the default.
+
+**`ShellRecycleBin` moved from `App/Interop` into `Core/Services/Delete`** so the helper can use it,
+which is what keeps an elevated delete going to the bin like any other. It has no WPF dependency and
+never had; it needed one `[SupportedOSPlatform("windows")]` because Core's TFM is plain `net10.0` and
+`TreatWarningsAsErrors` is on.
+
+**Undo runs unelevated first, and its own access-denied failures get the same offer** — a second
+prompt, which is honest, because putting a file back needs the rights taking it did. This is not
+optional: `ShellRecycleBin.Restore` invokes the shell's `undelete` verb, which restores to the
+*original* path, the one that was refused in the first place. But `Undo` takes an **outcome, not a
+plan**, so the retry is a narrowed *outcome* (`UndoRetryFor`) carrying `StagingDirectories: []` — the
+unelevated half still holds items in its own. Rename is the easy one: its undo is literally
+`Execute(UndoPlan(outcome))`, so the ordinary retry covers it and there is no `RenameUndo` verb on the
+wire at all.
+
+**The offer is a DI seam consulted from `ShellViewModel`, not a dialog raised from a view, and that is
+forced rather than chosen.** All four operations claim the one-level undo slot and call
+`RetireUndoable` — the moment staged data is erased — inside themselves. A retry raised after the
+method returned would need a second undo record, and claiming it would retire the first, committing a
+staging folder the user might still have wanted back. So `IElevationPrompt` is asked inside the same
+`IsTransferring` window, before the slot is claimed. `Views/ElevationDialog` is the app's answer to
+it: the shield glyph `E A 1 8` through the app's own `SymbolFont` (deliberately **not** the OS stock
+shield from `SHGetStockIconInfo`, which is a system-drawn colour bitmap and would be the one unthemed
+thing in the app), the refused items bounded at eight with "and N more", and **Skip as the default
+button** — nothing that raises a UAC prompt should be one stray Enter away. Transfer is the operation
+with no dialog today and keeps that: an ordinary failure still reaches only the status bar. This
+window is *consent*, and consent has to be asked for somewhere.
+
+`CanElevate` is asked **before** the dialog, never after: a standard user shown a shield gets a
+credential prompt for somebody else's password, which is worse than never being offered one. A
+declined prompt leaves the original failures standing and says so, and **nothing retries on a timer** —
+every attempt is a UAC prompt.
+
+Tests: `AccessDeniedTests` (the predicate, plus the wiring through real executors — a genuine Deny ACE
+for the positive case, and a sharing violation and a read-only attribute for the two negatives that
+look most like a permission problem and are neither), `ElevatedRetryTests` (the rules, pure),
+`ElevationProtocolTests` (the wire format and the helper's command line), `ElevationHostTests` (the
+elevated end over a `DuplexPair` against real files — mostly refusals, since "it does the operation"
+is the easy half). `tools/ui/themes.bbs` photographs the dialog in both palettes, and the harness
+registers `RefusingElevationLauncher` with a guard that *asserts* it did, the way the index client's
+does. Mutate a rule and confirm a test goes red: widen `IsAccessDenied` to any `IOException` and six
+go, drop the staging concatenation in `Merge` and one goes, drop the second-`Begin` guard and one goes.
+
+**One trap the tests themselves taught.** A Deny ACE added to a folder that *already contains* the
+file does not rewrite that file's DACL — it keeps the full control it inherited when it was made, that
+grant alone is enough to delete it, and the denial is never consulted. The fixture has to create the
+file *underneath* an already-denied folder. (And an agent running these under a sandboxed shell may
+see DACLs ignored entirely; run permission tests through a real shell.)
+
+**What no test reaches, and must be done by hand:** the UAC prompt itself, a genuinely privileged
+destination, and a standard-user account.
+
+1. Delete a file under `C:\Program Files`, accept the prompt, confirm it reaches the Recycle Bin and
+   Ctrl+Z restores it.
+2. `icacls "C:\.bertbrowser-trash\delete-XXXXXXXX"` after an elevated *staged* delete — the
+   interactive user must have `(F)`, inherited. This is the check the whole staging lifecycle rests on.
+3. Exactly **one** prompt per operation, and `Get-Process BertBrowser.Elevator` empty within a second
+   of it finishing.
+4. Kill the app mid-elevated-copy and confirm the helper exits.
+5. Decline the prompt: the original failure is reported, nothing else changed, and no undo record was
+   claimed by a retry that never ran.
+6. On a signed build, the UAC dialog names `BertBrowser.Elevator.exe` with the right publisher —
+   that string is the only thing actually standing between the user and an elevated file operation,
+   and it is the one part no code can check.
+
 ### Launching other programs
 
 **There is exactly one `Process.Start` in the app, inside `ProcessLauncher`**, and a `git grep`
@@ -777,6 +946,52 @@ plain-Enter arm of `FileList_KeyDown` needs its modifier guard or it swallows Ct
 first, and the double-click handler resolves the row **under the cursor** rather than
 `SelectedItem`, because Ctrl+Shift has already told an `Extended` `ListView` to range-extend. The
 folder tree deliberately has no elevated entry — a drive root is one careless click away there.
+
+**`runas` is a verb registered per file type, not something you can do to any file**, and forgetting
+that was a real bug: the menu item was enabled for everything, so choosing it on a `.txt` came back
+`ERROR_NO_ASSOCIATION` and a status-bar line reading *"No application is associated with the
+specified file for this operation"* — baffling about a file that opens fine on a double-click, and
+indistinguishable from nothing happening at all. `RunAsVerbRules` (Core) decides and
+`Interop/RunAsVerbRegistry` reads, the same split `ShellNewImport`/`ShellNewRegistry` use. Four
+things about it are worth keeping:
+
+- **The registry is asked, not an extension list consulted.** A list is wrong for every type an
+  installed program registers a `runas` verb for, and greying the item out on something that would
+  have worked is the worse of the two failures. The lookup mirrors the shell's own order — the user's
+  `FileExts\.ext\UserChoice`, then the machine default, plus verbs hung on the extension itself and
+  on `SystemFileAssociations`. Measured on a development machine: `.xml` and `.pdf` both carry one,
+  which no list would have guessed.
+- **Where there is no verb, the file's *handler* is elevated instead**, which is what makes the
+  feature worth having and is a step past Explorer. Explorer greys the item out on a `.sln`; this
+  reads the registered open command (`"…\VSLauncher.exe" "%1"`), substitutes the path and starts
+  *that* elevated — so "Run as administrator" on a solution opens Visual Studio as administrator, and
+  on a config file opens it in its own editor with the rights to save it. Measured: `.sln` and
+  `.csproj` resolve to VSLauncher, `.md` to Code, `.docx` to Word, while `.txt` and `.ps1` resolve to
+  nothing and stay greyed. `ShellOpenCommandParser` is the pure half and it **refuses far more than
+  it accepts** — a program that is not there, a command with no `%1` to put the file in, an unquoted
+  path no prefix of which exists. Everything here ends in starting a program with a token, so an
+  approximation is the one outcome not worth risking; greying out is the right failure.
+- **A `DelegateExecute` command is skipped**, because those are COM handlers and the command line
+  beside one is a fallback the shell may ignore entirely — starting it directly would run something
+  other than what a double-click runs. Packaged apps use them, which is most of why `.txt` comes back
+  with nothing.
+- **`.lnk` is the one place the registry is not the authority.** A shortcut carries no verbs of its
+  own — the shell resolves it and applies the *target's* — so `lnkfile` has no `runas` key and the
+  probe says no about a shortcut to a program Windows will happily elevate. Measured both ways:
+  `runas` on a shortcut to `notepad.exe` starts an elevated Notepad, and on a shortcut to a `.txt` it
+  returns 1155. So it is offered and the shell decides.
+- **The fallback list for an unreadable registry is measured, not guessed.** `.com`, `.msi`, `.ps1`,
+  `.vbs` and `.scr` all look like they belong on it and none of them does — `comfile` and
+  `Msi.Package` carry no `runas` key, so Windows refuses them exactly as it refuses a text file.
+  Listing one would put the original bug back on a machine whose registry cannot be read.
+- **The check is in `ProcessLauncher` as well as on the menu**, because the keyboard shortcut and a
+  custom command with the elevated box ticked never pass the menu's guard — and 1155 is caught there
+  too and reworded, for the shortcut case the pre-check deliberately lets through.
+
+`RunAsVerbRulesTests` and `ShellOpenCommandTests` cover the rules. Note the probe runs on every
+selection change, so its catch clause includes `ArgumentException`: a registry key name caps at 255
+characters and a file name does not. Answers are cached per extension for the life of the process —
+a file type does not gain a verb while the menu is open.
 
 ### Startup, the command line, and single instance
 

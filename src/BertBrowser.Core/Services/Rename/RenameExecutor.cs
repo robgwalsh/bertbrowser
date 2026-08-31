@@ -54,8 +54,10 @@ public sealed class RenameExecutor
             catch (Exception ex) when (IsFilesystemFailure(ex))
             {
                 stumbled[i] = true;
-                failed.Add(new FailedRename(item.SourcePath,
-                    $"'{item.SourceName}' could not be renamed: {ex.Message}"));
+                failed.Add(new FailedRename(
+                    item.SourcePath,
+                    $"'{item.SourceName}' could not be renamed: {ex.Message}",
+                    AccessDenied.Caused(ex)));
             }
         }
 
@@ -78,8 +80,16 @@ public sealed class RenameExecutor
             }
             catch (Exception ex) when (IsFilesystemFailure(ex))
             {
-                failed.Add(new FailedRename(item.SourcePath,
-                    $"'{item.SourceName}' could not be renamed: {ex.Message}{Restore(item, from, isStaged[i])}"));
+                // Where the item actually ended up, which is only ever somewhere unexpected when
+                // putting it back failed too. Taken as a value rather than spliced into the message,
+                // so a retry can start from it — see FailedRename.StrandedPath.
+                var stranded = Restore(item, from, isStaged[i]);
+                var note = stranded is null ? "" : $" It is currently at '{stranded}'.";
+                failed.Add(new FailedRename(
+                    item.SourcePath,
+                    $"'{item.SourceName}' could not be renamed: {ex.Message}{note}",
+                    AccessDenied.Caused(ex),
+                    stranded));
             }
         }
 
@@ -104,20 +114,21 @@ public sealed class RenameExecutor
             .ToList(), []);
 
     /// <summary>Puts a staged item back under its original name after its rename failed. Returns
-    /// the empty string when there was nothing to put back or it went back cleanly, and a note
-    /// naming the staged path when it could not — the one case where an item is left somewhere the
-    /// user didn't put it, so it must never be silent.</summary>
-    private static string Restore(PlannedRename item, string from, bool wasStaged)
+    /// null when there was nothing to put back or it went back cleanly, and the staged path when it
+    /// could not — the one case where an item is left somewhere the user didn't put it, so it must
+    /// never be silent, and the one case where a retry has to start from somewhere other than the
+    /// path the plan named.</summary>
+    private static string? Restore(PlannedRename item, string from, bool wasStaged)
     {
-        if (!wasStaged) return "";
+        if (!wasStaged) return null;
         try
         {
             Move(from, item.SourcePath, item.IsDirectory);
-            return "";
+            return null;
         }
         catch (Exception ex) when (IsFilesystemFailure(ex))
         {
-            return $" It is currently at '{from}'.";
+            return from;
         }
     }
 

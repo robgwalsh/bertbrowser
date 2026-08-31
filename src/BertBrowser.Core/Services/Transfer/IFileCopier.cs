@@ -121,7 +121,7 @@ public sealed class FileSystemFileCopier : IFileCopier
         {
             2 => new FileNotFoundException(message),
             3 => new DirectoryNotFoundException(message),
-            5 => new UnauthorizedAccessException(message),
+            CopyNative.ErrorAccessDenied => new UnauthorizedAccessException(message),
             _ => new IOException(message, hresult),
         };
     }

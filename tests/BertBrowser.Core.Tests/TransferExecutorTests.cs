@@ -274,7 +274,7 @@ public sealed class TransferExecutorTests : IDisposable
         AssertContent(source, "new");              // the mover went home
         AssertContent(P("dest", "a.txt"), "existing"); // the displaced file came back
         Assert.Empty(TransferExecutor.StagedItems(outcome));
-        Assert.False(Directory.Exists(outcome.StagingDirectory!));
+        Assert.False(Directory.Exists(outcome.StagingDirectories.Single()));
     }
 
     [Fact]
@@ -364,7 +364,7 @@ public sealed class TransferExecutorTests : IDisposable
         File.Delete(TransferExecutor.StagedItems(outcome).Single());
         _executor.PurgeStaging(outcome);
 
-        Assert.False(Directory.Exists(outcome.StagingDirectory!));
+        Assert.False(Directory.Exists(outcome.StagingDirectories.Single()));
     }
 
     [Fact]
@@ -373,7 +373,7 @@ public sealed class TransferExecutorTests : IDisposable
         var precious = Dir("not-staging");
         File_("keep me", "not-staging", "important.txt");
         var outcome = new TransferOutcome(
-            TransferVerb.Move, _root, [], [], [], precious);
+            TransferVerb.Move, _root, [], [], [], [precious]);
 
         _executor.PurgeStaging(outcome);
 

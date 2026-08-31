@@ -37,6 +37,7 @@ internal static class CopyNative
     // --- Error codes worth distinguishing ---
     internal const int ErrorRequestAborted = 1235;
     internal const int ErrorNotSameDevice = 17;
+    internal const int ErrorAccessDenied = 5;
 
     /// <summary>
     /// The callback both entry points take. Only <paramref name="totalBytes"/> and

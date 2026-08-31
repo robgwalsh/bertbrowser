@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.ShellIntegration;
 
 namespace BertBrowser.App.Services;
 
@@ -52,15 +53,40 @@ public interface IProcessLauncher
 public sealed class ProcessLauncher : IProcessLauncher
 {
     private const int ERROR_CANCELLED = 1223;
+    private const int ERROR_NO_ASSOCIATION = 1155;
 
     public string? Launch(string file, string? arguments = null, string? workingDirectory = null,
         bool elevated = false)
     {
         if (string.IsNullOrWhiteSpace(file)) return "Nothing to open.";
 
+        // Decided here rather than only at the menu, so every route gets the same answer — the
+        // keyboard shortcut, and a custom command with the elevated box ticked, neither of which
+        // passes the context menu's check.
+        var target = file;
+        var targetArguments = arguments ?? "";
+        if (elevated)
+        {
+            var open = Interop.RunAsVerbRegistry.Decide(file, isDirectory: false, insideArchive: false);
+            switch (open.Kind)
+            {
+                case ElevatedOpenKind.None:
+                    return RunAsVerbRules.CannotRunMessage(Describe(file));
+
+                // No runas verb, but the file has a handler: start *that* elevated with the file as
+                // its argument, which is what running a .sln or a config file as administrator means.
+                // Any arguments a caller passed are dropped, deliberately — they were meant for the
+                // file, and this is a different program.
+                case ElevatedOpenKind.Handler:
+                    target = open.Executable;
+                    targetArguments = open.Arguments;
+                    break;
+            }
+        }
+
         try
         {
-            Process.Start(new ProcessStartInfo(file, arguments ?? "")
+            Process.Start(new ProcessStartInfo(target, targetArguments)
             {
                 UseShellExecute = true,
                 Verb = elevated ? "runas" : "",
@@ -71,6 +97,15 @@ public sealed class ProcessLauncher : IProcessLauncher
         catch (Win32Exception ex) when (ex.NativeErrorCode == ERROR_CANCELLED)
         {
             return $"'{Describe(file)}' was not opened.";
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == ERROR_NO_ASSOCIATION && elevated)
+        {
+            // Windows saying there is no runas verb for this file. The pre-check above catches
+            // almost every case, but not a shortcut — which is offered on purpose, because the
+            // registry cannot say what it points at. Say the useful thing rather than passing on
+            // "No application is associated with the specified file for this operation", which is
+            // baffling about a file that opens fine on a double-click.
+            return RunAsVerbRules.CannotRunMessage(Describe(file));
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException
                                       or FileNotFoundException or ObjectDisposedException)

@@ -19,6 +19,11 @@ dotnet publish "$root\src\BertBrowser.Indexer\BertBrowser.Indexer.csproj" -c Rel
     -r win-x64 --self-contained true -p:Version=$Version -o "$root\publish"
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+# And the elevated file-operation helper, same folder, same reasoning.
+dotnet publish "$root\src\BertBrowser.Elevator\BertBrowser.Elevator.csproj" -c Release `
+    -r win-x64 --self-contained true -p:Version=$Version -o "$root\publish"
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 vpk pack --packId BertBrowser --packVersion $Version --packDir "$root\publish" `
     --mainExe BertBrowser.exe --packTitle BertBrowser --packAuthors "Rob Walsh" `
     --icon "$root\src\BertBrowser.App\Assets\app.ico" --outputDir "$root\Releases"

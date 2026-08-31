@@ -3,11 +3,15 @@
   <assemblyIdentity version="1.0.0.0" name="BertBrowser.App"/>
 
   <!-- asInvoker. A file browser runs as the person using it: what it opens, deletes and launches
-       should carry their rights and no more. Reading the NTFS MFT and USN change journal does need
-       a raw volume handle and therefore an administrator token, so that one job lives in
-       BertBrowser.Indexer.exe, which this process starts on demand and which can do nothing else.
-       Do not put requireAdministrator back here to fix an access-denied error — a folder this app
-       cannot read is a folder Explorer cannot read either, and that is the intended behaviour. -->
+       should carry their rights and no more. Two jobs need more than that, and each lives in its
+       own short-lived helper: reading the NTFS MFT needs a raw volume handle (BertBrowser.Indexer),
+       and a file operation Windows refused needs a token for exactly that operation
+       (BertBrowser.Elevator, started only from a click on a shield, one request, then it exits).
+
+       Do not put requireAdministrator back here to fix an access-denied error. Browsing stays as it
+       is — a folder this app cannot read is a folder Explorer cannot read either — and a *write*
+       that is refused is now offered a retry through the helper, with a prompt the user answers,
+       rather than by handing this process a token it holds all session for everything it does. -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">

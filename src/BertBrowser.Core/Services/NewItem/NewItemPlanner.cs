@@ -32,9 +32,17 @@ public sealed class FileSystemNewItemProbe : INewItemProbe
 /// <para>
 /// <see cref="Delete.ProtectedLocations"/> is deliberately <em>not</em> consulted. That list guards
 /// a handful of folders against being <em>deleted</em>, exact-match only; creating inside them is
-/// the ordinary thing this app is for — a new file in the profile root is not a mistake, and
-/// <c>C:\Windows</c> is refused by its ACL now the app is <c>asInvoker</c>. Wiring it in here would
-/// refuse legitimate work and buy nothing.
+/// the ordinary thing this app is for — a new file in the profile root is not a mistake. Wiring it
+/// in here would refuse legitimate work and buy nothing.
+/// </para>
+/// <para>
+/// That reasoning used to lean on the manifest: <c>C:\Windows</c> was said to be refused by its ACL
+/// because the app is <c>asInvoker</c>. <b>It no longer leans on anything of the sort</b>, and the
+/// clause has gone — a refused create can now be retried with an administrator token. The planner is
+/// unchanged, because this process is still <c>asInvoker</c> and the ordinary path is exactly what it
+/// always was; what the manifest used to cover is covered explicitly one layer up, at
+/// <c>ElevationRules.IsRefusedForElevation</c>, which is where the extra privilege actually is. The
+/// refusal belongs where the privilege is.
 /// </para>
 /// </remarks>
 public sealed class NewItemPlanner

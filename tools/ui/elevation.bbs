@@ -1,0 +1,51 @@
+# Elevated file operations, end to end and without a UAC prompt anywhere in it.
+#
+#   tools/BertBrowser.Harness/bin/Debug/net10.0-windows/BertBrowser.Harness.exe \
+#       --script tools/ui/elevation.bbs --out %TEMP%\elevation
+#
+# What this proves is the seam nothing else can: a *genuine* ERROR_ACCESS_DENIED, produced by a Deny
+# ACE the current account can set on its own file with no privilege at all, reaching the offer
+# through the real executors, the real discriminator and the real rules. The launcher under it
+# refuses to start anything, so the run stops exactly where the prompt would be.
+#
+# It has already earned its keep once: the shell reports a denied recycle as
+# COPYENGINE_E_ACCESS_DENIED_SRC (0x80270021) rather than the Win32 0x80070005, so the first version
+# of ShellRecycleBin's check missed every protected file — the one case the whole feature is for.
+
+tree .
+refresh
+
+# --- an ordinary delete offers nothing ---
+#
+# First, because the recording prompt accumulates over a run: this is the only point at which "no
+# offer" means anything. A file that simply goes must not put a UAC prompt in front of anyone.
+
+select notes.txt
+delete
+assert-no-elevation-offered
+
+# --- a failure a token could fix ---
+#
+# The ACE goes on the folder before the file exists, which is the only ordering that works — see
+# DeniedFixture. Its own folder, because the denial is inheritable.
+
+deny locked\report.txt
+refresh
+assert-row locked
+
+go locked
+select report.txt
+delete
+
+# The delete failed, and it failed in a way the app can do something about.
+assert-elevation-offered
+# ...and it stayed failed, because the harness never starts the helper. The file is still there.
+assert-exists locked\report.txt
+assert-row report.txt
+
+# --- the consent window itself ---
+
+select report.txt
+dialog elevation 01-elevation
+
+state

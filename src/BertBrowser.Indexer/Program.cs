@@ -17,7 +17,7 @@ namespace BertBrowser.Indexer;
 /// draws a window. Everything it produces goes into the database the app already created.
 /// </para>
 /// <para>
-/// It exits when the app does. See <see cref="ParentProcess"/> for the two mechanisms and why
+/// It exits when the app does. See <see cref="PipeOwner"/> for the two mechanisms and why
 /// neither is the explicit shutdown message.
 /// </para>
 /// </remarks>
@@ -69,7 +69,7 @@ internal static class Program
 
         // The name could have been guessed or raced for. Only this establishes that the endpoint
         // belongs to the process that started us.
-        if (!ParentProcess.OwnsPipe(pipe, options.ParentProcessId))
+        if (!PipeOwner.OwnsPipe(pipe, options.ParentProcessId))
         {
             Console.Error.WriteLine("The pipe does not belong to the process that started this one.");
             return 4;
@@ -89,7 +89,7 @@ internal static class Program
         using var index = new MftIndexService(new FsIndexRepository(db), new DirSizeRepository(db));
 
         using var lifetime = new CancellationTokenSource();
-        ParentProcess.WatchForExit(options.ParentProcessId, () =>
+        PipeOwner.WatchForExit(options.ParentProcessId, () =>
         {
             // Belt to the pipe's braces. Cancelling ends Run, which returns from Main, which closes
             // the volume handles the indexer holds.

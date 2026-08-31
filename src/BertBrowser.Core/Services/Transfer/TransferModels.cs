@@ -115,19 +115,33 @@ public sealed record CompletedTransfer(
 
 /// <param name="SourcePath">The source that could not be transferred.</param>
 /// <param name="Message">The failure, phrased for the status bar.</param>
-public sealed record FailedTransfer(string SourcePath, string Message);
+/// <param name="AccessDenied">Windows refused permission, rather than the item being missing, in
+/// use, or on the wrong volume. The one failure an administrator token could fix, and therefore the
+/// only one the elevated retry is ever offered for.</param>
+public sealed record FailedTransfer(string SourcePath, string Message, bool AccessDenied = false);
 
 /// <summary>What actually happened on disk. <see cref="Completed"/> doubles as the undo record.</summary>
+/// <param name="StagingDirectories">Every staging folder this run created, so the whole lot can be
+/// discarded in one go once the transfer can no longer be undone.</param>
 /// <param name="Cancelled">True when the user stopped the transfer part-way. Without it a cancelled
 /// run is indistinguishable from an empty plan: the items that never ran appear in neither
 /// <paramref name="Completed"/>, <paramref name="Skipped"/> nor <paramref name="Failed"/>.</param>
+/// <remarks>
+/// A single run only ever creates one staging folder, so a list looks like one too many — but an
+/// outcome is not always a single run. Two of them can be merged into one, which is what the
+/// elevated retry does with the pass that failed on permissions and the pass that did not, and there
+/// is nowhere to put the second folder if this is a <c>string?</c>. Whichever one was dropped would
+/// then never be committed and never purged: the user's displaced folder would stay hidden on disk
+/// for good, with no record pointing at it. <c>DeleteOutcome</c> has carried a list for the same
+/// reason since it was written.
+/// </remarks>
 public sealed record TransferOutcome(
     TransferVerb Verb,
     string DestinationDirectory,
     IReadOnlyList<CompletedTransfer> Completed,
     IReadOnlyList<string> Skipped,
     IReadOnlyList<FailedTransfer> Failed,
-    string? StagingDirectory,
+    IReadOnlyList<string> StagingDirectories,
     bool Cancelled = false)
 {
     /// <summary>Only a move is worth undoing: a copy adds without removing or overwriting.

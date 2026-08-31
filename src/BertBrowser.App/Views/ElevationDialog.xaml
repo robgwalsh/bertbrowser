@@ -1,0 +1,59 @@
+<v:ThemedWindow x:Class="BertBrowser.App.Views.ElevationDialog"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:v="clr-namespace:BertBrowser.App.Views"
+                Title="Administrator permission"
+                Width="460" SizeToContent="Height" MinHeight="180"
+                ResizeMode="NoResize"
+                WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+                Background="{StaticResource Theme.Surface.Background}"
+                TextElement.Foreground="{StaticResource Theme.Text.Primary}">
+    <!-- Consent, not a report. An ordinary failure keeps its status-bar-only treatment; this window
+         exists because asking for a token is something the user has to agree to, and agreement has
+         to be asked for somewhere they will see it.
+
+         Cancel is the default button, as it is on DeleteDialog: nothing that raises a UAC prompt
+         should be one stray Enter away. -->
+    <DockPanel Margin="16">
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button x:Name="CancelButton" Content="Skip" MinWidth="88" Margin="0,0,8,0"
+                    IsCancel="True" IsDefault="True"/>
+            <Button x:Name="OkButton" Content="Try as administrator" MinWidth="88"
+                    Style="{StaticResource PrimaryButton}" Click="Ok_Click"/>
+        </StackPanel>
+
+        <DockPanel>
+            <!-- Segoe Fluent Icons E1A8, the shield, through the app's own SymbolFont — the same
+                 glyph the "Run as administrator" menu item uses. Deliberately not the OS stock
+                 shield from SHGetStockIconInfo: that is a system-drawn colour bitmap and would be
+                 the one unthemed thing in an app whose entire theming section exists because
+                 MessageBox cannot be themed. -->
+            <TextBlock x:Name="Glyph" DockPanel.Dock="Left" FontSize="22" Margin="0,0,12,0"
+                       VerticalAlignment="Top" FontFamily="{StaticResource SymbolFont}"
+                       Foreground="{StaticResource Theme.Text.Link}" Text="&#xEA18;"/>
+            <StackPanel>
+                <TextBlock x:Name="Headline" TextWrapping="Wrap" FontWeight="SemiBold"/>
+                <TextBlock x:Name="Explanation" TextWrapping="Wrap" Margin="0,6,0,0"
+                           Foreground="{StaticResource Theme.Text.Secondary}"/>
+
+                <Border Margin="0,12,0,0" Padding="8"
+                        Background="{StaticResource Theme.Window.Background}"
+                        BorderBrush="{StaticResource Theme.Border.Default}" BorderThickness="1">
+                    <StackPanel>
+                        <ItemsControl x:Name="Items">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis"
+                                               Margin="0,1"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock x:Name="More" Margin="0,4,0,0" Visibility="Collapsed"
+                                   Foreground="{StaticResource Theme.Text.Secondary}"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </DockPanel>
+    </DockPanel>
+</v:ThemedWindow>

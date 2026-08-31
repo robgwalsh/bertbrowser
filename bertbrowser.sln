@@ -19,6 +19,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BertBrowser.Harness", "tool
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BertBrowser.Indexer", "src\BertBrowser.Indexer\BertBrowser.Indexer.csproj", "{CC1A8711-93CC-4154-8C37-1F1EF9E18380}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BertBrowser.Elevator", "src\BertBrowser.Elevator\BertBrowser.Elevator.csproj", "{7F3E5C21-9A4D-4B18-8E62-3C7A1D0B5F49}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -89,6 +91,18 @@ Global
 		{CC1A8711-93CC-4154-8C37-1F1EF9E18380}.Release|x64.Build.0 = Release|Any CPU
 		{CC1A8711-93CC-4154-8C37-1F1EF9E18380}.Release|x86.ActiveCfg = Release|Any CPU
 		{CC1A8711-93CC-4154-8C37-1F1EF9E18380}.Release|x86.Build.0 = Release|Any CPU
+		{7F3E5C21-9A4D-4B18-8E62-3C7A1D0B5F49}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7F3E5C21-9A4D-4B18-8E62-3C7A1D0B5F49}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7F3E5C21-9A4D-4B18-8E62-3C7A1D0B5F49}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{7F3E5C21-9A4D-4B18-8E62-3C7A1D0B5F49}.Debug|x64.Build.0 = Debug|Any CPU
+		{7F3E5C21-9A4D-4B18-8E62-3C7A1D0B5F49}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{7F3E5C21-9A4D-4B18-8E62-3C7A1D0B5F49}.Debug|x86.Build.0 = Debug|Any CPU
+		{7F3E5C21-9A4D-4B18-8E62-3C7A1D0B5F49}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7F3E5C21-9A4D-4B18-8E62-3C7A1D0B5F49}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7F3E5C21-9A4D-4B18-8E62-3C7A1D0B5F49}.Release|x64.ActiveCfg = Release|Any CPU
+		{7F3E5C21-9A4D-4B18-8E62-3C7A1D0B5F49}.Release|x64.Build.0 = Release|Any CPU
+		{7F3E5C21-9A4D-4B18-8E62-3C7A1D0B5F49}.Release|x86.ActiveCfg = Release|Any CPU
+		{7F3E5C21-9A4D-4B18-8E62-3C7A1D0B5F49}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -99,5 +113,6 @@ Global
 		{B39054AD-D0F9-47D7-9B86-C40359EC1E8C} = {95E44BB6-4FA5-4602-8C06-FF8A268BFBC7}
 		{A258E49B-682A-425F-902E-0F86D776BFB5} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 		{CC1A8711-93CC-4154-8C37-1F1EF9E18380} = {5B5C0983-5E6C-4B83-9C1B-2D0DECDBA0F4}
+		{7F3E5C21-9A4D-4B18-8E62-3C7A1D0B5F49} = {5B5C0983-5E6C-4B83-9C1B-2D0DECDBA0F4}
 	EndGlobalSection
 EndGlobal

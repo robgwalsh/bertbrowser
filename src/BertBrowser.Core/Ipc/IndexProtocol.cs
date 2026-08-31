@@ -55,6 +55,17 @@ public readonly record struct IndexMessage(IndexVerb Verb, string Argument = "")
 /// of that which is worth the convenience.
 /// </para>
 /// <para>
+/// <b>The rule survives the arrival of a second elevated helper, and it is worth being clear why.</b>
+/// It was never "no elevated process may take a path". It is a rule about <em>this</em> helper, and
+/// it rests on three properties of it: it lives for the whole session, it is started at launch
+/// without anyone asking, and its job — reading a volume — names no file. A path verb here would let
+/// anything reaching this pipe aim an always-on administrator-token process at a chosen file, with
+/// no user gesture in between. <c>BertBrowser.Elevator</c> inverts all three: it lives for one
+/// operation, is started only by a click on a shield in a dialog naming the items, and exists
+/// <em>because</em> it takes paths. What replaces the rule there is one prompt per operation, one
+/// request per process, and a process that exits when the request is done.
+/// </para>
+/// <para>
 /// Everything in the other direction is a state push, not a reply. The app mirrors what arrives
 /// into an <c>MftIndexState</c> and answers <c>IsIndexed</c>/<c>AnyIndexed</c>/<c>StatusText</c>
 /// from it locally, so nothing the UI asks ever waits on a round trip.

@@ -10,6 +10,7 @@ using BertBrowser.Core.Layout;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Archives;
+using BertBrowser.Core.Services.Elevation;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Services.NewItem;
@@ -41,6 +42,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private readonly DeleteSurveyor _deleteSurveyor;
     private readonly DirSizeRepository _dirSizes;
     private readonly PaneFactory _factory;
+    private readonly IElevatedOperationRunner _elevation;
+    private readonly IElevationPrompt _elevationPrompt;
 
     /// <summary>"Show hidden items" browse setting, toggled from the Settings dialog. Mirrors
     /// <see cref="AppSettings.ShowHiddenItems"/>; hidden files/folders — and now hidden
@@ -185,8 +188,12 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         ExtractExecutor extractExecutor,
         ArchiveCreator archiveCreator,
         ArchiveEditPlanner archiveEditPlanner,
-        ArchiveEditExecutor archiveEditExecutor)
+        ArchiveEditExecutor archiveEditExecutor,
+        IElevatedOperationRunner elevation,
+        IElevationPrompt elevationPrompt)
     {
+        _elevation = elevation;
+        _elevationPrompt = elevationPrompt;
         _archiveEditPlanner = archiveEditPlanner;
         _archiveEditExecutor = archiveEditExecutor;
         _archiveCreator = archiveCreator;
@@ -893,7 +900,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         try
         {
             SetStatus($"Renaming {plan.Work.Count:N0} item(s)…");
-            var outcome = await Task.Run(() => _renameExecutor.Execute(plan));
+            var (outcome, elevated) = await ElevateIfRefusedAsync(
+                plan, await Task.Run(() => _renameExecutor.Execute(plan)));
 
             RetireUndoable();
             if (outcome.CanUndo)
@@ -908,7 +916,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             if (outcome.Failed.Count > 0)
                 status += $"; {outcome.Failed.Count:N0} failed — {outcome.Failed[0].Message}";
             else if (outcome.CanUndo) status += " — Ctrl+Z to undo";
-            SetStatus(status);
+            SetStatus(status + elevated);
             return outcome;
         }
         finally
@@ -926,17 +934,21 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         try
         {
             SetStatus("Undoing…");
-            var result = await Task.Run(() => _renameExecutor.Undo(outcome));
+            // A rename is its own inverse, so the undo is an ordinary rename of the undo plan — and
+            // the ordinary retry covers it, with no undo-specific verb on the wire at all.
+            var undoPlan = RenameExecutor.UndoPlan(outcome);
+            var (result, elevated) = await ElevateIfRefusedAsync(
+                undoPlan, await Task.Run(() => _renameExecutor.Execute(undoPlan)));
 
             // Spent either way: a partial undo must not be replayed.
             _undoableRename = null;
             UndoDescription = "";
 
-            await RefreshAfterRenameAsync(result.Completed, RenameExecutor.UndoPlan(outcome).Renames);
+            await RefreshAfterRenameAsync(result.Completed, undoPlan.Renames);
 
-            SetStatus(result.Failed.Count == 0
+            SetStatus((result.Failed.Count == 0
                 ? $"Undone — {result.Completed.Count:N0} name(s) put back"
-                : $"Put back {result.Completed.Count:N0} name(s); {result.Failed.Count:N0} could not be — {result.Failed[0].Message}");
+                : $"Put back {result.Completed.Count:N0} name(s); {result.Failed.Count:N0} could not be — {result.Failed[0].Message}") + elevated);
         }
         finally
         {
@@ -975,7 +987,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         UndoCommand.NotifyCanExecuteChanged();
         try
         {
-            var outcome = await Task.Run(() => _newItemExecutor.Execute(plan));
+            var (outcome, elevated) = await ElevateIfRefusedAsync(
+                plan, await Task.Run(() => _newItemExecutor.Execute(plan)));
 
             // Deliberately no RetireUndoable and no undo record. Creating is additive, exactly as
             // copying is, so Ctrl+Z is left pointing at whatever move, rename or delete came
@@ -991,9 +1004,9 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
             await RefreshAfterCreateAsync(plan);
 
-            SetStatus(outcome.Failed is { } failed
+            SetStatus((outcome.Failed is { } failed
                 ? failed.Message
-                : $"Created '{plan.Name}'");
+                : $"Created '{plan.Name}'") + elevated);
             return outcome;
         }
         finally
@@ -1181,8 +1194,9 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
                     ? $"Deleting {p.Done + 1:N0} of {p.Total:N0} — {p.CurrentName}"
                     : ActiveTab.StatusText));
 
-            var outcome = await Task.Run(
-                () => _deleteExecutor.Execute(plan, CancellationToken.None, progress));
+            var (outcome, elevated) = await ElevateIfRefusedAsync(
+                plan,
+                await Task.Run(() => _deleteExecutor.Execute(plan, CancellationToken.None, progress)));
 
             RetireUndoable();
             if (outcome.CanUndo)
@@ -1201,7 +1215,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             if (outcome.Failed.Count > 0)
                 status += $"; {outcome.Failed.Count:N0} failed — {outcome.Failed[0].Message}";
             else if (outcome.CanUndo) status += " — Ctrl+Z to undo";
-            SetStatus(status);
+            SetStatus(status + elevated);
             return outcome;
         }
         finally
@@ -1219,7 +1233,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         try
         {
             SetStatus("Undoing…");
-            var result = await Task.Run(() => _deleteExecutor.Undo(outcome));
+            var (result, elevated) = await ElevateIfRefusedAsync(
+                outcome, await Task.Run(() => _deleteExecutor.Undo(outcome)));
 
             // Spent either way: a partial undo must not be replayed. Whatever could not be put back
             // is still held, and goes when the next operation retires this record.
@@ -1233,9 +1248,9 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             await Tree.RefreshDirectoriesAsync(directories);
             await RefreshTabsShowingAsync(directories);
 
-            SetStatus(result.Failed.Count == 0
+            SetStatus((result.Failed.Count == 0
                 ? $"Undone — {result.Restored:N0} item(s) put back"
-                : $"Put back {result.Restored:N0} item(s); {result.Failed.Count:N0} could not be — {result.Failed[0].Message}");
+                : $"Put back {result.Restored:N0} item(s); {result.Failed.Count:N0} could not be — {result.Failed[0].Message}") + elevated);
         }
         finally
         {
@@ -1400,8 +1415,11 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             // model directly from the executor's background thread.
             var progress = new Progress<TransferProgress>(surface.Apply);
 
-            var outcome = await Task.Run(
-                () => _transferExecutor.Execute(plan, resolutions, cancellation.Token, progress));
+            var (outcome, elevated) = await ElevateIfRefusedAsync(
+                plan,
+                await Task.Run(
+                    () => _transferExecutor.Execute(plan, resolutions, cancellation.Token, progress)),
+                resolutions);
 
             RetireUndoable();
             if (outcome.CanUndo)
@@ -1411,7 +1429,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             }
 
             await RefreshAfterTransferAsync(plan, outcome);
-            SetStatus(DescribeOutcome(plan, outcome));
+            SetStatus(DescribeOutcome(plan, outcome) + elevated);
             return outcome;
         }
         finally
@@ -1422,6 +1440,166 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             UndoCommand.NotifyCanExecuteChanged();
         }
     }
+
+    // --- Trying again with an administrator token ---
+
+    /// <summary>
+    /// Offers a second, elevated pass over whatever Windows refused, and folds the result back into
+    /// one outcome.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Called from inside each of the four operations, after the ordinary pass and <b>before</b>
+    /// <see cref="RetireUndoable"/>. That position is forced rather than chosen: retiring claims the
+    /// one-level undo slot and erases the previous operation's staged data, so a retry raised after
+    /// it would need a second undo record and claiming that would commit a staging folder the user
+    /// might still have wanted back.
+    /// </para>
+    /// <para>
+    /// Written out four times rather than made generic over three delegates. The types differ, and
+    /// four honest copies that contain no rules — every rule is in <see cref="ElevatedRetry"/> —
+    /// read better than one clever one.
+    /// </para>
+    /// </remarks>
+    private readonly record struct Elevated<T>(T Outcome, string Note);
+
+    private async Task<Elevated<TransferOutcome>> ElevateIfRefusedAsync(
+        TransferPlan plan,
+        TransferOutcome outcome,
+        IReadOnlyDictionary<string, ConflictResolution>? resolutions)
+    {
+        if (ElevatedRetry.RetryFor(plan, outcome, resolutions) is not { } retry)
+            return new Elevated<TransferOutcome>(outcome, "");
+
+        var verb = plan.Verb == TransferVerb.Move ? ElevationOperation.TransferMove : ElevationOperation.TransferCopy;
+        if (!Asked(verb, outcome.Failed.Where(f => f.AccessDenied).Select(f => f.SourcePath), out var note))
+            return new Elevated<TransferOutcome>(outcome, note);
+
+        // Its own progress surface, built from the retry plan: reusing the first pass's would leave
+        // its item counts and byte total describing an operation that has already finished.
+        var estimate = TransferEstimator.Estimate(
+            retry.Plan, IndexedTransferSizeSource.For(retry.Plan, _dirSizes));
+        var surface = new TransferProgressViewModel(retry.Plan, estimate, () => { })
+        {
+            Headline = $"Retrying {retry.Plan.Transfers.Count:N0} item(s) as administrator…",
+        };
+        TransferProgress = surface;
+
+        var run = await _elevation.RunAsync(retry, new Progress<TransferProgress>(surface.Apply));
+        TransferProgress = null;
+
+        return run.Result is { } second
+            ? new Elevated<TransferOutcome>(ElevatedRetry.Merge(outcome, retry, second), "")
+            : new Elevated<TransferOutcome>(outcome, Describe(run.Detail));
+    }
+
+    private async Task<Elevated<DeleteOutcome>> ElevateIfRefusedAsync(DeletePlan plan, DeleteOutcome outcome)
+    {
+        if (ElevatedRetry.RetryFor(plan, outcome) is not { } retry)
+            return new Elevated<DeleteOutcome>(outcome, "");
+
+        if (!Asked(ElevationOperation.Delete, outcome.Failed.Where(f => f.AccessDenied).Select(f => f.SourcePath), out var note))
+            return new Elevated<DeleteOutcome>(outcome, note);
+
+        var run = await _elevation.RunAsync(retry);
+        return run.Result is { } second
+            ? new Elevated<DeleteOutcome>(ElevatedRetry.Merge(outcome, retry, second), "")
+            : new Elevated<DeleteOutcome>(outcome, Describe(run.Detail));
+    }
+
+    private async Task<Elevated<RenameOutcome>> ElevateIfRefusedAsync(RenamePlan plan, RenameOutcome outcome)
+    {
+        if (ElevatedRetry.RetryFor(plan, outcome) is not { } retry)
+            return new Elevated<RenameOutcome>(outcome, "");
+
+        if (!Asked(ElevationOperation.Rename, outcome.Failed.Where(f => f.AccessDenied).Select(f => f.SourcePath), out var note))
+            return new Elevated<RenameOutcome>(outcome, note);
+
+        var run = await _elevation.RunAsync(retry);
+        return run.Result is { } second
+            ? new Elevated<RenameOutcome>(ElevatedRetry.Merge(outcome, retry, second), "")
+            : new Elevated<RenameOutcome>(outcome, Describe(run.Detail));
+    }
+
+    private async Task<Elevated<NewItemOutcome>> ElevateIfRefusedAsync(NewItemPlan plan, NewItemOutcome outcome)
+    {
+        if (ElevatedRetry.RetryFor(plan, outcome) is not { } retry)
+            return new Elevated<NewItemOutcome>(outcome, "");
+
+        if (!Asked(ElevationOperation.NewItem, [plan.TargetPath], out var note))
+            return new Elevated<NewItemOutcome>(outcome, note);
+
+        var run = await _elevation.RunAsync(retry);
+        return run.Result is { } second
+            ? new Elevated<NewItemOutcome>(ElevatedRetry.Merge(outcome, retry, second), "")
+            : new Elevated<NewItemOutcome>(outcome, Describe(run.Detail));
+    }
+
+    /// <summary>
+    /// Whether to go ahead: this account can elevate, and the user said yes.
+    /// </summary>
+    /// <remarks>
+    /// <b>The account is checked before the dialog, never after.</b> A standard user shown a shield
+    /// gets a credential prompt for somebody else's password — firing that at somebody who never
+    /// asked for it is a good deal worse than quietly saying it cannot be done.
+    /// </remarks>
+    private bool Asked(
+        ElevationOperation operation, IEnumerable<string> items, out string note, bool isUndo = false)
+    {
+        if (!_elevation.CanElevate)
+        {
+            note = " — and this account cannot provide administrator permission";
+            return false;
+        }
+
+        note = "";
+        return _elevationPrompt.Offer(new ElevationOffer(operation, [.. items], isUndo));
+    }
+
+
+    /// <summary>
+    /// The same offer, for putting things back. Undoing a move that needed a token costs a second
+    /// prompt, which is honest: restoring a file needs the rights taking it did.
+    /// </summary>
+    /// <remarks>
+    /// It is not optional polish either. <c>ShellRecycleBin.Restore</c> invokes the shell's
+    /// <c>undelete</c> verb, which puts an item back at its <em>original</em> path — the path that
+    /// was refused in the first place, which is why it was elevated. So the undo of an elevated
+    /// delete will usually need elevation too.
+    /// </remarks>
+    private async Task<Elevated<TransferUndoResult>> ElevateIfRefusedAsync(
+        TransferOutcome outcome, TransferUndoResult result)
+    {
+        if (ElevatedRetry.UndoRetryFor(outcome, result) is not { } retry)
+            return new Elevated<TransferUndoResult>(result, "");
+
+        if (!Asked(ElevationOperation.TransferUndo,
+                result.Failed.Where(f => f.AccessDenied).Select(f => f.SourcePath), out var note, isUndo: true))
+            return new Elevated<TransferUndoResult>(result, note);
+
+        var run = await _elevation.UndoAsync(retry.Outcome);
+        return run.Result is { } second
+            ? new Elevated<TransferUndoResult>(ElevatedRetry.Merge(result, retry, second), "")
+            : new Elevated<TransferUndoResult>(result, Describe(run.Detail));
+    }
+
+    /// <inheritdoc cref="ElevateIfRefusedAsync(TransferOutcome, TransferUndoResult)"/>
+    private async Task<Elevated<DeleteUndoResult>> ElevateIfRefusedAsync(
+        DeleteOutcome outcome, DeleteUndoResult result)
+    {
+        if (ElevatedRetry.UndoRetryFor(outcome, result) is not { } retry)
+            return new Elevated<DeleteUndoResult>(result, "");
+
+        if (!Asked(ElevationOperation.DeleteUndo,
+                result.Failed.Where(f => f.AccessDenied).Select(f => f.SourcePath), out var note, isUndo: true))
+            return new Elevated<DeleteUndoResult>(result, note);
+
+        var run = await _elevation.UndoAsync(retry.Outcome);
+        return run.Result is { } second
+            ? new Elevated<DeleteUndoResult>(ElevatedRetry.Merge(result, retry, second), "")
+            : new Elevated<DeleteUndoResult>(result, Describe(run.Detail));
+    }
+    private static string Describe(string detail) => detail.Length == 0 ? "" : $" — {detail}";
 
     // --- Extracting ---
 
@@ -1814,7 +1992,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         try
         {
             SetStatus("Undoing…");
-            var result = await Task.Run(() => _transferExecutor.Undo(outcome));
+            var (result, elevated) = await ElevateIfRefusedAsync(
+                outcome, await Task.Run(() => _transferExecutor.Undo(outcome)));
 
             // The record is spent either way: a partial undo must not be replayed.
             _undoableTransfer = null;
@@ -1828,9 +2007,9 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             await Tree.RefreshDirectoriesAsync(directories);
             await RefreshTabsShowingAsync(directories);
 
-            SetStatus(result.Failed.Count == 0
+            SetStatus((result.Failed.Count == 0
                 ? $"Undone — {result.Restored:N0} item(s) put back"
-                : $"Put back {result.Restored:N0} item(s); {result.Failed.Count:N0} could not be restored — {result.Failed[0].Message}");
+                : $"Put back {result.Restored:N0} item(s); {result.Failed.Count:N0} could not be restored — {result.Failed[0].Message}") + elevated);
         }
         finally
         {

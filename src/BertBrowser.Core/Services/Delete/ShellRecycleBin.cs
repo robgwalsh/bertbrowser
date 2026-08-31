@@ -1,9 +1,9 @@
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Threading;
-using BertBrowser.Core.Services.Delete;
 
-namespace BertBrowser.App.Interop;
+namespace BertBrowser.Core.Services.Delete;
 
 /// <summary>
 /// The Windows Recycle Bin, over <c>IFileOperation</c>.
@@ -35,9 +35,14 @@ namespace BertBrowser.App.Interop;
 /// </para>
 /// <para>
 /// Everything runs on a dedicated STA thread with a deadline, like
-/// <see cref="PortableDevices"/>: <c>IFileOperation</c> is apartment-threaded and may put up UI.
+/// the app's portable-device enumeration does: <c>IFileOperation</c> is apartment-threaded and may
+/// put up UI.
 /// </para>
 /// </remarks>
+// COM against the shell, on a plain net10.0 project: the platform-compatibility analyzer wants the
+// promise spelled out, since nothing in the target framework says Windows the way the App's does.
+// The whole app is Windows-only; this attribute is bookkeeping, not a new constraint.
+[SupportedOSPlatform("windows")]
 public sealed class ShellRecycleBin : IRecycleBin, IRecycleProbe
 {
     /// <summary>Long enough for a big batch of renames — recycling does not copy — and short enough
@@ -348,6 +353,11 @@ public sealed class ShellRecycleBin : IRecycleBin, IRecycleProbe
         IReadOnlyList<PlannedDelete> items, IProgress<DeleteProgress>? progress)
         : IFileOperationProgressSink
     {
+        /// <summary>The copy engine's own access-denied codes. It has its own facility and does not
+        /// reuse the Win32 one; see <see cref="IsAccessDenied"/>.</summary>
+        private const int CopyEngineAccessDeniedSource = unchecked((int)0x80270021);
+        private const int CopyEngineAccessDeniedDestination = unchecked((int)0x80270022);
+
         private readonly Dictionary<string, PlannedDelete> _bySource =
             items.ToDictionary(i => i.SourcePath, StringComparer.OrdinalIgnoreCase);
 
@@ -400,8 +410,17 @@ public sealed class ShellRecycleBin : IRecycleBin, IRecycleProbe
 
             if (hrDelete < 0)
             {
+                // The shell hands back a per-item HRESULT, so unlike every other failure in this
+                // codebase the permission case arrives already distinguished — no exception to
+                // classify, just a comparison. Which codes count is the part to get right; see
+                // IsAccessDenied.
+                var denied = IsAccessDenied(hrDelete);
+                var reason = denied
+                    ? "access is denied."
+                    : Marshal.GetExceptionForHR(hrDelete)?.Message ?? "could not be deleted.";
+
                 _failed.Add(new FailedDelete(
-                    planned.SourcePath, $"{planned.Name}: {Marshal.GetExceptionForHR(hrDelete)?.Message ?? "could not be deleted."}"));
+                    planned.SourcePath, $"{planned.Name}: {reason}", AccessDenied: denied));
                 return 0;
             }
 
@@ -414,6 +433,23 @@ public sealed class ShellRecycleBin : IRecycleBin, IRecycleProbe
 
         // --- Everything below is vtable padding: unused, but every slot must be present and in
         //     order, or the calls above land on the wrong one. ---
+
+        /// <summary>
+        /// Whether the shell refused an item for permissions.
+        /// </summary>
+        /// <remarks>
+        /// <b>Measured, not assumed, and the plain Win32 code is not enough.</b> Deleting a file
+        /// carrying a Deny ACE comes back as <c>COPYENGINE_E_ACCESS_DENIED_SRC</c>
+        /// (<c>0x80270021</c>), not <c>0x80070005</c> — the copy engine has its own facility and
+        /// uses it. Checking only the Win32 HRESULT meant a genuinely protected file was reported
+        /// as an ordinary failure and never offered an administrator retry, which is precisely the
+        /// case the whole feature exists for. <c>tools/ui/elevation.bbs</c> is what caught it, and
+        /// is what would catch it again.
+        /// </remarks>
+        private static bool IsAccessDenied(int hr) =>
+            hr == Services.AccessDenied.HResult ||
+            hr == CopyEngineAccessDeniedSource ||
+            hr == CopyEngineAccessDeniedDestination;
 
         public int StartOperations() => 0;
 
