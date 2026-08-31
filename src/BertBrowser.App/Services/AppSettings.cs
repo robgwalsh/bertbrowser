@@ -43,6 +43,23 @@ public sealed class AppSettings
     /// moving on its own rather than as the app remembering anything.</summary>
     public double PreviewPaneWidth { get; set; } = 360;
 
+    /// <summary>The file list's columns, in order, with their widths. Null means the user has never
+    /// configured them, which is what ships <c>ColumnCatalog.Defaults()</c>; an empty list means they
+    /// stripped it back on purpose and is honoured as such. Same distinction as
+    /// <see cref="NewFileTypes"/> and <see cref="ThemeId"/>.
+    /// <para>
+    /// Like <see cref="ShowPreviewPane"/>, this is what a <em>new</em> tab starts from — the column
+    /// set itself is per tab, because arranging columns is something you do for the folder in front
+    /// of you.
+    /// </para></summary>
+    public List<BertBrowser.Core.Services.Columns.ColumnSetting>? FileListColumns { get; set; }
+
+    /// <summary>The columns a new tab should show: what is configured, or the shipped defaults when
+    /// nothing ever has been, cleaned up either way. One place, so the file list, the settings page
+    /// and the harness cannot disagree — the reason <see cref="ResolvedNewFileTypes"/> exists.</summary>
+    public IReadOnlyList<BertBrowser.Core.Services.Columns.ColumnSetting> ResolvedFileListColumns =>
+        BertBrowser.Core.Services.Columns.ColumnLayoutRules.Normalize(FileListColumns);
+
     /// <summary>How much of a text file the preview reads. The rest is not shown and the pane says
     /// so — a preview that silently stops looks like the whole file.</summary>
     public int PreviewTextMaxBytes { get; set; } = 1024 * 1024;

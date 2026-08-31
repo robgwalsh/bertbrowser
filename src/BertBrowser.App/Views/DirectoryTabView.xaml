@@ -290,74 +290,16 @@
                         </MenuItem>
                     </ContextMenu>
                 </ListView.ContextMenu>
+                <!--
+                  The columns are built in code, not declared here: which ones there are is the
+                  user's, and GridView.Columns has no ItemsSource to bind a list through. See
+                  DirectoryTabView.ReconcileColumns and Core/Services/Columns/ColumnLayoutRules.
+                  The GridView itself still has to be an instance per view — element instances cannot
+                  be shared between ListViews, which is why this file has its own rather than
+                  pointing at a resource.
+                -->
                 <ListView.View>
-                    <GridView x:Name="DetailsView">
-                        <GridViewColumn Width="320" x:Name="NameColumn">
-                            <GridViewColumnHeader Content="Name" Tag="Name"/>
-                            <GridViewColumn.CellTemplate>
-                                <DataTemplate>
-                                    <StackPanel Orientation="Horizontal">
-                                        <Image Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,6,0"
-                                               Opacity="{Binding IconOpacity}"/>
-                                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </DataTemplate>
-                            </GridViewColumn.CellTemplate>
-                        </GridViewColumn>
-                        <GridViewColumn Width="220" x:Name="RelPathColumn">
-                            <GridViewColumnHeader Content="Folder" Tag="RelativePath"/>
-                            <GridViewColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding RelativePath}" Opacity="0.7"/>
-                                </DataTemplate>
-                            </GridViewColumn.CellTemplate>
-                        </GridViewColumn>
-                        <!-- The matching line from a content: search. Deliberately carries no Tag:
-                             DirectoryTabView.xaml.cs parses the Tag into a SortColumn, and sorting
-                             a result set by line number across different files means nothing. -->
-                        <GridViewColumn Width="0" x:Name="MatchColumn">
-                            <GridViewColumnHeader Content="Match"/>
-                            <GridViewColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock TextTrimming="CharacterEllipsis">
-                                        <Run Text="{Binding MatchLineNumber, Mode=OneWay}"
-                                             Foreground="{StaticResource Theme.Text.Secondary}"/>
-                                        <Run Text=" "/><Run Text="{Binding MatchPrefix, Mode=OneWay}"/><Run
-                                             Text="{Binding MatchText, Mode=OneWay}"
-                                             Background="{StaticResource Theme.Input.SelectionBackground}"
-                                             Foreground="{StaticResource Theme.Input.SelectionForeground}"
-                                             FontWeight="SemiBold"/><Run
-                                             Text="{Binding MatchSuffix, Mode=OneWay}"/>
-                                    </TextBlock>
-                                </DataTemplate>
-                            </GridViewColumn.CellTemplate>
-                        </GridViewColumn>
-                        <GridViewColumn Width="110">
-                            <GridViewColumnHeader Content="Size" Tag="Size"/>
-                            <GridViewColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding SizeDisplay}" HorizontalAlignment="Right"
-                                               ToolTip="{Binding SizeTooltip}"/>
-                                </DataTemplate>
-                            </GridViewColumn.CellTemplate>
-                        </GridViewColumn>
-                        <GridViewColumn Width="120">
-                            <GridViewColumnHeader Content="Type" Tag="Type"/>
-                            <GridViewColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding TypeName}"/>
-                                </DataTemplate>
-                            </GridViewColumn.CellTemplate>
-                        </GridViewColumn>
-                        <GridViewColumn Width="140">
-                            <GridViewColumnHeader Content="Modified" Tag="Modified"/>
-                            <GridViewColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding ModifiedDisplay}"/>
-                                </DataTemplate>
-                            </GridViewColumn.CellTemplate>
-                        </GridViewColumn>
-                    </GridView>
+                    <GridView x:Name="DetailsView"/>
                 </ListView.View>
             </ListView>
 

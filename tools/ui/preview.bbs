@@ -11,7 +11,12 @@ go Preview
 assert-count 8
 
 # --- off by default, and toggling is per tab ---
+#
+# The caption strip's toggle is the discoverable way in — Ctrl+P and the Settings checkbox are
+# the other two, and the checkbox only says what a *new* tab starts from. It is asserted here
+# rather than photographed: whether it is lit is a title-bar detail the window shots below carry.
 
+assert-visible PreviewPaneToggle
 assert-hidden PreviewPane
 preview on
 assert-visible PreviewPane

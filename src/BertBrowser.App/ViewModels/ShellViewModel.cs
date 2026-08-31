@@ -10,6 +10,7 @@ using BertBrowser.Core.Layout;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Archives;
+using BertBrowser.Core.Services.Columns;
 using BertBrowser.Core.Services.Elevation;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.Mft;
@@ -342,11 +343,14 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             for (var i = 0; i < tabs.Count; i++)
             {
                 var created = pane.AddTab("", activate: false);
-                if (Enum.TryParse<SortColumn>(tabs[i].SortBy, out var column))
+                if (tabs[i].SortBy is { Length: > 0 } sortBy)
                 {
-                    created.FileList.SortBy = column;
+                    // Normalised rather than trusted: the file is hand-editable and may have been
+                    // written by a newer build that knows columns this one does not.
+                    created.FileList.SortBy = ColumnCatalog.SortSpec(sortBy).Id;
                     created.FileList.SortDescending = tabs[i].SortDescending;
                 }
+                created.FileList.RestoreColumns(tabs[i].Columns);
                 pending.Add(new PendingNavigation(created, tabs[i].Path, i == visibleIndex));
             }
 
@@ -403,8 +407,13 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             Tabs = tabs.Select(t => new SessionTab
             {
                 Path = t.CurrentPath,
-                SortBy = t.FileList.SortBy.ToString(),
+                SortBy = t.FileList.SortBy,
                 SortDescending = t.FileList.SortDescending,
+                // Null unless this tab's columns were actually arranged, so an untouched tab keeps
+                // following the saved default rather than freezing today's copy of it.
+                Columns = t.FileList.ColumnsCustomized
+                    ? t.FileList.ColumnLayout?.Select(c => c.Copy()).ToList()
+                    : null,
             }).ToList(),
             ActiveTabIndex = pane.ActiveTab is { } visible ? Math.Max(0, tabs.IndexOf(visible)) : 0,
             IsActivePane = ReferenceEquals(pane, ActivePane),
@@ -634,6 +643,21 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     {
         foreach (var tab in AllTabs.ToList())
             tab.FileList.RefreshTileAspect();
+    }
+
+    /// <summary>
+    /// Pushes a newly saved default column set into every tab that has not arranged its own.
+    /// </summary>
+    /// <remarks>
+    /// Shaped like <see cref="RefreshTileAspect"/> — a re-layout, not a reload, since the rows are
+    /// unchanged and only the cells around them differ. Without it the Settings page would be a
+    /// control that visibly does nothing until you open a new tab; with it, a tab someone has
+    /// arranged by hand is still left alone, which is what <c>ColumnsCustomized</c> is for.
+    /// </remarks>
+    public void ApplyColumnDefaults()
+    {
+        foreach (var tab in AllTabs.ToList())
+            tab.FileList.ApplyDefaultColumns(_settings.FileListColumns);
     }
 
     /// <summary>Reloads every tab currently showing one of <paramref name="directories"/> — the

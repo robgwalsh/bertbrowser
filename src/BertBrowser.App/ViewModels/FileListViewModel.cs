@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Windows.Threading;
 using BertBrowser.App.Interop;
 using BertBrowser.App.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -6,17 +7,9 @@ using BertBrowser.Core.Data;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.Columns;
 
 namespace BertBrowser.App.ViewModels;
-
-public enum SortColumn
-{
-    Name,
-    Size,
-    Type,
-    Modified,
-    RelativePath,
-}
 
 public sealed partial class FileListViewModel : ObservableObject
 {
@@ -34,6 +27,116 @@ public sealed partial class FileListViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isFlattened;
+
+    // --- Columns ---
+
+    private IReadOnlyList<ColumnSetting>? _columnLayout;
+
+    /// <summary>
+    /// The columns this list shows, in order. Null means the tab has never been given one and takes
+    /// whatever <see cref="ColumnLayoutRules.Resolve"/> makes of that.
+    /// </summary>
+    /// <remarks>
+    /// Per list rather than global, the way <c>ShowPreviewPane</c> is per tab: a column set is
+    /// something you arrange for the folder you are looking at.
+    /// </remarks>
+    public IReadOnlyList<ColumnSetting>? ColumnLayout
+    {
+        get => _columnLayout;
+        set
+        {
+            _columnLayout = value;
+            AttachHydrator();
+            // Anything assigning this is a person arranging columns: the header menu, a header drag,
+            // a gripper. ApplyDefaultColumns is the one path that is not, and it says so.
+            ColumnsCustomized = true;
+            ColumnsChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>
+    /// Whether this list's columns were arranged here rather than inherited from the saved default.
+    /// </summary>
+    /// <remarks>
+    /// What stops a new default, saved in Settings, from wiping out an arrangement someone made in a
+    /// tab that is still open — and equally, what lets that new default reach every tab that has not
+    /// been touched, so the settings page is not a control that appears to do nothing.
+    /// </remarks>
+    public bool ColumnsCustomized { get; private set; }
+
+    /// <summary>Takes a new saved default without claiming the tab was customised.</summary>
+    public void ApplyDefaultColumns(IReadOnlyList<ColumnSetting>? layout)
+    {
+        if (ColumnsCustomized) return;
+        _columnLayout = layout;
+        AttachHydrator();
+        ColumnsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Restores a layout saved with the session, which was customised when it was saved and
+    /// must stay that way — otherwise the next settings change would silently discard it.</summary>
+    public void RestoreColumns(IReadOnlyList<ColumnSetting>? layout)
+    {
+        if (layout is null) return;
+        ColumnLayout = layout;
+    }
+
+    /// <summary>
+    /// The columns to build, with Folder and Match put in or left out according to what this list is
+    /// currently showing.
+    /// </summary>
+    public IReadOnlyList<ResolvedColumn> ResolvedColumns =>
+        ColumnLayoutRules.Resolve(ColumnLayout, IsFlattened, ShowsContentMatches);
+
+    /// <summary>Fills the shell-metadata cells. Created lazily, so a list that never shows such a
+    /// column never builds one.</summary>
+    private ShellMetadataHydrator? _hydrator;
+
+    /// <summary>What the view has actually realized. Supplied by <c>DirectoryTabView</c>, which is
+    /// the only thing that can know; without it a fast scroll would queue a file open for every row
+    /// that flew past.</summary>
+    public Func<IReadOnlyCollection<FileItemViewModel>>? RealizedRows { get; set; }
+
+    internal ShellMetadataHydrator Hydrator
+    {
+        get
+        {
+            if (_hydrator is not null) return _hydrator;
+            _hydrator = new ShellMetadataHydrator(Dispatcher.CurrentDispatcher)
+            {
+                RealizedRows = RealizedRows,
+            };
+            _hydrator.Idle += (_, _) => OnPropertyChanged(nameof(IsHydratingMetadata));
+            return _hydrator;
+        }
+    }
+
+    /// <summary>Whether metadata is still arriving. <c>UiSession.Settle</c> waits on this, so a
+    /// scripted capture cannot photograph half-filled columns and no script needs a sleep.</summary>
+    public bool IsHydratingMetadata => _hydrator?.IsBusy == true;
+
+    /// <summary>Points the hydrator at the columns now in force and hands every row a way to reach
+    /// it. Called whenever the column set or the item collection changes.</summary>
+    private void AttachHydrator()
+    {
+        var keys = ResolvedColumns
+            .Where(c => c.Spec.Kind == ColumnKind.ShellProperty)
+            .Select(c => c.Id)
+            .ToList();
+
+        if (keys.Count == 0 && _hydrator is null) return;
+
+        Hydrator.SetColumns(keys);
+        foreach (var item in Items)
+            item.Hydrator = _hydrator;
+        OnPropertyChanged(nameof(IsHydratingMetadata));
+    }
+
+    /// <summary>
+    /// Raised when <see cref="ResolvedColumns"/> would come back different. The view rebuilds from
+    /// it; there is no bindable path, because <c>GridView.Columns</c> has no <c>ItemsSource</c>.
+    /// </summary>
+    public event EventHandler? ColumnsChanged;
 
     /// <summary>
     /// This listing is the inside of an archive rather than a folder on disk.
@@ -71,8 +174,19 @@ public sealed partial class FileListViewModel : ObservableObject
     [ObservableProperty]
     private string? _emptyMessage;
 
+    /// <summary>
+    /// The id of the column the list is sorted by — a <see cref="ColumnCatalog"/> id, so a shell
+    /// property can be sorted by as readily as a built-in.
+    /// </summary>
+    /// <remarks>
+    /// A string rather than an enum, and the built-in ids are exactly the members the enum used to
+    /// have: <c>SessionTab.SortBy</c> has always persisted this as a string with a documented
+    /// fallback, so every settings file written by every previous build keeps working untouched.
+    /// Always assigned through <see cref="SetSort"/>, which normalises through the catalogue — an
+    /// unusable id must degrade to Name rather than reach <see cref="CurrentComparer"/>.
+    /// </remarks>
     [ObservableProperty]
-    private SortColumn _sortBy = SortColumn.Name;
+    private string _sortBy = ColumnCatalog.Name;
 
     [ObservableProperty]
     private bool _sortDescending;
@@ -148,6 +262,9 @@ public sealed partial class FileListViewModel : ObservableObject
         _settings = settings;
         _archives = archives;
         _tileAspect = AspectRatio.Parse(settings.TileAspectRatio);
+        // The field, not the property: seeding is not customising, and going through the setter
+        // would make every new tab claim an arrangement nobody made.
+        _columnLayout = settings.FileListColumns;
     }
 
     /// <summary>Normal browsing: direct children of <paramref name="path"/>.</summary>
@@ -155,6 +272,10 @@ public sealed partial class FileListViewModel : ObservableObject
     {
         IsLoading = true;
         IsFlattened = false;
+        // Cleared here and not only set by a search: this was the one assignment site, so clearing
+        // a content: search left the flag true and its Match column on screen over an ordinary
+        // directory listing, with nothing in it and nothing that would ever take it away again.
+        ShowsContentMatches = false;
         ErrorMessage = null;
         EmptyMessage = null;
         IsArchiveLocked = false;
@@ -418,9 +539,16 @@ public sealed partial class FileListViewModel : ObservableObject
             hit.RelativeDirDisplay,
             hit.Match);
 
-    public void SetSort(SortColumn column)
+    /// <summary>Sorts by a column, or reverses the direction if it is already the one in force.</summary>
+    /// <remarks>
+    /// Normalised through the catalogue on the way in, so an id from a hand-edited settings file, a
+    /// newer build, or an unsortable column (Match) becomes Name here rather than reaching the
+    /// comparer.
+    /// </remarks>
+    public void SetSort(string columnId)
     {
-        if (SortBy == column)
+        var column = ColumnCatalog.SortSpec(columnId).Id;
+        if (string.Equals(SortBy, column, StringComparison.OrdinalIgnoreCase))
         {
             SortDescending = !SortDescending;
         }
@@ -466,24 +594,91 @@ public sealed partial class FileListViewModel : ObservableObject
         }
     }
 
-    private void ReplaceItems(IReadOnlyList<FileItemViewModel> items) =>
+    private void ReplaceItems(IReadOnlyList<FileItemViewModel> items)
+    {
         Items = new ObservableCollection<FileItemViewModel>(items);
+        // Every row needs the way back to the hydrator, and a new listing abandons whatever the
+        // last one had in flight — those reads are for rows that are gone.
+        _hydrator?.Reset();
+        AttachHydrator();
+    }
 
-    private void SortInPlace(List<FileItemViewModel> items) => items.Sort(CurrentComparer());
+    /// <summary>
+    /// Orders a list in place.
+    /// </summary>
+    /// <remarks>
+    /// <b>The metadata values are snapshotted first, and that is not tidiness.</b>
+    /// <see cref="List{T}.Sort(Comparison{T})"/> throws
+    /// <c>InvalidOperationException: IComparer.Compare() method returns inconsistent results</c> if
+    /// the comparer ever changes its mind mid-sort — and a comparer reading a cache that background
+    /// hydration is still filling will eventually do exactly that. Reading everything once, up
+    /// front, makes the comparison a pure function of a fixed table. The failure it prevents is a
+    /// crash that only appears under load, on a big folder, in someone else's session.
+    /// </remarks>
+    private void SortInPlace(List<FileItemViewModel> items)
+    {
+        var snapshot = SnapshotSortValues(items);
+        items.Sort(CurrentComparer(snapshot));
+    }
+
+    /// <summary>The metadata values as they stand right now, or null when the sort is by a column
+    /// the rows answer themselves.</summary>
+    private Dictionary<FileItemViewModel, ColumnValue?>? SnapshotSortValues(
+        IReadOnlyList<FileItemViewModel> items)
+    {
+        if (ColumnCatalog.SortSpec(SortBy) is not { Kind: ColumnKind.ShellProperty } spec) return null;
+
+        var snapshot = new Dictionary<FileItemViewModel, ColumnValue?>(items.Count);
+        foreach (var item in items)
+            snapshot[item] = item.ColumnValueFor(spec.Id);
+        return snapshot;
+    }
 
     /// <summary>
     /// The order the list is showing. Shared with the live-refresh merge, which has to place an
     /// arriving row — a second implementation there would drift from this one and put new files in
     /// the wrong place under any sort but the default.
     /// </summary>
-    private Comparison<FileItemViewModel> CurrentComparer()
+    private Comparison<FileItemViewModel> CurrentComparer(
+        Dictionary<FileItemViewModel, ColumnValue?>? metadata = null)
     {
-        Comparison<FileItemViewModel> cmp = SortBy switch
+        var spec = ColumnCatalog.SortSpec(SortBy);
+
+        // A metadata column sorts on what has been read and nothing else — the snapshot, never a
+        // live lookup. Rows whose value has not arrived have no rank, and the band below keeps them
+        // at the bottom in *both* directions: a blank is the absence of a value, not a small one.
+        if (spec.Kind == ColumnKind.ShellProperty)
         {
-            SortColumn.Size => (a, b) => a.SizeSortKey.CompareTo(b.SizeSortKey),
-            SortColumn.Type => (a, b) => string.Compare(a.TypeName, b.TypeName, StringComparison.OrdinalIgnoreCase),
-            SortColumn.Modified => (a, b) => a.ModifiedUtc.CompareTo(b.ModifiedUtc),
-            SortColumn.RelativePath => (a, b) => NaturalStringComparer.Instance.Compare(a.RelativePath, b.RelativePath),
+            var values = metadata ?? [];
+            return (a, b) =>
+            {
+                var band = LayoutBand(a) - LayoutBand(b);
+                if (band != 0) return band;
+
+                values.TryGetValue(a, out var left);
+                values.TryGetValue(b, out var right);
+
+                var known = ColumnComparison.KnownBand(left) - ColumnComparison.KnownBand(right);
+                if (known != 0) return known;
+
+                var ordered = ColumnComparison.Compare(left, right, NaturalStringComparer.Instance);
+                if (ordered == 0) ordered = NaturalStringComparer.Instance.Compare(a.Name, b.Name);
+                return SortDescending ? -ordered : ordered;
+            };
+        }
+
+        Comparison<FileItemViewModel> cmp = spec.Id switch
+        {
+            ColumnCatalog.Size => (a, b) => a.SizeSortKey.CompareTo(b.SizeSortKey),
+            ColumnCatalog.Type => (a, b) => string.Compare(a.TypeName, b.TypeName, StringComparison.OrdinalIgnoreCase),
+            ColumnCatalog.Modified => (a, b) => a.ModifiedUtc.CompareTo(b.ModifiedUtc),
+            ColumnCatalog.Created => (a, b) => a.CreatedUtc.CompareTo(b.CreatedUtc),
+            ColumnCatalog.Accessed => (a, b) => a.AccessedUtc.CompareTo(b.AccessedUtc),
+            ColumnCatalog.Attributes => (a, b) =>
+                string.Compare(a.AttributesDisplay, b.AttributesDisplay, StringComparison.Ordinal),
+            ColumnCatalog.Extension => (a, b) =>
+                string.Compare(a.ExtensionDisplay, b.ExtensionDisplay, StringComparison.OrdinalIgnoreCase),
+            ColumnCatalog.RelativePath => (a, b) => NaturalStringComparer.Instance.Compare(a.RelativePath, b.RelativePath),
             _ => (a, b) => NaturalStringComparer.Instance.Compare(a.Name, b.Name),
         };
 

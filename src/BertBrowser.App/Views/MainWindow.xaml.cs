@@ -146,6 +146,9 @@ public partial class MainWindow : ThemedWindow
             // open, so they need no refresh.)
             _shell.ShowHiddenItems = _settings.ShowHiddenItems;
             _shell.RefreshTileAspect();
+            // Reaches every tab that has not arranged its own columns. Without this the Columns page
+            // would appear to do nothing until a new tab was opened.
+            _shell.ApplyColumnDefaults();
         }
     }
 

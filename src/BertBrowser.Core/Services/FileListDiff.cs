@@ -85,17 +85,39 @@ public static class FileListDiff
     /// the old spelling until something else forced a reload.
     /// </para>
     /// <para>
-    /// Only the <b>Hidden</b> attribute is weighed, not the whole set, because that is the only one
-    /// a row renders. Comparing them all would report a change every time Windows touched Archive
-    /// on a file nobody can see a difference in, and — worse — a row rebuilt from a listing can
-    /// only reconstruct the flags it shows, so a full comparison would call every row different on
-    /// every pass and rebuild the entire list each time.
+    /// This once weighed <b>only</b> the Hidden attribute, because that was the only one a row
+    /// rendered and because a row rebuilt from a listing could only reconstruct the flags it showed
+    /// — so a full comparison called every row different on every pass. Configurable columns make
+    /// the first half false, and the row carrying its whole <see cref="FileEntry.Attributes"/>
+    /// makes the second half false, so the set below can be compared honestly.
+    /// </para>
+    /// <para>
+    /// <b><see cref="FileEntry.AccessedUtc"/> is deliberately not compared</b>, though a column may
+    /// render it. Reading a file moves it, and this app reads files constantly — the preview pane,
+    /// content search, and the shell property reads behind a metadata column all do. Weighing it
+    /// would mark every row the user merely looked at as changed on the next pass, which is exactly
+    /// the churn the original rule was written to avoid, arriving through a door columns opened.
+    /// </para>
+    /// <para>
+    /// <see cref="MeaningfulAttributes"/> is the rest of that reasoning: the cloud-provider bits
+    /// move on files nobody touched, and <c>Normal</c> is only meaningful in isolation, so a lister
+    /// reporting it one pass and <c>Archive</c> the next would look like a change. <c>Archive</c>
+    /// itself stays in, because a write that sets it moves <see cref="FileEntry.ModifiedUtc"/> too
+    /// and it costs nothing, while an <c>attrib +a</c> on its own is a real change to a real column.
     /// </para>
     /// </remarks>
     private static bool Differs(FileEntry a, FileEntry b) =>
         !string.Equals(a.Name, b.Name, StringComparison.Ordinal) ||
         a.SizeBytes != b.SizeBytes ||
         a.ModifiedUtc != b.ModifiedUtc ||
+        a.CreatedUtc != b.CreatedUtc ||
         a.IsDirectory != b.IsDirectory ||
-        a.Attributes.HasFlag(FileAttributes.Hidden) != b.Attributes.HasFlag(FileAttributes.Hidden);
+        (a.Attributes & MeaningfulAttributes) != (b.Attributes & MeaningfulAttributes);
+
+    /// <summary>The attributes a row can render and that only change when something really
+    /// happened to the file.</summary>
+    private const FileAttributes MeaningfulAttributes =
+        FileAttributes.ReadOnly | FileAttributes.Hidden | FileAttributes.System |
+        FileAttributes.Directory | FileAttributes.Archive | FileAttributes.Compressed |
+        FileAttributes.Encrypted | FileAttributes.ReparsePoint;
 }

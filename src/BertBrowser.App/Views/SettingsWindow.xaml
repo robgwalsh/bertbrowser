@@ -339,6 +339,86 @@
                     </Grid>
                 </DockPanel>
 
+
+                <!-- The default columns a new tab starts from -->
+                <DockPanel>
+                    <DockPanel.Style>
+                        <Style TargetType="DockPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedCategory.Id}"
+                                             Value="{x:Static vm:SettingsCategory.Columns}">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DockPanel.Style>
+
+                    <TextBlock DockPanel.Dock="Top" Text="Columns" FontSize="18" Margin="0,0,0,4"/>
+                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,12"
+                               Foreground="{StaticResource Theme.Text.Secondary}"
+                               Text="What a new tab starts with. Columns are per tab, so you can also right-click any column header to change just the tab you are in. Tabs you have already arranged by hand are left alone."/>
+
+                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,10,0,0">
+                        <ComboBox x:Name="ColumnToAddBox" Width="220" Margin="0,0,6,0"
+                                  ItemsSource="{Binding AvailableColumns}"
+                                  SelectedItem="{Binding ColumnToAdd, Mode=TwoWay}">
+                            <!-- ItemTemplate, never DisplayMemberPath: a retemplated ComboBox renders
+                                 its closed state from SelectionBoxItemTemplate, which WPF derives
+                                 from ItemTemplate alone. -->
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Header}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <Button Content="Add" Padding="12,3" Margin="0,0,6,0"
+                                Command="{Binding AddColumnCommand}"/>
+                        <!-- Everything the box above does not list: the machine's whole property
+                             system, the same picker the column header's menu opens. -->
+                        <Button Content="More columns…" Padding="12,3" Margin="0,0,6,0"
+                                Click="MoreColumns_Click"/>
+                        <Button Content="Reset" Padding="12,3"
+                                Command="{Binding ResetColumnsCommand}"/>
+                    </StackPanel>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <ListBox Grid.Column="0"
+                                 AutomationProperties.AutomationId="ColumnDefaultsList"
+                                 ItemsSource="{Binding Columns}"
+                                 SelectedItem="{Binding SelectedColumn, Mode=TwoWay}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <DockPanel Margin="2">
+                                        <TextBox DockPanel.Dock="Right" Width="60" Margin="8,0,0,0"
+                                                 ToolTip="Width in pixels"
+                                                 Text="{Binding Width, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:0}}"/>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Header}"/>
+                                            <TextBlock Text="{Binding Detail}" FontSize="11"
+                                                       Foreground="{StaticResource Theme.Text.Secondary}"/>
+                                        </StackPanel>
+                                    </DockPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <StackPanel Grid.Column="2" VerticalAlignment="Top">
+                            <Button Content="Remove" Padding="12,3" Margin="0,0,0,6"
+                                    Command="{Binding RemoveColumnCommand}"/>
+                            <Button Content="↑" Padding="9,3" Margin="0,0,0,6" ToolTip="Move up"
+                                    Command="{Binding MoveColumnUpCommand}"/>
+                            <Button Content="↓" Padding="9,3" ToolTip="Move down"
+                                    Command="{Binding MoveColumnDownCommand}"/>
+                        </StackPanel>
+                    </Grid>
+                </DockPanel>
                 <!-- Custom context menu commands -->
                 <DockPanel>
                     <DockPanel.Style>

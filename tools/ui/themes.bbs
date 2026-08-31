@@ -19,6 +19,8 @@ dialog rename       02b-rename-dark
 dialog rename-advanced 02c-rename-advanced-dark
 dialog delete       03-delete-dark
 dialog settings     04-settings-dark
+dialog settings-columns 04b-columns-settings-dark
+dialog columns      04c-column-picker-dark
 dialog properties   05-properties-dark
 dialog theme-editor 06-theme-editor-dark
 progress-demo
@@ -51,6 +53,8 @@ dialog rename     08b-rename-light
 dialog rename-advanced 08c-rename-advanced-light
 dialog delete     09-delete-light
 dialog settings   10-settings-light
+dialog settings-columns 10b-columns-settings-light
+dialog columns      10c-column-picker-light
 dialog properties 11-properties-light
 dialog transfer   11b-transfer-light
 dialog duplicates 11c-duplicates-light

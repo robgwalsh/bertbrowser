@@ -124,4 +124,75 @@ public sealed class FileListDiffTests
 
         Assert.False(FileListDiff.Compute(before, after).Any);
     }
+
+    // --- What counts as a change, now that a row can render more than a name and a size ---
+
+    private static FileEntry Stamped(
+        DateTime created = default, DateTime accessed = default,
+        FileAttributes attributes = FileAttributes.Normal) =>
+        new("a.txt", @"C:\Dir\a.txt", false, 10,
+            new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), attributes, created, accessed);
+
+    /// <summary>
+    /// The trap this feature opened. Reading a file moves its access time, and this app reads files
+    /// constantly — the preview pane, content search, and the shell reads behind a metadata column.
+    /// Weighing it would mark every row the user merely looked at as changed on the next pass.
+    /// </summary>
+    [Fact]
+    public void AnAccessTimeChangeAloneIsNotAChange()
+    {
+        var before = new[] { Stamped(accessed: new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)) };
+        var after = new[] { Stamped(accessed: new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc)) };
+
+        Assert.False(FileListDiff.Compute(before, after).Any);
+    }
+
+    [Fact]
+    public void ACreationTimeChangeIsAChange()
+    {
+        var before = new[] { Stamped(created: new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)) };
+        var after = new[] { Stamped(created: new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc)) };
+
+        Assert.Single(FileListDiff.Compute(before, after).Updated);
+    }
+
+    [Theory]
+    [InlineData(FileAttributes.ReadOnly)]
+    [InlineData(FileAttributes.Hidden)]
+    [InlineData(FileAttributes.System)]
+    [InlineData(FileAttributes.Archive)]
+    public void AnAttributeARowCanRenderIsAChange(FileAttributes flag)
+    {
+        var before = new[] { Stamped(attributes: FileAttributes.Normal) };
+        var after = new[] { Stamped(attributes: flag) };
+
+        Assert.Single(FileListDiff.Compute(before, after).Updated);
+    }
+
+    /// <summary>A sync client flips these on files nobody touched, so they must not churn the
+    /// list.</summary>
+    [Theory]
+    [InlineData(FileAttributes.Offline)]
+    [InlineData(FileAttributes.NotContentIndexed)]
+    [InlineData(FileAttributes.Temporary)]
+    public void AnAttributeNoRowRendersIsNotAChange(FileAttributes flag)
+    {
+        var before = new[] { Stamped(attributes: FileAttributes.Archive) };
+        var after = new[] { Stamped(attributes: FileAttributes.Archive | flag) };
+
+        Assert.False(FileListDiff.Compute(before, after).Any);
+    }
+
+    /// <summary>
+    /// The meta-test: proof the comparison above can actually see an attribute change at all, so
+    /// the "not a change" theories are not passing because nothing is compared.
+    /// </summary>
+    [Fact]
+    public void TheAttributeComparisonCanTellTheDifference()
+    {
+        var before = new[] { Stamped(attributes: FileAttributes.Archive) };
+        var after = new[] { Stamped(attributes: FileAttributes.Archive | FileAttributes.ReadOnly) };
+
+        Assert.True(FileListDiff.Compute(before, after).Any);
+    }
 }

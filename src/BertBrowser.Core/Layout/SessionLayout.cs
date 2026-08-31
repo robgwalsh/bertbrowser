@@ -53,6 +53,14 @@ public sealed class SessionTab
     public string? SortBy { get; set; }
 
     public bool SortDescending { get; set; }
+
+    /// <summary>The columns this tab was showing, when they were arranged here rather than taken
+    /// from the saved default. <b>Null means "whatever the default is"</b> and is what an untouched
+    /// tab saves — so changing the default still reaches it on the next launch.
+    /// <see cref="Services.Columns.ColumnLayoutRules.Normalize"/> cleans it up on the way back in,
+    /// so an unusable entry degrades rather than failing the layout, exactly as
+    /// <see cref="SortBy"/> does.</summary>
+    public List<Services.Columns.ColumnSetting>? Columns { get; set; }
 }
 
 /// <summary>

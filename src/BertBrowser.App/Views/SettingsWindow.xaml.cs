@@ -46,6 +46,21 @@ public partial class SettingsWindow : ThemedWindow
         editor.Show();
     }
 
+    /// <summary>
+    /// The whole property system, for the columns the curated list does not name.
+    /// </summary>
+    /// <remarks>
+    /// Modal over Settings rather than closing it the way "Customise colours…" does: this one
+    /// answers with a list and comes straight back, so there is nothing to get out of the way of.
+    /// The result goes through <c>ColumnLayoutRules.ApplyPicked</c>, the same rule the header menu's
+    /// picker uses.
+    /// </remarks>
+    private void MoreColumns_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = ColumnPickerDialog.Create(this, _vm.ColumnsForPicker());
+        if (dialog.ShowDialog() == true) _vm.ApplyPickedColumns(dialog.Chosen);
+    }
+
     private void Browse_Click(object sender, RoutedEventArgs e)
     {
         if (_vm.SelectedCommand is not { } command) return;

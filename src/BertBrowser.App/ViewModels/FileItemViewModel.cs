@@ -1,8 +1,10 @@
 using System.Windows.Media;
 using BertBrowser.App.Interop;
+using BertBrowser.App.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.Columns;
 
 namespace BertBrowser.App.ViewModels;
 
@@ -14,8 +16,29 @@ public sealed partial class FileItemViewModel : ObservableObject
     public DateTime ModifiedUtc { get; private set; }
     public string TypeName { get; }
 
+    /// <summary>
+    /// The whole attribute set, not just the one bit a row used to render.
+    /// </summary>
+    /// <remarks>
+    /// Kept in full so <see cref="ToEntry"/> round-trips faithfully. That is what
+    /// <c>FileListDiff.Differs</c> rests on: while a rebuilt row could only reconstruct Hidden, a
+    /// full comparison would have called every row different on every pass, so only Hidden could be
+    /// weighed — and an Attributes column then had nothing honest to show.
+    /// <para>
+    /// Thin on a search row, which knows only Hidden (<c>SearchHit</c> carries a bool). That cannot
+    /// bite the merge, which refuses a flattened list outright.
+    /// </para>
+    /// </remarks>
+    public FileAttributes Attributes { get; private set; }
+
+    /// <summary>When it was created, and <see cref="AccessedUtc"/> when it was last read.
+    /// <c>default</c> means unknown — a search hit and an archive entry have neither.</summary>
+    public DateTime CreatedUtc { get; private set; }
+
+    public DateTime AccessedUtc { get; private set; }
+
     /// <summary>Hidden (own or inherited) — drives the dimmed-icon treatment.</summary>
-    public bool IsHidden { get; private set; }
+    public bool IsHidden => Attributes.HasFlag(FileAttributes.Hidden);
 
     /// <summary>Ghosted like Explorer when hidden.</summary>
     // 0.55, not the 0.45 this used to be: against a dark window the lower value reads as mud
@@ -37,6 +60,66 @@ public sealed partial class FileItemViewModel : ObservableObject
     /// <summary>Path relative to the search root; only set in flattened search-results mode.</summary>
     public string RelativePath { get; }
 
+    // --- Shell-metadata columns ---
+
+    /// <summary>Set by the list that owns this row; null until then, and null forever for a row in
+    /// a list with no metadata columns on it.</summary>
+    internal ShellMetadataHydrator? Hydrator { get; set; }
+
+    /// <summary>
+    /// What this row shows in a shell-metadata column, by canonical name. The binding behind every
+    /// such cell is <c>{Binding [System.Image.Dimensions]}</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reading one is a cache lookup and, on a miss, a note asking for it — never a file open on the
+    /// UI thread. There is deliberately no dictionary per row: a folder can hold two hundred
+    /// thousand rows while the user looks at forty, so this costs nothing for a row nobody ever
+    /// scrolls to.
+    /// </para>
+    /// <para>
+    /// <b>The cell is refreshed by raising <see cref="Columns"/>, not <c>"Item[]"</c>.</b> The
+    /// indexer lives on the struct rather than on the row, so <c>"Item[]"</c> from the row is a
+    /// notification about an indexer the binding is not using and WPF ignores it — the values
+    /// arrived, were cached, and the column stayed blank for ever. Naming the property makes WPF
+    /// re-read it and re-evaluate the indexer behind it. Nothing in C# can see the difference, which
+    /// is why <c>assert-metadata</c> reads the rendered cell rather than asking the row.
+    /// </para>
+    /// </remarks>
+    public ShellColumnValues Columns => _columns ??= new ShellColumnValues(this);
+
+    private ShellColumnValues? _columns;
+
+    /// <summary>
+    /// Values have arrived; re-read the cells that were waiting for them.
+    /// </summary>
+    /// <remarks>
+    /// <b>A fresh instance, not just a notification.</b> This was a <c>readonly struct</c> holding
+    /// only the row, so re-reading <see cref="Columns"/> handed WPF a value equal to the one it
+    /// already had, it concluded nothing had changed, and it never re-evaluated the indexer behind
+    /// it — every metadata column rendered permanently blank while every value was read, cached and
+    /// discarded. Replacing the object is what makes the change visible.
+    /// </remarks>
+    internal void NotifyColumnsChanged()
+    {
+        _columns = new ShellColumnValues(this);
+        OnPropertyChanged(nameof(Columns));
+    }
+
+    /// <summary>The indexer behind a metadata cell. One small object per row that has values, not a
+    /// dictionary: a folder can hold two hundred thousand rows and this costs nothing for the ones
+    /// nobody scrolls to.</summary>
+    public sealed class ShellColumnValues(FileItemViewModel row)
+    {
+        public string this[string canonical] =>
+            row.Hydrator?.Value(row, canonical)?.Display ?? "";
+    }
+
+    /// <summary>The typed sort key for a metadata column, or null when it has not been read.
+    /// Deliberately a <em>peek</em>: sorting compares every row against several others, so asking
+    /// here would queue a file open for every row in the folder on one click of a header.</summary>
+    internal ColumnValue? ColumnValueFor(string canonical) => Hydrator?.Peek(this, canonical);
+
     /// <summary>
     /// The listing entry this row was built from, for comparing against a fresh listing.
     /// </summary>
@@ -55,7 +138,7 @@ public sealed partial class FileItemViewModel : ObservableObject
     /// </remarks>
     public FileEntry ToEntry() => new(
         Name, FullPath, IsDirectory, IsDirectory ? -1 : SizeBytes ?? 0, ModifiedUtc,
-        IsHidden ? FileAttributes.Hidden : FileAttributes.Normal);
+        Attributes, CreatedUtc, AccessedUtc);
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SizeDisplay), nameof(SizeSortKey))]
@@ -78,7 +161,9 @@ public sealed partial class FileItemViewModel : ObservableObject
         FullPath = entry.FullPath;
         IsDirectory = entry.IsDirectory;
         ModifiedUtc = entry.ModifiedUtc;
-        IsHidden = entry.Attributes.HasFlag(FileAttributes.Hidden);
+        Attributes = entry.Attributes;
+        CreatedUtc = entry.CreatedUtc;
+        AccessedUtc = entry.AccessedUtc;
         RelativePath = string.Empty;
         // A directory's size is normally unknown at listing time (FileSystemService writes -1) and
         // arrives later from dir_size_cache. A lister that already knows it exactly — the archive
@@ -143,7 +228,9 @@ public sealed partial class FileItemViewModel : ObservableObject
                 var info = new DirectoryInfo(FullPath);
                 if (!info.Exists) return;
                 ModifiedUtc = info.LastWriteTimeUtc;
-                IsHidden = info.Attributes.HasFlag(FileAttributes.Hidden);
+                CreatedUtc = info.CreationTimeUtc;
+                AccessedUtc = info.LastAccessTimeUtc;
+                Attributes = info.Attributes;
             }
             else
             {
@@ -151,7 +238,9 @@ public sealed partial class FileItemViewModel : ObservableObject
                 if (!info.Exists) return;
                 SizeBytes = info.Length;
                 ModifiedUtc = info.LastWriteTimeUtc;
-                IsHidden = info.Attributes.HasFlag(FileAttributes.Hidden);
+                CreatedUtc = info.CreationTimeUtc;
+                AccessedUtc = info.LastAccessTimeUtc;
+                Attributes = info.Attributes;
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
@@ -233,7 +322,40 @@ public sealed partial class FileItemViewModel : ObservableObject
             ? ByteSizeFormatter.Format(b) + (SizeIncomplete ? " *" : "")
             : IsDirectory ? "—" : "";
 
-    public string ModifiedDisplay => ModifiedUtc == default ? "" : ModifiedUtc.ToLocalTime().ToString("g");
+    public string ModifiedDisplay => Stamp(ModifiedUtc);
+
+    public string CreatedDisplay => Stamp(CreatedUtc);
+
+    public string AccessedDisplay => Stamp(AccessedUtc);
+
+    /// <summary>A timestamp, or nothing at all when it is unknown. Blank rather than
+    /// <c>01/01/0001</c>, which reads as data — an archive entry and an unhydrated search row both
+    /// land here.</summary>
+    private static string Stamp(DateTime utc) => utc == default ? "" : utc.ToLocalTime().ToString("g");
+
+    /// <summary>Explorer's letters, in Explorer's order. Blank for a row that does not know its
+    /// attributes rather than claiming the file has none.</summary>
+    public string AttributesDisplay
+    {
+        get
+        {
+            if (Attributes == 0) return "";
+            Span<char> flags = stackalloc char[7];
+            var n = 0;
+            if (Attributes.HasFlag(FileAttributes.ReadOnly)) flags[n++] = 'R';
+            if (Attributes.HasFlag(FileAttributes.Hidden)) flags[n++] = 'H';
+            if (Attributes.HasFlag(FileAttributes.System)) flags[n++] = 'S';
+            if (Attributes.HasFlag(FileAttributes.Archive)) flags[n++] = 'A';
+            if (Attributes.HasFlag(FileAttributes.Compressed)) flags[n++] = 'C';
+            if (Attributes.HasFlag(FileAttributes.Encrypted)) flags[n++] = 'E';
+            if (Attributes.HasFlag(FileAttributes.ReparsePoint)) flags[n++] = 'L';
+            return new string(flags[..n]);
+        }
+    }
+
+    /// <summary>The extension without its dot, as Explorer shows it. A folder has none.</summary>
+    public string ExtensionDisplay =>
+        IsDirectory || Path.GetExtension(Name) is not { Length: > 1 } ext ? "" : ext[1..];
 
     /// <summary>Unknown sizes sort together at the small end.</summary>
     public long SizeSortKey => SizeBytes ?? -1;

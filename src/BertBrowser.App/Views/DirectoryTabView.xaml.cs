@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
@@ -9,6 +10,7 @@ using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Archives;
+using BertBrowser.Core.Services.Columns;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
@@ -48,8 +50,13 @@ public partial class DirectoryTabView : UserControl
         Tab.FileList.PropertyChanged += FileList_PropertyChanged;
         Tab.PropertyChanged += Tab_PropertyChanged;
         Tab.RevealFileRequested += OnRevealFileRequested;
-        UpdateRelPathColumn();
-        UpdateMatchColumn();
+        Tab.FileList.ColumnsChanged += FileList_ColumnsChanged;
+        Tab.FileList.RealizedRows = RealizedRows;
+        DetailsView.Columns.CollectionChanged += Columns_CollectionChanged;
+        // Bubbles from PART_HeaderGripper in the GridViewColumnHeader template.
+        FileListView.AddHandler(Thumb.DragCompletedEvent, new DragCompletedEventHandler(Header_DragCompleted));
+        ReconcileColumns();
+        AttachHeaderStripMenu();
         ApplyViewMode();     // honor a restored thumbnail zoom level
         UpdatePreviewPane(); // and a restored preview pane
     }
@@ -61,6 +68,9 @@ public partial class DirectoryTabView : UserControl
         Tab.FileList.PropertyChanged -= FileList_PropertyChanged;
         Tab.PropertyChanged -= Tab_PropertyChanged;
         Tab.RevealFileRequested -= OnRevealFileRequested;
+        Tab.FileList.ColumnsChanged -= FileList_ColumnsChanged;
+        DetailsView.Columns.CollectionChanged -= Columns_CollectionChanged;
+        FileListView.RemoveHandler(Thumb.DragCompletedEvent, new DragCompletedEventHandler(Header_DragCompleted));
         PreviewPane.Detach();
     }
 
@@ -90,7 +100,7 @@ public partial class DirectoryTabView : UserControl
 
     /// <summary>Shows or hides the preview column. Assigned rather than bound because
     /// <see cref="ColumnDefinition.Width"/> is not a bindable target — the same reason
-    /// <see cref="UpdateRelPathColumn"/> assigns its column too.</summary>
+    /// <see cref="ReconcileColumns"/> builds the file list's columns in code.</summary>
     private void UpdatePreviewPane()
     {
         var show = Tab.IsPreviewVisible;
@@ -129,10 +139,15 @@ public partial class DirectoryTabView : UserControl
 
     private void FileList_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(FileListViewModel.IsFlattened))
-            UpdateRelPathColumn();
-        else if (e.PropertyName == nameof(FileListViewModel.ShowsContentMatches))
-            UpdateMatchColumn();
+        // Both, and not just the first: Folder follows IsFlattened and Match follows
+        // ShowsContentMatches, and forgetting either gives a column that never appears.
+        if (e.PropertyName is nameof(FileListViewModel.IsFlattened)
+                           or nameof(FileListViewModel.ShowsContentMatches))
+            ReconcileColumns();
+        // Only the markers move, so this repaints rather than rebuilding the columns.
+        else if (e.PropertyName is nameof(FileListViewModel.SortBy)
+                                or nameof(FileListViewModel.SortDescending))
+            ApplySortGlyphs();
         else if (e.PropertyName == nameof(FileListViewModel.Items))
         {
             // Before the focus call: selecting scrolls the list, and doing it the other way round
@@ -168,6 +183,8 @@ public partial class DirectoryTabView : UserControl
         else
         {
             FileListView.View = DetailsView;
+            // The header row is rebuilt with the view, taking its menu with it.
+            AttachHeaderStripMenu();
             FileListView.ClearValue(ItemsControl.ItemsPanelProperty);           // restore virtualizing stack
             FileListView.ClearValue(ItemsControl.ItemTemplateSelectorProperty); // GridView supplies cells
             FileListView.ItemContainerStyle = (Style)FindResource("FileRowStyle");
@@ -187,21 +204,224 @@ public partial class DirectoryTabView : UserControl
         FocusList();
     }
 
-    /// <summary>The Folder column only makes sense in the flattened search-results list.</summary>
-    private void UpdateRelPathColumn() =>
-        RelPathColumn.Width = Tab.FileList.IsFlattened ? 220 : 0;
+    // --- Columns ---
+
+    /// <summary>Guards against the reconcile hearing its own mutations back through
+    /// <see cref="Columns_CollectionChanged"/>. The <c>_thumbnailViewApplied</c> idiom.</summary>
+    private bool _reconciling;
+
+    private ColumnHeaderMenu? _columnMenu;
+
+    /// <summary>One per view, hung off every header this view builds: a ContextMenu is an element
+    /// instance and cannot be shared with the other tabs' views, the same constraint that keeps each
+    /// tab's GridView its own. Its contents are rebuilt on every open, so nothing goes stale.</summary>
+    /// <summary>The column header's menu, for the UI harness to photograph. Built through the same
+    /// property a right-click uses, so a capture cannot drift from what the app shows.</summary>
+    internal ContextMenu ColumnMenuForHarness => ColumnMenu.Menu;
+
+    private ColumnHeaderMenu ColumnMenu => _columnMenu ??= new ColumnHeaderMenu(
+        read: () => Tab.FileList.ColumnLayout,
+        write: layout => Tab.FileList.ColumnLayout = layout,
+        saveAsDefault: SaveColumnsAsDefault,
+        more: ShowColumnPicker);
+
+    /// <summary>Opens the whole property system, for the columns the curated menu does not list.
+    /// Modal: it is a choice with an OK on it, unlike the analysis windows.</summary>
+    private void ShowColumnPicker()
+    {
+        var current = ColumnLayoutRules.Normalize(Tab.FileList.ColumnLayout);
+        var dialog = ColumnPickerDialog.Create(Window.GetWindow(this), current);
+        if (dialog.ShowDialog() != true) return;
+
+        Tab.FileList.ColumnLayout =
+            ColumnLayoutRules.ApplyPicked(Tab.FileList.ColumnLayout, dialog.Chosen);
+    }
+
+    /// <summary>Makes this tab's arrangement what a new tab starts from. Saved immediately, the way
+    /// a theme change is: there is no dialog here to press Cancel in.</summary>
+    private void SaveColumnsAsDefault()
+    {
+        _settings.FileListColumns = ColumnLayoutRules.Normalize(Tab.FileList.ColumnLayout)
+            .Select(c => c.Copy()).ToList();
+        _settings.Save();
+        _shell.ApplyColumnDefaults();
+    }
+
+    private void FileList_ColumnsChanged(object? sender, EventArgs e) => ReconcileColumns();
 
     /// <summary>
-    /// And the Match column only when the search actually read file contents.
+    /// Puts the column menu on the header row itself, so the empty strip past the last column
+    /// answers with it too.
     /// </summary>
     /// <remarks>
-    /// Keyed on <c>ShowsContentMatches</c> rather than on <c>IsFlattened</c>, which every search
-    /// sets: an empty column appearing whenever you type into the box would read as a rendering
-    /// fault. Same mechanism as the Folder column above — an assigned width, since a
-    /// <c>GridViewColumn</c> is not part of any items collection to bind through.
+    /// That gap is a <c>GridViewColumnHeader</c> with <c>Role=Padding</c> which the presenter builds
+    /// itself, so it never passes through <see cref="FileListColumns.Build"/> and has no menu of its
+    /// own — a right-click there bubbled to the <c>ListView</c> and opened the <em>file</em> menu,
+    /// offering Cut, Delete and Properties for a click on nothing at all.
+    /// <para>
+    /// Setting it on the row presenter rather than hunting the filler down is what makes that
+    /// robust: <c>ContextMenuService</c> walks up to the nearest ancestor carrying a menu, so every
+    /// present and future part of the header strip is covered, while the rows below still bubble
+    /// past it to the list's own. Deferred to <c>Loaded</c> priority because the presenter is a
+    /// template part and does not exist while the constructor runs.
+    /// </para>
     /// </remarks>
-    private void UpdateMatchColumn() =>
-        MatchColumn.Width = Tab.FileList.ShowsContentMatches ? 420 : 0;
+    private void AttachHeaderStripMenu()
+    {
+        // The presenter is a template part, so it is absent while the constructor runs and absent
+        // again for a moment after the View is swapped back from tile mode — and by then the list
+        // is already loaded, so waiting on Loaded alone silently never fires. Try now, once more
+        // after the next layout pass, and keep Loaded as the backstop for the very first time.
+        // Assigning the same menu twice costs nothing; missing it hands the header strip back to
+        // the file menu with nothing to say so.
+        if (Attach()) return;
+
+        Dispatcher.InvokeAsync(() => Attach(), DispatcherPriority.Loaded);
+        FileListView.Loaded += OnFileListLoaded;
+
+        bool Attach()
+        {
+            if (VisualTreeUtil.FindDescendant<GridViewHeaderRowPresenter>(FileListView) is not { } presenter)
+                return false;
+            presenter.ContextMenu = ColumnMenu.Menu;
+            return true;
+        }
+
+        void OnFileListLoaded(object? sender, RoutedEventArgs e)
+        {
+            if (Attach()) FileListView.Loaded -= OnFileListLoaded;
+        }
+    }
+
+    /// <summary>
+    /// The rows that currently have a container, for the metadata hydrator to narrow its work to.
+    /// </summary>
+    /// <remarks>
+    /// Read off the virtualizing panel's own children rather than by asking the generator about
+    /// every item: on a folder of two hundred thousand rows the second is two hundred thousand
+    /// lookups per pass, which is the cost this narrowing exists to avoid paying.
+    /// </remarks>
+    private IReadOnlyCollection<FileItemViewModel> RealizedRows()
+    {
+        var realized = new HashSet<FileItemViewModel>();
+        if (VisualTreeUtil.FindDescendant<VirtualizingStackPanel>(FileListView) is not { } panel)
+            return realized;
+
+        foreach (var child in panel.Children)
+        {
+            if (child is FrameworkElement { DataContext: FileItemViewModel row })
+                realized.Add(row);
+        }
+        return realized;
+    }
+
+    /// <summary>
+    /// Brings <c>DetailsView.Columns</c> into line with what the list should be showing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reconciled by id rather than cleared and rebuilt, for three reasons that all bite.
+    /// <c>FileRowStyle</c> binds <c>GridViewRowPresenter.Columns</c> to this very collection, so a
+    /// <c>Clear()</c> renders every realized row with no cells for an instant — a visible flash on
+    /// every search and every clear of one. A surviving column keeps a width the user has dragged
+    /// but not yet persisted, and keeps its header instance from under an in-progress gripper drag.
+    /// And it is the same object across the <c>View = null</c> swap into tile mode and back, so that
+    /// path needs nothing of its own.
+    /// </para>
+    /// <para>
+    /// This replaces the pair of <c>Width = 0</c> assignments the Folder and Match columns used to
+    /// live behind, which left a clickable zero-width header and a gripper in the tab order.
+    /// </para>
+    /// </remarks>
+    private void ReconcileColumns()
+    {
+        if (_reconciling) return;
+        _reconciling = true;
+        try
+        {
+            var target = Tab.FileList.ResolvedColumns;
+            var columns = DetailsView.Columns;
+
+            for (var i = 0; i < target.Count; i++)
+            {
+                var want = target[i];
+                var found = IndexOfColumn(columns, want.Id, from: i);
+
+                if (found < 0) columns.Insert(i, FileListColumns.Build(want, this, ColumnMenu.Menu));
+                else if (found != i) columns.Move(found, i);
+
+                var column = columns[i];
+                FileListColumns.UpdateHeader(column, want);
+
+                // Measured against ActualWidth, not Width: Width is NaN on a column the user
+                // auto-sized by double-clicking its gripper, and every comparison against NaN is
+                // false — so a reconcile would silently stop maintaining that column's width.
+                // The tolerance is what stops this stomping a drag that is still in progress.
+                if (Math.Abs(column.ActualWidth - want.Width) > 1) column.Width = want.Width;
+            }
+
+            while (columns.Count > target.Count) columns.RemoveAt(columns.Count - 1);
+
+            ApplySortGlyphs();
+        }
+        finally
+        {
+            _reconciling = false;
+        }
+    }
+
+    /// <summary>Marks the header of the column being sorted by, and clears the rest.</summary>
+    private void ApplySortGlyphs() => FileListColumns.ApplySortGlyphs(
+        DetailsView.Columns, Tab.FileList.SortBy, Tab.FileList.SortDescending);
+
+    /// <summary>
+    /// Writes a header drag back into the model.
+    /// </summary>
+    /// <remarks>
+    /// <c>GridView.AllowsColumnReorder</c> defaults to true, so headers have always been draggable
+    /// here — the drag simply went nowhere. Now that the order is kept, it has to come back through
+    /// <see cref="ColumnLayoutRules.CaptureOrder"/>, which drops the injected columns the model must
+    /// never learn about and puts Name back at the front.
+    /// </remarks>
+    private void Columns_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (_reconciling || e.Action != NotifyCollectionChangedAction.Move) return;
+
+        var live = DetailsView.Columns.Select(FileListColumns.GetId).ToList();
+        Tab.FileList.ColumnLayout = ColumnLayoutRules.CaptureOrder(live, Tab.FileList.ColumnLayout);
+    }
+
+    /// <summary>
+    /// Captures a column width once the gripper is let go.
+    /// </summary>
+    /// <remarks>
+    /// On completion rather than per pixel of the drag, the rule <c>PreviewPaneWidth</c> already
+    /// follows. <see cref="GridViewColumn.ActualWidth"/> rather than <c>Width</c>, because
+    /// double-clicking a gripper auto-sizes the column and leaves <c>Width</c> as <c>NaN</c> — that
+    /// gesture raises this event too, and <c>ActualWidth</c> is the only place the resulting number
+    /// can be read.
+    /// </remarks>
+    private void Header_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        var layout = Tab.FileList.ColumnLayout;
+        foreach (var column in DetailsView.Columns)
+        {
+            var id = FileListColumns.GetId(column);
+            if (id.Length == 0 || ColumnCatalog.IsInjected(id)) continue;
+            layout = ColumnLayoutRules.SetWidth(layout, id, column.ActualWidth);
+        }
+        Tab.FileList.ColumnLayout = layout;
+    }
+
+    private static int IndexOfColumn(IList<GridViewColumn> columns, string id, int from)
+    {
+        for (var i = from; i < columns.Count; i++)
+        {
+            if (string.Equals(FileListColumns.GetId(columns[i]), id, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+        return -1;
+    }
 
     private void Scroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e) =>
         ScrollSpeed.HandlePreviewMouseWheel(sender, e, _settings);
@@ -333,11 +553,10 @@ public partial class DirectoryTabView : UserControl
 
     private void FileList_HeaderClick(object sender, RoutedEventArgs e)
     {
-        if (e.OriginalSource is GridViewColumnHeader { Tag: string tag } &&
-            Enum.TryParse<SortColumn>(tag, out var column))
-        {
-            Tab.FileList.SetSort(column);
-        }
+        // The Tag is the column's catalogue id. SetSort normalises it, so a header carrying
+        // something unsortable — Match — falls back rather than sorting by a line number.
+        if (e.OriginalSource is GridViewColumnHeader { Tag: string tag })
+            Tab.FileList.SetSort(tag);
     }
 
     /// <summary>Updates the status-bar selection summary and mirrors a single selected *directory*

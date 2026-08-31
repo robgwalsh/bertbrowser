@@ -8,11 +8,21 @@
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:PreviewPaneViewModel}"
              AutomationProperties.AutomationId="PreviewPane"
-             Background="{StaticResource Theme.Window.Background}">
+             Background="{StaticResource Theme.Window.Background}"
+             BorderThickness="1,0,0,0"
+             BorderBrush="{StaticResource Theme.Border.Default}">
     <!--
       One tab's preview. Every body below is bound to its own Has* flag rather than to a
       DataTrigger chain, because exactly one of them is ever true and a reader should be able to
       see that at a glance.
+
+      The left edge is drawn here and not on the GridSplitter beside it. Theme.Splitter.Background
+      is transparent in every built-in (the splitter only colours on hover and drag), and this pane
+      shares Theme.Window.Background with the file list — so with nothing between them the two
+      regions read as one surface. Border.Default rather than Border.Subtle: this is the seam
+      between two panels, not a rule inside one, and Subtle is nearly invisible against the
+      window background it would sit on. It rides on the UserControl's own template border,
+      which honours BorderBrush/BorderThickness exactly as it already honours Background above.
     -->
     <UserControl.Resources>
         <!-- Merged rather than relied upon from a sibling: StaticResource searches a dictionary's

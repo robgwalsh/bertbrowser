@@ -41,8 +41,20 @@ public static class PreviewClassifier
 
     /// <summary>Cloud-placeholder attributes. Reading a file carrying any of these makes the
     /// provider fetch its content, which is never something a preview may decide on its own.</summary>
-    private const FileAttributes Placeholder =
+    public const FileAttributes Placeholder =
         FileAttributes.Offline | RecallOnOpen | RecallOnDataAccess;
+
+    /// <summary>
+    /// Whether reading this file's bytes would make a sync provider download it.
+    /// </summary>
+    /// <remarks>
+    /// One predicate rather than the mask repeated, because the preview pane is no longer the only
+    /// thing that must not trip it: a shell-metadata column opens files too
+    /// (<c>GPS_OPENSLOWITEM</c>), and one scrolled past a synced photo folder would pull the whole
+    /// thing down a row at a time. Two copies of this test could disagree; one cannot.
+    /// </remarks>
+    public static bool IsCloudPlaceholder(FileAttributes attributes) =>
+        (attributes & Placeholder) != 0;
 
     public static PreviewRequest Classify(
         IReadOnlyList<PreviewTarget> selection,
@@ -63,7 +75,7 @@ public static class PreviewClassifier
         if (target.IsDirectory)
             return Refuse(PreviewRefusal.Folder);
 
-        if ((target.Attributes & Placeholder) != 0)
+        if (IsCloudPlaceholder(target.Attributes))
             return Refuse(PreviewRefusal.NotDownloaded);
 
         // The override comes after the two refusals above and never before them. Forcing a mode

@@ -30,13 +30,17 @@ public sealed class PaneFactory(
         new(fileSystem, dirSizeRepository, searchService, settings, launcher, mftIndex,
             archives, archiveReader, archivePasswords);
 
-    /// <summary>A tab set up to look like <paramref name="source"/>: same sort order. History is
-    /// deliberately not copied — the duplicate starts fresh.</summary>
+    /// <summary>A tab set up to look like <paramref name="source"/>: same sort order and the same
+    /// columns. History is deliberately not copied — the duplicate starts fresh.</summary>
     public DirectoryTabViewModel CloneTab(DirectoryTabViewModel source)
     {
         var tab = CreateTab();
         tab.FileList.SortBy = source.FileList.SortBy;
         tab.FileList.SortDescending = source.FileList.SortDescending;
+        // Only when the source really arranged them; otherwise the copy keeps following the default
+        // the way the original does.
+        if (source.FileList.ColumnsCustomized)
+            tab.FileList.RestoreColumns(source.FileList.ColumnLayout);
         return tab;
     }
 }

@@ -50,7 +50,9 @@ public static class PreviewMetadata
         return rows;
     }
 
-    private static string ShortenCanonical(string canonical)
+    /// <summary>"System.Image.Dimensions" -> "Dimensions". The last-resort header for a property
+    /// with no registered display name, shared with the column catalogue so the two cannot differ.</summary>
+    internal static string ShortenCanonical(string canonical)
     {
         var dot = canonical.LastIndexOf('.');
         return dot >= 0 && dot < canonical.Length - 1 ? canonical[(dot + 1)..] : canonical;
@@ -66,7 +68,9 @@ public static class PreviewMetadata
         _ => [],
     };
 
-    private static readonly string[] ImageOrder =
+    /// <summary>Also the seed for the column catalogue's curated shell columns — one copy of these
+    /// canonical names, because a second would drift with nothing to notice.</summary>
+    internal static readonly string[] ImageOrder =
     [
         "System.Image.Dimensions",
         "System.Image.BitDepth",
@@ -83,7 +87,9 @@ public static class PreviewMetadata
         "System.GPS.Longitude",
     ];
 
-    private static readonly string[] MediaOrder =
+    /// <summary>Also the seed for the column catalogue's curated shell columns — one copy of these
+    /// canonical names, because a second would drift with nothing to notice.</summary>
+    internal static readonly string[] MediaOrder =
     [
         "System.Title",
         "System.Music.Artist",
@@ -103,7 +109,9 @@ public static class PreviewMetadata
         "System.Audio.ChannelCount",
     ];
 
-    private static readonly string[] DocumentOrder =
+    /// <summary>Also the seed for the column catalogue's curated shell columns — one copy of these
+    /// canonical names, because a second would drift with nothing to notice.</summary>
+    internal static readonly string[] DocumentOrder =
     [
         "System.Title",
         "System.Author",

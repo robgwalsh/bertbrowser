@@ -115,7 +115,10 @@ duplicates-keep <strategy>  tick every copy but one: newest, oldest or shallowes
 duplicates-remove           delete the ticked copies through PlanDelete/DeleteAsync, so they land
                             in the Recycle Bin and `undo` puts them back
 
-hidden on|off | thumbnails <0..1> | sort name|size|modified|type | theme <id>
+hidden on|off | thumbnails <0..1> | sort <column-id> | theme <id>
+                            (sort takes any catalogue id: Name, Size, Type, Modified, Created,
+                            Accessed, Extension, or a canonical name such as
+                            System.Image.Dimensions. "date" still means Modified.)
 preview on|off              the active tab's preview pane, with its debounce and off-thread read
                             waited out (so assert after this, not straight after a `select`)
 preview-mode auto|raw|hex   the pane's view override; sticky across selections, settled the same
@@ -125,7 +128,9 @@ shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, rename-advanced,
                             delete, delete-permanent, message, warning, properties, settings,
                             theme-editor, disk-usage, duplicates, search-syntax, extract,
-                            compress, archive-password, elevation
+                            compress, archive-password, elevation, settings-columns, columns
+                            (settings opens on General, so settings-columns is how the Columns
+                            page gets photographed at all)
                             (new-folder/new-file/search-syntax need no selection; every other
                             kind uses one.
                             rename-advanced is the rename dialog with its options panel open —
@@ -135,6 +140,16 @@ session                     save the pane/tab arrangement the way closing the wi
                             prune it the way a launch does, and reopen it in place — assert on
                             what came back with assert-panes / assert-tabs / assert-path
 rows                        the row names, for when an assertion is about to fail
+columns                     the live GridView's columns as id:width. assert-visible cannot see a
+                            GridViewColumn — it is not a FrameworkElement and never enters the
+                            visual tree — so this is the only way to check one
+columns add|remove <id>     edit the active tab's columns through ColumnLayoutRules, the same
+columns move <id> <index>   functions the header menu and a header drag go through
+columns width <id> <px>
+columns reset               back to the saved default
+menu columns [name]         PNG of the column header menu's items. They are rendered detached, not
+                            opened: a ContextMenu is a Popup with its own top-level window that WPF
+                            repositions onto the nearest monitor, i.e. onto the user's screen
 probe <token> [element]     where a theme token's colour came out: the resolver, the app and
                             window resources, and the element's own Background/Foreground
 
@@ -143,6 +158,10 @@ assert-error [substring]     the warning banner above the list; bare = assert th
 assert-row <name> | assert-no-row <name> | assert-selected <n>
 assert-tabs <n> | assert-panes <n> | assert-flattened | assert-not-flattened
 assert-inside-archive | assert-not-inside-archive
+assert-column <id> | assert-no-column <id>
+assert-columns <id>, <id>, ...            the whole column order, injected ones included
+assert-metadata <row> <canonical> <text>  what a shell-metadata cell actually reads (substring)
+assert-header-menu columns|files          which menu a right-click past the last column opens
 assert-can-undo | assert-cannot-undo | assert-exists <path> | assert-missing <path>
 assert-duplicate-groups <n> | assert-duplicate-selected <n>
 assert-duplicate-row <name> | assert-no-duplicate-row <name>

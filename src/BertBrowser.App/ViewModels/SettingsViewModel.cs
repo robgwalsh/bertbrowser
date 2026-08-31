@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using BertBrowser.App.Services;
 using BertBrowser.App.Theming;
 using BertBrowser.Core.Models;
+using BertBrowser.Core.Services.Columns;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
 using BertBrowser.Core.Services.ShellIntegration;
@@ -100,7 +101,42 @@ public enum SettingsCategory
     Appearance,
     Preview,
     NewItems,
+    Columns,
     Commands,
+}
+
+/// <summary>An editable row of the default column list.</summary>
+/// <remarks>
+/// Carries the spec as well as the setting, so the list can show a person "Date taken" while what is
+/// stored and compared is <c>System.Photo.DateTaken</c> — the canonical-name rule the whole feature
+/// rests on.
+/// </remarks>
+public sealed partial class ColumnItemViewModel : ObservableObject
+{
+    public ColumnItemViewModel(ColumnSetting setting)
+    {
+        Id = setting.Id;
+        Header = ColumnCatalog.TryGet(setting.Id)?.Header ?? setting.Id;
+        _width = setting.Width;
+    }
+
+    public string Id { get; }
+
+    public string Header { get; }
+
+    /// <summary>Shown under the header so two similarly-named properties can be told apart, and
+    /// because this is the string that ends up in settings.json.</summary>
+    public string Detail =>
+        ColumnCatalog.TryGet(Id) is { Kind: ColumnKind.ShellProperty } ? Id : "";
+
+    /// <summary>Name is the one row that cannot be removed — it carries the icon and identifies the
+    /// row. The Remove button asks this rather than the list finding out afterwards.</summary>
+    public bool Removable => !string.Equals(Id, ColumnCatalog.Name, StringComparison.OrdinalIgnoreCase);
+
+    [ObservableProperty]
+    private double _width;
+
+    public ColumnSetting ToSetting() => new(Id, Width);
 }
 
 /// <summary>One row of the navigation list. <see cref="Glyph"/> is a Segoe Fluent Icons codepoint.</summary>
@@ -244,6 +280,7 @@ public sealed partial class SettingsViewModel : ObservableObject
             new SettingsCategoryViewModel(SettingsCategory.Appearance, "Appearance", "\uE790"),
             new SettingsCategoryViewModel(SettingsCategory.Preview, "Preview", "\uE8A1"),
             new SettingsCategoryViewModel(SettingsCategory.NewItems, "New items", "\uE710"),
+            new SettingsCategoryViewModel(SettingsCategory.Columns, "Columns", "\uE71D"),
             new SettingsCategoryViewModel(SettingsCategory.Commands, "Commands", "\uE8A7"),
         };
         _selectedCategory = Categories[0];
@@ -263,6 +300,8 @@ public sealed partial class SettingsViewModel : ObservableObject
             (settings.NewFileTypes ?? NewFileTemplate.Defaults())
                 .Select(t => new NewFileTypeItemViewModel(t)));
         SelectedNewFileType = NewFileTypes.FirstOrDefault();
+        Columns = [];
+        Rebuild(settings.ResolvedFileListColumns, ColumnCatalog.Name);
         ShowHiddenItems = settings.ShowHiddenItems;
         EnterArchivesOnDoubleClick = settings.EnterArchivesOnDoubleClick;
         ScrollSpeed = settings.ScrollSpeedMultiplier;
@@ -386,6 +425,102 @@ public sealed partial class SettingsViewModel : ObservableObject
         SelectedNewFileType = selected;
     }
 
+    // --- Columns ---
+    //
+    // The default set a new tab starts from. Every edit here goes through ColumnLayoutRules, the
+    // same functions the header menu and a header drag use, so the three cannot disagree about what
+    // adding or moving a column means — Name stays first whichever way it is asked for.
+
+    /// <summary>The default columns, in the order they appear in a list.</summary>
+    public ObservableCollection<ColumnItemViewModel> Columns { get; }
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RemoveColumnCommand))]
+    [NotifyCanExecuteChangedFor(nameof(MoveColumnUpCommand))]
+    [NotifyCanExecuteChangedFor(nameof(MoveColumnDownCommand))]
+    private ColumnItemViewModel? _selectedColumn;
+
+    /// <summary>What is left to add: everything the catalogue offers that is not already listed.
+    /// Rebuilt after each change rather than filtered live, so the box never offers a duplicate.</summary>
+    public ObservableCollection<ColumnSpec> AvailableColumns { get; } = [];
+
+    [ObservableProperty]
+    private ColumnSpec? _columnToAdd;
+
+    [RelayCommand]
+    private void AddColumn()
+    {
+        if (ColumnToAdd is not { } spec) return;
+        Rebuild(ColumnLayoutRules.Toggle(CurrentColumns(), spec.Id, on: true), spec.Id);
+    }
+
+    /// <summary>Greyed rather than silently doing nothing: Name cannot be removed, and a button
+    /// that looks live and then ignores you is worse than one that says so.</summary>
+    private bool CanRemoveColumn() => SelectedColumn is { Removable: true };
+
+    [RelayCommand(CanExecute = nameof(CanRemoveColumn))]
+    private void RemoveColumn()
+    {
+        if (SelectedColumn is not { Removable: true } selected) return;
+        Rebuild(ColumnLayoutRules.Toggle(CurrentColumns(), selected.Id, on: false), null);
+    }
+
+    private bool CanMoveColumn() => SelectedColumn is not null;
+
+    [RelayCommand(CanExecute = nameof(CanMoveColumn))]
+    private void MoveColumnUp() => MoveColumn(-1);
+
+    [RelayCommand(CanExecute = nameof(CanMoveColumn))]
+    private void MoveColumnDown() => MoveColumn(1);
+
+    [RelayCommand]
+    private void ResetColumns() => Rebuild(ColumnCatalog.Defaults(), ColumnCatalog.Name);
+
+    /// <summary>The columns as they stand, for the "More columns…" picker to open onto.</summary>
+    public IReadOnlyList<ColumnSetting> ColumnsForPicker() => CurrentColumns();
+
+    /// <summary>Takes the picker's answer. The same rule the header menu's picker goes through, so
+    /// the two cannot disagree about what ticking a property means.</summary>
+    public void ApplyPickedColumns(IReadOnlyList<string> chosen) =>
+        Rebuild(ColumnLayoutRules.ApplyPicked(CurrentColumns(), chosen), SelectedColumn?.Id);
+
+    private void MoveColumn(int delta)
+    {
+        if (SelectedColumn is not { } selected) return;
+        var index = Columns.IndexOf(selected);
+        Rebuild(ColumnLayoutRules.Move(CurrentColumns(), selected.Id, index + delta), selected.Id);
+    }
+
+    private IReadOnlyList<ColumnSetting> CurrentColumns() =>
+        Columns.Select(c => c.ToSetting()).ToList();
+
+    private void Rebuild(IReadOnlyList<ColumnSetting> settings, string? select)
+    {
+        Columns.Clear();
+        foreach (var setting in settings)
+            Columns.Add(new ColumnItemViewModel(setting));
+
+        SelectedColumn = select is null
+            ? Columns.FirstOrDefault()
+            : Columns.FirstOrDefault(c => c.Id.Equals(select, StringComparison.OrdinalIgnoreCase));
+
+        RefreshAvailableColumns();
+    }
+
+    private void RefreshAvailableColumns()
+    {
+        var listed = Columns.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        AvailableColumns.Clear();
+
+        foreach (var spec in ColumnCatalog.BuiltIns.Concat(ColumnCatalog.Curated))
+        {
+            // Folder and Match are placed by the list itself and are not anyone's to choose.
+            if (ColumnCatalog.IsInjected(spec.Id) || listed.Contains(spec.Id)) continue;
+            AvailableColumns.Add(spec);
+        }
+        ColumnToAdd = AvailableColumns.FirstOrDefault();
+    }
+
     /// <summary>Adds the types Windows knows about that aren't listed yet. Reads the registry and
     /// never writes to it, so Explorer's own New menu is untouched; entries already here keep their
     /// place and their settings, so this is safe to press twice.</summary>
@@ -485,6 +620,10 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settings.PreviewTextMaxBytes = (int)Math.Clamp(PreviewTextLimitKb * 1024, 4096, 64 * 1024 * 1024);
         _settings.SearchContentMaxBytes = (int)Math.Clamp(ContentSearchLimitKb * 1024, 4096, 64 * 1024 * 1024);
         _settings.TileAspectRatio = TileAspect.ToString();
+        // Always a list once this dialog has been saved, never null: from here on the user has
+        // configured their columns, and the "never configured" state has nothing left to say.
+        _settings.FileListColumns = ColumnLayoutRules.Normalize(CurrentColumns())
+            .Select(c => c.Copy()).ToList();
         _settings.Save();
         error = null;
         return true;

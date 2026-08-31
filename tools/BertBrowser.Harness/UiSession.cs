@@ -328,7 +328,8 @@ internal sealed class UiSession : IDisposable
     /// <summary>Every open tab, not just the visible one: a background tab reloading is still work
     /// in flight, and a capture taken over it would catch the list mid-replacement.</summary>
     private bool IsBusy => Dispatcher.Invoke(() =>
-        Shell.IsTransferring || Shell.AllTabs.Any(t => t.FileList.IsLoading));
+        Shell.IsTransferring ||
+        Shell.AllTabs.Any(t => t.FileList.IsLoading || t.FileList.IsHydratingMetadata));
 
     /// <summary>
     /// Waits for a debounced search to have been issued and finished.

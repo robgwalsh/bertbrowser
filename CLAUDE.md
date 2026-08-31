@@ -1380,6 +1380,22 @@ Per tab because the address bar, search box, progress bar, error banner and — 
 memory, and has to live in `MainWindow`'s `PreviewKeyDown` because an Alt chord arrives as
 `Key.System` with the real key in `SystemKey`.
 
+**`PreviewPaneToggle` in the caption strip is the discoverable third way**, beside the two chords —
+the Settings checkbox is *not* a fourth, since it only says what a new tab starts from. It sits with
+the other buttons that act on the active tab and binds `ActiveTab.TogglePreviewCommand`, and its
+on-state has to read `ActiveTab.IsPreviewVisible` for the same reason: the pane is per tab, so the
+setting is the wrong thing to light it from. On is a **filled** button rather than the accent
+`Theme.Toolbar.CheckedForeground` the Auto/Raw/Hex segments use — `ThemeCatalogTests` contrast-checks
+that token against nothing in the title bar, and `Theme.Toolbar.PressedBackground` carries the state
+without putting an unheld colour up there.
+
+**The pane draws its own left edge** (`BorderThickness="1,0,0,0"`, `Theme.Border.Default`, on the
+`UserControl`'s own template border). Nothing else was drawing one: `Theme.Splitter.Background` is
+transparent in every built-in — the splitter only colours on hover and drag — and the pane shares
+`Theme.Window.Background` with the file list, so the two regions ran together as one surface.
+`Border.Default` rather than `Border.Subtle`: this is the seam between two panels, and Subtle
+(`#2B2B2B` on a `#1E1E1E` window in Dark+) is very nearly the invisible line it replaced.
+
 The split follows the house shape: the deciding and the parsing are pure and in
 `Core/Services/Preview` where xUnit can reach them; the App does the I/O and the pixels. **Nothing
 is registered in `App.BuildServices()`** — `PreviewPaneViewModel` is constructed by
@@ -1878,6 +1894,189 @@ Two things bite: the pack URI must be **assembly-qualified**
 decode is wrapped, because it runs from a dependency-property setter during XAML parse, where an
 exception surfaces as the window failing to open rather than as an icon going missing.
 
+### Columns
+
+The file list's columns are the user's: add, remove, reorder, resize, and pull Windows shell
+metadata. Five fixed columns was the loudest "young app" tell in the listing, and closing it needed
+one decision made early — **a column's identity is a string** — after which almost everything else
+followed.
+
+**A shell column's id *is* its canonical property name** (`System.Photo.DateTaken`); a built-in's is
+a bare word. That is `PreviewMetadata`'s rule, which has a test named after it: display names are
+localised and canonical names are not, so a header reads "Abmessungen" on a German Windows while
+what is stored and compared never changes. **The two id spaces cannot collide** — a canonical name
+always contains a dot and a built-in id never does — and that is what lets `Resolve` tell "a
+built-in from a newer build, drop it" from "a property this machine has no handler for, keep it and
+render blank".
+
+**The built-in ids are exactly the members `SortColumn` used to have**, which is why deleting that
+enum needed no migration at all: `SessionTab.SortBy` has always been *"a string rather than the enum
+so an unknown value from a newer or hand-edited file falls back"*, so every settings file ever
+written keeps working, and an older build reading a newer one falls back to Name exactly as that
+comment intends. The XAML `Tag`s were already those strings too.
+
+- **`ColumnCatalog`** is what exists: the built-ins, and ~35 curated shell properties **composed from
+  `PreviewMetadata`'s own `ImageOrder`/`MediaOrder`/`DocumentOrder` arrays** rather than retyped —
+  38 canonical strings that would otherwise drift with nothing to notice. `ShadowedByBuiltIn` keeps
+  `System.ItemTypeText` and friends out: two Type columns, one of them blank until it hydrates, is
+  worse than the free one that never is.
+- **`ColumnLayoutRules.Resolve` replaced both `Width = 0` hacks.** Folder and Match were permanently
+  in the collection and toggled by assigning a zero width, which left a clickable zero-width header
+  and a gripper in the tab order. They are **injected, never persisted** — they follow the list's
+  *mode*, which is what the zero width was saying all along. Match is still keyed on
+  `ShowsContentMatches` and never on `IsFlattened`, which every search sets.
+- **Name is present and first, enforced on the drag and not only on load.** `AllowsColumnReorder`
+  has always defaulted true, so a header could already be dragged anywhere; persisting the layout is
+  what would have made that stick. `CaptureOrder` is the one function the drag, the menu and the
+  settings page all go through, so the three cannot disagree.
+
+**Reading metadata is where the danger is, and the rule that matters is not a performance one.**
+`SHGetPropertyStoreFromParsingName` with `GPS_OPENSLOWITEM` genuinely opens the file so EXIF and ID3
+handlers run — so **a Dimensions column scrolled down a synced photo folder would download the whole
+folder, one row at a time, with no progress and nothing asked.** `MetadataReadRules.MayRead` refuses
+a cloud placeholder, and lives in **Core rather than beside the interop that enforces it** precisely
+so a test can hold it still; it asks `PreviewClassifier.IsCloudPlaceholder`, now a shared predicate,
+so the pane and the column cannot drift apart. Reparse points and directories are refused with it.
+
+Three more things bound the cost, and the third is the one that is easy to get wrong:
+
+- **`ShellProperties.ReadValues` asks for named keys.** `Read` enumerates every property a file has
+  *and* does a `PSGetPropertyDescription` COM activation per property per file — 60–120 for an
+  ordinary JPEG, to learn names nobody asked for. Right for the Properties dialog, hopeless per row.
+  Descriptions become a per-*column* cost paid once, via `PSGetPropertyKeyFromName` behind a
+  process-lifetime cache.
+- **Four reads at once** (`ContentSearchRules`' measured peak), and that bound *is* the protection:
+  there is no cancelling a COM call in flight, so a task per row would mean hundreds of concurrent
+  store opens, which stops the shell answering for every application on the machine.
+- **A cell asks; it never fetches.** `Icon` and `Thumbnail` can afford to start a read from their own
+  getter because tiles are few and large. A details list scrolls an order of magnitude faster: a
+  flick through a big folder realizes and discards thousands of containers a second, and starting a
+  file open for each would leave the disk busy for minutes after the user stopped, every one for a
+  row long gone. So the indexer **records a want and returns blank**, and one coalesced pass asks the
+  view (`RealizedRows`, off the virtualizing panel's own children) what is *still* on screen. Rows
+  that scrolled past are never opened.
+
+`FileItemViewModel.Columns` is a `readonly struct` over the shared hydrator, not a dictionary per
+row: a folder can hold 200,000 rows and you are looking at forty, so a per-row dictionary would be
+200,000 allocations for a few hundred values.
+
+**Sorting sorts what has been read, and unknown sinks last in both directions** — a blank is the
+absence of a value, not a small one, so `ColumnComparison.KnownBand` is applied *above* the
+ascending/descending flip. `ReadValues` unwraps `VT_FILETIME` and the numeric variants into a typed
+sort key because natural ordering handles `"800 x 600"` and `"00:03:41"` but **not a formatted date**
+— `31/08` sorts before `01/09` under every string comparison there is, and Date taken is the first
+column anyone adds. The `VT_VECTOR | VT_ARRAY | VT_BYREF` bail is what keeps that honest:
+`System.Music.Artist` and `System.Keywords` really are vectors, and reading their union as a double
+would format a pointer address as the sort key. `ColumnComparison` takes its text comparer as an
+argument, because `NaturalStringComparer` is a `shlwapi` call in App; that is
+`TransferRate`-takes-its-timestamps, and it is what makes the rule testable in Core.
+
+**The cell refresh took two goes to get right, and both failures looked like the other one.** A
+metadata cell binds `Columns[System.Image.Dimensions]`, and `Columns` returned a `readonly struct`
+holding only the row — so when values arrived and the row raised the property, WPF re-read it, got a
+value *equal* to the one it already had, concluded nothing had changed and never re-evaluated the
+indexer. Every such column rendered permanently blank while every value behind it was read, cached
+and thrown away. `ShellColumnValues` is a small class now and `NotifyColumnsChanged` replaces the
+instance, so the change is something WPF can see. Raising `"Item[]"` instead does not help: that
+notification is about an indexer on the *row*, and the binding's is one property further along.
+
+**What made that expensive to find was a second bug in the assertion**, and it is worth stating
+because it will recur. `assert-metadata` originally read the value out of the view model in C#,
+where everything looked perfect. Rewritten to read the rendered cell it still said blank —
+because a column with a `CellTemplate` puts a `ContentPresenter` in the row with a `TextBlock`
+inside it, while one rendered from `DisplayMemberBinding` (which is every shell column) **is** the
+`TextBlock`, and the walk only looked at descendants. Two independent faults, each a convincing
+explanation of the other's symptom. The rule the episode leaves behind: **an assertion about a
+column has to read what is on screen, and has to include the cell element itself.**
+
+**The header strip is three separate surfaces, and two of them are easy to forget.** The sort marker
+is a `ContentTemplate` on the header (`Column.Header` in `Styles.xaml`) driven by an attached
+`FileListColumns.SortGlyph`, because the shared `GridViewColumnHeader` template has no hook for one
+and is used by every other list in the app; keeping the label a plain string is what lets
+`UpdateHeader`, the menu and the reconcile all keep comparing it. The **empty strip past the last
+column** is a `Role=Padding` header the presenter builds itself, so it never passes through
+`FileListColumns.Build` and has no menu — a right-click there opened the *file* menu, offering Cut,
+Delete and Properties for a click on nothing. The menu goes on the **header row presenter** rather
+than on that filler, so `ContextMenuService` finds it by walking up and every part of the strip is
+covered; and it has to be re-attached after the `View = null` swap out of tile mode, where the
+presenter is rebuilt *after* the assignment and the list is already loaded, so waiting on `Loaded`
+alone silently never fires.
+
+**Retemplating a `MenuItem` drops the check mark with everything else.** `ColumnHeaderMenu` is the
+app's only checkable menu, so `IsCheckable`/`IsChecked` were set perfectly and rendered nothing at
+all — the tick is now drawn in the icon column by `Menus.xaml`. It is a `Path` rather than the
+`SymbolFont` glyph every other icon uses, because that key lives in `Styles.xaml` and
+**`StaticResource` reaches a dictionary's own merged children, never its siblings**: `Menus.xaml`
+merges `Primitives → Tokens`, so naming it there fails at load. The same rule is why the sort marker
+is drawn rather than set in an icon font.
+
+**Two more traps, neither of which a reviewer would catch:**
+
+- **`List<T>.Sort` throws** `IComparer.Compare() method returns inconsistent results` if a comparer
+  changes its mind mid-sort — and one reading a cache that background threads are filling eventually
+  will. `SortInPlace` snapshots the values into a plain dictionary first. Only reproducible under
+  load, on a big folder, in someone else's session.
+- **The comparer must never trigger hydration**, which is why `FileItemViewModel.ColumnValueFor`
+  calls `Hydrator.Peek` and not `Value`. Sorting compares every row against several others, so
+  asking would queue a file open for every row in the folder on one click of a header. It is the
+  obvious helpful edit, and nothing else would catch it.
+
+**Widening `FileEntry` was free and retuned `FileListDiff`.** `FileSystemEntry` hands back
+`CreationTimeUtc` and `LastAccessTimeUtc` from the find data already being read, so Created,
+Accessed and Attributes cost no extra I/O. That falsified `Differs`' stated premise — *"only the
+Hidden attribute is weighed… because that is the only one a row renders"* — but its second half
+named the real defect: a rebuilt row *"can only reconstruct the flags it shows"*, because `ToEntry()`
+returned `IsHidden ? Hidden : Normal`. The row now carries the whole attribute set, `ToEntry()`
+round-trips faithfully, and only then can `Differs` compare a masked set honestly.
+**`AccessedUtc` renders but never votes**, and the reason is this feature's own reads: the preview
+pane, content search and `GPS_OPENSLOWITEM` all move it, so weighing it would mark every row the
+user merely looked at as changed on the next pass — exactly the churn the original rule was written
+to prevent, arriving through a door columns opened.
+
+**The layout is per tab with a saved default**, the shape `ShowPreviewPane` already has. The header
+menu edits this tab and carries "Set as default for new tabs"; the Settings page edits the default.
+**Both reach the same "More columns…" picker**, and both hand its answer to
+`ColumnLayoutRules.ApplyPicked` rather than applying it themselves — that answer is the whole set of
+ticked properties, including the ones already showing, so a merge that removed and re-added each one
+would shuffle a carefully arranged layout to the end every time somebody opened the picker and
+pressed OK.
+`FileListViewModel.ColumnsCustomized` is what reconciles the two: `ShellViewModel.ApplyColumnDefaults`
+fans a new default out to every tab that has **not** been arranged by hand — without it the Settings
+page would be a control that visibly does nothing, and without the flag it would silently discard
+work. `SessionTab.Columns` is null for an untouched tab, so changing the default still reaches it.
+
+**The columns are reconciled by id, never cleared and rebuilt.** `FileRowStyle` binds
+`GridViewRowPresenter.Columns` to that very collection, so a `Clear()` renders every realized row
+with no cells for an instant — a visible flash on every search and every clear of one. Reconciling
+also keeps a width dragged but not yet persisted, keeps a header instance from under an in-progress
+gripper drag, and is the same object across the `View = null` swap into tile mode. Widths are read
+from **`ActualWidth`, never `Width`**: a gripper double-click auto-sizes the column and leaves
+`Width` as `NaN`, and every comparison against `NaN` is false, so a reconcile would silently stop
+maintaining it. The id rides on an attached property on the column itself rather than being read
+back off its header, which happens to work only while every header is an element.
+
+Tests: `ColumnLayoutRulesTests` (the nine invariants), `ColumnCatalogTests` (id-space separation,
+shadowed keys, the sort ids every previous build wrote), `ColumnComparisonTests`,
+`MetadataReadRulesTests`, and `FileListDiffTests`' new arms. `tools/ui/columns.bbs` drives the whole
+thing through the real window, including a genuine shell read — `preview-fixture`'s `sample.png` is a
+real 64×64 PNG, so `System.Image.Dimensions` has something true to say, and `assert-metadata` is what
+proves the keyed read, the hydrator and the busy flag all work together. **`assert-visible` cannot
+help here**: a `GridViewColumn` is not a `FrameworkElement` and never enters the visual tree, which
+is why `columns`, `assert-column` and `assert-columns` exist and why they read the *live* `GridView`
+rather than the view model. Mutate a rule and confirm a test goes red — measured, not guessed: key
+Match on `IsFlattened` and one goes; stop moving Name to the front and four go; let `AccessedUtc`
+vote in `Differs` and one goes; drop the placeholder refusal from `MetadataReadRules` and two go.
+
+**One pre-existing bug this work surfaced**: `ShowsContentMatches` had exactly one assignment site,
+inside the search branch, and nothing ever reset it — so clearing a `content:` search left its Match
+column on screen over an ordinary listing, empty, with nothing that would ever take it away.
+`LoadDirectoryAsync` clears it now.
+
+**What no test reaches, and must be done by hand:** a folder of photos sorting correctly by Date
+taken, and — the one that matters — a OneDrive folder of cloud-only files, confirming that scrolling
+with a Dimensions column on downloads **nothing** and the placeholder attributes are still set
+afterwards.
+
 ### Tabs and panes
 
 Several directories are open at once, so **nothing may reach for "the" current directory**. The
@@ -1921,6 +2120,14 @@ Three things are easy to get wrong here:
   load and the view focuses the list on that change, so `DirectoryTabView.FocusFileList` is gated on
   `Tab.IsActive && IsKeyboardFocusWithin` — otherwise a directory finishing its load in one pane
   yanks the caret out of another pane's search box.
+
+**A guard before an `await` is not a guard.** `DirectoryTabViewModel.OnRefreshTick` — the watcher's
+debounced live refresh — returns early for a flattened list, then awaits the merge and writes
+`"N item(s)"`. A search starting *during* that await left the status line reading a folder count
+over a result set; `MergeDirectoryAsync` refuses a flattened list, so the count it wrote was the
+number of *search hits*, which is what makes the symptom so confusing. It re-checks after the await
+now. This surfaced as a `smoke.bbs` flake that passed eight runs out of nine, so the giveaway was
+the message rather than the failure: "3 item(s)" where 3 was the result count.
 
 Anything that changes a directory on disk must **fan out**: `ShellViewModel.RefreshTabsShowingAsync`
 reloads every tab showing one of the affected folders (matched via `PathKey`, never string

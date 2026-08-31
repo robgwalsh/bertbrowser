@@ -28,13 +28,17 @@ public sealed class FileSystemService : IFileSystemService
         var entries = new List<FileEntry>();
         var enumerable = new FileSystemEnumerable<FileEntry>(
             path,
+            // Creation and access times come out of the same WIN32_FIND_DATA as everything else
+            // here, so the columns that show them cost nothing over a listing that does not.
             (ref FileSystemEntry entry) => new FileEntry(
                 entry.FileName.ToString(),
                 entry.ToFullPath(),
                 entry.IsDirectory,
                 entry.IsDirectory ? -1 : entry.Length,
                 entry.LastWriteTimeUtc.UtcDateTime,
-                entry.Attributes),
+                entry.Attributes,
+                entry.CreationTimeUtc.UtcDateTime,
+                entry.LastAccessTimeUtc.UtcDateTime),
             new EnumerationOptions
             {
                 IgnoreInaccessible = false,

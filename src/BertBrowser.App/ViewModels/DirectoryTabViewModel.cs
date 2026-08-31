@@ -308,7 +308,12 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         try
         {
             await FileList.MergeDirectoryAsync(CurrentPath, IncludeHidden, _navigationCts.Token);
-            StatusText = $"{FileList.Items.Count} item(s)";
+
+            // Re-checked after the await, not only before it. A search can begin while the merge is
+            // in flight — the merge itself refuses a flattened list, but the status line was written
+            // regardless, replacing "3 result(s) for 'report'" with a count of the folder behind it.
+            if (!FileList.IsFlattened)
+                StatusText = $"{FileList.Items.Count} item(s)";
         }
         catch (OperationCanceledException)
         {

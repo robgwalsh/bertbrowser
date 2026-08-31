@@ -1,0 +1,152 @@
+# Configurable columns, through the real window.
+#
+# What no unit test reaches here is the reconcile: ColumnLayoutRules decides the list, but whether
+# DetailsView.Columns ends up matching it — after a search, after a clear, after a drag — is a
+# property of the view. assert-visible cannot see a GridViewColumn (it is not a FrameworkElement and
+# never enters the visual tree), which is why assert-column and assert-columns exist.
+
+tree .
+refresh
+
+# The starting set is what the five fixed columns always were. Anything that changes
+# ColumnCatalog.Defaults without meaning to goes red here.
+assert-columns Name, Size, Type, Modified
+columns
+
+# --- The two columns the app places itself ---
+
+# Folder follows the flattening, and is gone the moment the search is cleared. It also lands between
+# the name and everything else rather than on the end.
+search report
+assert-flattened
+assert-columns Name, RelativePath, Size, Type, Modified
+clear-search
+assert-no-column RelativePath
+
+# Match follows ShowsContentMatches, not IsFlattened. An ordinary search flattens and must NOT bring
+# it: mutate ColumnLayoutRules.Resolve to key it on isFlattened and the next two lines go red.
+search report
+assert-no-column Match
+clear-search
+
+content-fixture
+refresh
+search content:needle
+assert-flattened
+assert-column Match
+assert-columns Name, RelativePath, Match, Size, Type, Modified
+shot 01-match-column
+clear-search
+assert-no-column Match
+
+# Neither of them is a choice, so neither survives into the saved layout — a hand-edited settings
+# file naming one must not get a second copy, or one in a listing where it means nothing.
+columns add RelativePath
+assert-no-column RelativePath
+
+# --- Adding, removing, reordering, resizing ---
+
+columns add Created
+assert-columns Name, Size, Type, Modified, Created
+columns remove Type
+assert-columns Name, Size, Modified, Created
+columns move Created 1
+assert-columns Name, Created, Size, Modified
+columns width Created 200
+columns
+shot 02-custom-columns
+
+# Name is not optional and not movable. Both rules are enforced where the drag comes back through,
+# not only on load, because AllowsColumnReorder has always let the header be dragged away.
+columns remove Name
+assert-column Name
+columns move Name 3
+assert-columns Name, Created, Size, Modified
+
+# The injected columns still slot in around a customised set.
+search report
+assert-columns Name, RelativePath, Created, Size, Modified
+clear-search
+
+# A sort by a column that was added at runtime, which is the whole point of the ids being strings.
+sort Created
+sort Created
+sort Name
+
+columns reset
+assert-columns Name, Size, Type, Modified
+
+# The layout survives the session round trip the same way the pane arrangement does.
+columns add Created
+columns width Created 180
+session
+assert-columns Name, Size, Type, Modified, Created
+
+assert-not-launched
+state
+
+# --- Shell metadata ---
+#
+# A real 64x64 PNG, so System.Image.Dimensions has something true to say. The read goes through
+# ShellProperties.ReadValues — the keyed path, not the enumerate-everything one the Properties
+# dialog uses — and lands via the hydrator's coalescing pass rather than from a cell getter.
+#
+# assert-metadata reads the *rendered cell*, not the view model, and that is the whole point of it:
+# the first version of this feature read and cached every value correctly while rendering a blank
+# column, because the binding was never told the value had arrived. Asking the view model in C#
+# looked perfect throughout.
+preview-fixture
+refresh
+go Preview
+columns add System.Image.Dimensions
+assert-column System.Image.Dimensions
+settle 400
+assert-metadata sample.png System.Image.Dimensions 64
+shot 03-metadata-column
+
+# Sorting by a column that did not exist when the app was compiled, which is the whole reason the
+# ids are strings rather than an enum.
+sort System.Image.Dimensions
+sort System.Image.Dimensions
+sort Name
+
+columns reset
+assert-no-column System.Image.Dimensions
+assert-not-launched
+
+# --- The header strip, the sort marker, and the menu ---
+
+# A right-click past the last column must open the *column* menu. That gap is a Role=Padding header
+# the presenter builds itself, so it carries no menu of its own and used to fall through to the file
+# list's — offering Cut, Delete and Properties for a click on nothing at all. Checked after a
+# search and after a tile-mode round trip too, since both rebuild the header row.
+assert-header-menu columns
+search report
+settle
+assert-header-menu columns
+clear-search
+thumbnails 0.5
+thumbnails 0
+settle
+assert-header-menu columns
+
+# The sort marker follows the column being sorted by, and flips with the direction. Photographed
+# rather than asserted: the glyph is a template trigger, and the way it fails is by rendering
+# nothing while every property behind it is correct.
+sort Size
+settle
+shot 04-sort-ascending FileListView
+sort Size
+settle
+shot 05-sort-descending FileListView
+sort Name
+
+# The checklist, with ticks against the columns that are on. Photographed for the same reason: the
+# themed MenuItem template drops the stock check indicator, so IsChecked can be perfect while
+# nothing renders. Name is ticked and disabled — it cannot be turned off.
+columns add Created
+menu columns 06-column-menu
+
+assert-not-launched
+state
+

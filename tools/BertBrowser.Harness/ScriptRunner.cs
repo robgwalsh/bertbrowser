@@ -12,6 +12,7 @@ using BertBrowser.App.ViewModels;
 using BertBrowser.App.Views;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Layout;
+using BertBrowser.Core.Services.Columns;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.Elevation;
 using BertBrowser.Core.Services.DiskUsage;
@@ -172,6 +173,13 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "session": Session(); break;
             case "probe": Probe(rest); break;
             case "rows": output.WriteLine("ROWS " + string.Join(", ", RowNames())); break;
+            case "columns": Columns(rest); break;
+            case "assert-column": AssertColumn(rest, expected: true); break;
+            case "assert-no-column": AssertColumn(rest, expected: false); break;
+            case "assert-columns": AssertColumns(rest); break;
+            case "assert-metadata": AssertMetadata(rest); break;
+            case "menu": Menu(rest); break;
+            case "assert-header-menu": AssertHeaderMenu(rest); break;
 
             // assertions
             case "assert-path": AssertPath(rest); break;
@@ -551,6 +559,292 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     private ListView FileList() =>
         FindNamed<ListView>("FileListView")
         ?? throw new InvalidOperationException("The active tab has no file list.");
+
+    // --- Columns ---
+    //
+    // Read off the live GridView rather than out of the view model, deliberately: the view model's
+    // answer is what the rules decided, and what a script needs to know is what the reconcile
+    // actually built. assert-visible cannot help here — a GridViewColumn is not a FrameworkElement
+    // and never appears in the visual tree.
+
+    private IReadOnlyList<GridViewColumn> LiveColumns() => session.Dispatcher.Invoke(() =>
+        FileList().View is GridView grid
+            ? grid.Columns.ToList()
+            : throw new AssertionException(
+                "The file list is in tile mode, which has no columns."));
+
+    private string ColumnSummary() => session.Dispatcher.Invoke(() => string.Join(", ",
+        LiveColumns().Select(c =>
+            $"{FileListColumns.GetId(c)}:{c.ActualWidth:0}")));
+
+    private void Columns(string rest)
+    {
+        var (verb, tail) = Split(rest);
+        switch (verb.ToLowerInvariant())
+        {
+            case "":
+                output.WriteLine("COLUMNS " + ColumnSummary());
+                break;
+
+            case "add":
+                Edit(l => ColumnLayoutRules.Toggle(l, Require(tail, "columns add"), on: true));
+                break;
+
+            case "remove":
+                Edit(l => ColumnLayoutRules.Toggle(l, Require(tail, "columns remove"), on: false));
+                break;
+
+            case "move":
+            {
+                var (id, index) = Split(tail);
+                Edit(l => ColumnLayoutRules.Move(l, id, Number(index, "columns move")));
+                break;
+            }
+
+            case "width":
+            {
+                var (id, width) = Split(tail);
+                Edit(l => ColumnLayoutRules.SetWidth(l, id, Number(width, "columns width")));
+                break;
+            }
+
+            case "reset":
+                Invoke(() => session.Tab.FileList.ColumnLayout = null);
+                break;
+
+            default:
+                throw new FormatException(
+                    $"columns wants add, remove, move, width or reset, got '{verb}'.");
+        }
+
+        void Edit(Func<IReadOnlyList<ColumnSetting>?, IReadOnlyList<ColumnSetting>> change) =>
+            Invoke(() =>
+            {
+                var list = session.Tab.FileList;
+                list.ColumnLayout = change(list.ColumnLayout);
+            });
+    }
+
+    private void AssertColumn(string rest, bool expected)
+    {
+        var id = Require(rest, expected ? "assert-column" : "assert-no-column");
+        var present = session.Dispatcher.Invoke(() =>
+            LiveColumns().Any(c =>
+                FileListColumns.GetId(c).Equals(id, StringComparison.OrdinalIgnoreCase)));
+
+        if (present != expected)
+            throw new AssertionException(expected
+                ? $"there is no '{id}' column: {ColumnSummary()}"
+                : $"the '{id}' column is still there: {ColumnSummary()}");
+    }
+
+    /// <summary>
+    /// Which menu a right-click on the empty strip past the last column would open.
+    /// </summary>
+    /// <remarks>
+    /// Resolved the way <c>ContextMenuService</c> resolves it — the nearest ancestor carrying a menu
+    /// — rather than by asserting that some particular element holds one, so it stays true however
+    /// the header strip is put together. That gap is a <c>Role=Padding</c> header the presenter
+    /// builds itself, so it has no menu of its own and used to fall through to the file list's.
+    /// </remarks>
+    private void AssertHeaderMenu(string rest)
+    {
+        var want = Require(rest, "assert-header-menu").ToLowerInvariant();
+        if (want is not ("columns" or "files"))
+            throw new FormatException($"assert-header-menu wants columns or files, got '{want}'.");
+
+        var actual = session.Dispatcher.Invoke(() =>
+        {
+            var presenter = VisualTreeUtil.FindDescendant<GridViewHeaderRowPresenter>(FileList())
+                ?? throw new AssertionException("the file list has no header row.");
+
+            var padding = Descendants(presenter)
+                .OfType<GridViewColumnHeader>()
+                .FirstOrDefault(h => h.Role == GridViewColumnHeaderRole.Padding)
+                ?? throw new AssertionException("the header row has no padding filler to click on.");
+
+            // Identified by reference, not by what is in it: the column menu fills itself in on
+            // Opened, so its Items are empty until someone right-clicks and looking for a known
+            // entry would call it the file menu every time.
+            var columnMenu = VisualTreeUtil.FindAncestor<DirectoryTabView>(padding)?.ColumnMenuForHarness;
+
+            for (DependencyObject? d = padding; d is not null; d = VisualTreeHelper.GetParent(d))
+            {
+                if (d is FrameworkElement { ContextMenu: { } menu })
+                    return ReferenceEquals(menu, columnMenu) ? "columns" : "files";
+            }
+            return "none";
+        });
+
+        if (actual != want)
+            throw new AssertionException(
+                $"a right-click past the last column would open the '{actual}' menu, expected '{want}'.");
+    }
+
+    /// <summary>
+    /// Photographs a context menu's items.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The items are hosted in the parked window and rendered there, rather than the menu being
+    /// opened for real. <b>A ContextMenu is a Popup and gets its own top-level window</b>, which WPF
+    /// repositions to fit the nearest monitor — so opening one would put a menu on the user's
+    /// screen, which is the single thing this harness exists to avoid.
+    /// </para>
+    /// <para>
+    /// What that still covers is what matters here: these are the real
+    /// <see cref="ColumnHeaderMenu"/>'s own <c>MenuItem</c> instances under the app's own implicit
+    /// <c>MenuItem</c> style, so a check mark that does not render is visible in the picture. It
+    /// does not cover the popup's own chrome, and does not claim to.
+    /// </para>
+    /// </remarks>
+    private void Menu(string rest)
+    {
+        var (kind, tail) = Split(rest);
+        var (name, _) = Split(tail);
+
+        var items = session.Dispatcher.Invoke(() => kind.ToLowerInvariant() switch
+        {
+            "columns" => ColumnMenuItems(),
+            var other => throw new FormatException($"'{other}' is not a menu. Try: columns."),
+        });
+
+        var path = Resolve(Named(name.Length == 0 ? $"menu-{kind}" : name, ++_shots));
+        session.Dispatcher.Invoke(() => RenderDetached(items, path));
+
+        if (!Capture.HasContent(path))
+            throw new AssertionException($"{path} is a single flat colour — the menu rendered nothing.");
+        output.WriteLine($"SHOT {path}");
+    }
+
+    /// <summary>
+    /// Renders loose menu items straight to a PNG.
+    /// </summary>
+    /// <remarks>
+    /// Measured and arranged with no parent, which is what makes this correct: <c>Render</c> applies
+    /// a visual's offset within its parent, so the usual trap — a child drawn at its window
+    /// coordinates and mostly missing the bitmap — cannot arise when there is no parent to be offset
+    /// within. It also needs no <c>VisualBrush</c>, whose cached realisation is the reason
+    /// <see cref="Capture"/> renders the whole window and crops instead.
+    /// </remarks>
+    private static void RenderDetached(IReadOnlyList<MenuItem> items, string path)
+    {
+        var host = new StackPanel { Width = 300 };
+        host.SetResourceReference(Panel.BackgroundProperty, BertBrowser.Core.Theming.ThemeToken.MenuBackground);
+        foreach (var item in items) host.Children.Add(item);
+
+        host.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        host.Arrange(new Rect(host.DesiredSize));
+        host.UpdateLayout();
+
+        var width = (int)Math.Ceiling(host.ActualWidth);
+        var height = (int)Math.Ceiling(host.ActualHeight);
+        if (width <= 0 || height <= 0)
+            throw new AssertionException($"the menu laid out to {width}x{height}, so there is nothing to capture.");
+
+        var target = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        target.Render(host);
+
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(target));
+        if (Path.GetDirectoryName(path) is { Length: > 0 } directory) Directory.CreateDirectory(directory);
+        using var stream = File.Create(path);
+        encoder.Save(stream);
+    }
+
+    /// <summary>The real column menu's items, built the way a right-click builds them.</summary>
+    private List<MenuItem> ColumnMenuItems()
+    {
+        var view = FindNamed<FrameworkElement>("FileListView");
+        var tabView = VisualTreeUtil.FindAncestor<DirectoryTabView>(view)
+            ?? throw new AssertionException("The file list is not inside a DirectoryTabView.");
+
+        var menu = tabView.ColumnMenuForHarness;
+        menu.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.ContextMenu.OpenedEvent, menu));
+
+        var items = menu.Items.OfType<MenuItem>().ToList();
+        menu.Items.Clear(); // detach them, so they can be hosted somewhere else
+        return items;
+    }
+
+    /// <summary>
+    /// What a shell-metadata cell actually reads: <c>assert-metadata sample.png System.Image.Dimensions 64 x 64</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Substring, and deliberately: the property system formats a value for display in the machine's
+    /// own conventions, so pinning the whole string would make this fail on a differently-configured
+    /// Windows rather than on a broken read.
+    /// </para>
+    /// <para>
+    /// <b>Read off the rendered cell, not out of the view model.</b> The first version asked the row
+    /// in C# and passed while every such column rendered permanently blank — the values were being
+    /// read and cached, and the binding that should have shown them was never updating. An assertion
+    /// that cannot see that is not asserting the feature.
+    /// </para>
+    /// </remarks>
+    private void AssertMetadata(string rest)
+    {
+        var (name, tail) = Split(rest);
+        var (canonical, expected) = Split(tail);
+        if (canonical.Length == 0 || expected.Length == 0)
+            throw new FormatException("assert-metadata wants a row, a canonical name and the text to find.");
+
+        var row = Row(name);
+        var actual = session.Dispatcher.Invoke(() => CellText(row, canonical));
+
+        if (!actual.Contains(expected.Trim('"'), StringComparison.OrdinalIgnoreCase))
+            throw new AssertionException(
+                $"the '{canonical}' cell of '{name}' reads '{actual}', expected it to contain '{expected}'.");
+    }
+
+    /// <summary>What a row's cell for one column actually has on screen.</summary>
+    private string CellText(FileItemViewModel row, string columnId)
+    {
+        var ids = LiveColumns().Select(FileListColumns.GetId).ToList();
+        var index = ids.FindIndex(id => id.Equals(columnId, StringComparison.OrdinalIgnoreCase));
+        if (index < 0)
+            throw new AssertionException($"there is no '{columnId}' column: {ColumnSummary()}");
+
+        if (FileList().ItemContainerGenerator.ContainerFromItem(row) is not ListViewItem container)
+            throw new AssertionException(
+                $"'{row.Name}' has no realized row, so nothing is rendered to read.");
+
+        var presenter = VisualTreeUtil.FindDescendant<GridViewRowPresenter>(container)
+            ?? throw new AssertionException("the row has no GridViewRowPresenter.");
+
+        // Ordered by where each cell actually sits, not by the order GridViewRowPresenter happens to
+        // hold its children in — those two are not the same, and assuming they were made this read
+        // the neighbouring column.
+        var cells = Enumerable.Range(0, VisualTreeHelper.GetChildrenCount(presenter))
+            .Select(i => VisualTreeHelper.GetChild(presenter, i))
+            .OfType<UIElement>()
+            .OrderBy(c => c.TranslatePoint(new Point(0, 0), presenter).X)
+            .ToList();
+
+        var cell = cells.ElementAtOrDefault(index);
+        if (cell is null) return "";
+
+        // The cell itself as well as its descendants: a column with a CellTemplate puts a
+        // ContentPresenter here with the TextBlock inside it, while one rendered from
+        // DisplayMemberBinding — which is every shell-metadata column — *is* the TextBlock. Looking
+        // only underneath reads those as permanently empty, which is a very convincing way to
+        // mistake a working feature for a broken one.
+        var blocks = new[] { cell }.Concat(Descendants(cell)).OfType<TextBlock>();
+        return string.Join("", blocks.Select(t => t.Text));
+    }
+
+    /// <summary>The whole column order, as ids: <c>assert-columns Name, Size, Type</c>.</summary>
+    private void AssertColumns(string rest)
+    {
+        var wanted = Require(rest, "assert-columns")
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var actual = session.Dispatcher.Invoke(() => LiveColumns().Select(FileListColumns.GetId).ToArray());
+
+        if (!wanted.SequenceEqual(actual, StringComparer.OrdinalIgnoreCase))
+            throw new AssertionException(
+                $"expected the columns to be [{string.Join(", ", wanted)}], they are [{string.Join(", ", actual)}].");
+    }
 
     private FileItemViewModel Row(string name) => session.Dispatcher.Invoke(() =>
         session.Tab.FileList.Items.FirstOrDefault(
@@ -1344,15 +1638,18 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
     private void Sort(string rest)
     {
-        var column = Require(rest, "sort").ToLowerInvariant() switch
-        {
-            "name" => SortColumn.Name,
-            "size" => SortColumn.Size,
-            "modified" or "date" => SortColumn.Modified,
-            "type" => SortColumn.Type,
-            var other => throw new FormatException(
-                $"sort wants name, size, modified or type, got '{other}'."),
-        };
+        var wanted = Require(rest, "sort");
+
+        // Any catalogue id, so a shell-metadata column can be sorted by from a script the same way a
+        // built-in can. "date" stays as an alias for Modified; scripts have used it since before
+        // columns were configurable.
+        var column = wanted.Equals("date", StringComparison.OrdinalIgnoreCase)
+            ? ColumnCatalog.Modified
+            : ColumnCatalog.BuiltIns.Concat(ColumnCatalog.Curated)
+                  .FirstOrDefault(s => s.Id.Equals(wanted, StringComparison.OrdinalIgnoreCase))?.Id
+              ?? throw new FormatException(
+                  $"sort wants a column id, got '{wanted}'. Built-ins: " +
+                  string.Join(", ", ColumnCatalog.BuiltIns.Where(s => s.Sortable).Select(s => s.Id)) + ".");
 
         Invoke(() => session.Tab.FileList.SetSort(column));
         session.Settle();
@@ -1447,6 +1744,17 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         }
     }
 
+    private SettingsViewModel SettingsFor(SettingsCategory category)
+    {
+        var vm = new SettingsViewModel(
+            session.Services.GetRequiredService<AppSettings>(),
+            session.Services.GetRequiredService<IThemeService>(),
+            session.Services.GetRequiredService<IShellNewCatalog>(),
+            session.Services.GetRequiredService<IFolderHandlerService>());
+        vm.SelectedCategory = vm.Categories.First(c => c.Id == category);
+        return vm;
+    }
+
     private Window Build(string kind) => kind switch
     {
         "rename" => RenameDialog.Create(
@@ -1494,11 +1802,17 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         "new-file" => NewItemDialogFor(NewItemKind.File),
 
-        "settings" => new SettingsWindow(new SettingsViewModel(
-            session.Services.GetRequiredService<AppSettings>(),
-            session.Services.GetRequiredService<IThemeService>(),
-            session.Services.GetRequiredService<IShellNewCatalog>(),
-            session.Services.GetRequiredService<IFolderHandlerService>())),
+        "settings" => new SettingsWindow(SettingsFor(SettingsCategory.General)),
+
+        // Settings opens on General, so a page further down the list needs its own kind to be
+        // photographed at all.
+        "settings-columns" => new SettingsWindow(SettingsFor(SettingsCategory.Columns)),
+
+        "columns" => ColumnPickerDialog.Create(
+            session.Window, session.Tab.FileList.ResolvedColumns
+                .Where(c => !c.Injected)
+                .Select(c => new ColumnSetting(c.Id, c.Width))
+                .ToList()),
 
         "theme-editor" => new ThemeEditorWindow(new AppearanceViewModel(
             session.Services.GetRequiredService<IThemeService>())),
@@ -1540,7 +1854,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         _ => throw new FormatException(
             $"'{kind}' is not a dialog. Try: new-folder, new-file, rename, rename-advanced, " +
             "delete, delete-permanent, message, warning, properties, settings, theme-editor, " +
-            "disk-usage, duplicates, transfer, extract, compress, archive-password."),
+            "disk-usage, duplicates, transfer, extract, compress, archive-password, " +
+            "settings-columns, columns."),
     };
 
     /// <summary>
@@ -1646,6 +1961,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             ("items", Text(tab.FileList.Items.Count)),
             ("selected", Text(tab.SelectedItems.Count)),
             ("flattened", Bool(tab.FileList.IsFlattened)),
+            ("columns", Quote(string.Join(", ", tab.FileList.ResolvedColumns.Select(c => c.Id)))),
             ("insideArchive", Bool(tab.FileList.IsInsideArchive)),
             ("search", Quote(tab.ActiveSearchText)),
             ("globalSearch", Bool(tab.IsGlobalSearch)),
