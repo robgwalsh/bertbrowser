@@ -18,7 +18,12 @@ namespace BertBrowser.Core.Services.Search;
 public abstract class SearchNode
 {
     /// <summary>Whether <paramref name="candidate"/> satisfies this node. The definition.</summary>
-    public abstract bool Matches(in SearchCandidate candidate);
+    /// <remarks>
+    /// Three-valued rather than boolean, because a <c>content:</c> term cannot be answered from an
+    /// index row or a directory entry — see <see cref="SearchMatch"/>. Every other term is
+    /// <see cref="SearchMatch.Yes"/> or <see cref="SearchMatch.No"/> and always was.
+    /// </remarks>
+    public abstract SearchMatch Matches(in SearchCandidate candidate);
 
     /// <summary>
     /// Writes a WHERE fragment that matches <em>at least</em> everything <see cref="Matches"/>
@@ -67,6 +72,29 @@ public abstract class SearchNode
     /// runs a second, opt-in pass.
     /// </remarks>
     public virtual bool WantsArchives => false;
+
+    /// <summary>Whether any node in this subtree asks for file contents (<c>content:</c>).</summary>
+    /// <remarks>
+    /// <para><strong>This one <em>does</em> propagate through a <see cref="NotNode"/>, unlike
+    /// <see cref="WantsHidden"/> and <see cref="WantsArchives"/> — which is the asymmetry a reader
+    /// will trip on, so here is the reason.</strong> Those two are requests to <em>widen</em> a
+    /// scan, and <c>!is:hidden</c> or <c>!in:archives</c> asks for the default rather than for more
+    /// work. But <c>!content:x</c> is not a request for less work: deciding that a file does
+    /// <em>not</em> contain something needs it read exactly as much as deciding that it does.</para>
+    /// <para>It is a static property of the query, never of a candidate. Its job is to decide
+    /// whether the second pass runs at all, and to refuse the places that cannot run one — the
+    /// correctness of <see cref="Matches"/> is <see cref="SearchMatch"/>'s job, not this.</para>
+    /// </remarks>
+    public virtual bool NeedsContent => false;
+
+    /// <summary>Adds every <c>content:</c> needle in this subtree to <paramref name="into"/>.</summary>
+    /// <remarks>The scanner highlights whichever needle it finds first, so it has to know what to
+    /// look for without taking the tree apart itself — and collecting them here means a needle
+    /// cannot be missed because it sat under a bracket or a <c>NOT</c>.</remarks>
+    public virtual void CollectContentNeedles(List<string> into) { }
+
+    /// <summary>A settled yes-or-no, for the terms that never need to read anything.</summary>
+    protected static SearchMatch Verdict(bool matched) => matched ? SearchMatch.Yes : SearchMatch.No;
 }
 
 /// <summary>Every child must match.</summary>
@@ -76,14 +104,25 @@ public sealed class AndNode : SearchNode
 
     public AndNode(IReadOnlyList<SearchNode> children) => Children = children;
 
-    public override bool Matches(in SearchCandidate candidate)
+    /// <summary>
+    /// One settled <see cref="SearchMatch.No"/> refuses the whole conjunction without reading
+    /// anything — which is what makes <c>is:dir content:x</c> cost nothing instead of handing every
+    /// directory in the tree to a file opener.
+    /// </summary>
+    public override SearchMatch Matches(in SearchCandidate candidate)
     {
         // No LINQ and no closure: this runs once per entry of a whole-subtree walk, and
         // `in` parameters cannot be captured by a lambda anyway.
+        var undecided = false;
         for (var i = 0; i < Children.Count; i++)
-            if (!Children[i].Matches(candidate))
-                return false;
-        return true;
+        {
+            switch (Children[i].Matches(candidate))
+            {
+                case SearchMatch.No: return SearchMatch.No;
+                case SearchMatch.NeedsContent: undecided = true; break;
+            }
+        }
+        return undecided ? SearchMatch.NeedsContent : SearchMatch.Yes;
     }
 
     public override void WriteSql(SqlPredicateBuilder builder)
@@ -104,6 +143,13 @@ public sealed class AndNode : SearchNode
     public override bool WantsHidden => Children.Any(c => c.WantsHidden);
 
     public override bool WantsArchives => Children.Any(c => c.WantsArchives);
+
+    public override bool NeedsContent => Children.Any(c => c.NeedsContent);
+
+    public override void CollectContentNeedles(List<string> into)
+    {
+        for (var i = 0; i < Children.Count; i++) Children[i].CollectContentNeedles(into);
+    }
 }
 
 /// <summary>Any child may match.</summary>
@@ -113,12 +159,24 @@ public sealed class OrNode : SearchNode
 
     public OrNode(IReadOnlyList<SearchNode> children) => Children = children;
 
-    public override bool Matches(in SearchCandidate candidate)
+    /// <summary>
+    /// One settled <see cref="SearchMatch.Yes"/> satisfies the whole disjunction without reading
+    /// anything. That is the other half of the optimisation: in <c>content:a OR ext:txt</c> every
+    /// <c>.txt</c> is a hit already, and returning "undecided" for it would spend the file budget
+    /// re-establishing what the name had settled.
+    /// </summary>
+    public override SearchMatch Matches(in SearchCandidate candidate)
     {
+        var undecided = false;
         for (var i = 0; i < Children.Count; i++)
-            if (Children[i].Matches(candidate))
-                return true;
-        return false;
+        {
+            switch (Children[i].Matches(candidate))
+            {
+                case SearchMatch.Yes: return SearchMatch.Yes;
+                case SearchMatch.NeedsContent: undecided = true; break;
+            }
+        }
+        return undecided ? SearchMatch.NeedsContent : SearchMatch.No;
     }
 
     public override void WriteSql(SqlPredicateBuilder builder)
@@ -141,6 +199,13 @@ public sealed class OrNode : SearchNode
     public override bool WantsHidden => Children.Any(c => c.WantsHidden);
 
     public override bool WantsArchives => Children.Any(c => c.WantsArchives);
+
+    public override bool NeedsContent => Children.Any(c => c.NeedsContent);
+
+    public override void CollectContentNeedles(List<string> into)
+    {
+        for (var i = 0; i < Children.Count; i++) Children[i].CollectContentNeedles(into);
+    }
 }
 
 /// <summary>The child must not match.</summary>
@@ -150,7 +215,23 @@ public sealed class NotNode : SearchNode
 
     public NotNode(SearchNode child) => Child = child;
 
-    public override bool Matches(in SearchCandidate candidate) => !Child.Matches(candidate);
+    /// <summary>
+    /// Negation flips a settled answer and leaves an unsettled one alone.
+    /// </summary>
+    /// <remarks>
+    /// <strong>This is the counterpart of the rule <see cref="WriteSql"/> keeps below</strong> — a
+    /// superset cannot be negated — and here it costs nothing to state, because "undecided" is a
+    /// value rather than a guess. Map <see cref="SearchMatch.NeedsContent"/> to either
+    /// <see cref="SearchMatch.Yes"/> or <see cref="SearchMatch.No"/> instead and
+    /// <c>!content:foo</c> breaks: to <c>No</c> and the first pass yields nothing at all, to
+    /// <c>Yes</c> and the reader is never asked and every file is reported as a hit.
+    /// </remarks>
+    public override SearchMatch Matches(in SearchCandidate candidate) => Child.Matches(candidate) switch
+    {
+        SearchMatch.Yes => SearchMatch.No,
+        SearchMatch.No => SearchMatch.Yes,
+        _ => SearchMatch.NeedsContent,
+    };
 
     /// <summary>
     /// <strong>A superset cannot be negated.</strong> Every <see cref="WriteSql"/> is allowed to
@@ -189,4 +270,11 @@ public sealed class NotNode : SearchNode
     /// <summary>Deliberately not the child's either, and for the same reason: <c>!in:archives</c>
     /// asks to leave containers out, which is already what happens.</summary>
     public override bool WantsArchives => false;
+
+    /// <summary>Unlike the two above, this one <em>does</em> take the child's: establishing that a
+    /// file does not contain something needs it read exactly as much as establishing that it does.
+    /// See the remarks on <see cref="SearchNode.NeedsContent"/>.</summary>
+    public override bool NeedsContent => Child.NeedsContent;
+
+    public override void CollectContentNeedles(List<string> into) => Child.CollectContentNeedles(into);
 }

@@ -161,6 +161,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "preview": Preview(rest); break;
             case "preview-mode": PreviewViewMode(rest); break;
             case "preview-fixture": PreviewFixture(rest); break;
+            case "content-fixture": ContentFixture(rest); break;
             case "sort": Sort(rest); break;
             case "theme": Theme(rest); break;
 
@@ -176,6 +177,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-path": AssertPath(rest); break;
             case "assert-status": AssertStatus(rest); break;
             case "assert-error": AssertError(rest); break;
+            case "assert-match": AssertMatch(rest); break;
+            case "stop-search": Invoke(() => session.Tab.StopSearchCommand.Execute(null)); break;
             case "assert-indexing": AssertIndexing(rest); break;
             case "assert-transfer": AssertTransfer(rest); break;
             case "assert-transfer-indeterminate": AssertTransferIndeterminate(); break;
@@ -253,6 +256,53 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         Sandbox.Stamp(root);
         output.WriteLine($"# preview fixture: {root}");
+    }
+
+    /// <summary>
+    /// Files whose <em>contents</em> are the assertion, for driving <c>content:</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Its own fixture rather than an addition to <c>tree</c> or <c>preview-fixture</c>, for
+    /// the reason spelled out on the latter: adding files to a shared fixture moves every
+    /// <c>assert-count</c> in every script that uses it. And <c>Sandbox.Write</c> cannot serve
+    /// here, because it fills a file with its own name repeated — which is exactly the case a
+    /// content search has to be proved <em>not</em> to be answering.</para>
+    /// <para>Each file is here for one rule. <c>needle.txt</c> is named for the needle and does not
+    /// contain it, and <c>haystack.txt</c> is the other way round: together they are what proves
+    /// the reader ran at all rather than the name term quietly answering. <c>decoy.txt</c> holds
+    /// both words of the phrase but never adjacently. <c>utf16.txt</c> exercises the
+    /// bomless-UTF-16 rung of the encoding ladder end to end. <c>opaque.bin</c> spells the needle
+    /// in plain bytes behind a NUL, so a hit on it would mean the binary sniff had stopped working.
+    /// </para>
+    /// </remarks>
+    private void ContentFixture(string rest)
+    {
+        var root = _sandbox.RequireInside(rest.Length == 0 ? "Content" : rest, "content-fixture");
+        Directory.CreateDirectory(root);
+
+        File.WriteAllText(Path.Combine(root, "haystack.txt"),
+            "first line\nthe annual report is late\nthird line\n");
+        File.WriteAllText(Path.Combine(root, "decoy.txt"),
+            "annual sales figures\nand a separate report\n");
+        File.WriteAllText(Path.Combine(root, "code.cs"),
+            "public class Thing\n{\n    // the annual report goes here\n}\n");
+
+        // Named for the needle, and does not contain it.
+        File.WriteAllText(Path.Combine(root, "annual report.md"),
+            "this file is named for it but never says the words\n");
+
+        // UTF-16 LE with no byte-order mark — what most Windows tools emit.
+        File.WriteAllText(Path.Combine(root, "utf16.txt"),
+            "the annual report, in two-byte characters\n", new UnicodeEncoding(false, false));
+
+        var opaque = new byte[2048];
+        opaque[0] = 0;
+        Encoding.ASCII.GetBytes("the annual report").CopyTo(opaque, 16);
+        for (var i = 64; i < opaque.Length; i++) opaque[i] = (byte)(i % 251);
+        File.WriteAllBytes(Path.Combine(root, "opaque.bin"), opaque);
+
+        Sandbox.Stamp(root);
+        output.WriteLine($"# content fixture: {root}");
     }
 
     /// <summary>A 64×64 PNG with an alpha hole through the middle, drawn from a formula so two
@@ -1753,6 +1803,37 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     /// against it cannot tell "the query was refused" from "the query ran and found nothing".
     /// The banner appears only for the first.
     /// </remarks>
+    /// <summary>
+    /// Asserts on a row's Match column: <c>assert-match &lt;row&gt; &lt;text&gt;</c>.
+    /// </summary>
+    /// <remarks>
+    /// The only way to see the matching line through the real window. Without it the whole
+    /// content-snippet path — the reader's line numbering, the clipping, and the three runs the
+    /// cell is built from — is covered by unit tests and by nothing that renders.
+    /// </remarks>
+    private void AssertMatch(string rest)
+    {
+        var parts = rest.Split(' ', 2, StringSplitOptions.TrimEntries);
+        if (parts.Length < 2)
+            throw new InvalidOperationException("assert-match needs a row name and some text.");
+
+        var (row, expected) = (parts[0], parts[1]);
+
+        var actual = session.Dispatcher.Invoke(() =>
+            session.Tab.FileList.Items
+                .FirstOrDefault(i => string.Equals(i.Name, row, StringComparison.OrdinalIgnoreCase))
+                ?.Match?.Line);
+
+        if (actual is null)
+            throw new AssertionException(
+                $"expected row '{row}' to carry a content match containing '{expected}', " +
+                "but it has none (or the row is not there).");
+
+        if (!actual.Contains(expected, StringComparison.OrdinalIgnoreCase))
+            throw new AssertionException(
+                $"expected '{row}' to have matched on a line containing '{expected}', got '{actual}'.");
+    }
+
     private void AssertError(string rest)
     {
         var actual = session.Dispatcher.Invoke(() => session.Tab.FileList.ErrorMessage);

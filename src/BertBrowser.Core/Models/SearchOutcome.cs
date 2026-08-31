@@ -31,10 +31,23 @@ public enum SearchResultSource
 /// unanswerable rather than unmatched, and reporting a plain "no results" would say the disk
 /// holds no such files when what is really true is that nothing measured it.
 /// </param>
+/// <param name="Cancelled">
+/// The user stopped the search. <paramref name="Hits"/> is then a floor rather than the answer —
+/// what is in it really did match. Separate from <paramref name="ContentScan"/>'s own
+/// <c>Incomplete</c> for the reason <c>DuplicateScanOutcome</c> keeps its two flags apart:
+/// conflating "you stopped it" with "some files could not be read" makes a cancelled run look like
+/// a disk full of broken files.
+/// </param>
+/// <param name="ContentScan">
+/// What the <c>content:</c> reading pass actually did, or null when the query had no content term.
+/// Null is therefore also how a caller knows whether to show the Match column at all.
+/// </param>
 public sealed record SearchOutcome(
     IReadOnlyList<SearchHit> Hits,
     bool Truncated,
     SearchResultSource Source,
     bool RefreshPending,
     string? Problem = null,
-    bool ScopeLacksMetadata = false);
+    bool ScopeLacksMetadata = false,
+    bool Cancelled = false,
+    ContentScanReport? ContentScan = null);

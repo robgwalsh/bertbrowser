@@ -91,7 +91,32 @@ public static class TextPreviewReader
     {
         var budget = (int)Math.Clamp(byteBudget, 0, int.MaxValue - 1);
         var (bytes, moreRemains) = ReadAtMost(stream, budget);
+        return Decode(bytes, moreRemains, maxLines, maxLineLength, forceText);
+    }
 
+    /// <summary>
+    /// The decoding half of <see cref="Read"/>, over bytes somebody else has already read.
+    /// </summary>
+    /// <remarks>
+    /// <para>Split out for the content search, which opens thousands of files where the pane opens
+    /// one and so cannot afford <see cref="ReadAtMost"/>'s fresh <c>byte[budget + 1]</c> and the
+    /// copy out of it — it rents from <see cref="System.Buffers.ArrayPool{T}"/> and hands the span
+    /// here instead.</para>
+    /// <para><strong>The point is what it prevents.</strong> The ladder below — byte-order mark,
+    /// bomless UTF-16, NUL-means-binary, strict UTF-8, Latin-1 — is the only one in the app, so the
+    /// grep and the pane cannot come to different conclusions about what a file is. A second
+    /// implementation would be two answers to one question.</para>
+    /// </remarks>
+    /// <param name="moreRemains">Whether the caller's budget cut the read short. Passed into the
+    /// UTF-8 validation, where a sequence running off the end is evidence of the cut when there was
+    /// one and evidence against UTF-8 when there was not.</param>
+    public static TextPreview Decode(
+        ReadOnlySpan<byte> bytes,
+        bool moreRemains,
+        int maxLines = DefaultMaxLines,
+        int maxLineLength = DefaultMaxLineLength,
+        bool forceText = false)
+    {
         if (bytes.Length == 0)
             return new TextPreview("", "UTF-8", "", 0, moreRemains, LooksBinary: false);
 
@@ -99,7 +124,7 @@ public static class TextPreviewReader
         if (encoding is null)
             return new TextPreview("", "Binary", "", 0, moreRemains, LooksBinary: true);
 
-        ReadOnlySpan<byte> body = bytes.AsSpan(bomLength);
+        ReadOnlySpan<byte> body = bytes[bomLength..];
 
         // A budget cut lands wherever it lands, which for a multi-byte encoding is often mid
         // character. Trimming the partial tail is cheaper than explaining the replacement glyph
@@ -145,7 +170,7 @@ public static class TextPreviewReader
 
     /// <summary>Null encoding means the bytes are not text.</summary>
     private static (Encoding? Encoding, string Name, int BomLength) DetectEncoding(
-        byte[] bytes, bool truncated, bool forceText = false)
+        ReadOnlySpan<byte> bytes, bool truncated, bool forceText = false)
     {
         if (StartsWith(bytes, 0xEF, 0xBB, 0xBF)) return (new UTF8Encoding(false), "UTF-8 (BOM)", 3);
         if (StartsWith(bytes, 0xFF, 0xFE, 0x00, 0x00)) return (new UTF32Encoding(false, false), "UTF-32 LE", 4);
@@ -168,7 +193,7 @@ public static class TextPreviewReader
 
     /// <summary>UTF-16 with no BOM is what most Windows tools emit, and it is the one case where
     /// NUL bytes mean text rather than binary. The tell is that they are all on one parity.</summary>
-    private static (Encoding, string, int)? DetectBomlessUtf16(byte[] bytes)
+    private static (Encoding, string, int)? DetectBomlessUtf16(ReadOnlySpan<byte> bytes)
     {
         var sample = Math.Min(bytes.Length, 8192);
         if (sample < 4) return null;
@@ -192,7 +217,7 @@ public static class TextPreviewReader
         return null;
     }
 
-    private static bool StartsWith(byte[] bytes, params byte[] prefix)
+    private static bool StartsWith(ReadOnlySpan<byte> bytes, params ReadOnlySpan<byte> prefix)
     {
         if (bytes.Length < prefix.Length) return false;
         for (var i = 0; i < prefix.Length; i++)
@@ -200,7 +225,7 @@ public static class TextPreviewReader
         return true;
     }
 
-    private static bool HasNul(byte[] bytes)
+    private static bool HasNul(ReadOnlySpan<byte> bytes)
     {
         var sample = Math.Min(bytes.Length, 8192);
         for (var i = 0; i < sample; i++)
@@ -211,7 +236,7 @@ public static class TextPreviewReader
     /// <param name="truncated">Whether the budget cut the read short. A sequence running off the
     /// end is evidence of the cut when it did, and evidence against UTF-8 when it did not — which
     /// is the difference between reading a Latin-1 file correctly and mangling it.</param>
-    private static bool IsValidUtf8(byte[] bytes, bool truncated)
+    private static bool IsValidUtf8(ReadOnlySpan<byte> bytes, bool truncated)
     {
         var i = 0;
         while (i < bytes.Length)

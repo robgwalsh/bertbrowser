@@ -87,7 +87,7 @@
                                  AutomationProperties.Name="Search this folder"
                                  Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                                  KeyDown="SearchBox_KeyDown"
-                                 ToolTip="Search this folder and everything under it (Ctrl+F). Filters: ext: size: dm: path: is: re:, plus OR and !"/>
+                                 ToolTip="Search this folder and everything under it (Ctrl+F). Filters: ext: size: dm: path: is: re: in: content:, plus OR and !"/>
                         <TextBlock Text="Search this folder" Foreground="{StaticResource Theme.Text.Placeholder}" Margin="4,0,0,0"
                                    VerticalAlignment="Center" IsHitTestVisible="False">
                             <TextBlock.Style>
@@ -309,6 +309,26 @@
                             <GridViewColumn.CellTemplate>
                                 <DataTemplate>
                                     <TextBlock Text="{Binding RelativePath}" Opacity="0.7"/>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <!-- The matching line from a content: search. Deliberately carries no Tag:
+                             DirectoryTabView.xaml.cs parses the Tag into a SortColumn, and sorting
+                             a result set by line number across different files means nothing. -->
+                        <GridViewColumn Width="0" x:Name="MatchColumn">
+                            <GridViewColumnHeader Content="Match"/>
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock TextTrimming="CharacterEllipsis">
+                                        <Run Text="{Binding MatchLineNumber, Mode=OneWay}"
+                                             Foreground="{StaticResource Theme.Text.Secondary}"/>
+                                        <Run Text=" "/><Run Text="{Binding MatchPrefix, Mode=OneWay}"/><Run
+                                             Text="{Binding MatchText, Mode=OneWay}"
+                                             Background="{StaticResource Theme.Input.SelectionBackground}"
+                                             Foreground="{StaticResource Theme.Input.SelectionForeground}"
+                                             FontWeight="SemiBold"/><Run
+                                             Text="{Binding MatchSuffix, Mode=OneWay}"/>
+                                    </TextBlock>
                                 </DataTemplate>
                             </GridViewColumn.CellTemplate>
                         </GridViewColumn>

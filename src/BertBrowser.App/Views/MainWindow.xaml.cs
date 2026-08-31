@@ -326,6 +326,15 @@ public partial class MainWindow : ThemedWindow
     {
         if (e.Key != Key.Escape) return;
 
+        // Two-stage, exactly as the per-folder box is: while a content search is still reading,
+        // Escape stops it and keeps what it found rather than throwing those results away.
+        if (_shell.ActiveTab.IsSearchRunning)
+        {
+            _shell.ActiveTab.StopSearchCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
+
         // Escape ends the search and hands focus back to the list, which is what the results were
         // showing. The field itself stays where it is — it is part of the chrome now.
         _shell.ActiveTab.ClearSearchCommand.Execute(null);

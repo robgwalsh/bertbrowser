@@ -199,6 +199,8 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     {
         _navigationCts.Cancel();
         _searchDebounceCts.Cancel();
+        _searchStopCts?.Cancel();
+        _searchStopCts?.Dispose();
         FileList.PropertyChanged -= OnFileListPropertyChanged;
         Preview.Dispose();
         StopWatching();
@@ -538,6 +540,25 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
 
     private async Task RunSearchAsync(CancellationToken ct)
     {
+        try
+        {
+            await RunSearchCoreAsync(ct);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // A *stop* rather than a supersede: the navigation token is untouched, so nothing else
+            // is coming to end this search. BeginSearch raised IsLoading and only
+            // CompleteSearchAsync lowers it, so without this the bar spins for ever and
+            // UiSession.Settle — which waits on exactly that flag — never returns.
+            IsSearchRunning = false;
+            FileList.EndSearch();
+            StatusText =
+                $"Stopped — {FileList.Items.Count} result(s) so far for '{ActiveSearchText}'";
+        }
+    }
+
+    private async Task RunSearchCoreAsync(CancellationToken ct)
+    {
         var queryText = ActiveSearchText;
         var global = IsGlobalSearch;
 
@@ -551,7 +572,29 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
             return;
         }
 
+        var needsContent = ParsedSearch.Query!.NeedsContent;
         FileList.BeginSearch();
+        FileList.ShowsContentMatches = needsContent;
+
+        // Escape means "stop this, keep what you found" while a search is running, so the reading
+        // pass gets a token of its own rather than being cancelled only by navigation. Both are
+        // linked: typing more still supersedes the run, and there the outcome is discarded below.
+        _searchStopCts?.Dispose();
+        _searchStopCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var stopToken = _searchStopCts.Token;
+        IsSearchRunning = needsContent;
+
+        // How much of the reading pass is left. A separate channel from the hits, because it
+        // answers a different question — and during the tens of seconds a whole-tree grep can take
+        // it is the only thing worth saying.
+        var contentProgress = new Progress<ContentScanProgress>(p =>
+        {
+            if (ct.IsCancellationRequested) return;
+            StatusText = p.FilesToRead > 0
+                ? $"Reading {p.FilesRead:N0} of {p.FilesToRead:N0} file(s) for '{queryText}' — " +
+                  $"{FileList.Items.Count} result(s) so far — Esc to stop"
+                : $"Searching for '{queryText}'…";
+        });
 
         SearchOutcome? outcome;
         // Search never surfaces hidden files/folders, regardless of the "Show hidden items"
@@ -559,12 +602,35 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         // results a search is actually for.
         if (global)
         {
-            // Whole-PC: served straight from the MFT index, no live streaming.
+            // Whole-PC: the names come straight from the MFT index. A content term then turns that
+            // instant answer into tens of seconds of reading, which is why this streams now.
             StatusText = $"Searching this PC for '{queryText}'…";
-            outcome = await _searchService.SearchAllAsync(queryText, ct, includeHidden: false);
+            var globalProgress = new Progress<IReadOnlyList<SearchHit>>(batch =>
+            {
+                if (ct.IsCancellationRequested) return;
+                FileList.AppendSearchHits(batch);
+            });
+            outcome = await _searchService.SearchAllAsync(
+                queryText, stopToken, includeHidden: false,
+                liveBatches: needsContent ? globalProgress : null,
+                contentProgress: needsContent ? contentProgress : null);
         }
         else if (_archives.Resolve(CurrentPath) is { } here)
         {
+            // Refused rather than answered wrongly, and this branch needs its own check because it
+            // never reaches SearchService: an archive entry has no file on disk, so its candidate
+            // carries no content — and an unread candidate counts as a possible match by design.
+            // Run the walk anyway and every entry in the container comes back as a hit.
+            if (needsContent)
+            {
+                const string message = "content: can't look inside archives — extract it first.";
+                FileList.ErrorMessage = message;
+                StatusText = message;
+                FileList.EndSearch();
+                IsSearchRunning = false;
+                return;
+            }
+
             // Inside a container the index is no help — it holds nothing about archive contents,
             // and handing it a virtual root would crawl a path that does not exist straight into
             // fs_entry. It is also unnecessary: the listing already read the whole directory, so
@@ -589,11 +655,22 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
             {
                 if (ct.IsCancellationRequested) return;
                 FileList.AppendSearchHits(batch);
-                StatusText = $"{FileList.Items.Count} result(s) so far for '{queryText}'…";
+
+                // The content pass owns the status line once it starts reporting, or the two
+                // channels would fight over one row of text every hundred milliseconds.
+                if (!needsContent)
+                    StatusText = $"{FileList.Items.Count} result(s) so far for '{queryText}'…";
             });
-            outcome = await _searchService.SearchAsync(CurrentPath, queryText, ct, progress, includeHidden: false);
+            outcome = await _searchService.SearchAsync(
+                CurrentPath, queryText, stopToken, progress, includeHidden: false,
+                contentProgress: needsContent ? contentProgress : null);
         }
 
+        IsSearchRunning = false;
+
+        // The navigation token, not the stop token: typing more supersedes this run and its
+        // results belong to a query that is no longer on screen. A *stop* leaves that token alone,
+        // so the floor the pass returned is kept and shown.
         if (outcome is null || ct.IsCancellationRequested) return;
 
         // Global hits come from MFT rows with no size/timestamp, so hydrate them from disk.
@@ -609,6 +686,18 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
 
         var suffix = outcome.Source switch
         {
+            // What the reading pass did comes first, because it explains the count more directly
+            // than anything about the index does: a content search that stopped at a ceiling found
+            // what it found in the part of the disk it reached, and saying "0 results" instead
+            // would report an absence the search never established.
+            _ when outcome.Cancelled => " — stopped",
+            _ when outcome.ContentScan is { } scan && scan.Limit != ContentScanLimit.None =>
+                ContentLimitSuffix(scan),
+            _ when outcome.ContentScan is { Unreadable: > 0 } some =>
+                $" — {some.Unreadable:N0} file(s) could not be read",
+            _ when outcome.ContentScan is { Truncated: > 0 } big =>
+                $" — {big.Truncated:N0} file(s) were only searched to their first " +
+                $"{ByteSizeFormatter.Format(ContentSearchRules.MaxBytesPerFile)}",
             // A size or date filter against an index that holds no lengths cannot match anything,
             // so "0 results" would report an empty disk rather than an unmeasured one. Said first
             // because it explains the count, which every other suffix assumes is meaningful.
@@ -622,6 +711,49 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         };
         var truncated = outcome.Truncated ? " (showing first 1,000)" : "";
         StatusText = $"{outcome.Hits.Count} result(s) for '{queryText}' in {scope}{truncated}{suffix}";
+    }
+
+    /// <summary>
+    /// Where a content search ran out of budget, named rather than merely counted.
+    /// </summary>
+    /// <remarks>
+    /// A whole-PC content search walks the index in path order with no <c>ORDER BY</c>, so running
+    /// out means stopping somewhere alphabetical — quite possibly before <c>C:\Users</c>. "Searched
+    /// the first 50,000 files" is true and still reads as "your PC has no such file"; naming where
+    /// it reached is what turns that into a bound the reader can act on.
+    /// </remarks>
+    private static string ContentLimitSuffix(ContentScanReport scan)
+    {
+        var where = scan.LastPathExamined is { Length: > 0 } path ? $", up to {path}" : "";
+        return scan.Limit switch
+        {
+            ContentScanLimit.Bytes =>
+                $" — stopped after reading {ByteSizeFormatter.Format(scan.BytesRead)}{where}",
+            _ => $" — searched the first {scan.FilesRead:N0} file(s){where}",
+        };
+    }
+
+    /// <summary>True while a reading pass is in flight, so Escape can stop it instead of clearing.</summary>
+    [ObservableProperty]
+    private bool _isSearchRunning;
+
+    private CancellationTokenSource? _searchStopCts;
+
+    /// <summary>
+    /// Stops a running content search but keeps what it found.
+    /// </summary>
+    /// <remarks>
+    /// Cancels a token linked to — but distinct from — the navigation one, so the pass returns its
+    /// floor and the outcome is still used. Cancelling navigation instead would discard the
+    /// results, which is right when the user typed another character and wrong when they asked it
+    /// to stop.
+    /// </remarks>
+    [RelayCommand]
+    private void StopSearch()
+    {
+        if (!IsSearchRunning) return;
+        _searchStopCts?.Cancel();
+        IsSearchRunning = false;
     }
 
     [RelayCommand]

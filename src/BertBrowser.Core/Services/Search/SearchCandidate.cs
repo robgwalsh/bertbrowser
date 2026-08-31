@@ -10,6 +10,11 @@ namespace BertBrowser.Core.Services.Search;
 /// walker computes the uppercased name on its way to building a path key, and the index stores
 /// both folded. Matching therefore allocates nothing per candidate, which matters: this runs
 /// once per entry of a live scan over a whole subtree.</para>
+/// <para><strong>Never compare two of these.</strong> <see cref="Content"/> is a read cache hanging
+/// off an identity rather than part of one, so the generated equality would call a candidate
+/// different from itself depending on whether its file had been opened yet. Nothing compares them
+/// today — there are three construction sites, all feeding a <c>Matches</c> call — and this note is
+/// here so nothing starts.</para>
 /// <para>A row written by <c>MftVolumeIndexer.BuildFromUsnEnum</c> carries
 /// <see cref="SizeBytes"/> 0 and <see cref="ModifiedUtc"/> <see cref="DateTime.MinValue"/> —
 /// that build path records names only. Terms reading those fields must treat such a row as
@@ -21,10 +26,17 @@ namespace BertBrowser.Core.Services.Search;
 /// <param name="SizeBytes">Length in bytes; 0 for a directory and for an unmeasured row.</param>
 /// <param name="ModifiedUtc">Last write time in UTC; <see cref="DateTime.MinValue"/> when unknown.</param>
 /// <param name="Hidden">Effective hidden state (the entry's own, or an ancestor's).</param>
+/// <param name="Content">
+/// The file's decoded text, when it has been read. <strong>Null means "not read yet"</strong> —
+/// which is what every first-pass producer supplies, and what makes a <c>content:</c> term answer
+/// <see cref="SearchMatch.NeedsContent"/> rather than guessing. <see cref="ContentText.None"/> is
+/// the different thing: read, and there was nothing to search.
+/// </param>
 public readonly record struct SearchCandidate(
     string NameKey,
     string PathKey,
     bool IsDirectory,
     long SizeBytes,
     DateTime ModifiedUtc,
-    bool Hidden);
+    bool Hidden,
+    ContentText? Content = null);

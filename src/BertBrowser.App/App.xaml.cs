@@ -224,7 +224,16 @@ public partial class App : Application
                 s.GetRequiredService<BertBrowser.Core.Services.Elevation.IElevationLauncher>(),
                 s.GetRequiredService<BertBrowser.Core.Services.Elevation.IElevationTransportFactory>(),
                 BertBrowser.App.Services.Elevation.ElevatedProcess.CurrentUserSid ?? ""));
-        services.AddSingleton<ISearchService, SearchService>();
+        // The one content-search bound a person can move. A delegate, so the setting can change
+        // while this singleton lives, and Core still never sees AppSettings.
+        services.AddSingleton<ISearchService>(sp => new SearchService(
+            sp.GetRequiredService<FsIndexRepository>(),
+            sp.GetRequiredService<IndexCrawler>(),
+            sp.GetRequiredService<IIndexWatcherService>(),
+            sp.GetRequiredService<BertBrowser.Core.Services.Mft.IMftIndexService>(),
+            sp.GetRequiredService<BertBrowser.Core.Services.Archives.IArchiveBrowser>(),
+            contentReader: null,
+            contentBudget: () => sp.GetRequiredService<AppSettings>().SearchContentMaxBytes));
         services.AddSingleton<BertBrowser.Core.Services.DiskUsage.IDiskUsageService,
             BertBrowser.Core.Services.DiskUsage.DiskUsageService>();
         // Finding duplicates starts from the byte lengths the MFT pass already wrote, then reads

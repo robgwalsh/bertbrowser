@@ -32,7 +32,24 @@ public sealed class SearchQuery
     public static SearchQueryParse Parse(string? text) => SearchGrammar.Parse(text);
 
     /// <summary>Whether <paramref name="candidate"/> satisfies the query. The definition of a hit.</summary>
-    public bool Matches(in SearchCandidate candidate) => _root.Matches(candidate);
+    /// <remarks>
+    /// <strong>Undecided counts as a match here, and that is what keeps this a superset.</strong>
+    /// The three callers — the repository's row re-check, the live scan, and the archive scanner —
+    /// are all asking "could this be a hit?", and a candidate whose file has not been read yet
+    /// could be. They are unchanged by <c>content:</c> existing. Anything that means to act on the
+    /// answer, rather than to shortlist on it, asks <see cref="Evaluate"/> instead.
+    /// </remarks>
+    public bool Matches(in SearchCandidate candidate) => _root.Matches(candidate) != SearchMatch.No;
+
+    /// <summary>
+    /// The full three-valued verdict: a hit, not a hit, or not answerable until the file is read.
+    /// </summary>
+    /// <remarks>
+    /// Only the content pass wants this. It is what lets the scanner spend its file budget solely
+    /// on <see cref="SearchMatch.NeedsContent"/> candidates and take a
+    /// <see cref="SearchMatch.Yes"/> straight to the results without opening anything.
+    /// </remarks>
+    public SearchMatch Evaluate(in SearchCandidate candidate) => _root.Matches(candidate);
 
     /// <summary>
     /// The WHERE fragment for an index query. Matches at least everything <see cref="Matches"/>
@@ -63,4 +80,23 @@ public sealed class SearchQuery
     /// than genuinely unmatched, and the caller says so instead of showing a bare "no results".
     /// </summary>
     public bool NeedsMetadata => _root.NeedsMetadata;
+
+    /// <summary>Whether the query asks for file contents, and so needs a second, reading pass.</summary>
+    /// <remarks>Also the flag the places that <em>cannot</em> run that pass refuse on: an archive
+    /// interior has no file on disk to open, so answering there would report every entry as a hit.
+    /// </remarks>
+    public bool NeedsContent => _root.NeedsContent;
+
+    /// <summary>Every <c>content:</c> needle in the query, in tree order.</summary>
+    /// <remarks>What the scanner highlights. Built once per query rather than per file — there are
+    /// tens of thousands of the latter.</remarks>
+    public IReadOnlyList<string> ContentNeedles
+    {
+        get
+        {
+            var needles = new List<string>();
+            _root.CollectContentNeedles(needles);
+            return needles;
+        }
+    }
 }

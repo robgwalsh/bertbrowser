@@ -193,6 +193,7 @@ honoured, several of them ANDed — and on top of that `Core/Services/Search` ad
 | `path:projects` | a substring of the whole path, not just the name |
 | `is:dir` | also `is:file`, `is:hidden` |
 | `re:^IMG_\d+` | a regular expression over the name |
+| `content:todo` | text *inside* the file — also `content:"a phrase"` |
 | `!tmp`, `NOT tmp` | exclusion |
 | `draft OR final` | alternation; adjacency is still AND, and AND binds tighter |
 | `(a OR b) ext:txt` | brackets group |
@@ -206,9 +207,11 @@ Four rules keep this from breaking what people already type:
   findable and no existing query silently changes meaning.
 - **A stray `!`, an unbalanced `)` and an unclosed `(` are all literal or forgiving** rather than
   errors. Quoting is the escape where a name really contains a bracket.
-- **`dc:`/`da:`/`content:` are refused with a message.** They plainly mean something this index
-  cannot answer, and degrading them to a substring search would return nothing while implying the
-  disk holds no such files.
+- **`dc:`/`da:` are refused with a message.** They plainly mean something this index cannot
+  answer, and degrading them to a substring search would return nothing while implying the disk
+  holds no such files. `content:` used to be on that list and is not any more — it is answered by
+  reading the files rather than the index, which is why it is the one filter that still works on a
+  volume the fallback build could only record names for.
 
 `SearchGrammar.Parse` **never throws** — a bad regular expression, an unreadable size, a half-typed
 `size:>` all come back as text, because this runs on the UI thread on a keystroke. It returns three
@@ -312,6 +315,73 @@ fact, since the fallback enumeration path can leave those blank.
 still on disk — that is the whole point, so Ctrl+Z can restore them — but they have been deleted as
 far as the user is concerned, and search saying otherwise reads as a delete that silently failed.
 
+### Reading the files: `content:`
+
+Everything above answers a query from a table. `content:` cannot: no column holds file text, and
+none is going to — extracted text stored beside the MFT rows is a separate, later idea. So a content
+query is answered in **two passes over the same query tree**, and the interesting part is that the
+tree is evaluated twice rather than taken apart.
+
+**`SearchNode.Matches` is three-valued** — `Yes`, `No`, `NeedsContent`. Every other term is settled
+either way and always was; only `ContentTerm` originates the third, and only for a file nobody has
+opened. `SearchQuery.Matches` still means "could this be a hit?" (`!= No`), so the three producers of
+a `SearchCandidate` — the repository's row re-check, the live scan, and the archive scanner — did not
+change at all. The reading pass asks `SearchQuery.Evaluate` instead and gets the full verdict.
+
+Kleene logic through the combinators is what makes the cost bearable:
+
+| Query | Candidate | Verdict | Cost |
+|---|---|---|---|
+| `content:a OR ext:md` | `notes.md` | `Yes` | never opened — the name settled it |
+| `content:a OR ext:md` | `code.cs` | `NeedsContent` | opened |
+| `is:dir content:x` | any directory | `No` | never opened |
+| `report !content:x` | `report.cs`, unread | `NeedsContent` | opened, then negated |
+
+A boolean superset would get none of those: it would open every `.md` to re-establish what its name
+already said, and hand every directory to a file opener. `NotNode` needs no special case either —
+negating "undecided" is "undecided", which is the same rule its `WriteSql` has always kept for a
+superset it cannot invert.
+
+**The first pass asks for candidates, not results.** `ContentTerm.SqlComplete` is false, so `LIMIT`
+is not pushed down (rows pass the SQL and then fail the read), and the cap becomes
+`ContentSearchRules.MaxCandidates` — 50,000 — instead of the 1,000-result cap, which would otherwise
+mean never grepping more than a thousand files.
+
+**The second pass** (`ContentScanner`) reads only the undecided ones, four at a time, streaming
+survivors onto the same `IProgress` the live scan uses. Each file is sniffed at 8 KB to decide
+encoding and whether it is text at all — so a binary costs 8 KB rather than a megabyte — then read to
+`AppSettings.SearchContentMaxBytes` (1 MB by default). The encoding ladder is
+`TextPreviewReader.Decode`, extracted from the preview pane precisely so there is only one of it.
+Nothing is held open (`FileShare.ReadWrite | Delete`, or a search would block this app's own rename
+and delete executors), reparse points and cloud placeholders are refused rather than followed or
+hydrated, and **a null return means this file failed while a throw means the run stopped** — the
+distinction `IFileHasher` documents, and without it a cancel looks like a disk full of broken files.
+
+**What it costs**, measured warm against `C:\Source` — 245,305 files, 8.0 GB:
+
+| Work | Rate |
+|---|---|
+| 8 KB head sniff, 1 thread | 8,436 files/s |
+| 8 KB head sniff, **4 threads** | **15,609 files/s** |
+| 8 KB head sniff, 8 threads | 13,158 files/s — *worse* |
+| Read + substring over 27,655 text files (103 MB), 4 threads | 2,109 ms → ~13,100 files/s, ~49 MB/s |
+| `string.Contains` miss over 50 M chars, ordinal | 7 ms |
+| the same, ignoring case | 7 ms — identical |
+
+Two things follow. **Four threads is the peak**, which is the same number `DuplicateScanner` uses and
+for the same stated reason. And **matching is free; the cost is entirely opening and reading** — so
+every ceiling is denominated in files and bytes rather than terms, a second `content:` term costs
+nothing, and there is no case-sensitivity option because there is nothing to buy with one. The whole
+tree extrapolates to about 19 s warm, which is why this streams, reports progress, and stops on Esc
+while keeping what it found.
+
+**Two refusals rather than wrong answers.** `content:` with `in:archives`, and `content:` typed while
+standing inside a container, are both refused by name. The reason is worth keeping: an archive entry
+has no file on disk, so its candidate carries no content — and an unread candidate counts as a
+*possible* match by design. A scanner that ran anyway would not return too few results, it would
+return **every entry in the container**. `ArchiveSearchScanner` refuses one itself rather than
+trusting its callers.
+
 ### The other reader: duplicates
 
 The search box is not the only thing that reads these rows. The duplicate finder
@@ -360,8 +430,9 @@ the canonical path.
   `%USERPROFILE%\.bertbrowser\bertbrowser.db`. Deleting that folder resets it; the next launch
   rebuilds.
 - **Results are capped at 1,000** per query.
-- **Names only.** There is no content indexing, and none is planned. `content:` says so rather than
-  searching for the literal text.
+- **The index holds names only.** `content:` is answered by reading the files themselves, not from
+  any stored text — see "Reading the files" below. There is still no content *index*, so a content
+  query costs disk rather than a lookup, and is bounded and cancellable accordingly.
 - **`size:` and `dm:` need a fully indexed drive.** The `FSCTL_ENUM_USN_DATA` fallback records names
   only, so those filters can never match on a volume built that way. A filtered search that comes
   back empty asks `FsIndexRepository.HasSizeData` before reporting "no results", and says the drive
@@ -381,7 +452,12 @@ the canonical path.
 | `MftDirectorySizeBuilderTests` | Post-order rollup totals |
 | `SearchQueryTests` | What a bare query has always meant: the two-literal-character floor, wildcards, GLOB escaping — plus the compatibility cases the filter syntax could have broken silently (an unrecognised key, lowercase `or`, a trailing `!`) |
 | `SearchGrammarTests` | The filter language: every key, the operators, the refusals, a real catastrophic backtrack |
-| `SearchAgreementTests` | ~40 queries run through **both** SQL and the matcher over one corpus, asserted identical — the test that makes drift impossible — plus the cap and the size-data probe |
+| `SearchAgreementTests` | ~45 queries run through **both** SQL and the matcher over one corpus, asserted identical — the test that makes drift impossible — plus the cap, the size-data probe, and that a content query shortlists every candidate its name allows |
+| `ContentTermTests` | The three-valued verdict through AND, OR and NOT: the two cases that cost nothing (`content:a OR ext:md`, `is:dir content:x`) and the one that must stay undecided (`!content:x`) |
+| `ContentReaderTests` | Real files: the encoding ladder, the sharing flags that stop a search blocking a rename, the per-file budget, and null-for-failure versus throw-for-cancel |
+| `ContentSnippetTests` | Line numbers, and clipping a very long line *around* the match rather than from the left |
+| `ContentScannerTests` | Which candidates are opened, a cancel giving back a floor, the ceilings, and one unreadable file costing the others nothing |
+| `ContentSearchAgreementTests` | The whole pipeline against an independent `File.ReadAllText` of a real tree, on **both** branches — the analogue of `SearchAgreementTests`, which structurally cannot cover a content term |
 | `SizeTextTests`, `DateShorthandTests` | The literal parsers; the clock is injected, and the units are pinned to `ByteSizeFormatter`'s |
 | `FsIndexRepositoryTests` | Range scans, truncation, ancestor path reconstruction, rename/delete subtree rewrites, the vanish sweep |
 | `SearchServiceTests` | Fresh / stale / unindexed routing and live-scan streaming |

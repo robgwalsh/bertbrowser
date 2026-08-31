@@ -36,6 +36,7 @@ public static class SearchSyntax
     public const string Regex = "RE";
     public const string Name = "NAME";
     public const string In = "IN";
+    public const string Content = "CONTENT";
 
     /// <summary>Aliases mapped onto the canonical key above.</summary>
     private static readonly Dictionary<string, string> Aliases = new(StringComparer.Ordinal)
@@ -52,6 +53,8 @@ public static class SearchSyntax
         ["REGEX"] = Regex,
         ["NAME"] = Name,
         ["IN"] = In,
+        ["CONTENT"] = Content,
+        ["CONTENTS"] = Content,
     };
 
     /// <summary>
@@ -61,8 +64,11 @@ public static class SearchSyntax
     /// These are refused with a message rather than degraded to a name term. Someone typing
     /// a created-date filter has a specific question; silently searching for the literal text
     /// "dc:today" answers a different one and returns nothing, which reads as "no such files"
-    /// rather than "no such filter". <c>fs_entry</c> stores modified time only, and
-    /// <c>docs/search-indexing.md</c> puts content indexing out of scope.
+    /// rather than "no such filter". <c>fs_entry</c> stores modified time only.
+    ///
+    /// <c>content:</c> used to be listed here and no longer is: it is answered by reading the files
+    /// themselves rather than the index, which is why it is the one filter that still works on a
+    /// volume the indexer could only record names for.
     /// </remarks>
     private static readonly Dictionary<string, string> Unsupported = new(StringComparer.Ordinal)
     {
@@ -70,8 +76,6 @@ public static class SearchSyntax
         ["DATECREATED"] = "created date isn't indexed — only modified is, so use dm:",
         ["DA"] = "accessed date isn't indexed — only modified is, so use dm:",
         ["DATEACCESSED"] = "accessed date isn't indexed — only modified is, so use dm:",
-        ["CONTENT"] = "file contents aren't indexed — this searches names only",
-        ["CONTENTS"] = "file contents aren't indexed — this searches names only",
     };
 
     /// <summary>Resolves a typed key to its canonical form, or null when it is not a key at all.</summary>
@@ -101,6 +105,7 @@ public static class SearchSyntax
             new("is:dir", "folders only — also is:file and is:hidden"),
             new("re:^IMG_\\d+", "a regular expression over the name"),
             new("in:archives", "look inside zips and 7zs too — names, not contents"),
+            new("content:todo", "text inside the file — also content:\"a phrase\""),
         ]),
 
         new("Combining", "Words sit side by side to mean AND; the rest is spelled out.",
@@ -114,7 +119,7 @@ public static class SearchSyntax
         [
             new("size: and dm:", "need a drive the indexer read in full"),
             new("dc: and da:", "aren't indexed — only the modified date is"),
-            new("content:", "file contents are never searched, only names"),
+            new("content:", "opens each file, so narrow it with ext: or a folder"),
             new("in:archives", "opens each archive, so it is slower and opt-in"),
         ]),
     };

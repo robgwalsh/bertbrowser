@@ -1,0 +1,100 @@
+# content: — grepping inside files, driven through the real window.
+#
+# What this covers that no unit test can: the same queries going through the *live scan*. A harness
+# run is unelevated, so there is no MFT index and the first search of a subtree falls to
+# FileSystemWalker — which is exactly where a content pass wired only into the index branch would
+# return the right rows in every test and nothing at all in the app.
+#
+# The fixture is built so the load-bearing assertion is possible at all:
+#   haystack.txt        contains "the annual report"          -> a hit, on its contents
+#   annual report.md    named for it, never says the words    -> NOT a hit
+# Those two together are what prove the reader ran rather than the name term quietly answering.
+
+tree .
+content-fixture
+refresh
+go Content
+assert-count 6
+
+# --- a phrase is a phrase ---
+#
+# decoy.txt has both words and never adjacently, so it separates a phrase from two words. This
+# query also could not be typed before: a quoted *value* used to make the whole token literal, so
+# content:"..." fell through to searching for a file called that.
+
+search content:"annual report"
+assert-flattened
+assert-error
+assert-row haystack.txt
+assert-row code.cs
+assert-row utf16.txt
+assert-no-row decoy.txt
+assert-no-row opaque.bin
+assert-no-row annual report.md
+assert-count 3
+shot 01-phrase
+
+# The matching line, with its number — the thing that makes a grep result actionable rather than a
+# list of filenames, and the only assertion that reaches the snippet through a rendered cell.
+assert-match haystack.txt the annual report is late
+assert-match code.cs // the annual report goes here
+
+# --- it is the contents, never the name ---
+#
+# "annual report.md" is named exactly for the needle. A single hit here would mean the name term
+# was answering and the reader had never run.
+
+search content:"annual report" ext:md
+assert-count 0
+
+# --- a binary is not text ---
+#
+# opaque.bin spells the needle in plain ASCII behind a NUL. Matching it would mean the sniff had
+# stopped working, and a source-tree search would fill up with .exe string tables.
+
+search content:report
+assert-no-row opaque.bin
+
+# --- case is ignored, in both directions ---
+
+search content:ANNUAL
+assert-row haystack.txt
+search content:annual
+assert-row haystack.txt
+
+# --- the floor, and the refusals ---
+#
+# One character would grep a whole tree for "a", so it is a message rather than a search. Keeping
+# the banner up is what leaves the previous results on screen instead of falling back to the
+# directory listing for a keystroke.
+
+search content:a
+assert-error content
+assert-flattened
+
+# An archive has no file on disk behind an entry, and an unread candidate counts as a possible
+# match by design — so answering this would return every entry in every container.
+search content:report in:archives
+assert-error archive
+
+# --- a name term still narrows a content search ---
+
+search haystack content:"annual report"
+assert-count 1
+assert-row haystack.txt
+
+# --- an ordinary search is untouched, and shows no Match column ---
+
+search report
+assert-error
+assert-row annual report.md
+assert-no-row haystack.txt
+assert-count 1
+shot 02-ordinary
+
+clear-search
+assert-not-flattened
+assert-count 6
+
+assert-not-launched
+state

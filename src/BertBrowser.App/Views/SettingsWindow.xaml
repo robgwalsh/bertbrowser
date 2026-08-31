@@ -167,6 +167,18 @@
                     <TextBlock Style="{StaticResource Hint}"
                                Text="Trim text after this amount."/>
 
+                    <DockPanel Margin="0,10,0,0">
+                        <TextBlock Text="Search inside files up to" VerticalAlignment="Center"/>
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding ContentSearchLimitText}" VerticalAlignment="Center"
+                                   HorizontalAlignment="Right" MinWidth="60"
+                                   Foreground="{StaticResource Theme.Text.Secondary}"/>
+                        <Slider Margin="12,0,8,0" VerticalAlignment="Center" Minimum="64" Maximum="8192"
+                                TickFrequency="64" IsSnapToTickEnabled="True"
+                                Value="{Binding ContentSearchLimitKb, Mode=TwoWay}"/>
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="How much of each file content: reads. A file longer than this is searched to here and no further, and the status bar says so rather than reporting it as a miss."/>
+
                     <TextBlock Style="{StaticResource Hint}" Margin="0,14,0,0"
                                Text="Previews don't hold file locks!"/>
                 </StackPanel>

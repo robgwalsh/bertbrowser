@@ -335,6 +335,17 @@ public sealed partial class FileListViewModel : ObservableObject
         $"Access is denied. \"{path}\" needs administrator rights, which BertBrowser does not " +
         "use — the same folders are closed to File Explorer.";
 
+    /// <summary>
+    /// Whether this result came from a search that read file contents.
+    /// </summary>
+    /// <remarks>
+    /// <strong>Deliberately not <see cref="IsFlattened"/>, which every search sets.</strong> The
+    /// Match column has nothing to show for an ordinary search, and an empty column that appears
+    /// whenever you type reads as a rendering fault rather than as a feature.
+    /// </remarks>
+    [ObservableProperty]
+    private bool _showsContentMatches;
+
     /// <summary>Search mode: prepares an empty flattened list for streamed hits to append into.</summary>
     public void BeginSearch()
     {
@@ -343,6 +354,22 @@ public sealed partial class FileListViewModel : ObservableObject
         ErrorMessage = null;
         EmptyMessage = null;
         Items = new ObservableCollection<FileItemViewModel>();
+    }
+
+    /// <summary>
+    /// Ends a search that was stopped rather than completed, keeping the rows it had already found.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="BeginSearch"/> raises <see cref="IsLoading"/> and only
+    /// <see cref="CompleteSearchAsync"/>'s <c>finally</c> ever lowered it. That was invisible while
+    /// every cancel was immediately followed by another load — but a stop that keeps its results
+    /// has no such load, so without this the progress bar spins for ever and the harness's
+    /// <c>Settle</c>, which waits on exactly this flag, never returns.
+    /// </remarks>
+    public void EndSearch(string? message = null)
+    {
+        IsLoading = false;
+        if (message is not null && Items.Count == 0) EmptyMessage = message;
     }
 
     /// <summary>Appends one batch of live-scan hits (called on the UI thread via IProgress).</summary>
@@ -388,7 +415,8 @@ public sealed partial class FileListViewModel : ObservableObject
         new(new FileEntry(hit.Name, hit.DisplayPath, hit.IsDirectory,
                 hit.IsDirectory ? -1 : hit.SizeBytes, hit.ModifiedUtc,
                 hit.Hidden ? FileAttributes.Hidden : 0),
-            hit.RelativeDirDisplay);
+            hit.RelativeDirDisplay,
+            hit.Match);
 
     public void SetSort(SortColumn column)
     {

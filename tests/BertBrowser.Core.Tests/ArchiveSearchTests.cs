@@ -198,4 +198,41 @@ public class ArchiveSearchTests : IDisposable
     {
         Assert.Contains(SearchSyntax.Entries, e => e.Example.Contains("in:archives"));
     }
+
+    /// <summary>
+    /// <c>content:</c> and <c>in:archives</c> together are refused by name rather than answered
+    /// badly, because there is no file on disk behind an archive entry for the reading pass to open.
+    /// </summary>
+    [Theory]
+    [InlineData("content:util in:archives")]
+    [InlineData("in:archives content:util")]
+    public void ContentCannotBeCombinedWithLookingInsideArchives(string queryText)
+    {
+        var parse = SearchQuery.Parse(queryText);
+
+        Assert.Null(parse.Query);
+        Assert.NotNull(parse.Problem);
+        Assert.Contains("archive", parse.Problem!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// And the scanner refuses one itself, rather than trusting its two callers to have checked.
+    /// </summary>
+    /// <remarks>
+    /// <strong>This is the trap, and it is the quiet kind.</strong> An archive entry's candidate
+    /// carries no content, and an unread candidate counts as a <em>possible</em> match by design —
+    /// that is what lets the first pass shortlist at all. So a scanner that ran the walk anyway
+    /// would not return too few results, it would return <em>every entry in the container</em>.
+    /// Delete the guard and this goes red with five hits instead of none.
+    /// </remarks>
+    [Fact]
+    public void TheScannerRefusesAContentQueryRatherThanMatchingEveryEntry()
+    {
+        // Built directly, since the grammar refuses this combination before a caller could form it.
+        var query = SearchQuery.Parse("content:util").Query!;
+
+        var hits = ArchiveSearchScanner.Search(_reader.Read(_zip, null), _zip, "", query, 1000);
+
+        Assert.Empty(hits);
+    }
 }

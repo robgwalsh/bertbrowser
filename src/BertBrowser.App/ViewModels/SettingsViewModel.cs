@@ -189,6 +189,15 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public string PreviewTextLimitText => $"{PreviewTextLimitKb:0} KB";
 
+    /// <summary>How much of each file a <c>content:</c> search reads, in kilobytes.</summary>
+    /// <remarks>Beside the preview budget because it is the same judgement about the same files.
+    /// The other content-search ceilings stay constants — see <c>AppSettings</c> for why.</remarks>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ContentSearchLimitText))]
+    private double _contentSearchLimitKb;
+
+    public string ContentSearchLimitText => $"{ContentSearchLimitKb:0} KB";
+
     /// <summary>
     /// Theme selection and editing. Unlike everything else here it applies live rather than on
     /// Save — see the note in the dialog.
@@ -259,6 +268,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         ScrollSpeed = settings.ScrollSpeedMultiplier;
         ShowPreviewPane = settings.ShowPreviewPane;
         PreviewTextLimitKb = Math.Round(settings.PreviewTextMaxBytes / 1024.0);
+        ContentSearchLimitKb = Math.Round(settings.SearchContentMaxBytes / 1024.0);
 
         TileAspect = AspectRatio.Parse(settings.TileAspectRatio);
         TileAspectOptions = AspectRatio.Presets.Contains(TileAspect)
@@ -473,6 +483,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settings.ScrollSpeedMultiplier = ScrollSpeed;
         _settings.ShowPreviewPane = ShowPreviewPane;
         _settings.PreviewTextMaxBytes = (int)Math.Clamp(PreviewTextLimitKb * 1024, 4096, 64 * 1024 * 1024);
+        _settings.SearchContentMaxBytes = (int)Math.Clamp(ContentSearchLimitKb * 1024, 4096, 64 * 1024 * 1024);
         _settings.TileAspectRatio = TileAspect.ToString();
         _settings.Save();
         error = null;

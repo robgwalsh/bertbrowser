@@ -92,10 +92,40 @@ public sealed partial class FileItemViewModel : ObservableObject
 
     /// <summary>Search-result mode: a real filesystem entry (file or directory) plus its
     /// parent path relative to the search root.</summary>
-    public FileItemViewModel(FileEntry entry, string relativePath) : this(entry)
+    public FileItemViewModel(FileEntry entry, string relativePath, ContentMatch? match = null)
+        : this(entry)
     {
         RelativePath = relativePath;
+        Match = match;
     }
+
+    /// <summary>
+    /// Where a <c>content:</c> search found its needle, or null. Search-results mode only, exactly
+    /// as <see cref="RelativePath"/> is.
+    /// </summary>
+    public ContentMatch? Match { get; }
+
+    // The matching line, split into the three runs the cell renders so the needle can be
+    // highlighted. Doing the split here rather than in a converter keeps the view free of logic and
+    // means the offsets are computed once per row instead of on every re-render.
+    //
+    // Clamped rather than trusted: these are offsets into a line the snippet already clipped, and a
+    // cell that threw would take the whole list with it.
+    public string MatchPrefix => Match is null ? "" : Match.Line[..Clamp(Match.MatchStart)];
+
+    public string MatchText => Match is null
+        ? ""
+        : Match.Line[Clamp(Match.MatchStart)..Clamp(Match.MatchStart + Match.MatchLength)];
+
+    public string MatchSuffix => Match is null
+        ? ""
+        : Match.Line[Clamp(Match.MatchStart + Match.MatchLength)..];
+
+    /// <summary>The line number, shown dimmed beside the text. Empty when there is no match.</summary>
+    public string MatchLineNumber => Match is null ? "" : Match.LineNumber.ToString();
+
+    private int Clamp(int index) =>
+        Match is null ? 0 : Math.Clamp(index, 0, Match.Line.Length);
 
     /// <summary>Fills size/modified/hidden from disk for a search result whose index row
     /// lacked them — MFT-built rows carry no size or timestamp. Intended to run off the UI

@@ -47,6 +47,20 @@ public sealed class AppSettings
     /// so — a preview that silently stops looks like the whole file.</summary>
     public int PreviewTextMaxBytes { get; set; } = 1024 * 1024;
 
+    /// <summary>How much of each file a <c>content:</c> search reads.</summary>
+    /// <remarks>
+    /// <para>The same number and the same judgement as <see cref="PreviewTextMaxBytes"/>, and a
+    /// setting for the same reason: it is the one content-search bound a person might genuinely
+    /// want to move, because it is about their files rather than about the app. A miss against a
+    /// longer file is "not in the first megabyte", which the status bar says out loud.</para>
+    /// <para><strong>The other ceilings are deliberately not settings.</strong> How many candidates
+    /// a pass shortlists, how many files it opens and how many threads it reads with are safety
+    /// valves measured against real hardware, not preferences — surfacing them would invite a
+    /// number nobody can evaluate and turn one place to argue about a figure into two.
+    /// See <c>ContentSearchRules</c>, which carries the measurements.</para>
+    /// </remarks>
+    public int SearchContentMaxBytes { get; set; } = 1024 * 1024;
+
     /// <summary>The floor the duplicate finder starts from, in bytes.</summary>
     /// <remarks>
     /// Not cosmetic: it bounds both the shortlist's memory and how much has to be read, and

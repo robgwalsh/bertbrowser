@@ -53,6 +53,30 @@ public sealed class SearchAgreementTests : IDisposable
         (@"C:\Corpus\Archive\ghost.bin",          false, 0,             DateTime.MinValue,     false),
     };
 
+    /// <summary>
+    /// A content query's first pass must return <em>everything</em> the name and metadata allow.
+    /// </summary>
+    /// <remarks>
+    /// <strong>The theory above cannot catch this, and it is worth knowing why.</strong> Both sides
+    /// there run with no file read: the matcher returns the superset directly, and the SQL side
+    /// gets <c>1</c> and is re-checked by the <em>same</em> superset matcher. They agree by
+    /// construction — and they would still agree if <c>ContentTerm</c> answered
+    /// <see cref="SearchMatch.No"/> for an unread file, because then both come back empty. So this
+    /// asserts the count directly instead. Break the superset and it goes red where the comparison
+    /// stays green.
+    /// </remarks>
+    [Fact]
+    public void AContentQueryShortlistsEveryCandidateTheNameAllows()
+    {
+        var query = SearchQuery.Parse("content:anything ext:txt").Query!;
+
+        var hits = _repo.Search(Root, query, cap: 1000, includeHidden: true).Hits;
+
+        Assert.Equal(
+            Corpus.Count(e => !e.IsDir && e.Path.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)),
+            hits.Count);
+    }
+
     /// <summary>Queries chosen to exercise every term type, and every way of combining them.</summary>
     public static TheoryData<string> Queries()
     {
@@ -73,6 +97,13 @@ public sealed class SearchAgreementTests : IDisposable
                      "report !re:draft", "!re:^img ext:jpg",
                      "report ext:txt size:>100 dm:>2020",
                      "path:corpus !path:archive ext:txt",
+
+                     // A content term reads the disk, so in *this* test — where no file is ever
+                     // opened — it is a pure superset on both sides. That is exactly what should
+                     // be pinned here: the first pass must not narrow, or the reader is handed
+                     // fewer candidates than matched and the results look arbitrary.
+                     "content:report", "content:report ext:txt", "report !content:draft",
+                     "content:alpha OR ext:jpg", "is:dir content:alpha",
                  })
             data.Add(q);
         return data;

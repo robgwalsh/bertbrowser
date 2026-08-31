@@ -19,9 +19,16 @@ public interface ISearchService
     /// a background crawl builds the index; the returned outcome contains the full
     /// (possibly capped) hit list either way.
     /// </summary>
+    /// <param name="contentProgress">
+    /// How far a <c>content:</c> pass has got. A separate channel from
+    /// <paramref name="liveBatches"/> because it answers a different question — that one carries
+    /// what was found, this one carries how much is left to look at, which is the only thing worth
+    /// saying during the tens of seconds a whole-tree grep can take.
+    /// </param>
     Task<SearchOutcome?> SearchAsync(
         string rootPath, string queryText, CancellationToken ct,
-        IProgress<IReadOnlyList<SearchHit>>? liveBatches = null, bool includeHidden = true);
+        IProgress<IReadOnlyList<SearchHit>>? liveBatches = null, bool includeHidden = true,
+        IProgress<ContentScanProgress>? contentProgress = null);
 
     /// <summary>
     /// Whole-PC search across every MFT-indexed volume. Returns null when the query is too
@@ -29,7 +36,15 @@ public interface ISearchService
     /// flight they are partial and <c>RefreshPending</c> is set (the caller re-queries when
     /// <c>IMftIndexService.IndexRefreshed</c> fires).
     /// </summary>
-    Task<SearchOutcome?> SearchAllAsync(string queryText, CancellationToken ct, bool includeHidden = true);
+    /// <remarks>
+    /// It gained the two streaming channels when <c>content:</c> did: the index answers a whole-PC
+    /// query in milliseconds and needed neither, but a content term turns the same query into tens
+    /// of seconds of reading, and a window that showed nothing for that long would read as hung.
+    /// </remarks>
+    Task<SearchOutcome?> SearchAllAsync(
+        string queryText, CancellationToken ct, bool includeHidden = true,
+        IProgress<IReadOnlyList<SearchHit>>? liveBatches = null,
+        IProgress<ContentScanProgress>? contentProgress = null);
 
     /// <summary>Fires (on a worker thread) with the canonical root key whose (re)crawl just completed.</summary>
     event Action<string>? IndexRefreshed;
@@ -65,15 +80,67 @@ public sealed class SearchService : ISearchService, IDisposable
     /// <summary>Only consulted when a query says <c>in:archives</c>; null leaves that a no-op.</summary>
     private readonly Archives.IArchiveBrowser? _archives;
 
+    /// <summary>The <c>content:</c> reading pass. Injectable for the reason the hasher is.</summary>
+    private readonly ContentScanner _content;
+
+    /// <summary>
+    /// How much of each file to read, asked fresh each search.
+    /// </summary>
+    /// <remarks>
+    /// A delegate rather than a value because this is a singleton and the setting can change while
+    /// it lives — the same reason the browse settings are read at the point of use rather than
+    /// captured. Core never sees <c>AppSettings</c>; the composition root closes over it, exactly
+    /// as <c>includeHidden</c> travels as a parameter.
+    /// </remarks>
+    private readonly Func<long>? _contentBudget;
+
     public SearchService(
         FsIndexRepository repository, IndexCrawler crawler, IIndexWatcherService watchers,
-        IMftIndexService mft, Archives.IArchiveBrowser? archives = null)
+        IMftIndexService mft, Archives.IArchiveBrowser? archives = null,
+        IContentReader? contentReader = null, Func<long>? contentBudget = null)
     {
+        _contentBudget = contentBudget;
         _archives = archives;
         _repository = repository;
         _crawler = crawler;
         _watchers = watchers;
         _mft = mft;
+        _content = new ContentScanner(contentReader ?? new FileSystemContentReader());
+    }
+
+    /// <summary>
+    /// How many rows the first pass asks for.
+    /// </summary>
+    /// <remarks>
+    /// A content query wants <em>candidates</em>, not results. Using the 1,000-result cap would
+    /// mean never grepping more than a thousand files — and most of those are about to be thrown
+    /// away, since the whole point of the pass is that their names did not settle them. The larger
+    /// number costs nothing extra to fetch: the rows come off a scan that was happening anyway.
+    /// </remarks>
+    private static int Cap(SearchQuery query) =>
+        query.NeedsContent ? ContentSearchRules.MaxCandidates : MaxResults;
+
+    /// <summary>
+    /// Runs the reading pass over a first-pass result, or returns it untouched.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately takes the <em>visible</em> hits, after <see cref="Visible"/> has dropped
+    /// anything sitting in a delete's holding folder or the Recycle Bin. Those files are still on
+    /// disk, and opening them would spend the file ceiling on things the user has already deleted —
+    /// on a whole-PC search, <c>$Recycle.Bin</c> sorts early enough to eat a good deal of it.
+    /// </remarks>
+    private (IReadOnlyList<SearchHit> Hits, bool Truncated, bool Cancelled, ContentScanReport? Report)
+        ApplyContent(
+            SearchQuery query, IReadOnlyList<SearchHit> hits, bool truncated,
+            IProgress<IReadOnlyList<SearchHit>>? liveBatches,
+            IProgress<ContentScanProgress>? contentProgress, CancellationToken ct)
+    {
+        if (!query.NeedsContent) return (hits, truncated, false, null);
+
+        var budget = _contentBudget?.Invoke() ?? ContentSearchRules.MaxBytesPerFile;
+        var scan = _content.Scan(
+            query, hits, MaxResults, truncated, budget, liveBatches, contentProgress, ct);
+        return (scan.Hits, scan.Truncated, scan.Cancelled, scan.Report);
     }
 
     /// <summary>Drops hits that live in a delete's holding folder. They are still on disk — that is
@@ -117,27 +184,36 @@ public sealed class SearchService : ISearchService, IDisposable
         return !await Task.Run(() => _repository.HasSizeData(rootPath), ct).ConfigureAwait(false);
     }
 
-    public async Task<SearchOutcome?> SearchAllAsync(string queryText, CancellationToken ct, bool includeHidden = true)
+    public async Task<SearchOutcome?> SearchAllAsync(
+        string queryText, CancellationToken ct, bool includeHidden = true,
+        IProgress<IReadOnlyList<SearchHit>>? liveBatches = null,
+        IProgress<ContentScanProgress>? contentProgress = null)
     {
         var parse = SearchQuery.Parse(queryText);
         if (parse.Query is not { } query)
             return Refused(parse);
 
         var (hits, truncated) = await Task.Run(
-            () => _repository.SearchGlobal(query, MaxResults, ShowHidden(query, includeHidden)),
+            () => _repository.SearchGlobal(query, Cap(query), ShowHidden(query, includeHidden)),
+            ct).ConfigureAwait(false);
+
+        var scoped = await UnansweredForWantOfMetadataAsync(query, hits, null, ct).ConfigureAwait(false);
+
+        var (final, capped, cancelled, report) = await Task.Run(
+            () => ApplyContent(query, Visible(hits), truncated, liveBatches, contentProgress, ct),
             ct).ConfigureAwait(false);
 
         // While volumes are still enumerating the results are partial; the ViewModel re-queries
         // on IMftIndexService.IndexRefreshed.
         return new SearchOutcome(
-            Visible(hits), truncated, SearchResultSource.Index, RefreshPending: _mft.IsBuilding,
-            ScopeLacksMetadata: await UnansweredForWantOfMetadataAsync(query, hits, null, ct)
-                .ConfigureAwait(false));
+            final, capped, SearchResultSource.Index, RefreshPending: _mft.IsBuilding,
+            ScopeLacksMetadata: scoped, Cancelled: cancelled, ContentScan: report);
     }
 
     public async Task<SearchOutcome?> SearchAsync(
         string rootPath, string queryText, CancellationToken ct,
-        IProgress<IReadOnlyList<SearchHit>>? liveBatches = null, bool includeHidden = true)
+        IProgress<IReadOnlyList<SearchHit>>? liveBatches = null, bool includeHidden = true,
+        IProgress<ContentScanProgress>? contentProgress = null)
     {
         var parse = SearchQuery.Parse(queryText);
         if (parse.Query is not { } query)
@@ -172,28 +248,51 @@ public sealed class SearchService : ISearchService, IDisposable
                 EnsureIndexed(covering.PathKey, covering.DisplayPath);
 
             var (hits, truncated) = await Task.Run(
-                () => _repository.Search(rootPath, query, MaxResults, showHidden), ct).ConfigureAwait(false);
+                () => _repository.Search(rootPath, query, Cap(query), showHidden), ct).ConfigureAwait(false);
 
             var visible = Visible(hits).ToList();
             var inside = await ScanArchivesAsync(query, rootPath, liveBatches, ct).ConfigureAwait(false);
             visible.AddRange(inside);
 
+            var scoped = await UnansweredForWantOfMetadataAsync(query, hits, rootPath, ct)
+                .ConfigureAwait(false);
+
+            var (final, capped, cancelled, report) = await Task.Run(
+                () => ApplyContent(query, visible, truncated, liveBatches, contentProgress, ct),
+                ct).ConfigureAwait(false);
+
             return new SearchOutcome(
-                visible, truncated,
+                final, capped,
                 fresh ? SearchResultSource.Index : SearchResultSource.StaleIndex,
                 RefreshPending: !fresh,
-                ScopeLacksMetadata: await UnansweredForWantOfMetadataAsync(query, hits, rootPath, ct)
-                    .ConfigureAwait(false));
+                ScopeLacksMetadata: scoped, Cancelled: cancelled, ContentScan: report);
         }
 
         EnsureIndexed(rootKey, PathKey.NormalizeDisplay(rootPath));
+
+        // A content query must not stream the *walk*: those rows are candidates, not results, and
+        // most are about to be discarded. Putting them on screen and taking them away again would
+        // be worse than a moment of nothing — the reading pass streams what actually matched.
         var outcome = await Task.Run(
-            () => LiveScan(rootPath, query, ct, liveBatches, showHidden), ct).ConfigureAwait(false);
+            () => LiveScan(rootPath, query, ct, query.NeedsContent ? null : liveBatches, showHidden),
+            ct).ConfigureAwait(false);
 
         var extra = await ScanArchivesAsync(query, rootPath, liveBatches, ct).ConfigureAwait(false);
-        return extra.Count == 0
-            ? outcome
-            : outcome with { Hits = [.. outcome.Hits, .. extra] };
+        var combined = extra.Count == 0
+            ? outcome.Hits
+            : [.. outcome.Hits, .. extra];
+
+        var scanned = await Task.Run(
+            () => ApplyContent(query, combined, outcome.Truncated, liveBatches, contentProgress, ct),
+            ct).ConfigureAwait(false);
+
+        return outcome with
+        {
+            Hits = scanned.Hits,
+            Truncated = scanned.Truncated,
+            Cancelled = scanned.Cancelled,
+            ContentScan = scanned.Report,
+        };
     }
 
     /// <summary>
@@ -278,6 +377,9 @@ public sealed class SearchService : ISearchService, IDisposable
         string rootPath, SearchQuery query, CancellationToken ct,
         IProgress<IReadOnlyList<SearchHit>>? liveBatches, bool includeHidden)
     {
+        // A content query walks for candidates rather than for results, so it stops at the larger
+        // ceiling — the reading pass applies the 1,000-result cap afterwards.
+        var cap = Cap(query);
         var rootDisplay = PathKey.NormalizeDisplay(rootPath);
         var hits = new List<SearchHit>();
         var batch = new List<SearchHit>();
@@ -292,7 +394,7 @@ public sealed class SearchService : ISearchService, IDisposable
                 return true;
             if (DeleteExecutor.IsHeldPath(entry.DisplayPath))
                 return true; // deleted, just not committed yet
-            if (hits.Count >= MaxResults)
+            if (hits.Count >= cap)
             {
                 truncated = true;
                 return false; // stop scanning for hits; the background crawl keeps indexing

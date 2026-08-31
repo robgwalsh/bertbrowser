@@ -39,6 +39,14 @@ public static class ArchiveSearchScanner
         var hits = new List<SearchHit>();
         if (!index.Ok) return hits;
 
+        // A content query has no answer in here, and the failure mode is the dangerous kind rather
+        // than the obvious one. An entry has no file on disk to open, so its candidate carries no
+        // content — and an unread candidate counts as a *possible* match by design, which is what
+        // lets the first pass shortlist. Run the walk anyway and every entry in the container comes
+        // back as a hit. The grammar refuses `content: in:archives` before it gets here; this is
+        // the guard that does not depend on two callers remembering.
+        if (query.NeedsContent) return hits;
+
         var start = index.Find(relativeTo);
         if (start is null) return hits;
 

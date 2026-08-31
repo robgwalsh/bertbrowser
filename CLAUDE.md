@@ -676,6 +676,109 @@ and confirm a test goes red: drop the repository's row re-check and seven go, le
 an inexact child and three go, make a size bound off by one and the agreement test catches the
 matcher and the SQL disagreeing.
 
+### Content search
+
+`content:todo` greps inside files; `content:"annual report"` is a phrase. It is the one filter no
+column can answer, so it is answered by **evaluating the same query tree twice** — once without the
+bytes, once with them. There is no content index and no schema change; storing extracted text beside
+the MFT rows is a separate, later idea.
+
+**`SearchNode.Matches` is three-valued** (`SearchMatch`: `Yes` / `No` / `NeedsContent`), and that is
+the whole design rather than a detail. `SearchQuery.Matches` still means "could this be a hit?"
+(`!= No`), so the three producers of a `SearchCandidate` — the repository's row re-check,
+`LiveScan`, and `ArchiveSearchScanner` — did not change a line. Only the reading pass asks
+`Evaluate` for the full verdict.
+
+- **A boolean superset would have been correct and lossy**, and two shapes show why. In
+  `content:a OR ext:md` every `.md` is a hit on its *name*; `Or` returning a settled `Yes` means it
+  is never opened, where "unknown ⇒ true" would spend the file ceiling re-establishing what the name
+  had already settled. In `is:dir content:x` every directory is a settled `No`; without that, every
+  folder in the tree is handed to a file opener.
+- **`NotNode` needs no special case**: negating "undecided" is "undecided". Map it to either boolean
+  and `!content:x` breaks — to `No` and the first pass yields nothing, to `Yes` and every file is
+  reported without the reader being asked. This is the counterpart of the rule `WriteSql` has always
+  kept about a superset it cannot invert, and it costs nothing to state because undecided is a value.
+- **`NeedsContent` propagates through a `NOT`, unlike `WantsHidden` and `WantsArchives`.** Those ask
+  to *widen* a scan, and `!is:hidden` asks for the default. But establishing that a file does not
+  contain something needs it read exactly as much as establishing that it does. It is a static
+  property of the query — whether to run the pass at all — never of a candidate.
+- **The first pass asks for candidates, not results.** `ContentTerm.SqlComplete` is false so `LIMIT`
+  is withheld, and the cap becomes `ContentSearchRules.MaxCandidates` (50,000) rather than the
+  1,000-result cap, which would otherwise mean never grepping more than a thousand files. Note it
+  calls `MarkIncomplete()` where `InArchivesTerm` deliberately does not: that term's `1` really does
+  match every filesystem row, this one's is a superset that the read then narrows.
+
+**`ContentReader` is the only thing that opens a file**, and it keeps every house rule:
+`FileShare.ReadWrite | Delete` (a held handle would block this app's own rename and delete executors
+in the folder being searched), `SequentialScan`, `ArrayPool` buffers, reparse points and cloud
+placeholders refused rather than followed or hydrated, and **null means this file failed while a
+throw means the run stopped** — conflate them and a cancel looks like a disk full of broken files.
+It sniffs 8 KB first, so a binary costs 8 KB rather than a megabyte, and **reuses
+`TextPreviewReader.Decode`** — extracted from `Read` precisely so the encoding ladder has one
+implementation and the grep and the pane cannot disagree about what a file is. Two of the preview's
+caps are deliberately lifted: its 5,000-line ceiling would stop searching at line 5,000, and its
+line fold would insert breaks the snippet's line numbers then counted. Clipping a long line is
+`ContentSnippet`'s job instead.
+
+**The needle is not folded**, unlike every other value-taking key in `SearchGrammar`. Those compare
+against an already-uppercased name; this compares against file text that would have to be folded per
+file, per thread — and `OrdinalIgnoreCase` is *measurably the same speed* as ordinal, so the fold
+would buy nothing. Measured, warm, on a 245,305-file tree: four threads is the peak (15,609 files/s
+sniffing, against 8,436 at one and 13,158 at eight — the same number `DuplicateScanner` uses), reads
+run at ~13,100 files/s and ~49 MB/s, and a substring miss over 50 M characters takes 7 ms. **Matching
+is free; the cost is entirely opening and reading**, which is why every ceiling counts files and
+bytes rather than terms, and why there is no case-sensitivity option.
+
+**The lexer had to change, and it fixed a latent bug.** `LexTerm` set `Quoted` for a quote anywhere
+in a token and `BuildTerm` refused to resolve a key on a quoted one — so `content:"annual report"`
+became a search for a file *named* that, and `ext:"jpg"` silently matched nothing. A token now tracks
+whether the quote came *before* the colon: a quoted **value** keeps its key, a quote before the colon
+means the whole thing is literal text. `"C:\Users"` still means what it always did, and
+`SearchQueryTests` is the untouched guard that says so.
+
+**Two refusals, not two wrong answers.** `content:` with `in:archives`, and `content:` typed inside a
+container, are refused by name. The reason is the quiet kind: an archive entry has no file on disk,
+so its candidate carries no content — and an unread candidate counts as a *possible* match by design.
+A scanner that ran anyway would not return too few results, it would return **every entry in the
+container**. `ArchiveSearchScanner` refuses one itself rather than trusting its two callers, and
+`DirectoryTabViewModel`'s in-archive branch needs its own check because it never reaches
+`SearchService`.
+
+The surface is a **Match column** — line number, the matching line, the needle highlighted — shown by
+`UpdateMatchColumn` the way `UpdateRelPathColumn` shows Folder, but keyed on
+`FileListViewModel.ShowsContentMatches` rather than on `IsFlattened`, which *every* search sets: an
+empty column appearing whenever you type would read as a rendering fault. The match rides on
+`SearchHit`, not on the streamed batch, because `CompleteSearchAsync` rebuilds every row from the
+final hits and a batch-only match would blank the column at the finish. A hit the *name* settled
+carries no line, deliberately — there is nothing to point at. **Escape is two-stage**: while a
+reading pass is running it stops it and keeps what was found (a token linked to but distinct from
+the navigation one, so the floor survives where typing another character discards it), otherwise it
+clears the box as before. That needed `FileListViewModel.EndSearch`, because `BeginSearch` raises
+`IsLoading` and only `CompleteSearchAsync`'s `finally` ever lowered it — invisible while every cancel
+was followed by another load, and a hang of `UiSession.Settle` the moment one is not.
+
+`AppSettings.SearchContentMaxBytes` is the one bound a person can move, beside `PreviewTextMaxBytes`
+and for the same reason. The others — candidates, files opened, bytes, threads — stay constants in
+`ContentSearchRules` with their measurements: they are safety valves rather than preferences, and
+surfacing them would invite a number nobody can evaluate.
+
+Tests: `ContentTermTests` (the three-valued logic through AND/OR/NOT), `ContentReaderTests` (real
+files: the ladder, the sharing flags, the budget, failure versus cancel), `ContentSnippetTests`
+(line numbers, clipping around the match), `ContentScannerTests` (what is opened, ceilings, a cancel
+giving back a floor — a `FakeReader` with a hook lands one mid-run deterministically, the
+`SteppedCopier` pattern), and **`ContentSearchAgreementTests`**, which runs the whole pipeline against
+an independent `File.ReadAllText` of a real tree on *both* branches. That last one exists because
+`SearchAgreementTests` structurally cannot cover this term: both its sides run with no file read, so
+they agree by construction and would still agree if `ContentTerm` answered `No` for unread content.
+`tools/ui/content.bbs` drives it through the real window — unelevated, so `FileSystemWalker`, which
+is exactly the branch a pass wired only into the index path would miss — with `content-fixture` and
+`assert-match`. Its load-bearing pair is `haystack.txt`, which contains the needle and is not named
+for it, and `annual report.md`, which is named for it and does not contain it. Mutate a rule and
+confirm a test goes red — measured, not guessed: make `OrNode` propagate `NeedsContent` past a
+settled `Yes` and three go; let `ContentTerm` answer `NeedsContent` for a directory and four go;
+narrow the reader's share flags and one goes; let a cancel return no hits instead of a floor and one
+goes.
+
 ### The elevated index helper
 
 **The app is `asInvoker`.** Exactly one thing needs an administrator token — `MftVolumeIndexer.Open()`

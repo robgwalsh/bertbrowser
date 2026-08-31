@@ -66,6 +66,18 @@ progress-demo off
 search report
 shot 12-search-light
 clear-search
+
+# And a content search, which is a lot of new surface for a colour to go missing in: a dimmed line
+# number, the matched line, and the needle picked out on Theme.Input.Selection*. That last pair is
+# the one worth photographing — it is borrowed from the text-selection tokens rather than minted,
+# so a palette that reads in a TextBox and not in a list cell would only show up here.
+content-fixture
+refresh
+go Content
+search content:"annual report"
+shot 12b-content-light
+clear-search
+go ..
 thumbnails 0.6
 shot 13-tiles-light
 thumbnails 0

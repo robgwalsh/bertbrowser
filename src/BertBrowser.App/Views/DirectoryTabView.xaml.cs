@@ -49,6 +49,7 @@ public partial class DirectoryTabView : UserControl
         Tab.PropertyChanged += Tab_PropertyChanged;
         Tab.RevealFileRequested += OnRevealFileRequested;
         UpdateRelPathColumn();
+        UpdateMatchColumn();
         ApplyViewMode();     // honor a restored thumbnail zoom level
         UpdatePreviewPane(); // and a restored preview pane
     }
@@ -130,6 +131,8 @@ public partial class DirectoryTabView : UserControl
     {
         if (e.PropertyName == nameof(FileListViewModel.IsFlattened))
             UpdateRelPathColumn();
+        else if (e.PropertyName == nameof(FileListViewModel.ShowsContentMatches))
+            UpdateMatchColumn();
         else if (e.PropertyName == nameof(FileListViewModel.Items))
         {
             // Before the focus call: selecting scrolls the list, and doing it the other way round
@@ -187,6 +190,18 @@ public partial class DirectoryTabView : UserControl
     /// <summary>The Folder column only makes sense in the flattened search-results list.</summary>
     private void UpdateRelPathColumn() =>
         RelPathColumn.Width = Tab.FileList.IsFlattened ? 220 : 0;
+
+    /// <summary>
+    /// And the Match column only when the search actually read file contents.
+    /// </summary>
+    /// <remarks>
+    /// Keyed on <c>ShowsContentMatches</c> rather than on <c>IsFlattened</c>, which every search
+    /// sets: an empty column appearing whenever you type into the box would read as a rendering
+    /// fault. Same mechanism as the Folder column above — an assigned width, since a
+    /// <c>GridViewColumn</c> is not part of any items collection to bind through.
+    /// </remarks>
+    private void UpdateMatchColumn() =>
+        MatchColumn.Width = Tab.FileList.ShowsContentMatches ? 420 : 0;
 
     private void Scroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e) =>
         ScrollSpeed.HandlePreviewMouseWheel(sender, e, _settings);
@@ -246,14 +261,26 @@ public partial class DirectoryTabView : UserControl
 
     // --- Search box ---
 
+    /// <remarks>
+    /// Escape is two-stage. While a content search is still reading it stops the run and keeps
+    /// what was found — the results a long grep has already put on screen are the point of it
+    /// streaming, and throwing them away because the user wanted it to stop would be perverse.
+    /// Otherwise it clears the box, which is what it has always done.
+    /// </remarks>
     private void SearchBox_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape)
+        if (e.Key != Key.Escape) return;
+
+        if (Tab.IsSearchRunning)
         {
-            Tab.ClearSearchCommand.Execute(null);
-            FileListView.Focus();
+            Tab.StopSearchCommand.Execute(null);
             e.Handled = true;
+            return;
         }
+
+        Tab.ClearSearchCommand.Execute(null);
+        FileListView.Focus();
+        e.Handled = true;
     }
 
     // --- Keyboard ---

@@ -244,7 +244,6 @@ public sealed class SearchGrammarTests
     [Theory]
     [InlineData("dc:today")]
     [InlineData("da:today")]
-    [InlineData("content:hello")]
     public void KnownButUnanswerableKeysSayWhy(string text)
     {
         var parse = SearchQuery.Parse(text);

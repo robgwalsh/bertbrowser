@@ -65,6 +65,14 @@ public static class SearchGrammar
         if (root is null)
             return new SearchQueryParse(null, null);
 
+        // Refused rather than answered wrongly. There is no file on disk behind an archive entry,
+        // so the reading pass has nothing to open — and because an unread candidate counts as a
+        // possible match, an archive scan that ran anyway would report every entry in every
+        // container as a hit.
+        if (root.NeedsContent && root.WantsArchives)
+            return new SearchQueryParse(
+                null, "content: can't look inside archives — extract them first.");
+
         // The floor: something has to narrow the disk down. Two literal characters of text —
         // summed across the query, so "a b" clears it exactly as it always did — or a filter
         // specific enough to stand alone. A bare "a" clears neither, and nor does "is:dir".
@@ -78,7 +86,11 @@ public static class SearchGrammar
 
     private enum TokenKind { Term, Or, Not, Open, Close }
 
-    private readonly record struct Token(TokenKind Kind, string Text, bool Quoted, int ColonIndex);
+    /// <param name="Quoted">A quote appeared somewhere in the token, so its text is literal.</param>
+    /// <param name="QuotedKey">A quote appeared <em>before</em> any colon, so what precedes that
+    /// colon is not a key. <c>"a:b"</c> is a name; <c>ext:"jpg"</c> is a key with a quoted value.</param>
+    private readonly record struct Token(
+        TokenKind Kind, string Text, bool Quoted, int ColonIndex, bool QuotedKey = false);
 
     /// <summary>
     /// Splits the text into terms and operators. Quotes suppress every special meaning inside
@@ -130,6 +142,7 @@ public static class SearchGrammar
     {
         var sb = new StringBuilder();
         var quoted = false;
+        var quotedKey = false;
         var colon = -1;
         var i = start;
 
@@ -146,6 +159,9 @@ public static class SearchGrammar
             if (c == '"')
             {
                 quoted = true;
+                // A quote before the colon means there is no key: the colon is part of a name.
+                // One after it is quoting the *value*, which is how content:"a phrase" works.
+                if (colon < 0) quotedKey = true;
                 i++;
                 while (i < text.Length && text[i] != '"')
                 {
@@ -163,7 +179,7 @@ public static class SearchGrammar
             i++;
         }
 
-        return (new Token(TokenKind.Term, sb.ToString(), quoted, colon), i);
+        return (new Token(TokenKind.Term, sb.ToString(), quoted, colon, quotedKey), i);
     }
 
     /// <summary>Whether what has been read so far is the <c>re:</c> key and its value.</summary>
@@ -271,8 +287,10 @@ public static class SearchGrammar
         {
             var text = token.Text;
 
-            // Quoted text is literal throughout: no key, no wildcards.
-            if (!token.Quoted && token.ColonIndex > 0)
+            // A key is still a key when its *value* is quoted — that is how content:"a phrase"
+            // and ext:"jpg" work. A quote before the colon is the other case: the whole token is
+            // literal text that happens to contain a colon, so "C:\Users" stays a name.
+            if (!token.QuotedKey && token.ColonIndex > 0)
             {
                 var key = text[..token.ColonIndex].ToUpperInvariant();
                 var value = text[(token.ColonIndex + 1)..];
@@ -306,6 +324,22 @@ public static class SearchGrammar
 
                 case SearchSyntax.Path:
                     return new PathTerm(value.ToUpperInvariant());
+
+                case SearchSyntax.Content:
+                    // Deliberately not folded, unlike every other key here. The others compare
+                    // against an already-uppercased name; this one compares against file text that
+                    // would have to be folded per file, so ContentTerm compares ignoring case
+                    // instead — measurably the same speed, and no second megabyte per file.
+                    //
+                    // The floor is enforced here as well as through LiteralChars, because that
+                    // sums across the whole query: without this, "content:a report" would clear it
+                    // and grep an entire tree for one character.
+                    if (value.Length < 2)
+                    {
+                        Problem = "content: needs at least two characters to look for.";
+                        return null;
+                    }
+                    return new ContentTerm(value);
 
                 case SearchSyntax.Extension:
                     var extensions = value
