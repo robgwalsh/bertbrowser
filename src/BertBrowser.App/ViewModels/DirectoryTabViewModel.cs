@@ -6,6 +6,7 @@ using BertBrowser.Core.Data;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.Archives;
 using BertBrowser.Core.Services.Search;
 
 namespace BertBrowser.App.ViewModels;
@@ -26,6 +27,13 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     /// nothing can say why rather than implying the PC is empty.</summary>
     private readonly BertBrowser.Core.Services.Mft.IMftIndexService _mftIndex;
     private readonly AppSettings _settings;
+
+    /// <summary>Asked whether a path is browsable and whether it is inside a container. Never on
+    /// the UI thread for anything that opens one — see <see cref="NavigateToAsync"/>.</summary>
+    private readonly BertBrowser.Core.Services.Archives.IArchiveBrowser _archives;
+
+    /// <summary>The cap on results from searching inside a container, matching the index's own.</summary>
+    private const int ArchiveSearchLimit = 1000;
 
     private readonly Stack<string> _backStack = new();
     private readonly Stack<string> _forwardStack = new();
@@ -167,16 +175,20 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         ISearchService searchService,
         AppSettings settings,
         IProcessLauncher launcher,
-        BertBrowser.Core.Services.Mft.IMftIndexService mftIndex)
+        BertBrowser.Core.Services.Mft.IMftIndexService mftIndex,
+        BertBrowser.Core.Services.Archives.IArchiveBrowser archives,
+        BertBrowser.Core.Services.Archives.IArchiveReader archiveReader,
+        BertBrowser.Core.Services.Archives.IArchivePasswords archivePasswords)
     {
         _searchService = searchService;
         _settings = settings;
         _launcher = launcher;
         _mftIndex = mftIndex;
+        _archives = archives;
 
-        FileList = new FileListViewModel(fileSystem, dirSizeRepository, settings);
+        FileList = new FileListViewModel(fileSystem, dirSizeRepository, settings, archives);
         FileList.PropertyChanged += OnFileListPropertyChanged;
-        Preview = new PreviewPaneViewModel(settings);
+        Preview = new PreviewPaneViewModel(settings, archives, archiveReader, archivePasswords);
         _isPreviewVisible = settings.ShowPreviewPane;
         _refreshTimer.Tick += OnRefreshTick;
     }
@@ -223,6 +235,14 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     {
         StopWatching();
         if (path.Length == 0) return;
+
+        // Nothing inside an archive can be watched, and this is an explicit skip rather than a
+        // reliance on the catch below: FileSystemWatcher throws ArgumentException on a path that is
+        // not a directory, which the catch would swallow into "no live refresh" — working, but by
+        // accident, and invisibly. The container itself is deliberately not watched either: a file
+        // being rewritten under a browsing session has no good answer, and F5 genuinely re-reads
+        // because the cache key carries its length and write time.
+        if (ArchivePath.LooksVirtual(path) && !Directory.Exists(path)) return;
 
         try
         {
@@ -299,13 +319,29 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     public async Task NavigateToAsync(string path)
     {
         if (path.Equals(CurrentPath, StringComparison.OrdinalIgnoreCase)) return;
+
+        // Two stages, and the second one is deliberately not an answer.
+        //
+        // A real directory is the common case and settles immediately. Otherwise LooksVirtual — a
+        // pure segment scan, no disk — says whether any part of the path names an archive. If it
+        // does we go ahead and let the *load* find out, because deciding here would mean opening a
+        // container on the UI thread, of a file that may be on a dead network share. That is the
+        // call the preview pane already refuses to make on this thread, for the same reason.
+        //
+        // So a damaged, encrypted or absent archive becomes a banner in the list rather than a
+        // refusal at the gate, which is also the only way the banner can offer Unlock.
         if (!Directory.Exists(path))
         {
-            StatusText = $"Folder not found: {path}";
-            return;
+            if (!ArchivePath.LooksVirtual(path))
+            {
+                StatusText = $"Folder not found: {path}";
+                return;
+            }
         }
-
-        path = ResolveInaccessibleJunction(path);
+        else
+        {
+            path = ResolveInaccessibleJunction(path);
+        }
         if (path.Equals(CurrentPath, StringComparison.OrdinalIgnoreCase)) return;
 
         if (CurrentPath.Length > 0)
@@ -527,6 +563,24 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
             StatusText = $"Searching this PC for '{queryText}'…";
             outcome = await _searchService.SearchAllAsync(queryText, ct, includeHidden: false);
         }
+        else if (_archives.Resolve(CurrentPath) is { } here)
+        {
+            // Inside a container the index is no help — it holds nothing about archive contents,
+            // and handing it a virtual root would crawl a path that does not exist straight into
+            // fs_entry. It is also unnecessary: the listing already read the whole directory, so
+            // this is a walk over something in memory and is instant.
+            StatusText = $"Searching {Path.GetFileName(here.ArchiveFile)} for '{queryText}'…";
+
+            var hits = await Task.Run(() => ArchiveSearchScanner.Search(
+                _archives.ReadArchive(here.ArchiveFile),
+                here.ArchiveFile, here.EntryPath, ParsedSearch.Query!, ArchiveSearchLimit, ct), ct);
+
+            if (ct.IsCancellationRequested) return;
+            FileList.AppendSearchHits(hits);
+            outcome = new SearchOutcome(
+                hits, Truncated: hits.Count >= ArchiveSearchLimit, SearchResultSource.LiveScan,
+                RefreshPending: false);
+        }
         else
         {
             StatusText = $"Searching for '{queryText}'…";
@@ -691,7 +745,81 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
             return;
         }
 
+        // The elevated arm comes before the archive one, and the order is load-bearing: put it
+        // after and Ctrl+Shift+double-click on a .zip silently stops meaning "run as administrator".
+        if (!elevated &&
+            _settings.EnterArchivesOnDoubleClick &&
+            ArchiveFormats.IsArchiveName(item.Name) &&
+            !FileList.IsInsideArchive)
+        {
+            _ = EnterArchiveOrLaunchAsync(item);
+            return;
+        }
+
+        // Nothing inside a container has a path another program can open, and ProcessLauncher would
+        // report that as a launch failure. Say the useful thing instead.
+        if (FileList.IsInsideArchive)
+        {
+            StatusText = $"Extract {item.Name} to open it.";
+            return;
+        }
+
         if (_launcher.Launch(item.FullPath, elevated: elevated) is { } message)
             StatusText = message;
+    }
+
+    /// <summary>
+    /// Double-clicking something whose name says archive: walk into it, or hand it to the program
+    /// that owns it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A name is a claim, and only the bytes settle it.</b> Plenty of files are called
+    /// <c>.zip</c> without being one, and taking the user into an error page instead of opening
+    /// their file would be a regression they never asked for. So a container whose bytes are not
+    /// what the suffix claims — <see cref="ArchiveFailure.Damaged"/> — falls back to launching,
+    /// exactly as it did before archives were browsable.
+    /// </para>
+    /// <para>
+    /// Every other failure <em>does</em> navigate, and that is the point of separating them: an
+    /// encrypted archive is a real archive, and the banner it lands on is what offers to unlock it.
+    /// Launching that one instead would hide the only way in.
+    /// </para>
+    /// <para>
+    /// The read is off the UI thread and cached, so the navigation that follows re-uses it rather
+    /// than opening the file twice.
+    /// </para>
+    /// </remarks>
+    private async Task EnterArchiveOrLaunchAsync(FileItemViewModel item)
+    {
+        var path = item.FullPath;
+
+        // The list is genuinely loading while this runs — opening a large 7z takes a moment — so
+        // say so rather than leaving the pane looking idle. It is also the flag quiescence is
+        // measured by, which is what makes the step assertable in a script instead of a race.
+        FileList.IsLoading = true;
+        ArchiveIndex index;
+        try
+        {
+            index = await Task.Run(() => _archives.ReadArchive(path));
+        }
+        catch (Exception)
+        {
+            FileList.IsLoading = false;
+            throw;
+        }
+
+        if (index.Failure == ArchiveFailure.Damaged)
+        {
+            // Not what its name claims. Hand it back to whatever owns the extension, exactly as
+            // this did before archives were browsable.
+            FileList.IsLoading = false;
+            if (_launcher.Launch(path, elevated: false) is { } message) StatusText = message;
+            return;
+        }
+
+        // Left set on purpose: the load this starts owns the flag from here and clears it in its
+        // own finally, so the pane never blinks out of its loading state and back into it.
+        await NavigateToAsync(path);
     }
 }

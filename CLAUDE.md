@@ -877,7 +877,8 @@ behind `DelegateExecute = {11dbb47c-a525-400b-9e80-a54615a090c0}` (`CLSID_Execut
 *more specific* verbs on `Directory` and `Drive` therefore takes the filesystem cases and leaves
 `Folder` alone — This PC, Control Panel, `.zip` browsing, FTP and Explorer's own in-window
 navigation all keep working, and keep working even if the registration is somehow left pointing at
-nothing. The Files app takes `Folder` instead and has the bug reports that follow from it, Control
+nothing. The `.zip` in that list means **Explorer's** zip browsing: this app browses archives itself
+(see **Archives**), and only a zip opened *from Explorer* stays with Explorer. The Files app takes `Folder` instead and has the bug reports that follow from it, Control
 Panel dying with "Application not found" among them; it needs a native `IShellWindows` shim and a
 hard-coded God Mode exclusion to paper over what that costs. Not worth it for the folders this app
 can actually browse.
@@ -1075,7 +1076,10 @@ Five rules are the design, and each is a thing Explorer's pane gets wrong:
   `NotDownloaded` and a message, not a silent multi-gigabyte fetch. The two recall bits are absent
   from .NET's `FileAttributes` and are named on `PreviewClassifier`.
 
-- **`PreviewClassifier`** decides, touching nothing: kind, byte budget, or a refusal. An
+- **`PreviewClassifier`** decides, touching nothing: kind, byte budget, or a refusal. Its archive
+  extension set has moved into `ArchiveFormats` (see **Archives**), which is also where the two
+  entry caps are explained: `ArchiveListing.DefaultMaxEntries` is 1,000 because this runs on arrow
+  keys, and the browse index's is 200,000 because a listing you navigated to was asked for. An
   unrecognised extension becomes `Document` — an honest attempt through the shell — rather than an
   immediate refusal, because the classifier cannot know which handlers this machine has. Office and
   OpenDocument extensions are deliberately **not** archives even though they are zips: the shell
@@ -1149,7 +1153,178 @@ theories go, drop the tokenizer's string handling and the cover assertion does.
 
 **Rendered Markdown and real PDF paging are the two things that want a package** (Markdig, PdfPig)
 and are deliberately absent: Markdown previews as its coloured source, PDF as page one from the
-shell.
+shell. Reading the bytes *inside* a container is not one of them — see below; the pane learned that
+by gaining one branch, because the classifier already took a name and every reader already took a
+`Stream`.
+
+### Archives
+
+`Core/Services/Archives` makes a zip, 7z, tar or rar behave like a folder: you walk into it, look at
+what is inside, pull things out, put things in, and search it. It is the one area where the
+underlying decision — how a path inside a container is spelled — settles almost everything else.
+
+**A virtual path is an ordinary Windows path.** `C:\x\a.zip\src\lib` is what a tab shows and what a
+row's `FullPath` holds. `Path.GetFullPath` accepts it, so `PathKey`, `BreadcrumbSegments`,
+`Path.GetDirectoryName` (which is Up and the back stack), `NavigationRequest.IsAcceptablePath` and
+the single-instance wire format all kept working with no changes at all. **Do not introduce a
+`zip://` scheme**: it throws out of `GetFullPath` and breaks every one of them.
+
+The price of that is one hard invariant, and it is the thing to be careful about in this whole area:
+
+> **No virtual path may reach a `PathKey`-keyed table.** `PathKey.IsUnder` places
+> `C:\x\a.zip\src` strictly inside **`C:\x`** as well as inside the archive, so a single such row in
+> `fs_entry`, `dir_size_cache` or `bookmark` makes every subtree range scan over the *containing
+> folder* start returning archive interiors. `BookmarkService.Add`, `SearchService.SearchAsync` and
+> the disk-usage queries each refuse a virtual root, and `DiskUsageInArchiveTests` counts `fs_entry`
+> rows afterwards.
+
+**SharpCompress is the first non-trivial third-party dependency in Core**, and it is confined to one
+class — `ArchiveReader.cs` — which is the justification. A package reachable from one file can be
+replaced; one whose types reach a ViewModel is one you have married. It earns its place where
+Markdig and PdfPig do not because there is no alternative at all: `System.IO.Compression` reads zip
+and nothing else, and hand-rolling an LZMA or RAR decoder is not a file browser's business. MIT,
+`net10.0` target, no transitive dependencies.
+
+> **Its published documentation describes an unreleased version. Do not write code from it.** There
+> is no `1.0.0` tag on GitHub and `master` has moved on, so `docs/API.md` advertises
+> `ArchiveFactory.InspectArchive`, `ArchiveInformation`, `SevenZipWriter`, `PasswordRequiredException`
+> and `InvalidArchiveException` — **none of which exist in the shipped package.** What does exist was
+> confirmed by searching the assembly: `IArchive.IsSolid/IsComplete`, per-entry `IsEncrypted`,
+> `ExtractAllEntries`, and `SharpCompress.Common.CryptographicException`. The compiler is the
+> authority here, not the docs.
+
+**`SharpCompress.Common.CryptographicException` shadows `System.Security.Cryptography`'s.** A file
+carrying the framework `using` and a bare `catch (CryptographicException)` compiles, catches the
+wrong type, and lets a wrong password escape unhandled out of a `Task.Run`. Fully qualified
+everywhere.
+
+The pieces:
+
+- **`ArchiveFormats`** is the one suffix table — the preview classifier's old `Archives` set moved
+  into it — matching by **longest suffix**, so `backup.tar.gz` matches `.tar.gz` and not `.gz`.
+  Measured, not assumed: opened as the wrong thing, a `.tar.gz` comes back as a GZip holding one
+  entry whose key is `null`, and a `.tar.bz2` throws outright. Each row carries its container, and
+  `RandomAccess` decides **which of the library's two APIs the reader uses** — that is not cosmetic.
+  Standalone `.bz2`, `.xz`, `.lz` and `.zst` are deliberately absent: nothing in the library names
+  them as containers, so there is no detected type to check a claim against.
+- **`ArchivePath`** splits `C:\x\a.zip\src` the way `UniquePath` works — the parser nominates and an
+  injected existence delegate decides — because a folder really can be named `foo.zip`. Shortest
+  prefix wins, so nesting is a refusal rather than a misparse. **Its `..` test is on the raw string,
+  before anything canonicalizes**: `GetFullPath(@"C:\x\a.zip\..\..\Windows")` is `C:\Windows`, a real
+  folder, so a parser that canonicalized first would hand extraction a destination outside the
+  archive. That is the most load-bearing line in the file.
+- **`ArchiveIndexBuilder`** is pure, and does the two things a container will not do for you.
+  **Intermediate directories are synthesized from path prefixes** — a zip carrying `src/lib/util.js`
+  and no `src/` entry is completely ordinary, and trusting explicit entries leaves a folder you
+  cannot enter. And **an entry whose key escapes the root is refused here rather than in the
+  extractor**: that is Zip Slip, refused at read time so the entry never exists to be extracted.
+  Directory sizes are the exact recursive sum, which is allowed because nothing is walked — the
+  numbers were already in the container's own directory.
+- **`ArchiveReader`** is the only file naming SharpCompress. **What the bytes turn out to be must
+  match what the name claimed**: 512,000 zero bytes named `archive.zip` is a *valid empty tar* (a
+  tar's end marker is zero blocks), so without that check the harness's own filler fixture browses
+  as an empty folder. Nothing is held open — `FileShare.ReadWrite | Delete`, because what a held
+  handle blocks is this app's own rename, move and delete executors. The catch is deliberately wide:
+  a malformed archive is attacker-controlled input handed to third-party decoders, and
+  `ArchiveContents.Failed`'s contract — *a damaged archive is a message, never a throw* — now holds
+  up a browsing surface rather than a panel.
+- **`ArchiveAwareFileSystemService`** is a decorator over `FileSystemService`, which is why the five
+  callers of `IFileSystemService` needed no changes at all. `IArchiveBrowser` on the same object is
+  what navigation, the preview pane and the guards ask instead. **Nothing inside an archive is ever
+  `Hidden`**: `IEntry.Attrib` holds a DOS byte *or* a Unix mode depending on the writing tool, and
+  "Show hidden items" filters on it — map it and most of a Linux tarball silently disappears under
+  the default setting. The payoff for getting it right is a ghosted icon; the cost of getting it
+  wrong is missing files.
+
+**Navigation's gate is two-stage, and the second stage is deliberately not an answer.**
+`Directory.Exists` settles the common case; otherwise `ArchivePath.LooksVirtual` — a pure segment
+scan, no disk — says *maybe*, and the ordinary load finds out. Deciding at the gate would mean
+opening a container on the UI thread, of a file that may be on a dead network share. So a damaged,
+encrypted or absent archive becomes a banner in the list, which is also the only way the banner can
+offer Unlock. `FileListViewModel.IsInsideArchive` is set from a real `File.Exists` on the worker
+thread, never from `LooksVirtual`, or a genuine folder named `photos.zip` would switch writing off.
+
+In `Open`, **the elevated arm comes before the archive one** — put it after and
+Ctrl+Shift+double-click on a `.zip` silently stops meaning "run as administrator". And **a name is a
+claim only the bytes settle**: a container that fails to read as `Damaged` falls back to launching,
+because plenty of files are called `.zip` without being one and taking the user to an error page
+instead of opening their file is a regression. Every *other* failure navigates, which is the point
+of separating them — an encrypted archive is a real archive and its banner is the way in.
+
+**Extracting is purely additive** — `Skip` and `KeepBoth`, and deliberately no `Replace`, so it
+needs no undo and cannot lose anyone's work. It reuses `TransferProgress` and
+`TransferProgressViewModel` unchanged through a synthetic `TransferPlan`; the byte total is *exact*
+for an addressable container, better than the filesystem case. **A cancelled extract records exactly
+what it created and removes only that, in reverse, while still empty** — `DirectoryRemoval.RemoveTree`
+would be wrong here, because an extract lands in a folder the user already has files in.
+`ExtractExecutor.ReadEntries` takes the whole selection in **one pass**, so a solid archive is
+decompressed once rather than once per file.
+
+**Creating** goes over this app's own walk rather than the library's, so the browse setting decides
+about hidden files and reparse points are skipped. It writes `<target>.bertbrowser-partial` and
+renames on success: cancelling must not leave a truncated file under the name every other tool will
+try to open. 7z and RAR are **refused by name** rather than greyed out.
+
+**Editing a container is a rewrite, and the order is the safety.** Nothing can modify these formats
+in place — .NET's own `ZipArchive` update mode does it by materialising every entry into memory and
+committing on `Dispose`, which is 4 GB of RAM for a 4 GB zip and a corrupt archive if it crashes. So
+`ArchiveEditExecutor` writes a sibling, **verifies it reads back**, moves the original into staging,
+then swaps. `ShellViewModel.RetireUndoable` is the only thing that finally erases the held original,
+so it outlives its undo record by exactly one operation — the contract a Replace's staging has. The
+undo slot is now **four-way**. Most of `ArchiveEditPlanner` is refusals, each by name: 7z and the
+read-only formats, solid, encrypted, incomplete, and anything over `MaxRewriteBytes`. Two details:
+the working name puts its marker **before** the suffix (`a.bertbrowser-rewrite-1234.zip`), or the
+reader's own extension check refuses to read back what it just wrote; and a rename in there is
+planned through **`ArchiveRenameProbe`**, an `IRenameProbe` over the index, so `RenamePlanner` and
+its dialog preview work unchanged — that probe seam paying off for a filesystem it knew nothing
+about.
+
+**Searching** comes in two halves. Inside a container it is answered from the index the listing
+already read, so it is instant and goes nowhere near `fs_entry`; `ArchiveSearchScanner` reuses
+`SearchNode.Matches` verbatim by building a `SearchCandidate` per node, so `ext:`, `size:`, `re:`,
+`OR`, `!` and brackets all work with nothing reimplemented. From outside, **`in:archives`** is a
+*scope* — `Matches` is `true`, `WriteSql` is `1`, and the real answer is `SearchQuery.WantsArchives`,
+computed exactly as `WantsHidden` is with `NotNode` returning `false`. It **finds the containers
+itself** rather than reusing the first pass's hits, which was the obvious shortcut and is wrong:
+searching for "util" would find nothing in `sample.zip` because `sample.zip` is not called util.
+**There is no schema change**, and there must not be: a second `PathKey`-keyed corpus of virtual
+paths is the invariant above, at scale.
+
+**Disk usage inside an archive is the one place that view is never approximate**, because every size
+is exact. `DiskUsageAvailability.Ready` is passed **directly** rather than through
+`ClassifyBreakdown`: that function weighs evidence *about the index*, and in here there is no index
+to have evidence about — asking it is the same category error that makes it a separate function from
+`Classify`, one level down.
+
+**Encrypted archives** prompt from the banner's Unlock, never from the background load that found
+them — a modal from a worker thread is not a modal, and it would have to be raised again on every
+back and refresh. Two shapes, derived rather than reported: a zip with headers in the clear lists in
+full with a lock on the rows, and a 7z with encrypted headers lists nothing. **A wrong password
+arrives as a parse failure, not a crypto error** — decrypting a header with the wrong key produces
+garbage — so with a password in hand, bytes that will not parse are reported as a bad password
+rather than a damaged file. `ArchivePasswordStore` keeps nothing on disk, and the reason is not
+vagueness about crypto: `settings.json` and `bertbrowser.db` are plain files in the profile, so
+"remembered" would mean "written in the clear beside the archive it unlocks".
+
+Tests: `ArchivePathTests`, `ArchiveFormatsTests`, `ArchiveIndexBuilderTests` (pure),
+`ArchiveReaderTests`, `ArchiveAwareFileSystemServiceTests`, `ExtractExecutorTests`,
+`ArchiveCreatorTests`, `ArchiveEditTests`, `ArchiveSearchTests`, `EncryptedArchiveTests`,
+`DiskUsageInArchiveTests`. **`ArchiveFixtures` lives in Core** behind `InternalsVisibleTo` so the
+tests and the harness write the same bytes: the containers nothing in the graph can produce — an
+AES zip, a header-encrypted 7z, a plain 7z — are base64 with the exact 7-Zip command line that made
+them in the comment above, the argument `ThemeCatalog` makes for built-ins as data. Everything else
+is written with SharpCompress itself, which makes those round-trip tests rather than compatibility
+tests; say so rather than pretending otherwise.
+
+`tools/ui/archive.bbs` drives the whole thing through the real window, and `themes.bbs` photographs
+the three new dialogs in both palettes — the password one holds the only `PasswordBox` in the app.
+**One line lives in `smoke.bbs`**: the ordinary `tree` fixture's `archive.zip` is 512,000 bytes of
+filler that three scripts have listed for ages, and entering it must hand the file back to the shell
+rather than browsing an empty tar. Mutate a rule and confirm a test goes red: trust explicit
+directory entries and a folder vanishes from a zip that omits them; drop the index's `..` refusal and
+Zip Slip lands; map `IEntry.Attrib` onto `FileAttributes` and a tarball half-disappears; clean up a
+cancelled extract with `RemoveTree` and the user's own files go; let `NotNode` propagate
+`WantsArchives` and `!in:archives` widens the scan instead of narrowing it.
 
 ### Theming
 

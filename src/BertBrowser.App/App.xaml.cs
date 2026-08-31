@@ -77,9 +77,13 @@ public partial class App : Application
         else
         {
             // Pruned here rather than inside the shell so "is this still a directory?" stays with
-            // the caller, the way the rest of the startup path already decides that.
+            // the caller, the way the rest of the startup path already decides that. The predicate
+            // accepts somewhere inside an archive too — closing the app in a zip and losing the tab
+            // is worse than reopening on a banner if the container has since gone.
             shell.StartLayout = BertBrowser.Core.Layout.SessionLayoutRules.Prune(
-                settings.Session, Directory.Exists);
+                settings.Session,
+                path => Directory.Exists(path) ||
+                        BertBrowser.Core.Services.Archives.ArchivePath.Parse(path, File.Exists) is not null);
 
             if (settings.LastPath is { } last && Directory.Exists(last))
                 shell.StartPath = last;
@@ -140,11 +144,41 @@ public partial class App : Application
         services.AddSingleton<DirSizeRepository>();
         services.AddSingleton<FsIndexRepository>();
         services.AddSingleton<BookmarkRepository>();
-        services.AddSingleton<IFileSystemService, FileSystemService>();
+        // The archive layer is a decorator, which is why the five callers of IFileSystemService —
+        // the file list, its merge diff, the disk-usage breakdown and the folder tree — needed no
+        // changes at all to gain it. The concrete FileSystemService is registered separately so the
+        // decorator has something real to fall through to.
+        services.AddSingleton<FileSystemService>();
+        services.AddSingleton<BertBrowser.Core.Services.Archives.IArchiveReader,
+            BertBrowser.Core.Services.Archives.SharpCompressArchiveReader>();
+        services.AddSingleton<BertBrowser.Core.Services.Archives.ArchiveCache>();
+        services.AddSingleton<Services.ArchivePasswordStore>();
+        services.AddSingleton<BertBrowser.Core.Services.Archives.IArchivePasswords>(
+            s => s.GetRequiredService<Services.ArchivePasswordStore>());
+        services.AddSingleton<BertBrowser.Core.Services.Archives.ArchiveAwareFileSystemService>(
+            s => new BertBrowser.Core.Services.Archives.ArchiveAwareFileSystemService(
+                s.GetRequiredService<FileSystemService>(),
+                s.GetRequiredService<BertBrowser.Core.Services.Archives.IArchiveReader>(),
+                s.GetRequiredService<BertBrowser.Core.Services.Archives.IArchivePasswords>(),
+                s.GetRequiredService<BertBrowser.Core.Services.Archives.ArchiveCache>()));
+        services.AddSingleton<IFileSystemService>(
+            s => s.GetRequiredService<BertBrowser.Core.Services.Archives.ArchiveAwareFileSystemService>());
+        // Same object again under its other interface: the listing seam for everything that browses
+        // directories, and this one for the few places that must be able to tell an archive apart.
+        // One instance, so the two views can never disagree about what a path is.
+        services.AddSingleton<BertBrowser.Core.Services.Archives.IArchiveBrowser>(
+            s => s.GetRequiredService<BertBrowser.Core.Services.Archives.ArchiveAwareFileSystemService>());
         services.AddSingleton<BertBrowser.Core.Services.Transfer.TransferPlanner>();
         services.AddSingleton<BertBrowser.Core.Services.Transfer.TransferExecutor>();
         services.AddSingleton<BertBrowser.Core.Services.Rename.RenamePlanner>();
         services.AddSingleton<BertBrowser.Core.Services.Rename.RenameExecutor>();
+        services.AddSingleton<BertBrowser.Core.Services.Archives.ArchiveCreator>();
+        services.AddSingleton<BertBrowser.Core.Services.Archives.ArchiveEditPlanner>();
+        services.AddSingleton(s => new BertBrowser.Core.Services.Archives.ArchiveEditExecutor(
+            s.GetRequiredService<BertBrowser.Core.Services.Archives.IArchiveReader>()));
+        services.AddSingleton<BertBrowser.Core.Services.Archives.ExtractPlanner>();
+        services.AddSingleton(s => new BertBrowser.Core.Services.Archives.ExtractExecutor(
+            s.GetRequiredService<BertBrowser.Core.Services.Archives.IArchiveReader>()));
         services.AddSingleton<BertBrowser.Core.Services.NewItem.NewItemPlanner>();
         services.AddSingleton<BertBrowser.Core.Services.NewItem.NewItemExecutor>();
         services.AddSingleton<IShellNewCatalog, ShellNewCatalog>();

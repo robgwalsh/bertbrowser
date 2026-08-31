@@ -86,6 +86,11 @@
                     <TextBlock Style="{StaticResource Hint}"
                                Text="Show hidden files and folders in listings and search results"/>
 
+                    <CheckBox Content="Open archives as folders" Margin="0,12,0,0"
+                              IsChecked="{Binding EnterArchivesOnDoubleClick}"/>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Double-clicking a zip, 7z, tar or rar walks into it. With this off they open in whichever program owns them — and the breadcrumb, Enter and typing the path still go in."/>
+
                     <DockPanel>
                         <TextBlock Text="Vertical scroll speed" VerticalAlignment="Center"/>
                         <TextBlock DockPanel.Dock="Right" Text="{Binding ScrollSpeedText}" VerticalAlignment="Center"
@@ -121,7 +126,7 @@
                         <CheckBox Content="Open folders in BertBrowser instead of File Explorer"
                                   IsChecked="{Binding OpenFoldersHere}"/>
                         <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,16"
-                                   Text="This PC, Control Panel and zip files keep opening in File Explorer, and so does anything that runs explorer.exe by name — Win+E, the taskbar icon, and some apps' &quot;Show in folder&quot;."/>
+                                   Text="This PC and Control Panel keep opening in File Explorer, and so does a zip opened from Explorer — BertBrowser browses archives in its own window. So does anything that runs explorer.exe by name — Win+E, the taskbar icon, and some apps' &quot;Show in folder&quot;."/>
 
                         <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,16"
                                    Foreground="{StaticResource Theme.Warning.Foreground}"

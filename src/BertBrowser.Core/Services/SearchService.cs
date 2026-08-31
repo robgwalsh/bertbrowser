@@ -4,6 +4,7 @@ using BertBrowser.Core.Data;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services.Delete;
+using BertBrowser.Core.Services.Archives;
 using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Services.Search;
 
@@ -43,6 +44,12 @@ public interface ISearchService
 public sealed class SearchService : ISearchService, IDisposable
 {
     private const int MaxResults = 1000;
+
+    /// <summary>How many containers one <c>in:archives</c> pass will open.</summary>
+    private const int MaxArchivesScanned = 200;
+
+    /// <summary>And how many bytes of them, whichever bound is reached first.</summary>
+    private const long MaxArchiveBytesScanned = 2L * 1024 * 1024 * 1024;
     private const int LiveBatchSize = 50;
     private static readonly TimeSpan LiveBatchInterval = TimeSpan.FromMilliseconds(250);
 
@@ -55,8 +62,14 @@ public sealed class SearchService : ISearchService, IDisposable
 
     public event Action<string>? IndexRefreshed;
 
-    public SearchService(FsIndexRepository repository, IndexCrawler crawler, IIndexWatcherService watchers, IMftIndexService mft)
+    /// <summary>Only consulted when a query says <c>in:archives</c>; null leaves that a no-op.</summary>
+    private readonly Archives.IArchiveBrowser? _archives;
+
+    public SearchService(
+        FsIndexRepository repository, IndexCrawler crawler, IIndexWatcherService watchers,
+        IMftIndexService mft, Archives.IArchiveBrowser? archives = null)
     {
+        _archives = archives;
         _repository = repository;
         _crawler = crawler;
         _watchers = watchers;
@@ -130,6 +143,17 @@ public sealed class SearchService : ISearchService, IDisposable
         if (parse.Query is not { } query)
             return Refused(parse);
 
+        // A root inside an archive is refused outright, and this is the hard invariant rather than
+        // a missing feature. PathKey.Canonicalize accepts a virtual path happily, FindCoveringRoot
+        // then misses, and EnsureIndexed would crawl a path that does not exist straight into
+        // fs_entry — after which every subtree range scan over the archive's own containing folder
+        // returns archive interiors. Searching inside a container is answered from its already
+        // loaded index instead; see the Archives section.
+        if (Archives.ArchivePath.Parse(rootPath, File.Exists) is not null)
+            return new SearchOutcome([], Truncated: false, SearchResultSource.Index,
+                RefreshPending: false,
+                Problem: "Searching inside an archive is not indexed. Extract it to search its contents.");
+
         var showHidden = ShowHidden(query, includeHidden);
         var rootKey = PathKey.Canonicalize(rootPath);
         var covering = await Task.Run(() => _repository.FindCoveringRoot(rootKey), ct).ConfigureAwait(false);
@@ -149,8 +173,13 @@ public sealed class SearchService : ISearchService, IDisposable
 
             var (hits, truncated) = await Task.Run(
                 () => _repository.Search(rootPath, query, MaxResults, showHidden), ct).ConfigureAwait(false);
+
+            var visible = Visible(hits).ToList();
+            var inside = await ScanArchivesAsync(query, rootPath, liveBatches, ct).ConfigureAwait(false);
+            visible.AddRange(inside);
+
             return new SearchOutcome(
-                Visible(hits), truncated,
+                visible, truncated,
                 fresh ? SearchResultSource.Index : SearchResultSource.StaleIndex,
                 RefreshPending: !fresh,
                 ScopeLacksMetadata: await UnansweredForWantOfMetadataAsync(query, hits, rootPath, ct)
@@ -158,7 +187,91 @@ public sealed class SearchService : ISearchService, IDisposable
         }
 
         EnsureIndexed(rootKey, PathKey.NormalizeDisplay(rootPath));
-        return await Task.Run(() => LiveScan(rootPath, query, ct, liveBatches, showHidden), ct).ConfigureAwait(false);
+        var outcome = await Task.Run(
+            () => LiveScan(rootPath, query, ct, liveBatches, showHidden), ct).ConfigureAwait(false);
+
+        var extra = await ScanArchivesAsync(query, rootPath, liveBatches, ct).ConfigureAwait(false);
+        return extra.Count == 0
+            ? outcome
+            : outcome with { Hits = [.. outcome.Hits, .. extra] };
+    }
+
+    /// <summary>
+    /// The <c>in:archives</c> second pass: opens the containers the ordinary pass already found and
+    /// searches their entry names.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Opt-in, and it has to be.</b> A bare word must never open an archive — that is the
+    /// compatibility rule the whole query language is bent around — and opening one is orders of
+    /// magnitude more expensive than reading an index row. So this runs only when the query said so.
+    /// </para>
+    /// <para>
+    /// <b>It finds the containers itself rather than reusing the first pass's hits</b>, which was
+    /// the obvious shortcut and is wrong: the query the user typed describes what they are looking
+    /// for <em>inside</em> an archive, and there is no reason it should also match the archive's own
+    /// name. Searching for "util" would have found nothing in <c>sample.zip</c> because
+    /// <c>sample.zip</c> is not called util.
+    /// </para>
+    /// <para>
+    /// <b>No schema change, and there must not be one.</b> Storing archive contents would mean a
+    /// second <c>PathKey</c>-keyed corpus full of virtual paths — the one thing that would poison
+    /// every subtree range scan over the folders those containers live in — rebuilt whenever any
+    /// archive's timestamp moved. <c>fs_entry</c> is <c>WITHOUT ROWID</c> and has already refused a
+    /// secondary index on <c>name</c> and on <c>size_bytes</c> for far less than this would cost.
+    /// </para>
+    /// <para>
+    /// Capped both ways, because the cost is per container and per byte: whichever bound is reached
+    /// first stops the pass.
+    /// </para>
+    /// </remarks>
+    private Task<IReadOnlyList<SearchHit>> ScanArchivesAsync(
+        SearchQuery query,
+        string rootPath,
+        IProgress<IReadOnlyList<SearchHit>>? liveBatches,
+        CancellationToken ct)
+    {
+        if (!query.WantsArchives || _archives is null)
+            return Task.FromResult<IReadOnlyList<SearchHit>>([]);
+
+        return Task.Run<IReadOnlyList<SearchHit>>(() =>
+        {
+            var containers = new List<(string Path, long Size)>();
+
+            // One walk for the containers, matching on the name table rather than on the query.
+            // Bounded as it goes, so a folder holding ten thousand zips stops at the cap rather
+            // than collecting them all and then throwing most away.
+            long found = 0;
+            FileSystemWalker.Walk(rootPath, entry =>
+            {
+                if (entry.IsDirectory || !ArchiveFormats.IsArchiveName(entry.Name)) return true;
+
+                containers.Add((entry.DisplayPath, entry.SizeBytes));
+                found += entry.SizeBytes;
+                return containers.Count < MaxArchivesScanned && found < MaxArchiveBytesScanned;
+            }, ct, includeHidden: false);
+
+            var hits = new List<SearchHit>();
+            foreach (var (path, _) in containers)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (hits.Count >= MaxResults) break;
+
+                var index = _archives.ReadArchive(path);
+                if (!index.Ok) continue;
+
+                var inside = ArchiveSearchScanner.Search(
+                    index, path, "", query, MaxResults - hits.Count, ct);
+                if (inside.Count == 0) continue;
+
+                hits.AddRange(inside);
+                // Straight onto the same stream the live scan uses, so results land in a list that
+                // is already on screen and none of the UI needed new plumbing.
+                liveBatches?.Report(inside);
+            }
+
+            return hits;
+        }, ct);
     }
 
     private SearchOutcome LiveScan(

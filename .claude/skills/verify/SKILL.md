@@ -63,6 +63,9 @@ tree [dir]                  lay down a throwaway fixture tree (folders, hidden e
 preview-fixture [dir]       files that really are what their extension says (a PNG with alpha, a
                             zip, C# and Markdown), in a Preview folder of their own — `tree`'s
                             photo.jpg is text, which previews as nothing
+archive-fixture [dir]       the containers nothing here can write: locked.zip (AES, password
+                            hunter2), sealed.7z (encrypted headers, correct-horse) and plain.7z.
+                            Base64 in Core so a script and a unit test see the same bytes
 mkdir <rel> | write <rel> [bytes] | sandbox
 
 go <path>                   navigate the active tab (relative paths resolve in the sandbox)
@@ -91,7 +94,14 @@ rename-rule <key=value ...> the same, through the dialog's options panel. Quote 
                             start=<n> step=<n>. Tokens: {name} {base} {ext} {parent} {n} {n:000}
                             {modified} {modified:<format>}, and {{ for a literal brace
 delete | delete-permanent [names]
+                            inside an archive, delete rewrites the container without those entries
+                            (and Ctrl+Z puts the whole original back); rename does the same for one
 move|copy [names] to <folder>
+extract [names] to <folder> pull entries out of the archive on show, through the same planner,
+                            executor and progress surface the menu uses
+compress <format> <name>    zip | tar | tar.gz | tar.bz2 — the selection, or the folder on show
+unlock <password>           give the archive on show a password and reload; writes the session
+                            store directly, because the harness never clicks
 undo
 
 duplicates [folder]         scan for byte-identical files, defaulting to the folder on show. It
@@ -109,7 +119,8 @@ preview on|off              the active tab's preview pane, with its debounce and
 shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, rename-advanced,
                             delete, delete-permanent, message, warning, properties, settings,
-                            theme-editor, disk-usage, duplicates, search-syntax
+                            theme-editor, disk-usage, duplicates, search-syntax, extract,
+                            compress, archive-password
                             (new-folder/new-file/search-syntax need no selection; every other
                             kind uses one.
                             rename-advanced is the rename dialog with its options panel open —
@@ -126,6 +137,7 @@ assert-path <substring> | assert-status <substring> | assert-count <n>
 assert-error [substring]     the warning banner above the list; bare = assert there is none
 assert-row <name> | assert-no-row <name> | assert-selected <n>
 assert-tabs <n> | assert-panes <n> | assert-flattened | assert-not-flattened
+assert-inside-archive | assert-not-inside-archive
 assert-can-undo | assert-cannot-undo | assert-exists <path> | assert-missing <path>
 assert-duplicate-groups <n> | assert-duplicate-selected <n>
 assert-duplicate-row <name> | assert-no-duplicate-row <name>

@@ -55,6 +55,18 @@ public abstract class SearchNode
 
     /// <summary>Whether any node in this subtree asks for hidden entries (<c>is:hidden</c>).</summary>
     public virtual bool WantsHidden => false;
+
+    /// <summary>
+    /// Whether any node in this subtree asks for archive contents to be searched too
+    /// (<c>in:archives</c>).
+    /// </summary>
+    /// <remarks>
+    /// A <em>scope</em> rather than a predicate, exactly as <see cref="WantsHidden"/> is: the index
+    /// holds nothing about what is inside a container, so this cannot be answered by matching a row
+    /// — it has to change which rows exist to be matched. <see cref="SearchService"/> reads it and
+    /// runs a second, opt-in pass.
+    /// </remarks>
+    public virtual bool WantsArchives => false;
 }
 
 /// <summary>Every child must match.</summary>
@@ -90,6 +102,8 @@ public sealed class AndNode : SearchNode
     public override bool HasFilter => Children.Any(c => c.HasFilter);
     public override bool NeedsMetadata => Children.Any(c => c.NeedsMetadata);
     public override bool WantsHidden => Children.Any(c => c.WantsHidden);
+
+    public override bool WantsArchives => Children.Any(c => c.WantsArchives);
 }
 
 /// <summary>Any child may match.</summary>
@@ -125,6 +139,8 @@ public sealed class OrNode : SearchNode
 
     public override bool NeedsMetadata => Children.Any(c => c.NeedsMetadata);
     public override bool WantsHidden => Children.Any(c => c.WantsHidden);
+
+    public override bool WantsArchives => Children.Any(c => c.WantsArchives);
 }
 
 /// <summary>The child must not match.</summary>
@@ -169,4 +185,8 @@ public sealed class NotNode : SearchNode
     /// <summary>Deliberately not the child's: <c>!is:hidden</c> asks to exclude hidden entries,
     /// which is the default, not a request to widen the scan.</summary>
     public override bool WantsHidden => false;
+
+    /// <summary>Deliberately not the child's either, and for the same reason: <c>!in:archives</c>
+    /// asks to leave containers out, which is already what happens.</summary>
+    public override bool WantsArchives => false;
 }

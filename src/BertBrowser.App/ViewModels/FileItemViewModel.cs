@@ -41,12 +41,20 @@ public sealed partial class FileItemViewModel : ObservableObject
     /// The listing entry this row was built from, for comparing against a fresh listing.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A directory's <see cref="SizeBytes"/> is deliberately left out — it is hydrated from the
     /// size cache rather than read from disk, so including it would make every folder look changed
     /// the moment its cached total arrived, and the live refresh would rebuild rows for nothing.
+    /// </para>
+    /// <para>
+    /// "Left out" is spelled <c>-1</c>, not <c>0</c>, because that is what a lister writes for a
+    /// directory whose size it does not know. Writing <c>0</c> here meant every folder differed
+    /// from its own fresh listing on every merge pass — the exact rebuild the paragraph above says
+    /// this exists to avoid.
+    /// </para>
     /// </remarks>
     public FileEntry ToEntry() => new(
-        Name, FullPath, IsDirectory, IsDirectory ? 0 : SizeBytes ?? 0, ModifiedUtc,
+        Name, FullPath, IsDirectory, IsDirectory ? -1 : SizeBytes ?? 0, ModifiedUtc,
         IsHidden ? FileAttributes.Hidden : FileAttributes.Normal);
 
     [ObservableProperty]
@@ -72,7 +80,11 @@ public sealed partial class FileItemViewModel : ObservableObject
         ModifiedUtc = entry.ModifiedUtc;
         IsHidden = entry.Attributes.HasFlag(FileAttributes.Hidden);
         RelativePath = string.Empty;
-        SizeBytes = entry.IsDirectory ? null : entry.SizeBytes;
+        // A directory's size is normally unknown at listing time (FileSystemService writes -1) and
+        // arrives later from dir_size_cache. A lister that already knows it exactly — the archive
+        // one, where the number was in the container's own directory — writes a real value, and
+        // that is the difference the >= 0 test reads. Zero is a fact here, not a missing row.
+        SizeBytes = entry.IsDirectory ? (entry.SizeBytes >= 0 ? entry.SizeBytes : null) : entry.SizeBytes;
         TypeName = entry.IsDirectory
             ? "Folder"
             : Path.GetExtension(entry.Name) is { Length: > 1 } ext ? ext[1..].ToUpperInvariant() + " file" : "File";

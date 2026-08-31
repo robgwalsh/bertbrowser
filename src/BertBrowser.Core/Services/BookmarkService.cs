@@ -21,8 +21,19 @@ public sealed class BookmarkService : IBookmarkService
     public Task<IReadOnlyList<Bookmark>> GetAllAsync() =>
         Task.Run(() => _repository.GetAll());
 
-    public Task<bool> AddAsync(string path, bool isDirectory) =>
-        Task.Run(() => _repository.Add(path, isDirectory));
+    /// <remarks>
+    /// <b>A path inside an archive is refused here, not only in the menu.</b> The bookmark table is
+    /// keyed by <c>PathKey</c>, and a virtual path canonicalizes perfectly happily — which is the
+    /// trap: <c>PathKey.IsUnder</c> then places it strictly inside the archive's own containing
+    /// folder as well as inside the archive, so one such row would make every subtree range scan
+    /// over that folder start returning archive interiors. The menu hiding the item is a courtesy;
+    /// this is the rule.
+    /// </remarks>
+    public Task<bool> AddAsync(string path, bool isDirectory)
+    {
+        if (Archives.ArchivePath.Parse(path, File.Exists) is not null) return Task.FromResult(false);
+        return Task.Run(() => _repository.Add(path, isDirectory));
+    }
 
     public Task RemoveAsync(string path) =>
         Task.Run(() => _repository.Remove(path));

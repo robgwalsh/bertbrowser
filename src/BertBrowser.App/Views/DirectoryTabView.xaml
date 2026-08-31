@@ -112,10 +112,21 @@
                          Visibility="{Binding FileList.IsLoading, Converter={StaticResource BoolToVisibility}}"/>
         </Grid>
 
-        <!-- Error banner -->
+        <!--
+          Error banner. The Unlock button rides in it rather than in a dialog of its own because a
+          locked archive is a *listing state*, not an event: it survives back and forward, it is
+          still there when you come back to the tab, and it must never be raised from the background
+          load that discovered it.
+        -->
         <Border DockPanel.Dock="Top" Background="{StaticResource Theme.Warning.Background}" Padding="8,4"
                 Visibility="{Binding FileList.ErrorMessage, Converter={StaticResource NullToCollapsed}}">
-            <TextBlock Text="{Binding FileList.ErrorMessage}" Foreground="{StaticResource Theme.Warning.Foreground}" TextWrapping="Wrap"/>
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Unlock…" Margin="12,0,0,0" MinWidth="80"
+                        Click="Unlock_Click"
+                        Visibility="{Binding FileList.IsArchiveLocked, Converter={StaticResource BoolToVisibility}}"/>
+                <TextBlock Text="{Binding FileList.ErrorMessage}" VerticalAlignment="Center"
+                           Foreground="{StaticResource Theme.Warning.Foreground}" TextWrapping="Wrap"/>
+            </DockPanel>
         </Border>
 
         <!--
@@ -222,6 +233,18 @@
                         <MenuItem x:Name="DuplicatesMenuItem" Header="Find duplicates…"
                                   InputGestureText="Ctrl+Shift+U" Click="ContextDuplicates_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C8;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem x:Name="CompressMenuItem" Header="Compress…"
+                                  Click="ContextCompress_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xF012;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem x:Name="ExtractHereMenuItem" Header="Extract here"
+                                  Click="ContextExtractHere_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8DE;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem x:Name="ExtractToMenuItem" Header="Extract to…"
+                                  Click="ContextExtractTo_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8DE;"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator/>
                         <MenuItem x:Name="CopyPathMenuItem" Header="Copy as path"

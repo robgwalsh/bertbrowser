@@ -1,0 +1,57 @@
+<v:ThemedWindow x:Class="BertBrowser.App.Views.CreateArchiveDialog"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:v="clr-namespace:BertBrowser.App.Views"
+                Title="Compress" Width="500" SizeToContent="Height" MinHeight="220"
+                ResizeMode="NoResize"
+                WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+                Background="{StaticResource Theme.Surface.Background}"
+                TextElement.Foreground="{StaticResource Theme.Text.Primary}">
+    <DockPanel Margin="16">
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="Cancel" MinWidth="88" Margin="0,0,8,0" IsCancel="True"/>
+            <Button x:Name="OkButton" Content="Compress" MinWidth="88" IsDefault="True"
+                    Style="{StaticResource PrimaryButton}" Click="Ok_Click"/>
+        </StackPanel>
+
+        <StackPanel>
+            <TextBlock x:Name="PromptText" Margin="0,0,0,10" TextWrapping="Wrap"/>
+
+            <TextBlock Text="Name" Margin="0,0,0,4"
+                       Foreground="{StaticResource Theme.Text.Secondary}"/>
+            <TextBox x:Name="NameBox" TextChanged="Input_Changed"/>
+
+            <Grid Margin="0,14,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="16"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Format" Margin="0,0,0,4"
+                               Foreground="{StaticResource Theme.Text.Secondary}"/>
+                    <!-- Plain strings: a retemplated ComboBox derives its closed-box rendering
+                         from ItemTemplate alone, and a string's own ToString is already the
+                         label. Anything richer here would need a DataTemplate minting. -->
+                    <ComboBox x:Name="FormatBox" SelectionChanged="Format_Changed"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Compression" Margin="0,0,0,4"
+                               Foreground="{StaticResource Theme.Text.Secondary}"/>
+                    <ComboBox x:Name="LevelBox" SelectionChanged="Input_Changed"/>
+                </StackPanel>
+            </Grid>
+
+            <TextBlock x:Name="ResultText" Margin="0,14,0,0" TextWrapping="NoWrap"
+                       TextTrimming="CharacterEllipsis"
+                       Foreground="{StaticResource Theme.Text.Secondary}"/>
+
+            <TextBlock x:Name="ProblemText" Margin="0,10,0,0" TextWrapping="Wrap"
+                       Foreground="{StaticResource Theme.Error.Foreground}"
+                       Visibility="Collapsed"/>
+        </StackPanel>
+    </DockPanel>
+</v:ThemedWindow>

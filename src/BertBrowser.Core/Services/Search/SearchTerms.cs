@@ -237,6 +237,44 @@ public sealed class HiddenTerm : SearchNode
     public override bool WantsHidden => true;
 }
 
+/// <summary>
+/// <c>in:archives</c> — widen the search to the contents of archives under the root.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A marker, and both abstract members are wired even though neither does any work:
+/// <see cref="Matches"/> is <c>true</c> and the SQL is <c>1</c>, because this term does not decide
+/// whether a <em>row</em> qualifies. It decides which rows exist at all, and that is
+/// <see cref="SearchNode.WantsArchives"/>'s job.
+/// </para>
+/// <para>
+/// The vacuous <c>Matches</c> is not a smell here for the same reason <c>is:hidden</c>'s
+/// <c>WantsHidden</c> is not: this is a scope. Making it a predicate instead would mean the index
+/// having a column for something it has never held.
+/// </para>
+/// </remarks>
+public sealed class InArchivesTerm : SearchNode
+{
+    public override bool Matches(in SearchCandidate candidate) => true;
+
+    public override void WriteSql(SqlPredicateBuilder builder) => builder.Append("1");
+
+    /// <summary>
+    /// A superset, so a <c>LIMIT</c> must not be pushed down past it and a <c>NOT</c> must not
+    /// invert it — both of which the existing rules already handle once this says so.
+    /// </summary>
+    public override bool SqlComplete => false;
+
+    public override int LiteralChars => 0;
+
+    /// <summary>Scope, not a filter: "everything, but also look in archives" is not a search.</summary>
+    public override bool HasFilter => false;
+
+    public override bool NeedsMetadata => false;
+
+    public override bool WantsArchives => true;
+}
+
 /// <summary>A regular expression over the entry name.</summary>
 /// <remarks>
 /// The one term with no SQL at all. It emits <c>1</c> and marks the predicate incomplete, which

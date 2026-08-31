@@ -53,6 +53,9 @@ public sealed class SearchQuery
     /// </summary>
     public bool WantsHidden => _root.WantsHidden;
 
+    /// <summary>Whether the query asked for archive contents to be scanned as well.</summary>
+    public bool WantsArchives => _root.WantsArchives;
+
     /// <summary>
     /// True when the query filters on size or modified time. Those columns are empty on a volume
     /// the indexer had to build through its <c>FSCTL_ENUM_USN_DATA</c> fallback, which records

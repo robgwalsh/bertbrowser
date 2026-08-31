@@ -335,6 +335,13 @@ public static class SearchGrammar
                         _ => Fail($"is: doesn't know '{value}' — try is:dir, is:file or is:hidden."),
                     };
 
+                case SearchSyntax.In:
+                    return value.ToUpperInvariant() switch
+                    {
+                        "ARCHIVE" or "ARCHIVES" or "ZIP" or "ZIPS" => new InArchivesTerm(),
+                        _ => Fail($"in: doesn't know '{value}' — the only scope is in:archives."),
+                    };
+
                 case SearchSyntax.Regex:
                     try
                     {

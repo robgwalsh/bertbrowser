@@ -87,8 +87,12 @@ public sealed class RenamePlanner
             var isDirectory = _probe.DirectoryExists(path);
             if (!isDirectory && !_probe.FileExists(path))
             {
+                // See DeletePlanner: an entry inside an archive fails the same existence test, and
+                // deserves the honest message rather than being told it is gone.
                 rejected.Add(new RejectedRename(path, RenameRejection.SourceMissing,
-                    $"'{Path.GetFileName(path)}' no longer exists."));
+                    Archives.ArchivePath.Parse(path, File.Exists) is not null
+                        ? $"'{Path.GetFileName(path)}' is inside an archive. Extract it first."
+                        : $"'{Path.GetFileName(path)}' no longer exists."));
                 continue;
             }
             occupied.Add(key);

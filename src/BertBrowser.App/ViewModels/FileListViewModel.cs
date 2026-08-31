@@ -27,11 +27,42 @@ public sealed partial class FileListViewModel : ObservableObject
     // per tab and per pane, and nothing global should have to reach down into it.
     private readonly AppSettings _settings;
 
+    private readonly BertBrowser.Core.Services.Archives.IArchiveBrowser _archives;
+
     [ObservableProperty]
     private bool _isLoading;
 
     [ObservableProperty]
     private bool _isFlattened;
+
+    /// <summary>
+    /// This listing is the inside of an archive rather than a folder on disk.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The guard the context menu and the key handler consult, exactly as they consult
+    /// <see cref="IsFlattened"/>. Everything that writes to disk by path is off while it is true,
+    /// because an entry's path is not one any executor can act on.
+    /// </para>
+    /// <para>
+    /// Set from a real <c>File.Exists</c> on the worker thread, never from
+    /// <c>ArchivePath.LooksVirtual</c>: a genuine folder named <c>photos.zip</c> must not put the
+    /// list into archive mode, and only asking the disk can tell the two apart.
+    /// </para>
+    /// </remarks>
+    [ObservableProperty]
+    private bool _isInsideArchive;
+
+    /// <summary>
+    /// The listing failed because the container needs a password nobody has given.
+    /// </summary>
+    /// <remarks>
+    /// A state rather than an event, which is what lets the banner carry an Unlock button: a modal
+    /// raised from the background load that discovered this would be raised off the UI thread, and
+    /// would have to be raised again on every back, forward and refresh.
+    /// </remarks>
+    [ObservableProperty]
+    private bool _isArchiveLocked;
 
     [ObservableProperty]
     private string? _errorMessage;
@@ -109,11 +140,13 @@ public sealed partial class FileListViewModel : ObservableObject
     private ObservableCollection<FileItemViewModel> _items = new();
 
     public FileListViewModel(
-        IFileSystemService fileSystem, DirSizeRepository dirSizeRepository, AppSettings settings)
+        IFileSystemService fileSystem, DirSizeRepository dirSizeRepository, AppSettings settings,
+        BertBrowser.Core.Services.Archives.IArchiveBrowser archives)
     {
         _fileSystem = fileSystem;
         _dirSizeRepository = dirSizeRepository;
         _settings = settings;
+        _archives = archives;
         _tileAspect = AspectRatio.Parse(settings.TileAspectRatio);
     }
 
@@ -124,8 +157,18 @@ public sealed partial class FileListViewModel : ObservableObject
         IsFlattened = false;
         ErrorMessage = null;
         EmptyMessage = null;
+        IsArchiveLocked = false;
         try
         {
+            // Resolved first, and off the UI thread. First because a damaged archive makes the
+            // listing throw, and the guards still have to know where they are — a banner about a
+            // broken container with Rename and Delete live over it would be worse than useless.
+            // A real File.Exists, not LooksVirtual: a genuine folder named "photos.zip" must not
+            // put the list into a mode where writing is switched off.
+            var insideArchive = await Task.Run(() => _archives.Resolve(path) is not null, ct);
+            ct.ThrowIfCancellationRequested();
+            IsInsideArchive = insideArchive;
+
             var entries = await Task.Run(() => _fileSystem.ListDirectory(path), ct);
             ct.ThrowIfCancellationRequested();
 
@@ -146,6 +189,14 @@ public sealed partial class FileListViewModel : ObservableObject
         catch (OperationCanceledException)
         {
             // superseded by a newer navigation
+        }
+        catch (BertBrowser.Core.Services.Archives.ArchiveLockedException ex)
+        {
+            // Before the IOException arm, which would otherwise swallow it: this is the one listing
+            // failure that has something the user can do about it.
+            Items.Clear();
+            ErrorMessage = ex.Message;
+            IsArchiveLocked = true;
         }
         catch (UnauthorizedAccessException)
         {
@@ -362,9 +413,15 @@ public sealed partial class FileListViewModel : ObservableObject
             await HydrateDirSizesAsync(Items.ToList(), ct);
     }
 
+    /// <remarks>
+    /// A folder the lister already sized exactly is skipped, not merely missed. Its path is not a
+    /// real one — that is the only way a lister knows a recursive total up front — so asking
+    /// <c>dir_size_cache</c> about it is a round trip that can only come back empty, and a hit
+    /// would be a row that should never have been written.
+    /// </remarks>
     private async Task HydrateDirSizesAsync(IReadOnlyList<FileItemViewModel> items, CancellationToken ct)
     {
-        var dirs = items.Where(i => i.IsDirectory).ToList();
+        var dirs = items.Where(i => i is { IsDirectory: true, SizeBytes: null }).ToList();
         if (dirs.Count == 0) return;
 
         var cache = await Task.Run(

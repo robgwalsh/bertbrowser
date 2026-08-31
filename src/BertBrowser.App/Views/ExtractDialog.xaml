@@ -1,0 +1,45 @@
+<v:ThemedWindow x:Class="BertBrowser.App.Views.ExtractDialog"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:v="clr-namespace:BertBrowser.App.Views"
+                Title="Extract" Width="520" SizeToContent="Height" MinHeight="200"
+                ResizeMode="NoResize"
+                WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+                Background="{StaticResource Theme.Surface.Background}"
+                TextElement.Foreground="{StaticResource Theme.Text.Primary}">
+    <DockPanel Margin="16">
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="Cancel" MinWidth="88" Margin="0,0,8,0" IsCancel="True"/>
+            <Button x:Name="OkButton" Content="Extract" MinWidth="88" IsDefault="True"
+                    Style="{StaticResource PrimaryButton}" Click="Ok_Click"/>
+        </StackPanel>
+
+        <StackPanel>
+            <TextBlock x:Name="PromptText" Margin="0,0,0,10" TextWrapping="Wrap"/>
+
+            <TextBlock Text="Extract to" Margin="0,0,0,4"
+                       Foreground="{StaticResource Theme.Text.Secondary}"/>
+            <DockPanel>
+                <Button x:Name="BrowseButton" DockPanel.Dock="Right" Content="Browse…"
+                        MinWidth="88" Margin="8,0,0,0" Click="Browse_Click"/>
+                <TextBox x:Name="DestinationBox" TextChanged="DestinationBox_TextChanged"/>
+            </DockPanel>
+
+            <TextBlock Text="If a file is already there" Margin="0,14,0,4"
+                       Foreground="{StaticResource Theme.Text.Secondary}"/>
+            <StackPanel>
+                <!-- There is deliberately no "replace" here. With only these two an extract is
+                     purely additive, so it needs no undo and can lose nobody's work — overwriting
+                     the destination is the commonest way people lose files to an unzip. -->
+                <RadioButton x:Name="KeepBothOption" Content="Keep both, numbering the new one"
+                             IsChecked="True" Margin="0,0,0,4"/>
+                <RadioButton x:Name="SkipOption" Content="Skip it and keep what is there"/>
+            </StackPanel>
+
+            <TextBlock x:Name="ProblemText" Margin="0,12,0,0" TextWrapping="Wrap"
+                       Foreground="{StaticResource Theme.Error.Foreground}"
+                       Visibility="Collapsed"/>
+        </StackPanel>
+    </DockPanel>
+</v:ThemedWindow>

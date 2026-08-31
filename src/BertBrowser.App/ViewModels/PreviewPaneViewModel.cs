@@ -3,6 +3,7 @@ using System.Windows.Media.Imaging;
 using BertBrowser.App.Interop;
 using BertBrowser.App.Services;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.Archives;
 using BertBrowser.Core.Services.Preview;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -65,7 +66,19 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     private FileItemViewModel? _target;
     private int _selectionCount;
 
-    public PreviewPaneViewModel(AppSettings settings) => _settings = settings;
+    private readonly IArchiveBrowser _archives;
+    private readonly IArchiveReader _archiveReader;
+    private readonly IArchivePasswords _passwords;
+
+    public PreviewPaneViewModel(
+        AppSettings settings, IArchiveBrowser archives, IArchiveReader archiveReader,
+        IArchivePasswords passwords)
+    {
+        _settings = settings;
+        _archives = archives;
+        _archiveReader = archiveReader;
+        _passwords = passwords;
+    }
 
     // --- what the view binds to ---
 
@@ -382,28 +395,55 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         public string? Message { get; init; }
     }
 
-    private static Payload Build(string path, DateTime stamp, PreviewRequest plan, CancellationToken ct)
+    private Payload Build(string path, DateTime stamp, PreviewRequest plan, CancellationToken ct)
     {
         try
         {
+            // Inside a container the differences are all subtractions, and each is a thing that
+            // needs a real path rather than bytes. The shell cannot see a path that does not
+            // exist, so asking it would cost a round trip per selection to be told nothing; a
+            // MediaElement and a GlyphTypeface both need a Uri, so those two say what to do instead
+            // of failing obscurely. Everything else is unchanged, because the classifier takes a
+            // name and every reader below takes a Stream.
+            var inArchive = _archives.Resolve(path) is { IsRoot: false };
+
             var payload = plan.Kind switch
             {
                 PreviewKind.Image => BuildImage(path, stamp),
                 PreviewKind.Text => BuildText(path, plan, ct),
                 PreviewKind.Archive => BuildArchive(path),
+                PreviewKind.Font when inArchive =>
+                    new Payload { Message = "Extract this font to preview it." },
                 PreviewKind.Font => BuildFont(path),
+                PreviewKind.Media when inArchive =>
+                    new Payload { Message = "Extract this file to play it." },
                 // Media shows a poster frame if the shell has one, and says nothing if it does not
                 // — there is still a transport to press, so "no preview available" would be wrong.
                 PreviewKind.Media => BuildShell(path, stamp) with { Kind = PreviewKind.Media, Message = null },
+                // The shell half of BuildDocument is skipped, so the order inverts to bytes-only.
+                _ when inArchive => BuildText(path, plan, ct, guessing: true),
                 _ => BuildDocument(path, stamp, plan, ct),
             };
 
             ct.ThrowIfCancellationRequested();
-            return payload with { Metadata = ReadMetadata(path, plan.Kind) };
+
+            // Shell properties come from the shell, which has never heard of a path inside a
+            // container. Skipped rather than attempted: the strip would be empty either way, and
+            // this way it costs nothing per selection.
+            return payload with
+            {
+                Metadata = inArchive ? [] : ReadMetadata(path, plan.Kind),
+            };
         }
         catch (OperationCanceledException)
         {
             throw;
+        }
+        catch (ArchiveLockedException ex)
+        {
+            // Before the general arm below, which is its base type: this one has a reason worth
+            // repeating and something the user can act on.
+            return new Payload { Message = ex.Message };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
         {
@@ -421,14 +461,57 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
 
     /// <summary>Opens sharing everything, copies into memory, closes. The handle is gone before a
     /// single pixel is decoded — which is the whole difference from Explorer's pane.</summary>
-    private static MemoryStream ReadFully(string path, long limit)
+    /// <summary>
+    /// The one place a preview gets its bytes, from a real file or from inside a container.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Routing here rather than at each builder is what let the whole pane learn about archives
+    /// without any of it learning what an archive is: the classifier already takes a
+    /// <em>name</em>, and every reader below already takes a <see cref="Stream"/>.
+    /// </para>
+    /// <para>
+    /// <b>Bounding the read bounds the decompression</b>, which is the one thing a zip bomb cannot
+    /// get around — pulling a megabyte out of a stream that would have produced ten gigabytes costs
+    /// a megabyte. So the budgets that were already here are the right shape, and no expansion-ratio
+    /// check is needed.
+    /// </para>
+    /// </remarks>
+    private Stream OpenBounded(string path, long limit)
     {
-        using var file = new FileStream(
+        if (_archives.Resolve(path) is { IsRoot: false } entry)
+        {
+            var index = _archives.ReadArchive(entry.ArchiveFile);
+            var password = _passwords.For(entry.ArchiveFile);
+
+            var bytes = _archiveReader.ReadEntry(
+                entry.ArchiveFile, entry.EntryPath, limit, password);
+
+            if (bytes is null)
+            {
+                // An encrypted zip lists in full and only refuses its contents, so this is the
+                // ordinary way a preview fails in one — and "could not be read" would send the user
+                // looking for a corrupt file rather than at the Unlock button above the list.
+                throw index.Find(entry.EntryPath) is { IsEncrypted: true }
+                    ? new ArchiveLockedException(
+                        entry.ArchiveFile, "This file is encrypted. Unlock the archive to preview it.")
+                    : new IOException("That entry could not be read from the archive.");
+            }
+
+            return new MemoryStream(bytes);
+        }
+
+        return new FileStream(
             path, FileMode.Open, FileAccess.Read,
             FileShare.ReadWrite | FileShare.Delete,
             bufferSize: 64 * 1024, FileOptions.SequentialScan);
+    }
 
-        var buffer = new MemoryStream(capacity: (int)Math.Clamp(file.Length, 0, 8 << 20));
+    private MemoryStream ReadFully(string path, long limit)
+    {
+        using var file = OpenBounded(path, limit);
+
+        var buffer = new MemoryStream(capacity: 64 * 1024);
         var remaining = limit;
         var chunk = new byte[64 * 1024];
         while (remaining > 0)
@@ -442,7 +525,7 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         return buffer;
     }
 
-    private static Payload BuildImage(string path, DateTime stamp)
+    private Payload BuildImage(string path, DateTime stamp)
     {
         using var bytes = ReadFully(path, PreviewClassifier.MaxImageBytes);
         try
@@ -477,12 +560,9 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     /// is the document fallback having a look. The bar for showing it is higher, and so is the bar
     /// for the message: "binary file" is a fact when a .txt turns out not to be text, and a guess
     /// dressed as one when we only opened it on spec.</param>
-    private static Payload BuildText(string path, PreviewRequest plan, CancellationToken ct, bool guessing = false)
+    private Payload BuildText(string path, PreviewRequest plan, CancellationToken ct, bool guessing = false)
     {
-        using var file = new FileStream(
-            path, FileMode.Open, FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete,
-            bufferSize: 64 * 1024, FileOptions.SequentialScan);
+        using var file = OpenBounded(path, plan.ByteBudget);
 
         var preview = TextPreviewReader.Read(file, plan.ByteBudget);
         ct.ThrowIfCancellationRequested();
@@ -554,10 +634,16 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         return lines;
     }
 
-    private static Payload BuildArchive(string path)
+    /// <remarks>
+    /// Still <c>ArchiveListing</c> rather than the browse index, and the two entry caps stay
+    /// different numbers on purpose: this one runs on arrow keys and must stay cheap, where a
+    /// listing you navigated to was asked for. Reading through <see cref="OpenBounded"/> means a
+    /// zip nested inside another one still gets <em>listed</em> here even though it cannot be
+    /// entered.
+    /// </remarks>
+    private Payload BuildArchive(string path)
     {
-        using var file = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var file = OpenBounded(path, PreviewClassifier.MaxArchiveBytes);
 
         var contents = ArchiveListing.Read(file);
         if (contents.Error is { } error) return new Payload { Message = error };
@@ -571,7 +657,7 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         return new Payload { Kind = PreviewKind.Archive, Archive = contents.Entries, ArchiveFooter = footer };
     }
 
-    private static Payload BuildFont(string path)
+    private Payload BuildFont(string path)
     {
         try
         {
@@ -603,7 +689,7 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         }
     }
 
-    private static Payload BuildShell(string path, DateTime stamp)
+    private Payload BuildShell(string path, DateTime stamp)
     {
         var key = PreviewImageCache.KeyFor(path, ShellPreviewPixels, stamp);
         var image = Images.GetOrAdd(key, () => ShellThumbnails.GetPreview(path, ShellPreviewPixels));
@@ -628,7 +714,7 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     /// shell declines outright is the file read — so this costs nothing for the formats that
     /// already worked.
     /// </remarks>
-    private static Payload BuildDocument(string path, DateTime stamp, PreviewRequest plan, CancellationToken ct)
+    private Payload BuildDocument(string path, DateTime stamp, PreviewRequest plan, CancellationToken ct)
     {
         var shell = BuildShell(path, stamp);
 

@@ -1,6 +1,7 @@
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
+using BertBrowser.Core.Services.Archives;
 using BertBrowser.Core.Services.Mft;
 
 namespace BertBrowser.Core.Services.DiskUsage;
@@ -42,12 +43,68 @@ public sealed class DiskUsageService(
     FsIndexRepository index,
     DirSizeRepository dirSizes,
     IFileSystemService fileSystem,
-    IMftIndexService mftIndex) : IDiskUsageService
+    IMftIndexService mftIndex,
+    IArchiveBrowser? archives = null) : IDiskUsageService
 {
+    /// <summary>
+    /// The biggest entries under a folder inside a container, from the container's own index.
+    /// </summary>
+    /// <remarks>
+    /// Always <see cref="DiskUsageAvailability.Ready"/>: an archive records every uncompressed
+    /// length, so unlike a volume there is no "not indexed yet" state to be in. That is what makes
+    /// pointing the treemap at a backup zip the one place this view is never approximate.
+    /// </remarks>
+    private LargestFilesOutcome LargestInArchive(
+        ArchivePath root, int limit, CancellationToken ct)
+    {
+        var archive = archives!.ReadArchive(root.ArchiveFile);
+        if (!archive.Ok) return new LargestFilesOutcome([], DiskUsageAvailability.NotIndexed);
+
+        var start = archive.Find(root.EntryPath);
+        if (start is null) return new LargestFilesOutcome([], DiskUsageAvailability.Ready);
+
+        var files = new List<SearchHit>();
+        var stack = new Stack<ArchiveNode>();
+        stack.Push(start);
+
+        while (stack.Count > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            var node = stack.Pop();
+
+            if (!node.IsDirectory)
+            {
+                files.Add(new SearchHit(
+                    ArchivePath.Compose(root.ArchiveFile, node.Path),
+                    RelativeDirDisplay: Path.GetDirectoryName(node.Path) ?? "",
+                    node.Name,
+                    IsDirectory: false,
+                    node.SizeBytes,
+                    node.Modified?.ToUniversalTime() ?? default));
+                continue;
+            }
+
+            foreach (var child in node.Children ?? []) stack.Push(child);
+        }
+
+        files.Sort((a, b) => b.SizeBytes.CompareTo(a.SizeBytes));
+        if (files.Count > limit) files.RemoveRange(limit, files.Count - limit);
+
+        return new LargestFilesOutcome(files, DiskUsageAvailability.Ready);
+    }
+
     public Task<LargestFilesOutcome> LargestFilesAsync(
         string? rootPath, int limit, bool includeHidden, CancellationToken ct) =>
         Task.Run(() =>
         {
+            // fs_entry knows nothing about what is inside a container, and must never be taught:
+            // its rows are PathKey-keyed, and a virtual key sorts strictly inside the archive's own
+            // containing folder as well as inside the archive. Answered from the container's index
+            // instead — where the sizes are exact and already in memory, so this is both correct
+            // and free.
+            if (rootPath is { Length: > 0 } && archives?.Resolve(rootPath) is { } inArchive)
+                return LargestInArchive(inArchive, limit, ct);
+
             var rootKey = rootPath is { Length: > 0 } ? PathKey.Canonicalize(rootPath) : null;
             var files = index.LargestFiles(rootPath, limit, includeHidden);
             ct.ThrowIfCancellationRequested();
@@ -83,9 +140,18 @@ public sealed class DiskUsageService(
             // One batched lookup for every subfolder's total, exactly as the file list and the
             // folder tree hydrate their size columns. Files need no lookup: the enumeration
             // already carried their real lengths.
-            var dirKeys = visible.Where(e => e.IsDirectory)
-                .Select(e => PathKey.Canonicalize(e.FullPath))
-                .ToList();
+            // Inside an archive there is nothing to look up: the lister already carried every
+            // folder's exact recursive total, because the numbers were in the container's own
+            // directory. Asking dir_size_cache would be a round trip that can only miss — and a
+            // miss reads as "unknown", which would draw a treemap of files with every folder
+            // greyed out and then have ClassifyBreakdown blame the index for it.
+            var insideArchive = ArchivePath.LooksVirtual(directory) && !Directory.Exists(directory);
+
+            var dirKeys = insideArchive
+                ? []
+                : visible.Where(e => e.IsDirectory)
+                    .Select(e => PathKey.Canonicalize(e.FullPath))
+                    .ToList();
             var cached = dirKeys.Count > 0
                 ? dirSizes.GetMany(dirKeys)
                 : new Dictionary<string, DirSizeResult>(StringComparer.Ordinal);
@@ -97,7 +163,11 @@ public sealed class DiskUsageService(
                 var key = PathKey.Canonicalize(entry.FullPath);
                 long? size;
                 var incomplete = false;
-                if (entry.IsDirectory)
+                if (entry.IsDirectory && insideArchive)
+                {
+                    size = entry.SizeBytes;
+                }
+                else if (entry.IsDirectory)
                 {
                     // A missing row is unknown, and stays null all the way to the view.
                     if (cached.TryGetValue(key, out var row))
@@ -128,14 +198,23 @@ public sealed class DiskUsageService(
             // Largest first, unknowns last — they have no area to give and belong out of the way.
             children.Sort((a, b) => (b.SizeBytes ?? -1).CompareTo(a.SizeBytes ?? -1));
 
-            var total = dirSizes.Get(directory)?.SizeBytes;
+            var total = insideArchive
+                ? children.Sum(c => c.SizeBytes ?? 0)
+                : dirSizes.Get(directory)?.SizeBytes;
             var unknownCount = children.Count(c => c.SizeBytes is null);
 
-            var availability = DiskUsageRules.ClassifyBreakdown(
-                dirKeys.Count,
-                children.Count(c => c.IsDirectory && c.SizeBytes is not null),
-                mftIndex.IsBuilding,
-                mftIndex.IsIndexed(rootKey));
+            // Ready is passed directly rather than through ClassifyBreakdown, and the distinction
+            // is the same one that makes ClassifyBreakdown a separate function from Classify: it
+            // weighs evidence *about the index*, and inside a container there is no index to have
+            // evidence about. Asking it would be the same category error, one level down — and it
+            // would answer NoSizeData about numbers that are exact.
+            var availability = insideArchive
+                ? DiskUsageAvailability.Ready
+                : DiskUsageRules.ClassifyBreakdown(
+                    dirKeys.Count,
+                    children.Count(c => c.IsDirectory && c.SizeBytes is not null),
+                    mftIndex.IsBuilding,
+                    mftIndex.IsIndexed(rootKey));
 
             return new DiskUsageBreakdown(
                 rootDisplay,

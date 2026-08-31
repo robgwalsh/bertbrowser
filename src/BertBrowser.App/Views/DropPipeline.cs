@@ -1,5 +1,6 @@
 using System.Windows;
 using BertBrowser.App.ViewModels;
+using BertBrowser.Core.Services.Archives;
 using BertBrowser.Core.Services.Transfer;
 
 namespace BertBrowser.App.Views;
@@ -110,6 +111,17 @@ internal sealed class DropPipeline(ShellViewModel shell, Action<string> report)
 
         try
         {
+            // A drop *into a container* is a different operation entirely — the archive is
+            // rewritten with the files added — so it is routed before TransferPlanner, which would
+            // correctly refuse a destination that is not a directory on disk and say something
+            // unhelpful about it. Checked first for that reason, not as a special case bolted on
+            // afterwards.
+            if (shell.ArchiveFileFor(destination) is not null)
+            {
+                await DropIntoArchiveAsync(sources, destination);
+                return;
+            }
+
             // Re-planned here against live disk state: the hover plan was only ever advisory.
             var plan = shell.PlanDrop(sources, destination, verb);
 
@@ -163,6 +175,41 @@ internal sealed class DropPipeline(ShellViewModel shell, Action<string> report)
             return new DropPayload(foreign, DropOrigin.External);
 
         return null;
+    }
+
+    /// <summary>
+    /// Adds dropped files to the container the destination is inside.
+    /// </summary>
+    /// <remarks>
+    /// <b>Always additive, and always a copy.</b> The source keeps its files whatever the drag
+    /// reported: an archive edit has no move semantics to offer, and deleting the originals on the
+    /// strength of a rewrite is not a trade worth making. Folders are refused rather than walked —
+    /// adding a tree would mean an entry per file and a name rule per entry, which is what Compress
+    /// is for.
+    /// </remarks>
+    private async Task DropIntoArchiveAsync(string[] sources, string destination)
+    {
+        var files = sources.Where(File.Exists).ToList();
+        if (files.Count == 0)
+        {
+            report("Only files can be added to an archive. Use Compress to make a new one.");
+            return;
+        }
+
+        var inside = shell.ArchiveEntryPathFor(destination) ?? "";
+        var edits = files
+            .Select(ArchiveEdit (f) => new AddFile(
+                f, inside.Length == 0 ? Path.GetFileName(f) : inside + "\\" + Path.GetFileName(f)))
+            .ToList();
+
+        var plan = shell.PlanArchiveEdit(shell.ActiveTab, edits);
+        if (plan.Rejected is { } rejected)
+        {
+            report(rejected.Message);
+            return;
+        }
+
+        await shell.ExecuteArchiveEditAsync(plan);
     }
 
     private static DropInDecision DecideFor(DropOrigin origin, DragEventArgs e) =>

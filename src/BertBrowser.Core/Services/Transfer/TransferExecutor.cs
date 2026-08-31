@@ -68,7 +68,7 @@ public sealed class TransferExecutor
         string? stagingDirectory = null;
         var cancelled = false;
 
-        var run = new Run(ct, progress, plan.Transfers.Count);
+        var run = new ProgressCoalescer(ct, progress, plan.Transfers.Count);
         foreach (var transfer in plan.Transfers)
         {
             if (ct.IsCancellationRequested)
@@ -107,7 +107,7 @@ public sealed class TransferExecutor
     /// <summary>Returns the completed record, or null when the item was skipped.</summary>
     private CompletedTransfer? ExecuteOne(
         TransferPlan plan, PlannedTransfer transfer, ConflictResolution resolution,
-        ref string? stagingDirectory, Run run)
+        ref string? stagingDirectory, ProgressCoalescer run)
     {
         Revalidate(plan, transfer);
 
@@ -129,7 +129,7 @@ public sealed class TransferExecutor
                     // A rename within the same directory tree: instant, and reversible by undo.
                     // Deliberately on an uncancellable run — clearing the name is bookkeeping, and
                     // a cancel landing half-way through it would strand the displaced entry.
-                    MoveEntry(destinationPath, displacedStagePath, Directory.Exists(destinationPath), Run.Silent());
+                    MoveEntry(destinationPath, displacedStagePath, Directory.Exists(destinationPath), ProgressCoalescer.Silent());
                     break;
 
                 default:
@@ -168,7 +168,7 @@ public sealed class TransferExecutor
         try
         {
             if (Exists(stagePath) && !Exists(destinationPath))
-                MoveEntry(stagePath, destinationPath, Directory.Exists(stagePath), Run.Silent());
+                MoveEntry(stagePath, destinationPath, Directory.Exists(stagePath), ProgressCoalescer.Silent());
         }
         catch (Exception ex) when (IsTransferFailure(ex))
         {
@@ -251,12 +251,12 @@ public sealed class TransferExecutor
                     continue;
                 }
 
-                MoveEntry(item.FinalPath, item.SourcePath, item.IsDirectory, Run.Silent());
+                MoveEntry(item.FinalPath, item.SourcePath, item.IsDirectory, ProgressCoalescer.Silent());
                 restored++;
 
                 // The name it took over is free again: put the displaced entry back.
                 if (item.DisplacedStagePath is { } staged && Exists(staged) && !Exists(item.FinalPath))
-                    MoveEntry(staged, item.FinalPath, Directory.Exists(staged), Run.Silent());
+                    MoveEntry(staged, item.FinalPath, Directory.Exists(staged), ProgressCoalescer.Silent());
             }
             catch (Exception ex) when (IsTransferFailure(ex))
             {
@@ -333,7 +333,7 @@ public sealed class TransferExecutor
 
     // --- Filesystem primitives ---
 
-    private void MoveEntry(string source, string destination, bool isDirectory, Run run)
+    private void MoveEntry(string source, string destination, bool isDirectory, ProgressCoalescer run)
     {
         if (!isDirectory)
         {
@@ -363,7 +363,7 @@ public sealed class TransferExecutor
         }
     }
 
-    private void CopyEntry(string source, string destination, bool isDirectory, Run run)
+    private void CopyEntry(string source, string destination, bool isDirectory, ProgressCoalescer run)
     {
         if (!isDirectory)
         {
@@ -387,7 +387,7 @@ public sealed class TransferExecutor
     /// <summary>One file's bytes, with the run's counters bracketing them.</summary>
     /// <param name="knownLength">The size we already know, or null to take the OS's word for it.
     /// Passing it keeps the running total exact even when the copy reports coarsely.</param>
-    private void CopyFile(string source, string destination, long? knownLength, Run run)
+    private void CopyFile(string source, string destination, long? knownLength, ProgressCoalescer run)
     {
         run.BeginFile(knownLength ?? 0);
         _copier.Copy(source, destination, run.FileProgress, run.Token);
@@ -411,7 +411,7 @@ public sealed class TransferExecutor
     /// Copy, verify, then delete. The source is only removed once the destination is confirmed to
     /// hold the same number of files and the same total bytes.
     /// </summary>
-    private void CrossVolumeMoveDirectory(string source, string destination, Run run)
+    private void CrossVolumeMoveDirectory(string source, string destination, ProgressCoalescer run)
     {
         var info = new DirectoryInfo(source);
 
@@ -488,7 +488,7 @@ public sealed class TransferExecutor
         }
     }
 
-    private void CopyDirectory(DirectoryInfo source, string destination, Run run)
+    private void CopyDirectory(DirectoryInfo source, string destination, ProgressCoalescer run)
     {
         run.Token.ThrowIfCancellationRequested();
         Directory.CreateDirectory(destination);
@@ -562,100 +562,4 @@ public sealed class TransferExecutor
     private static bool IsTransferFailure(Exception ex) =>
         ex is IOException or UnauthorizedAccessException or System.Security.SecurityException
             or NotSupportedException or ArgumentException;
-
-    /// <summary>
-    /// One <see cref="Execute"/> call's running counters, its cancellation token, and the rate at
-    /// which it is willing to talk about them.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>The coalescing is not optional.</b> <c>CopyFileEx</c> calls back per chunk — thousands of
-    /// times for one large file — and forwarding each one to an <see cref="IProgress{T}"/> bound to
-    /// the UI floods the dispatcher with work whose only job is to redraw a bar that has moved a
-    /// pixel. Item boundaries always report; in between, at most one report per
-    /// <see cref="ReportInterval"/>. It is the same guard <c>SearchService</c> puts on live results.
-    /// </para>
-    /// <para>
-    /// <b>Bytes are counted per file and snapped at the end of one.</b> A copy may report coarsely
-    /// or, for a small file, not at all, so the running total is set from the size we already knew
-    /// rather than from whatever the last callback happened to say. That is what keeps the figure
-    /// monotonic and makes it add up to the real total at the end.
-    /// </para>
-    /// </remarks>
-    private sealed class Run
-    {
-        private static readonly TimeSpan ReportInterval = TimeSpan.FromMilliseconds(100);
-
-        private readonly IProgress<TransferProgress>? _progress;
-        private readonly int _items;
-        private readonly System.Diagnostics.Stopwatch _sinceReport = System.Diagnostics.Stopwatch.StartNew();
-
-        private long _bytesDone;
-        private long _fileBase;
-        private long _fileBytes;
-        private long _fileTotal;
-        private int _done;
-        private string _name = "";
-
-        internal Run(CancellationToken token, IProgress<TransferProgress>? progress, int items)
-        {
-            Token = token;
-            _progress = progress;
-            _items = items;
-        }
-
-        /// <summary>A run for work that must finish once started: clearing a name into staging,
-        /// putting a displaced entry back, undoing. Reports nothing and cannot be cancelled.</summary>
-        internal static Run Silent() => new(CancellationToken.None, null, 0);
-
-        internal CancellationToken Token { get; }
-
-        internal void BeginItem(string name)
-        {
-            _name = name;
-            Report(force: true);
-        }
-
-        internal void EndItem() => _done++;
-
-        internal void Finished()
-        {
-            _name = "";
-            _fileBytes = 0;
-            _fileTotal = 0;
-            Report(force: true);
-        }
-
-        internal void BeginFile(long knownLength)
-        {
-            _fileBase = _bytesDone;
-            _fileBytes = 0;
-            _fileTotal = knownLength;
-        }
-
-        internal void FileProgress(long transferred, long total)
-        {
-            _fileBytes = transferred;
-            if (total > _fileTotal) _fileTotal = total;
-            _bytesDone = _fileBase + transferred;
-            Report(force: false);
-        }
-
-        internal void EndFile()
-        {
-            _bytesDone = _fileBase + Math.Max(_fileTotal, _fileBytes);
-            _fileBytes = 0;
-            _fileTotal = 0;
-        }
-
-        private void Report(bool force)
-        {
-            if (_progress is null) return;
-            if (!force && _sinceReport.Elapsed < ReportInterval) return;
-
-            _sinceReport.Restart();
-            _progress.Report(new TransferProgress(
-                _done, _items, _name, _bytesDone, _fileBytes, _fileTotal));
-        }
-    }
 }

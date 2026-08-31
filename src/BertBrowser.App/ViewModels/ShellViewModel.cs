@@ -9,6 +9,7 @@ using BertBrowser.Core.Data;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.Archives;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Services.NewItem;
@@ -152,6 +153,14 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private void FindDuplicates() =>
         OpenDuplicates(ActiveTab.CurrentPath is { Length: > 0 } path ? path : null);
 
+    private readonly IArchiveBrowser _archives;
+    private readonly IArchivePasswords _archivePasswords;
+    private readonly ExtractPlanner _extractPlanner;
+    private readonly ExtractExecutor _extractExecutor;
+    private readonly ArchiveCreator _archiveCreator;
+    private readonly ArchiveEditPlanner _archiveEditPlanner;
+    private readonly ArchiveEditExecutor _archiveEditExecutor;
+
     public ShellViewModel(
         IFileSystemService fileSystem,
         ISearchService searchService,
@@ -169,8 +178,22 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         DeleteSurveyor deleteSurveyor,
         PaneFactory factory,
         AppSettings settings,
-        IProcessLauncher launcher)
+        IProcessLauncher launcher,
+        IArchiveBrowser archives,
+        IArchivePasswords archivePasswords,
+        ExtractPlanner extractPlanner,
+        ExtractExecutor extractExecutor,
+        ArchiveCreator archiveCreator,
+        ArchiveEditPlanner archiveEditPlanner,
+        ArchiveEditExecutor archiveEditExecutor)
     {
+        _archiveEditPlanner = archiveEditPlanner;
+        _archiveEditExecutor = archiveEditExecutor;
+        _archiveCreator = archiveCreator;
+        _archives = archives;
+        _archivePasswords = archivePasswords;
+        _extractPlanner = extractPlanner;
+        _extractExecutor = extractExecutor;
         _launcher = launcher;
         _searchService = searchService;
         _mftIndex = mftIndex;
@@ -538,8 +561,15 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             return above is null ? (target.Path, null) : (above, target.Path);
         }
 
+        // A bare archive keeps reveal-and-select. "bertbrowser C:\x\a.zip" typed at a prompt most
+        // plausibly means "show me that file", and the shell folder-handler registration only ever
+        // sends directories, so nothing is lost by not entering it here.
         if (File.Exists(target.Path))
             return (Path.GetDirectoryName(target.Path), target.Path);
+
+        // A path *inside* an archive has no other reading, and until now was dropped in silence.
+        if (BertBrowser.Core.Services.Archives.ArchivePath.Parse(target.Path, File.Exists) is not null)
+            return (target.Path, null);
 
         return (null, null);
     }
@@ -549,6 +579,19 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     public void RequestTreeReveal(DirectoryTabViewModel tab, string directory)
     {
         if (!ReferenceEquals(tab, ActiveTab) || directory.Length == 0) return;
+
+        // The tree shows folders on disk, so somewhere inside an archive is revealed as the folder
+        // holding the container. That is also where Up goes from the archive's own root, so the
+        // highlight agrees with the navigation rather than pointing at a row that cannot exist.
+        // Without this the tree would settle on the deepest ancestor it could reach anyway; naming
+        // the rule is what stops that being mistaken for a bug later.
+        if (BertBrowser.Core.Services.Archives.ArchivePath.Parse(directory, File.Exists)
+            is { } inArchive)
+        {
+            directory = Path.GetDirectoryName(inArchive.ArchiveFile) ?? directory;
+            if (directory.Length == 0) return;
+        }
+
         TreeRevealRequested?.Invoke(directory);
     }
 
@@ -1291,6 +1334,13 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
     private DeleteOutcome? _undoableDelete;
 
+    /// <summary>
+    /// A fourth arm, and genuinely a fourth thing rather than one of the others in disguise: undoing
+    /// it renames a whole container back, not an item. It carries staging like a transfer and a
+    /// delete do, so it retires through <see cref="RetireUndoable"/> too.
+    /// </summary>
+    private ArchiveEditOutcome? _undoableArchiveEdit;
+
     /// <summary>True while a drop is being carried out; blocks a second one from overlapping it.</summary>
     [ObservableProperty]
     private bool _isTransferring;
@@ -1309,7 +1359,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
     public bool CanUndo =>
         (_undoableTransfer?.CanUndo == true || _undoableRename?.CanUndo == true ||
-            _undoableDelete?.CanUndo == true) && !IsTransferring;
+            _undoableDelete?.CanUndo == true || _undoableArchiveEdit?.CanUndo == true)
+        && !IsTransferring;
 
     /// <summary>"Undo move of 3 items" for the menu/tooltip; empty when there is nothing to undo.</summary>
     [ObservableProperty]
@@ -1372,6 +1423,349 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         }
     }
 
+    // --- Extracting ---
+
+    /// <summary>Plans pulling entries out of the container the tab is showing.</summary>
+    public ExtractPlan PlanExtract(
+        DirectoryTabViewModel tab,
+        IReadOnlyList<string> entryPaths,
+        string destinationDirectory,
+        ExtractConflict conflict)
+    {
+        if (_archives.Resolve(tab.CurrentPath) is not { } here)
+            return ExtractPlan.Refused(
+                ExtractRejection.ArchiveUnreadable, "This folder is not inside an archive.");
+
+        var index = _archives.ReadArchive(here.ArchiveFile);
+
+        // The entry paths arriving are full virtual paths — that is what a row's FullPath is — so
+        // they are turned back into keys here rather than everywhere upstream.
+        var keys = entryPaths
+            .Select(p => _archives.Resolve(p)?.EntryPath)
+            .Where(k => !string.IsNullOrEmpty(k))
+            .Select(k => k!)
+            .ToList();
+
+        return _extractPlanner.Plan(
+            index, here.ArchiveFile, here.EntryPath, keys, destinationDirectory, conflict);
+    }
+
+    /// <summary>The container a path is inside, if any — what the Unlock button needs to name.</summary>
+    public string? ArchiveFileFor(string path) => _archives.Resolve(path)?.ArchiveFile;
+
+    /// <summary>Holds a password for this session only. See <c>ArchivePasswordStore</c>.</summary>
+    public void RememberArchivePassword(string archiveFile, string password)
+    {
+        if (_archivePasswords is Services.ArchivePasswordStore store)
+            store.Remember(archiveFile, password);
+    }
+
+    /// <summary>Drops a password that turned out to be wrong, so it is not retried silently.</summary>
+    public void ForgetArchivePassword(string archiveFile)
+    {
+        if (_archivePasswords is Services.ArchivePasswordStore store)
+            store.Forget(archiveFile);
+    }
+
+    /// <summary>Where "Extract here" would put things, for seeding the dialog's destination box.</summary>
+    public string SuggestExtractDestination(string archiveFile)
+    {
+        var index = _archives.ReadArchive(archiveFile);
+        return ExtractRules.DestinationFor(index, archiveFile, Directory.Exists, File.Exists);
+    }
+
+    /// <summary>
+    /// Carries out an extract off the UI thread, on the transfer progress surface.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Modelled on <see cref="ExecuteDropAsync"/> and sharing its whole surface: a synthetic
+    /// <see cref="TransferPlan"/> feeds <see cref="TransferProgressViewModel"/>, which the
+    /// status-bar strip and the detail window already bind to. Nothing in Transfer had to learn
+    /// what an archive is, and nothing in the progress UI had to be duplicated.
+    /// </para>
+    /// <para>
+    /// It claims <see cref="IsTransferring"/> like the others, so two of these cannot overlap and
+    /// the undo slot stays coherent — but it never <em>writes</em> to that slot, because extracting
+    /// is additive. Whatever was undoable before an extract is still undoable after it, and Delete
+    /// removes what this made, reversibly.
+    /// </para>
+    /// </remarks>
+    public async Task<ExtractOutcome?> ExecuteExtractAsync(ExtractPlan plan)
+    {
+        if (IsTransferring || !plan.HasWork) return null;
+
+        IsTransferring = true;
+        UndoCommand.NotifyCanExecuteChanged();
+
+        var cancellation = new CancellationTokenSource();
+        try
+        {
+            var files = plan.Items.Where(i => !i.IsDirectory).ToList();
+
+            var synthetic = new TransferPlan(
+                TransferVerb.Copy,
+                plan.DestinationDirectory,
+                files.Select(f => new PlannedTransfer(
+                    f.EntryPath, IsDirectory: false, f.DestinationPath, Conflicts: false)).ToList(),
+                []);
+
+            // Exact for an addressable container, because the uncompressed lengths were already in
+            // its directory — better than the filesystem case. A sequential one reports a floor,
+            // and the bar goes indeterminate rather than lying about a percentage.
+            var estimate = new TransferEstimate(plan.TotalBytes, files.Count, plan.BytesAreExact);
+
+            var surface = new TransferProgressViewModel(synthetic, estimate, cancellation.Cancel);
+            surface.Headline = $"Extracting {files.Count:N0} item(s)…";
+            TransferProgress = surface;
+            SetStatus(surface.Headline);
+
+            var progress = new Progress<TransferProgress>(surface.Apply);
+            var password = _archivePasswords.For(plan.ArchiveFile);
+
+            var outcome = await Task.Run(
+                () => _extractExecutor.Execute(plan, password, cancellation.Token, progress));
+
+            await RefreshTabsShowingAsync([plan.DestinationDirectory]);
+            await Tree.RefreshDirectoriesAsync([plan.DestinationDirectory]);
+            SetStatus(DescribeExtract(outcome));
+            return outcome;
+        }
+        finally
+        {
+            TransferProgress = null;
+            cancellation.Dispose();
+            IsTransferring = false;
+            UndoCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    // --- Creating ---
+
+    /// <summary>
+    /// Compresses a selection into a new archive, on the transfer progress surface.
+    /// </summary>
+    /// <remarks>
+    /// Additive like an extract, so it claims <see cref="IsTransferring"/> and never writes to the
+    /// undo slot. The byte total is what the walk already measured — file lengths, not a
+    /// <c>dir_size_cache</c> lookup — so it is exact, and the bar shows a real percentage.
+    /// </remarks>
+    public async Task<CreateArchiveOutcome?> ExecuteCreateArchiveAsync(
+        IReadOnlyList<string> sources,
+        string archivePath,
+        ArchiveWriteFormat format,
+        CompressionLevel level)
+    {
+        if (IsTransferring || sources.Count == 0) return null;
+
+        IsTransferring = true;
+        UndoCommand.NotifyCanExecuteChanged();
+
+        var cancellation = new CancellationTokenSource();
+        try
+        {
+            var collected = await Task.Run(
+                () => ArchiveSourceWalk.Collect(sources, _settings.ShowHiddenItems, cancellation.Token));
+
+            if (collected.Count == 0)
+            {
+                SetStatus("There is nothing to compress.");
+                return null;
+            }
+
+            var synthetic = new TransferPlan(
+                TransferVerb.Copy,
+                Path.GetDirectoryName(archivePath) ?? "",
+                collected.Select(s => new PlannedTransfer(
+                    s.Path, IsDirectory: false, archivePath, Conflicts: false)).ToList(),
+                []);
+
+            var estimate = new TransferEstimate(
+                collected.Sum(s => s.SizeBytes), collected.Count, Complete: true);
+
+            var surface = new TransferProgressViewModel(synthetic, estimate, cancellation.Cancel);
+            surface.Headline = $"Compressing {collected.Count:N0} item(s)…";
+            TransferProgress = surface;
+            SetStatus(surface.Headline);
+
+            var progress = new Progress<TransferProgress>(surface.Apply);
+
+            var outcome = await Task.Run(() => _archiveCreator.Create(
+                archivePath, format, level, collected, cancellation.Token, progress));
+
+            var folder = Path.GetDirectoryName(archivePath);
+            if (folder is { Length: > 0 })
+            {
+                await RefreshTabsShowingAsync([folder]);
+                await Tree.RefreshDirectoriesAsync([folder]);
+            }
+
+            SetStatus(outcome.Cancelled
+                ? "Compress cancelled — nothing was written."
+                : $"{Path.GetFileName(archivePath)} created from {outcome.FilesWritten:N0} file(s).");
+            return outcome;
+        }
+        finally
+        {
+            TransferProgress = null;
+            cancellation.Dispose();
+            IsTransferring = false;
+            UndoCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    // --- Editing a container ---
+
+    /// <summary>Plans changing the contents of the archive the tab is standing in.</summary>
+    public ArchiveEditPlan PlanArchiveEdit(
+        DirectoryTabViewModel tab, IReadOnlyList<ArchiveEdit> edits)
+    {
+        if (_archives.Resolve(tab.CurrentPath) is not { } here)
+            return ArchiveEditPlan.Refused(
+                ArchiveEditRejection.Unreadable, "This folder is not inside an archive.");
+
+        long bytes;
+        try
+        {
+            bytes = new FileInfo(here.ArchiveFile).Length;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return ArchiveEditPlan.Refused(
+                ArchiveEditRejection.Unreadable, "The archive could not be opened.");
+        }
+
+        return _archiveEditPlanner.Plan(
+            _archives.ReadArchive(here.ArchiveFile), here.ArchiveFile, bytes, edits);
+    }
+
+    /// <summary>
+    /// The naming half of a rename, planned against the container rather than the disk.
+    /// </summary>
+    /// <remarks>
+    /// Same planner, different probe — see <see cref="ArchiveRenameProbe"/>. The dialog previews
+    /// with this, so what it shows is what the rewrite will produce.
+    /// </remarks>
+    public RenamePlan PlanRenameInArchive(IReadOnlyList<RenameSource> sources, RenameRule rule)
+    {
+        if (sources.Count == 0 || _archives.Resolve(sources[0].Path) is not { } here)
+            return PlanRename(sources, rule);
+
+        var probe = new ArchiveRenameProbe(_archives.ReadArchive(here.ArchiveFile), here.ArchiveFile);
+        return new RenamePlanner(probe).Plan(sources, rule);
+    }
+
+    /// <summary>The entry path a virtual path names inside its container, or null.</summary>
+    public string? ArchiveEntryPathFor(string path) => _archives.Resolve(path)?.EntryPath;
+
+    /// <summary>Turns selected rows inside a container into the edits that would remove them.</summary>
+    public IReadOnlyList<ArchiveEdit> RemovalsFor(IReadOnlyList<string> fullPaths) =>
+        fullPaths
+            .Select(p => _archives.Resolve(p)?.EntryPath)
+            .Where(e => !string.IsNullOrEmpty(e))
+            .Select(ArchiveEdit (e) => new RemoveEntry(e!))
+            .ToList();
+
+    /// <summary>
+    /// Carries out an archive edit, on the transfer progress surface and the shared undo slot.
+    /// </summary>
+    /// <remarks>
+    /// Unlike extracting and compressing, this one <em>is</em> destructive, so it takes the undo
+    /// slot like a move, a rename or a delete — retiring whatever was there first, which is what
+    /// commits the previous operation's staging and keeps exactly one thing undoable at a time.
+    /// </remarks>
+    public async Task<ArchiveEditOutcome?> ExecuteArchiveEditAsync(ArchiveEditPlan plan)
+    {
+        if (IsTransferring || !plan.HasWork) return null;
+
+        IsTransferring = true;
+        UndoCommand.NotifyCanExecuteChanged();
+
+        var cancellation = new CancellationTokenSource();
+        try
+        {
+            var name = Path.GetFileName(plan.ArchiveFile);
+
+            var synthetic = new TransferPlan(
+                TransferVerb.Copy, Path.GetDirectoryName(plan.ArchiveFile) ?? "",
+                [new PlannedTransfer(plan.ArchiveFile, false, plan.ArchiveFile, false)], []);
+
+            // The whole container is rewritten however small the change, so the bar measures the
+            // archive rather than the edit — which is the honest figure and the surprising one.
+            var estimate = new TransferEstimate(plan.RewriteBytes, 1, Complete: true);
+
+            var surface = new TransferProgressViewModel(synthetic, estimate, cancellation.Cancel);
+            surface.Headline = $"Rewriting {name}…";
+            TransferProgress = surface;
+            SetStatus(surface.Headline);
+
+            var progress = new Progress<TransferProgress>(surface.Apply);
+            var outcome = await Task.Run(
+                () => _archiveEditExecutor.Execute(plan, cancellation.Token, progress));
+
+            RetireUndoable();
+            if (outcome.CanUndo)
+            {
+                _undoableArchiveEdit = outcome;
+                UndoDescription = $"Ctrl+Z: undo changes to {name}";
+            }
+
+            var folder = Path.GetDirectoryName(plan.ArchiveFile);
+            if (folder is { Length: > 0 })
+            {
+                await Tree.RefreshDirectoriesAsync([folder]);
+                await RefreshTabsShowingAsync([folder]);
+            }
+            await RefreshTabsUnderAsync(plan.ArchiveFile);
+
+            SetStatus(outcome switch
+            {
+                { Cancelled: true } => $"{name} was left unchanged.",
+                { Failure: { } failure } => failure,
+                _ => $"{name} updated.",
+            });
+            return outcome;
+        }
+        finally
+        {
+            TransferProgress = null;
+            cancellation.Dispose();
+            IsTransferring = false;
+            UndoCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>
+    /// Reloads every tab standing inside <paramref name="archiveFile"/>.
+    /// </summary>
+    /// <remarks>
+    /// <c>RefreshTabsShowingAsync</c> matches a tab's folder exactly, which is no use here: a tab
+    /// may be several levels down inside the container that just changed. Matched with
+    /// <c>PathKey.IsUnder</c>, never string comparison, the way the rest of the fan-out is.
+    /// </remarks>
+    private async Task RefreshTabsUnderAsync(string archiveFile)
+    {
+        var key = PathKey.Canonicalize(archiveFile);
+
+        foreach (var tab in AllTabs.ToList())
+        {
+            if (tab.CurrentPath.Length == 0) continue;
+
+            var tabKey = PathKey.Canonicalize(tab.CurrentPath);
+            if (tabKey != key && !PathKey.IsUnder(tabKey, key)) continue;
+
+            await tab.RefreshViewAsync();
+        }
+    }
+
+    private static string DescribeExtract(ExtractOutcome outcome)
+    {
+        var written = $"{outcome.FilesWritten:N0} file(s) extracted";
+        if (outcome.Cancelled) return $"Extract cancelled — {written}.";
+        if (outcome.Failed.Count > 0) return $"{written}, {outcome.Failed.Count:N0} failed.";
+        return $"{written}.";
+    }
+
     /// <summary>Reverses the last move, rename or delete — whichever the undo slot holds.</summary>
     [RelayCommand(CanExecute = nameof(CanUndo))]
     private async Task UndoAsync()
@@ -1380,6 +1774,37 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         if (_undoableRename is { } rename) await UndoRenameAsync(rename);
         else if (_undoableDelete is { } deletion) await UndoDeleteAsync(deletion);
         else if (_undoableTransfer is { } transfer) await UndoTransferAsync(transfer);
+        else if (_undoableArchiveEdit is { } edit) await UndoArchiveEditAsync(edit);
+    }
+
+    private async Task UndoArchiveEditAsync(ArchiveEditOutcome outcome)
+    {
+        IsTransferring = true;
+        UndoCommand.NotifyCanExecuteChanged();
+        try
+        {
+            var failure = await Task.Run(() => _archiveEditExecutor.Undo(outcome));
+
+            _undoableArchiveEdit = null;
+            UndoDescription = "";
+
+            // The whole container changed, so anything showing its inside is stale. Refreshed by
+            // the archive's own path as well as its folder, because a tab may be standing in it.
+            var folder = Path.GetDirectoryName(outcome.ArchiveFile);
+            if (folder is { Length: > 0 })
+            {
+                await Tree.RefreshDirectoriesAsync([folder]);
+                await RefreshTabsShowingAsync([folder]);
+            }
+            await RefreshTabsUnderAsync(outcome.ArchiveFile);
+
+            SetStatus(failure ?? $"Put back {Path.GetFileName(outcome.ArchiveFile)}.");
+        }
+        finally
+        {
+            IsTransferring = false;
+            UndoCommand.NotifyCanExecuteChanged();
+        }
     }
 
     private async Task UndoTransferAsync(TransferOutcome outcome)
@@ -1425,9 +1850,12 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             TransferExecutor.CommitStaging(outcome);
         if (_undoableDelete is { } deletion)
             DeleteExecutor.CommitStaging(deletion);
+        if (_undoableArchiveEdit is { } edit)
+            ArchiveEditExecutor.CommitStaging(edit);
         _undoableTransfer = null;
         _undoableRename = null;
         _undoableDelete = null;
+        _undoableArchiveEdit = null;
         UndoDescription = "";
         UndoCommand.NotifyCanExecuteChanged();
     }

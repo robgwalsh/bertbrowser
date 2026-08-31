@@ -155,6 +155,15 @@ public sealed partial class DiskUsageViewModel : ObservableObject, IDisposable
     /// <summary>
     /// Points the view at <paramref name="rootPath"/> (null being "This PC") and runs both queries.
     /// </summary>
+    /// <summary>
+    /// Somewhere with contents to break down. Deliberately not just <c>Directory.Exists</c>: the
+    /// same widening the navigation gate needed, and for the same reason — a path inside an archive
+    /// is a real place with real children that no filesystem call will admit to.
+    /// </summary>
+    private static bool HasChildren(string path) =>
+        Directory.Exists(path) ||
+        BertBrowser.Core.Services.Archives.ArchivePath.Parse(path, File.Exists) is not null;
+
     public async Task LoadAsync(string? rootPath)
     {
         _cts?.Cancel();
@@ -179,8 +188,9 @@ public sealed partial class DiskUsageViewModel : ObservableObject, IDisposable
             var availability = files.Availability;
 
             // "This PC" has no single parent folder to break down, so the composition half only
-            // applies to a real directory.
-            if (rootPath is { Length: > 0 } directory && Directory.Exists(directory))
+            // applies to somewhere that has children — a real directory, or a folder inside a
+            // container, where every size is exact and this view is at its best.
+            if (rootPath is { Length: > 0 } directory && HasChildren(directory))
             {
                 var breakdown = await _service.BreakdownAsync(directory, _includeHidden, ct);
                 ct.ThrowIfCancellationRequested();

@@ -88,6 +88,20 @@ assert-visible PreviewPane
 preview off
 assert-hidden PreviewPane
 
-# Nothing in this run may have tried to put another program's window on screen.
+# Nothing up to here may have tried to put another program's window on screen.
 assert-not-launched
+
+# Last, because it is the one gesture in this script that *should* reach the launcher.
+#
+# The fixture's archive.zip is 512,000 bytes of filler, and this list has walked past it since
+# long before archives were browsable. It has to stay walked past: those bytes are all zeroes,
+# which is a *valid empty tar*, so an archive layer that trusted detection over the suffix would
+# quietly take the tab inside it and show an empty folder. Entering it must hand the file back to
+# whatever owns the extension — which this run refuses, and says so.
+go .
+enter archive.zip
+assert-row archive.zip
+assert-not-inside-archive
+assert-status was not launched
+
 state

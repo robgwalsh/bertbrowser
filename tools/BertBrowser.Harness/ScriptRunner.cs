@@ -139,6 +139,10 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "copy": Transfer(rest, TransferVerb.Copy); break;
             case "undo": Undo(); break;
             case "progress-demo": ProgressDemo(rest); break;
+            case "archive-fixture": ArchiveFixture(rest); break;
+            case "extract": Extract(rest); break;
+            case "compress": Compress(rest); break;
+            case "unlock": Unlock(rest); break;
             case "duplicates": Duplicates(rest); break;
             case "duplicates-keep": DuplicatesKeep(rest); break;
             case "duplicates-remove": DuplicatesRemove(); break;
@@ -175,6 +179,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-panes": AssertPanes(rest); break;
             case "assert-flattened": AssertFlattened(expected: true); break;
             case "assert-not-flattened": AssertFlattened(expected: false); break;
+            case "assert-inside-archive": AssertInsideArchive(expected: true); break;
+            case "assert-not-inside-archive": AssertInsideArchive(expected: false); break;
             case "assert-can-undo": AssertCanUndo(expected: true); break;
             case "assert-cannot-undo": AssertCanUndo(expected: false); break;
             case "assert-duplicate-groups": AssertDuplicateGroups(rest); break;
@@ -365,7 +371,11 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     private void Go(string rest)
     {
         var path = _sandbox.Resolve(Require(rest, "go"));
-        if (!Directory.Exists(path)) throw new AssertionException($"There is no folder at '{path}'.");
+        // Somewhere inside an archive is a legitimate destination and is not a directory on disk,
+        // so the check asks the same question navigation does rather than only Directory.Exists.
+        if (!Directory.Exists(path) &&
+            BertBrowser.Core.Services.Archives.ArchivePath.Parse(path, File.Exists) is null)
+            throw new AssertionException($"There is no folder at '{path}'.");
 
         Await(() => session.Tab.NavigateToAsync(path));
     }
@@ -375,11 +385,24 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     /// A file is refused rather than opened: the launcher this run is given starts nothing, so the
     /// only outcome would be a status-bar message, and saying so up front beats a script that looks
     /// like it did something.
+    /// <para>
+    /// An archive is the exception, and it is not a special case in the harness so much as the
+    /// absence of one: <c>Tab.Open</c> navigates into it rather than launching it, so nothing
+    /// starts and the refusal has nothing to protect. Letting the script say <c>enter sample.zip</c>
+    /// is also what makes the capture exercise the real double-click path rather than <c>go</c>.
+    /// </para>
     /// </remarks>
     private void Enter(string rest)
     {
         var name = Require(rest, "enter");
         var row = Row(name);
+
+        if (!row.IsDirectory && BertBrowser.Core.Services.Archives.ArchiveFormats.IsArchiveName(name))
+        {
+            Invoke(() => session.Tab.Open(row, elevated: false));
+            session.Settle();
+            return;
+        }
 
         if (!row.IsDirectory)
             throw new InvalidOperationException(
@@ -475,6 +498,11 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         session.Tab.SelectedItems.Count > 0
             ? session.Tab.SelectedItems
             : throw new AssertionException("Nothing is selected; use 'select <name>' first."));
+
+    /// <summary>The selection, or nothing, for the verbs where "nothing selected" is a real answer
+    /// rather than a mistake — Extract and Compress both mean the whole folder in that case.</summary>
+    private IReadOnlyList<FileItemViewModel> SelectionOrEmpty() =>
+        session.Dispatcher.Invoke(() => session.Tab.SelectedItems.ToList());
 
     // ---- tabs and panes ---------------------------------------------------------------
 
@@ -607,8 +635,40 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             _sandbox.RequireInside(i.FullPath, verb), i.IsDirectory, Modified(i)))
         .ToList();
 
+    /// <summary>
+    /// Plans and runs an archive edit, failing the script with the refusal rather than silently
+    /// doing nothing — the harness's counterpart to the message box the menu shows.
+    /// </summary>
+    private void EditArchive(IReadOnlyList<BertBrowser.Core.Services.Archives.ArchiveEdit> edits)
+    {
+        var plan = session.Dispatcher.Invoke(
+            () => session.Shell.PlanArchiveEdit(session.Tab, edits));
+
+        if (plan.Rejected is { } rejected)
+            throw new AssertionException($"The archive edit was refused: {rejected.Message}");
+
+        var outcome = Await(() => session.Shell.ExecuteArchiveEditAsync(plan));
+
+        if (outcome?.Failure is { } failure) throw new AssertionException(failure);
+    }
+
     private void Carry(List<RenameSource> sources, RenameRule rule, string what)
     {
+        // The same routing the rename handler does: one entry, and the container is rewritten.
+        if (session.Dispatcher.Invoke(() => session.Tab.FileList.IsInsideArchive))
+        {
+            var naming = session.Dispatcher.Invoke(() => session.Shell.PlanRenameInArchive(sources, rule));
+            if (naming.Renames.Count == 0)
+                throw new AssertionException($"{what} would change nothing.");
+
+            var entry = session.Dispatcher.Invoke(
+                () => session.Shell.ArchiveEntryPathFor(sources[0].Path)) ?? "";
+
+            EditArchive([new BertBrowser.Core.Services.Archives.RenameEntry(
+                entry, naming.Renames[0].TargetName)]);
+            return;
+        }
+
         var plan = session.Dispatcher.Invoke(() => session.Shell.PlanRename(sources, rule));
 
         if (plan.Rejected is { Count: > 0 } rejected)
@@ -730,6 +790,21 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     /// <summary>Deletes the selection, as the confirmation's Delete button does.</summary>
     private void Delete(string rest, DeleteMode mode)
     {
+        // Inside a container, delete means rewriting the container without those entries — a
+        // different planner and a different executor. Routed here as well as in the menu, so a
+        // script exercises the same path a click does rather than the one it bypassed.
+        if (session.Dispatcher.Invoke(() => session.Tab.FileList.IsInsideArchive))
+        {
+            var paths = (rest.Length == 0
+                    ? Selection().Select(i => i.FullPath)
+                    : rest.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Select(n => Row(n).FullPath))
+                .ToList();
+
+            EditArchive(session.Dispatcher.Invoke(() => session.Shell.RemovalsFor(paths)));
+            return;
+        }
+
         var sources = (rest.Length == 0
                 ? Selection().Select(i => (i.FullPath, i.IsDirectory))
                 : rest.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -760,6 +835,125 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     /// had copied. The paste command is a thin facade over this same planner and executor, so the
     /// code under test is the same either way.
     /// </remarks>
+    /// <summary>
+    /// Lays down the containers no part of this repository can write: an AES-encrypted zip, a 7z
+    /// with encrypted headers, and an ordinary 7z.
+    /// </summary>
+    /// <remarks>
+    /// The bytes come from <c>ArchiveFixtures</c> in Core, the same constants the unit tests use,
+    /// so a script and a test can never be looking at different archives. Everything else a script
+    /// needs is written with SharpCompress by <c>preview-fixture</c>.
+    /// </remarks>
+    private void ArchiveFixture(string rest)
+    {
+        var root = _sandbox.RequireInside(rest.Length == 0 ? "." : rest, "archive-fixture");
+        Directory.CreateDirectory(root);
+
+        BertBrowser.Core.Services.Archives.ArchiveFixtures.WriteTo(
+            Path.Combine(root, "locked.zip"),
+            BertBrowser.Core.Services.Archives.ArchiveFixtures.EncryptedZip);
+
+        BertBrowser.Core.Services.Archives.ArchiveFixtures.WriteTo(
+            Path.Combine(root, "sealed.7z"),
+            BertBrowser.Core.Services.Archives.ArchiveFixtures.HeaderEncryptedSevenZip);
+
+        BertBrowser.Core.Services.Archives.ArchiveFixtures.WriteTo(
+            Path.Combine(root, "plain.7z"),
+            BertBrowser.Core.Services.Archives.ArchiveFixtures.PlainSevenZip);
+
+        Console.WriteLine($"# archive fixture: {root}");
+    }
+
+    /// <summary>
+    /// Pulls entries out of the archive the tab is showing: <c>extract to &lt;folder&gt;</c>, or
+    /// <c>extract &lt;names&gt; to &lt;folder&gt;</c> for part of it.
+    /// </summary>
+    /// <remarks>
+    /// Goes through <c>PlanExtract</c>/<c>ExecuteExtractAsync</c>, so a script exercises the same
+    /// planner, executor and progress surface the menu does — the reason <c>move</c> and
+    /// <c>copy</c> go through the transfer executor rather than the clipboard.
+    /// </remarks>
+    private void Extract(string rest)
+    {
+        var (names, destination) = SplitOn(rest, "to", "extract");
+
+        var entries = names.Length == 0
+            ? []
+            : names.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(n => Row(n).FullPath)
+                .ToList();
+
+        var target = _sandbox.RequireInside(destination, "extract");
+        Directory.CreateDirectory(target);
+
+        var plan = session.Dispatcher.Invoke(
+            () => session.Shell.PlanExtract(
+                session.Tab, entries, target,
+                BertBrowser.Core.Services.Archives.ExtractConflict.KeepBoth));
+
+        if (plan.Rejected is { } rejected)
+            throw new AssertionException($"The extract was refused: {rejected.Message}");
+
+        Await(() => session.Shell.ExecuteExtractAsync(plan));
+    }
+
+    /// <summary>
+    /// Compresses the selection into a new archive: <c>compress zip Backup</c>, or
+    /// <c>compress tar.gz Backup</c>. With nothing selected it takes the folder on show.
+    /// </summary>
+    private void Compress(string rest)
+    {
+        var (format, name) = SplitFirstWord(Require(rest, "compress"));
+
+        var info = BertBrowser.Core.Services.Archives.ArchiveWriteRules.Formats
+            .FirstOrDefault(f => f.Label.Equals(format, StringComparison.OrdinalIgnoreCase))
+            ?? throw new FormatException(
+                $"'{format}' is not a format this app can write. Try: " +
+                string.Join(", ", BertBrowser.Core.Services.Archives.ArchiveWriteRules.Formats
+                    .Select(f => f.Label.ToLowerInvariant())));
+
+        if (name.Length == 0) throw new FormatException("compress needs a name for the archive.");
+
+        var selection = Selection();
+        var sources = selection.Count > 0
+            ? selection.Select(i => _sandbox.RequireInside(i.FullPath, "compress")).ToList()
+            : [_sandbox.RequireInside(session.Tab.CurrentPath, "compress")];
+
+        var target = _sandbox.RequireInside(
+            Path.Combine(session.Tab.CurrentPath, name + info.Suffix), "compress");
+
+        Await(() => session.Shell.ExecuteCreateArchiveAsync(
+            sources, target, info.Format,
+            BertBrowser.Core.Services.Archives.CompressionLevel.Normal));
+    }
+
+    /// <summary>
+    /// Gives the archive the tab is showing a password, and reloads.
+    /// </summary>
+    /// <remarks>
+    /// Writes the session store directly rather than driving the dialog, because the harness never
+    /// clicks — the same reason <c>move</c> goes through the transfer executor rather than the
+    /// clipboard. What it exercises is the part that matters: the reader consulting the store, the
+    /// cache preferring an unlocked read over a locked one, and the banner clearing.
+    /// </remarks>
+    private void Unlock(string rest)
+    {
+        var password = Require(rest, "unlock");
+
+        var archive = session.Dispatcher.Invoke(
+            () => session.Shell.ArchiveFileFor(session.Tab.CurrentPath))
+            ?? throw new AssertionException("This tab is not showing an archive.");
+
+        session.Dispatcher.Invoke(() => session.Shell.RememberArchivePassword(archive, password));
+        Await(() => session.Tab.RefreshViewAsync());
+    }
+
+    private static (string First, string Remainder) SplitFirstWord(string text)
+    {
+        var cut = text.IndexOf(' ');
+        return cut < 0 ? (text, "") : (text[..cut], text[(cut + 1)..].Trim());
+    }
+
     private void Transfer(string rest, TransferVerb verb)
     {
         var (names, destination) = SplitOn(rest, "to", verb.ToString().ToLowerInvariant());
@@ -1226,10 +1420,28 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             : throw new AssertionException(
                 "There is no transfer to show. Run 'progress-demo' before 'dialog transfer'."),
 
+        // Both are built through the same internal Create the menu goes through, so a capture
+        // cannot drift from what the app puts on screen.
+        "extract" => ExtractDialog.Create(
+            null,
+            Path.GetFileName(session.Tab.CurrentPath),
+            Path.Combine(session.Tab.CurrentPath, "Unpacked"),
+            SelectionOrEmpty().Count),
+
+        "archive-password" => ArchivePasswordDialog.Create(
+            null, Path.GetFileName(session.Tab.CurrentPath), retry: false),
+
+        "compress" => CreateArchiveDialog.Create(
+            null,
+            session.Tab.CurrentPath,
+            BertBrowser.Core.Services.Archives.ArchiveWriteRules.SuggestName(
+                SelectionOrEmpty().Select(i => i.FullPath).ToList(), session.Tab.CurrentPath),
+            Math.Max(1, SelectionOrEmpty().Count)),
+
         _ => throw new FormatException(
             $"'{kind}' is not a dialog. Try: new-folder, new-file, rename, rename-advanced, " +
             "delete, delete-permanent, message, warning, properties, settings, theme-editor, " +
-            "disk-usage, duplicates, transfer."),
+            "disk-usage, duplicates, transfer, extract, compress, archive-password."),
     };
 
     /// <summary>
@@ -1335,6 +1547,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             ("items", Text(tab.FileList.Items.Count)),
             ("selected", Text(tab.SelectedItems.Count)),
             ("flattened", Bool(tab.FileList.IsFlattened)),
+            ("insideArchive", Bool(tab.FileList.IsInsideArchive)),
             ("search", Quote(tab.ActiveSearchText)),
             ("globalSearch", Bool(tab.IsGlobalSearch)),
             ("tabs", Text(shell.ActivePane.Tabs.Count)),
@@ -1604,6 +1817,25 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             throw new AssertionException(expected
                 ? "the list is a normal directory listing, not a flattened search result."
                 : "the list is still a flattened search result.");
+    }
+
+    /// <summary>
+    /// Whether the list is showing the inside of a container.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart to <c>assert-flattened</c>, and it exists for the same reason: this is the
+    /// flag every write verb is gated on, so without a way to assert it a script can only check
+    /// that Rename did nothing — which it would also do if the guard had been removed and the
+    /// rename simply failed.
+    /// </remarks>
+    private void AssertInsideArchive(bool expected)
+    {
+        var actual = session.Dispatcher.Invoke(() => session.Tab.FileList.IsInsideArchive);
+
+        if (actual != expected)
+            throw new AssertionException(expected
+                ? "the list is a folder on disk, not the inside of an archive."
+                : "the list is still showing the inside of an archive.");
     }
 
     private void AssertCanUndo(bool expected)

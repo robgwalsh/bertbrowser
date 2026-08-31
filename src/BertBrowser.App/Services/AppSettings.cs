@@ -115,6 +115,18 @@ public sealed class AppSettings
     /// </remarks>
     public BertBrowser.Core.Services.Rename.RenameRule? AdvancedRename { get; set; }
 
+    /// <summary>
+    /// Whether double-clicking a zip, 7z, tar or rar walks into it instead of launching it.
+    /// </summary>
+    /// <remarks>
+    /// On by default, which is what Explorer, Directory Opus, Total Commander and Files all do.
+    /// Anyone who would rather their own archiver opened it turns this off and keeps every other
+    /// way in — the breadcrumb, Enter on the selection, and typing the path. Not nullable: "never
+    /// configured" and "on" mean the same thing here, so there is nothing for null to say — the
+    /// same reasoning <see cref="ShowPreviewPane"/> carries.
+    /// </remarks>
+    public bool EnterArchivesOnDoubleClick { get; set; } = true;
+
     private static string FilePath => AppPaths.SettingsPath;
 
     public static AppSettings Load()

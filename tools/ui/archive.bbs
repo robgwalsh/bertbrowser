@@ -1,0 +1,212 @@
+# Browsing an archive as if it were a folder.
+#
+# The whole feature rests on a virtual path being an ordinary Windows path — C:\x\a.zip\src — so
+# what this script is really checking is that the breadcrumb, Up, Back and the preview pane needed
+# no special cases to keep working inside one. If any of them grows one, this goes red.
+
+preview-fixture .
+refresh
+assert-row sample.zip
+assert-not-inside-archive
+
+# Double-click enters rather than launching, and the tab is now showing the container's root.
+enter sample.zip
+assert-path sample.zip
+assert-inside-archive
+assert-count 3
+assert-row src
+assert-row readme.txt
+shot 01-archive-root
+
+# Folders inside carry their exact recursive size. Nothing asked dir_size_cache for it — the
+# numbers were already in the container's own directory — which is why they appear at once and
+# are right rather than blank.
+enter src
+assert-count 2
+assert-row lib
+enter lib
+assert-count 1
+assert-row util.js
+
+# Up walks back out a level at a time and eventually leaves the archive altogether. This is the
+# payoff of not inventing a zip:// scheme: Path.GetDirectoryName does all of it unaided.
+up
+assert-path src
+up
+assert-inside-archive
+up
+assert-not-inside-archive
+assert-row sample.zip
+assert-no-row readme.txt
+
+# Back replays the history through the container without re-checking anything.
+back
+assert-inside-archive
+forward
+assert-not-inside-archive
+
+# Searching inside a container is answered from the index the listing already read, so it is
+# instant — and it goes nowhere near fs_entry, which must never learn a virtual path. Every filter
+# the box understands works in here, because the scanner reuses SearchNode.Matches verbatim.
+enter sample.zip
+search util
+assert-flattened
+assert-count 1
+assert-row util.js
+clear-search
+search ext:js
+assert-count 2
+clear-search
+up
+
+# And from outside, in:archives opens the containers under the root and searches their names.
+# It has to find them itself: "util" does not match sample.zip, which is exactly why reusing the
+# ordinary pass's hits would have found nothing. Asserted before anything is extracted, or the
+# copies on disk would answer instead of the archive.
+search util
+assert-count 0
+clear-search
+search in:archives util
+assert-count 1
+assert-row util.js
+clear-search
+
+# The preview pane reads an entry without extracting it, which Explorer's cannot do at all.
+# The classifier needed no change for this: it takes a name, and every reader takes a stream.
+preview on
+enter sample.zip
+enter src
+select app.js
+settle 400
+assert-preview text
+shot 02-archive-preview
+
+# Writing is off in here. The menu hides these too, but the flag is what both consult, so
+# asserting it is what proves the guard exists rather than that the rename merely failed.
+assert-inside-archive
+
+# Extracting, from inside src: the subtree comes out relative to where you are standing, so this
+# is lib\util.js rather than src\lib\util.js — extracting a folder you are already in must not
+# wrap it in a second copy of its own name.
+extract to Unpacked
+assert-exists Unpacked/app.js
+assert-exists Unpacked/lib/util.js
+assert-missing Unpacked/src/app.js
+assert-status extracted
+
+# From the container's root, naming one entry takes that one and nothing else — and it keeps its
+# own name, because here you asked for the folder rather than for what is in it.
+up
+extract docs to JustDocs
+assert-exists JustDocs/docs/guide.md
+assert-missing JustDocs/readme.txt
+
+# Extracting is additive — the same contract Copy and New have — so it must leave the one-level
+# undo slot exactly as it found it. The rename below is still what Ctrl+Z would reverse.
+up
+select plain.txt
+rename kept.txt
+assert-can-undo
+enter sample.zip
+extract to Again
+assert-exists Again/readme.txt
+assert-can-undo
+
+up
+
+# Creating, and then browsing straight back into what was created — which is the strongest check
+# the writer and the reader agree, and the one a round-trip unit test cannot make: it goes through
+# the real menu path, the real progress surface and the real navigation gate.
+refresh
+select kept.txt, sample.md
+compress zip Bundle
+refresh
+assert-row Bundle.zip
+enter Bundle.zip
+assert-count 2
+assert-row kept.txt
+up
+
+# tar.gz is the sequential half of the table, and it has to survive the same round trip: opened
+# through the addressable API it would come back as a GZip holding one nameless entry.
+select kept.txt, sample.md
+compress tar.gz Bundle
+refresh
+enter Bundle.tar.gz
+assert-count 2
+up
+
+
+# Changing what is in a container. There is no in-place edit of any of these formats, so this
+# rewrites the whole archive beside itself and swaps it in — and the original is held, not erased,
+# which is what makes Ctrl+Z put back the archive rather than the entry.
+go .
+enter sample.zip
+assert-count 3
+select readme.txt
+delete
+assert-count 2
+assert-no-row readme.txt
+assert-can-undo
+undo
+assert-count 3
+assert-row readme.txt
+
+# A rename in there is planned against the container's own index, so the dialog previews what the
+# rewrite will produce rather than asking the disk about a path it has never had.
+select readme.txt
+rename notes.txt
+assert-row notes.txt
+assert-no-row readme.txt
+undo
+assert-row readme.txt
+
+# Encryption comes in two shapes and they have to look different, because what the user can do
+# about them differs. A 7z with encrypted headers can list nothing at all, so the banner is the
+# whole content.
+archive-fixture .
+go .
+refresh
+enter sealed.7z
+assert-error password
+assert-count 0
+shot 03-locked-archive
+unlock correct-horse
+assert-error
+assert-count 2
+assert-row secret.txt
+
+# 7z can be read but not written, so changing one is refused by name rather than half-attempted.
+# Same for an encrypted container: a rewrite would silently drop the encryption.
+up
+enter plain.7z
+select secret.txt
+assert-count 2
+
+# A zip with its headers in the clear lists in full and refuses only its contents — hiding the
+# names would be pretending they are not right there in the file.
+up
+enter locked.zip
+assert-error
+assert-count 2
+assert-row secret.txt
+select secret.txt
+settle 400
+assert-preview none
+
+# ...and once unlocked, the same entry previews like any other file.
+unlock hunter2
+select secret.txt
+settle 400
+assert-preview text
+up
+
+# A file that only claims to be an archive is handed back to whatever owns the extension rather
+# than taking the tab into an error page. 512,000 bytes of zeroes is a *valid empty tar*, so
+# without the check that detection matches the suffix this browses as an empty folder.
+write fake.zip 4096
+refresh
+enter fake.zip
+assert-not-inside-archive
+assert-row fake.zip
+assert-status was not launched

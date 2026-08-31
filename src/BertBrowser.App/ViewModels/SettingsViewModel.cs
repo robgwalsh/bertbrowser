@@ -156,6 +156,10 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _showHiddenItems;
 
+    /// <summary>Whether double-clicking an archive walks into it. See <c>AppSettings</c>.</summary>
+    [ObservableProperty]
+    private bool _enterArchivesOnDoubleClick;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ScrollSpeedText))]
     private double _scrollSpeed;
@@ -251,6 +255,7 @@ public sealed partial class SettingsViewModel : ObservableObject
                 .Select(t => new NewFileTypeItemViewModel(t)));
         SelectedNewFileType = NewFileTypes.FirstOrDefault();
         ShowHiddenItems = settings.ShowHiddenItems;
+        EnterArchivesOnDoubleClick = settings.EnterArchivesOnDoubleClick;
         ScrollSpeed = settings.ScrollSpeedMultiplier;
         ShowPreviewPane = settings.ShowPreviewPane;
         PreviewTextLimitKb = Math.Round(settings.PreviewTextMaxBytes / 1024.0);
@@ -464,6 +469,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         // configured it, and an empty one means they emptied it on purpose.
         _settings.NewFileTypes = NewFileTypes.Select(t => t.ToTemplate()).ToList();
         _settings.ShowHiddenItems = ShowHiddenItems;
+        _settings.EnterArchivesOnDoubleClick = EnterArchivesOnDoubleClick;
         _settings.ScrollSpeedMultiplier = ScrollSpeed;
         _settings.ShowPreviewPane = ShowPreviewPane;
         _settings.PreviewTextMaxBytes = (int)Math.Clamp(PreviewTextLimitKb * 1024, 4096, 64 * 1024 * 1024);

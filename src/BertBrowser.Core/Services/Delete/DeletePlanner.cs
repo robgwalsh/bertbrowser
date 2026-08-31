@@ -61,8 +61,13 @@ public sealed class DeletePlanner
             var isDirectory = _probe.DirectoryExists(path);
             if (!isDirectory && !_probe.FileExists(path))
             {
+                // Something inside an archive is refused by the same test — it has no path on
+                // disk — but "no longer exists" would be a lie about a file the user can see. The
+                // menu already hides Delete there; this is the backstop and it should say why.
                 rejected.Add(new RejectedDelete(path, DeleteRejection.SourceMissing,
-                    $"'{Path.GetFileName(path)}' no longer exists."));
+                    Archives.ArchivePath.Parse(path, File.Exists) is not null
+                        ? $"'{Path.GetFileName(path)}' is inside an archive. Extract it first."
+                        : $"'{Path.GetFileName(path)}' no longer exists."));
                 continue;
             }
 

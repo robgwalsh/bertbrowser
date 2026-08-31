@@ -35,6 +35,7 @@ public static class SearchSyntax
     public const string Is = "IS";
     public const string Regex = "RE";
     public const string Name = "NAME";
+    public const string In = "IN";
 
     /// <summary>Aliases mapped onto the canonical key above.</summary>
     private static readonly Dictionary<string, string> Aliases = new(StringComparer.Ordinal)
@@ -50,6 +51,7 @@ public static class SearchSyntax
         ["RE"] = Regex,
         ["REGEX"] = Regex,
         ["NAME"] = Name,
+        ["IN"] = In,
     };
 
     /// <summary>
@@ -98,6 +100,7 @@ public static class SearchSyntax
             new("path:projects", "somewhere in the folder path, not just the name"),
             new("is:dir", "folders only — also is:file and is:hidden"),
             new("re:^IMG_\\d+", "a regular expression over the name"),
+            new("in:archives", "look inside zips and 7zs too — names, not contents"),
         ]),
 
         new("Combining", "Words sit side by side to mean AND; the rest is spelled out.",
@@ -112,6 +115,7 @@ public static class SearchSyntax
             new("size: and dm:", "need a drive the indexer read in full"),
             new("dc: and da:", "aren't indexed — only the modified date is"),
             new("content:", "file contents are never searched, only names"),
+            new("in:archives", "opens each archive, so it is slower and opt-in"),
         ]),
     };
 

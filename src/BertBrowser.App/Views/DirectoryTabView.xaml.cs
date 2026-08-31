@@ -8,6 +8,7 @@ using BertBrowser.App.Services;
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services;
+using BertBrowser.Core.Services.Archives;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
@@ -274,11 +275,18 @@ public partial class DirectoryTabView : UserControl
         else if (FileListView.IsKeyboardFocusWithin && Keyboard.Modifiers == ModifierKeys.Control &&
                  e.Key is Key.C or Key.X or Key.V)
         {
-            switch (e.Key)
+            // All three are off inside a container. Cut and paste would write; copy would make a
+            // promise to produce bytes later that an entry cannot keep, since the archive may have
+            // been rewritten by the time anything pastes. Still handled, so the chord is inert
+            // rather than falling through to something else.
+            if (!Tab.FileList.IsInsideArchive)
             {
-                case Key.C: _shell.CopySelectionCommand.Execute(SelectedFileItems()); break;
-                case Key.X: _shell.CutSelectionCommand.Execute(SelectedFileItems()); break;
-                case Key.V: _shell.PasteCommand.Execute(null); break;
+                switch (e.Key)
+                {
+                    case Key.C: _shell.CopySelectionCommand.Execute(SelectedFileItems()); break;
+                    case Key.X: _shell.CutSelectionCommand.Execute(SelectedFileItems()); break;
+                    case Key.V: _shell.PasteCommand.Execute(null); break;
+                }
             }
             e.Handled = true;
         }
@@ -428,6 +436,10 @@ public partial class DirectoryTabView : UserControl
             Tab.Open(item, RunAsAdminHeld);
             e.Handled = true;
         }
+        // Each of the three write verbs carries the archive guard as well as its modifier guard.
+        // The menu hides them there too, but a keybinding must not be able to route around a menu —
+        // and each still marks the key handled, so the chord does nothing rather than falling
+        // through to type-ahead and jumping the selection to a file beginning with "n".
         else if (e.Key == Key.F2 && Keyboard.Modifiers == ModifierKeys.None)
         {
             _ = RenameSelectionAsync();
@@ -435,10 +447,13 @@ public partial class DirectoryTabView : UserControl
         }
         else if (e.Key == Key.Delete && Keyboard.Modifiers is ModifierKeys.None or ModifierKeys.Shift)
         {
-            _ = DeleteSelectionAsync(permanent: Keyboard.Modifiers == ModifierKeys.Shift);
+            // Shift is ignored inside a container, for the reason the menu item is hidden there.
+            _ = DeleteSelectionAsync(
+                permanent: Keyboard.Modifiers == ModifierKeys.Shift && !Tab.FileList.IsInsideArchive);
             e.Handled = true;
         }
-        else if (e.Key == Key.N && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
+        else if (e.Key == Key.N && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift)
+                 && !Tab.FileList.IsInsideArchive)
         {
             // Explorer's shortcut. It belongs on the list rather than in the window's InputBindings
             // because it acts on the focused pane's directory, and it needs its modifier guard
@@ -543,11 +558,24 @@ public partial class DirectoryTabView : UserControl
         if (FileListView.ContextMenu is not { } menu) return;
 
         var selection = SelectedFileItems();
-        CopyMenuItem.IsEnabled = CutMenuItem.IsEnabled = selection.Count > 0;
+
+        // Inside an archive nothing has a path an executor can act on, so everything that writes to
+        // disk by path is off. The same guard the flattened-search rules use, for the same reason,
+        // and the dangerous ones are guarded at the service too — a keybinding must not be able to
+        // route around a menu.
+        //
+        // Copy is off with them, and that one is worth stating: Ctrl+C is a promise to produce
+        // bytes *later*, and an entry cannot keep it — the container may have been rewritten by the
+        // time anyone pastes. Explorer keeps the promise by extracting to temp on the keystroke,
+        // which writes gigabytes for a keypress. Extract is the honest verb and it gets its own
+        // menu item.
+        var inArchive = Tab.FileList.IsInsideArchive;
+
+        CopyMenuItem.IsEnabled = CutMenuItem.IsEnabled = selection.Count > 0 && !inArchive;
         CopyPathMenuItem.IsEnabled = CopyNameMenuItem.IsEnabled = selection.Count > 0;
         CopyPathMenuItem.Header = selection.Count > 1 ? "Copy as paths" : "Copy as path";
         CopyNameMenuItem.Header = selection.Count > 1 ? "Copy names" : "Copy name";
-        PasteMenuItem.IsEnabled = FileClipboard.HasFiles();
+        PasteMenuItem.IsEnabled = FileClipboard.HasFiles() && !inArchive;
 
         // "Open in new tab/pane" only makes sense for folders.
         var folders = selection.Count(i => i.IsDirectory);
@@ -558,20 +586,57 @@ public partial class DirectoryTabView : UserControl
         // offers itself and analyses the folder being shown, which is the useful reading of an
         // empty-space right-click.
         DiskUsageMenuItem.IsEnabled = selection.Count == 0 || (selection.Count == 1 && folders == 1);
-        DuplicatesMenuItem.IsEnabled = DiskUsageMenuItem.IsEnabled;
+        // Duplicates reads whole files by path, which an entry does not have. Disk usage does not:
+        // every size inside a container is already exact, so it stays on — see the Archives section.
+        DuplicatesMenuItem.IsEnabled = DiskUsageMenuItem.IsEnabled && !inArchive;
+
+        // Extract shows from either side of the container: on a single selected archive out here,
+        // or on the selection (or everything, with nothing selected) in there. It is the one write
+        // verb that is *more* available inside an archive than outside one.
+        var extractable = inArchive ||
+            (selection.Count == 1 && !selection[0].IsDirectory &&
+             ArchiveFormats.IsArchiveName(selection[0].Name));
+
+        ExtractHereMenuItem.Visibility = ExtractToMenuItem.Visibility =
+            extractable ? Visibility.Visible : Visibility.Collapsed;
+
+        // Compressing reads files by path, so it needs real ones — off inside a container and off
+        // over a flattened search result, where "the folder being shown" is not a folder.
+        CompressMenuItem.IsEnabled =
+            !inArchive && !Tab.FileList.IsFlattened && Tab.CurrentPath.Length > 0;
+        CompressMenuItem.Header = selection.Count > 1
+            ? $"Compress {selection.Count:N0} items…"
+            : "Compress…";
+        ExtractHereMenuItem.Header = inArchive && selection.Count > 0
+            ? $"Extract {selection.Count:N0} item(s) here"
+            : "Extract here";
 
         // Only ever one file: "run this folder as administrator" means nothing, and a whole
         // selection of programs started elevated at once is not something to offer from a menu.
         RunAsAdminMenuItem.IsEnabled =
-            selection.Count == 1 && !selection[0].IsDirectory;
+            selection.Count == 1 && !selection[0].IsDirectory && !inArchive;
 
-        RenameMenuItem.IsEnabled = selection.Count > 0;
+        // Rename and Delete stay on inside a container, but they mean something different in
+        // there: the container is rewritten beside itself and swapped in. Whether that is possible
+        // at all depends on the format and the archive's own shape, and the planner is what knows —
+        // so the menu offers it and the refusal, when there is one, arrives by name.
+        //
+        // Renaming several at once is not offered in there: a rewrite writes each entry exactly
+        // once, so the staging trick that makes a rotating batch work on disk has nowhere to happen.
+        RenameMenuItem.IsEnabled = selection.Count == 1 || (selection.Count > 1 && !inArchive);
         RenameMenuItem.Header = selection.Count > 1 ? $"Rename {selection.Count} items…" : "Rename…";
 
-        DeleteMenuItem.IsEnabled = DeletePermanentlyMenuItem.IsEnabled = selection.Count > 0;
+        DeleteMenuItem.IsEnabled = selection.Count > 0;
+
+        // Shift+Delete has no meaning in there: an entry has no Recycle Bin and no staging of its
+        // own, so there is no second, more destructive thing for it to mean.
+        DeletePermanentlyMenuItem.IsEnabled = selection.Count > 0 && !inArchive;
         DeleteMenuItem.Header = selection.Count > 1 ? $"Delete {selection.Count} items…" : "Delete…";
 
-        BookmarkMenuItem.IsEnabled = selection.Count > 0;
+        // Bookmarking is refused at BookmarkService too, and that is the important half: a virtual
+        // path in the bookmark table would sort strictly inside the archive's own containing folder
+        // under PathKey.IsUnder, and poison every subtree query over it.
+        BookmarkMenuItem.IsEnabled = selection.Count > 0 && !inArchive;
         // "Remove bookmark" only when every selected item is already bookmarked.
         var allBookmarked = selection.Count > 0 && selection.All(i => _shell.Bookmarks.IsBookmarked(i.FullPath));
         BookmarkMenuItem.Header = allBookmarked ? "Remove bookmark" : "Bookmark";
@@ -579,7 +644,8 @@ public partial class DirectoryTabView : UserControl
         // New acts on the folder being shown, so it needs one — and a flattened search result is
         // not one: creating into the search root would produce an item that may not match the query
         // and so would not appear, which reads as a failure.
-        NewMenuItem.IsEnabled = !Tab.FileList.IsFlattened && Tab.CurrentPath.Length > 0;
+        NewMenuItem.IsEnabled =
+            !Tab.FileList.IsFlattened && !inArchive && Tab.CurrentPath.Length > 0;
         NewItemMenu.Rebuild(NewMenuItem, NewFileTypesSeparator, _settings,
             template => _ = CreateInCurrentFolderAsync(NewItemKind.File, template));
 
@@ -673,6 +739,133 @@ public partial class DirectoryTabView : UserControl
     }
 
     /// <summary>A selected folder, or — with nothing selected — the folder being shown.</summary>
+    /// <summary>
+    /// Extract, from either side of the container: a selected archive out in the folder that holds
+    /// it, or the selection inside one out to somewhere chosen.
+    /// </summary>
+    /// <remarks>
+    /// Both go through <see cref="ShellViewModel.PlanExtract"/> and
+    /// <see cref="ShellViewModel.ExecuteExtractAsync"/>, so there is one path to audit and one
+    /// progress surface. Nothing here writes a file itself.
+    /// </remarks>
+    /// <summary>
+    /// Asks for the current archive's password and reloads with it.
+    /// </summary>
+    /// <remarks>
+    /// The reload is an ordinary refresh: the password store is consulted by the reader on the way
+    /// through, and the cache treats an index read <em>with</em> a password as superseding one read
+    /// without — so there is no special "unlocked" path, only a re-read that now succeeds.
+    /// </remarks>
+    private void Unlock_Click(object sender, RoutedEventArgs e) => _ = UnlockAsync();
+
+    private async Task UnlockAsync()
+    {
+        if (_shell.ArchiveFileFor(Tab.CurrentPath) is not { } archive) return;
+
+        var dialog = ArchivePasswordDialog.Create(
+            Window.GetWindow(this), Path.GetFileName(archive), retry: _unlockRefused);
+
+        if (dialog.ShowDialog() != true) return;
+
+        _shell.RememberArchivePassword(archive, dialog.Password);
+        await Tab.RefreshViewAsync();
+
+        // A wrong password comes straight back as the same locked state, so the next attempt says
+        // so rather than repeating the first, more optimistic, wording.
+        _unlockRefused = Tab.FileList.IsArchiveLocked;
+        if (!_unlockRefused) return;
+
+        _shell.ForgetArchivePassword(archive);
+    }
+
+    /// <summary>Whether the last password given for this tab's archive was refused.</summary>
+    private bool _unlockRefused;
+
+    /// <summary>Compress the selection, or the whole folder when nothing is selected.</summary>
+    private void ContextCompress_Click(object sender, RoutedEventArgs e) => _ = CompressAsync();
+
+    private async Task CompressAsync()
+    {
+        var selection = SelectedFileItems();
+        var sources = selection.Count > 0
+            ? selection.Select(i => i.FullPath).ToList()
+            : [Tab.CurrentPath];
+
+        var directory = Path.GetDirectoryName(Tab.CurrentPath.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } above
+                        && selection.Count == 0
+            ? above                      // compressing the folder itself puts the archive beside it
+            : Tab.CurrentPath;
+
+        var dialog = CreateArchiveDialog.Create(
+            Window.GetWindow(this), directory,
+            ArchiveWriteRules.SuggestName(sources, Tab.CurrentPath), sources.Count);
+
+        if (dialog.ShowDialog() != true) return;
+
+        await _shell.ExecuteCreateArchiveAsync(
+            sources, dialog.ArchivePath, dialog.Format, dialog.Level);
+    }
+
+    private void ContextExtractHere_Click(object sender, RoutedEventArgs e) =>
+        _ = ExtractAsync(askWhere: false);
+
+    private void ContextExtractTo_Click(object sender, RoutedEventArgs e) =>
+        _ = ExtractAsync(askWhere: true);
+
+    private async Task ExtractAsync(bool askWhere)
+    {
+        var (archive, entries) = ExtractTarget();
+        if (archive is null) return;
+
+        var destination = _shell.SuggestExtractDestination(archive);
+        var conflict = ExtractConflict.KeepBoth;
+
+        if (askWhere)
+        {
+            var dialog = ExtractDialog.Create(
+                Window.GetWindow(this), Path.GetFileName(archive), destination, entries.Count);
+            if (dialog.ShowDialog() != true) return;
+
+            destination = dialog.Destination;
+            conflict = dialog.Conflict;
+        }
+
+        // Entering the container first is what makes "Extract here" work on a row in the folder
+        // above it: the plan is expressed in terms of the archive the tab is showing.
+        if (!Tab.FileList.IsInsideArchive)
+        {
+            await Tab.NavigateToAsync(archive);
+            entries = [];
+        }
+
+        var plan = _shell.PlanExtract(Tab, entries, destination, conflict);
+        if (plan.Rejected is { } rejected)
+        {
+            MessageDialog.Show(
+                Window.GetWindow(this), rejected.Message, "Extract", MessageDialogKind.Warning);
+            return;
+        }
+
+        await _shell.ExecuteExtractAsync(plan);
+    }
+
+    /// <summary>
+    /// What to extract: the selected archive when standing outside one, or the selection (or
+    /// everything) when standing inside one.
+    /// </summary>
+    private (string? Archive, IReadOnlyList<string> Entries) ExtractTarget()
+    {
+        var selection = SelectedFileItems();
+
+        if (Tab.FileList.IsInsideArchive)
+            return (Tab.CurrentPath, selection.Select(i => i.FullPath).ToList());
+
+        var one = selection.Count == 1 && !selection[0].IsDirectory ? selection[0] : null;
+        return one is not null && ArchiveFormats.IsArchiveName(one.Name)
+            ? (one.FullPath, [])
+            : (null, []);
+    }
+
     private void ContextDuplicates_Click(object sender, RoutedEventArgs e)
     {
         var target = FileListView.SelectedItem is FileItemViewModel { IsDirectory: true } item
@@ -711,6 +904,12 @@ public partial class DirectoryTabView : UserControl
     {
         var selection = SelectedFileItems();
         if (selection.Count == 0) return;
+
+        if (Tab.FileList.IsInsideArchive)
+        {
+            await RenameInArchiveAsync(selection[0]);
+            return;
+        }
 
         // SelectedItems is in the order things were clicked, which is not the order they are read in.
         // The date goes across local, matching the Modified column the user was just reading, and
@@ -790,6 +989,53 @@ public partial class DirectoryTabView : UserControl
     private void ContextDeletePermanently_Click(object sender, RoutedEventArgs e) =>
         _ = DeleteSelectionAsync(permanent: true);
 
+    /// <summary>
+    /// Renaming one entry inside a container, which means rewriting the whole container.
+    /// </summary>
+    /// <remarks>
+    /// The same dialog, so the naming rules the user knows are the naming rules that apply — but
+    /// one item only, because a rewrite writes each entry exactly once and the staging trick that
+    /// makes a rotating batch work on disk has nowhere to happen in here.
+    /// </remarks>
+    private async Task RenameInArchiveAsync(FileItemViewModel item)
+    {
+        var owner = Window.GetWindow(this);
+
+        var sources = new List<RenameSource>
+        {
+            new(item.FullPath, item.IsDirectory,
+                item.ModifiedUtc == default ? null : item.ModifiedUtc.ToLocalTime()),
+        };
+
+        if (RenameDialog.Show(owner, sources, _shell.PlanRenameInArchive) is not { } plan) return;
+        if (plan.Renames.Count == 0) return;
+
+        var edits = new List<ArchiveEdit>
+        {
+            new RenameEntry(
+                _shell.ArchiveEntryPathFor(item.FullPath) ?? "",
+                plan.Renames[0].TargetName),
+        };
+
+        await RunArchiveEditAsync(edits, owner);
+    }
+
+    /// <summary>
+    /// Plans and runs an archive edit, reporting a refusal rather than appearing to do nothing.
+    /// </summary>
+    private async Task RunArchiveEditAsync(IReadOnlyList<ArchiveEdit> edits, Window? owner)
+    {
+        var plan = _shell.PlanArchiveEdit(Tab, edits);
+
+        if (plan.Rejected is { } rejected)
+        {
+            MessageDialog.Show(owner, rejected.Message, "Archive", MessageDialogKind.Warning);
+            return;
+        }
+
+        await _shell.ExecuteArchiveEditAsync(plan);
+    }
+
     /// <summary>Deletes the selection, after showing exactly what that comes to.</summary>
     /// <remarks>The plan is built before the confirmation and handed straight to the executor, so
     /// the items the user was shown are the items that go — and the executor re-checks every one of
@@ -798,6 +1044,26 @@ public partial class DirectoryTabView : UserControl
     {
         var selection = SelectedFileItems();
         if (selection.Count == 0) return;
+
+        if (Tab.FileList.IsInsideArchive)
+        {
+            // No planner, no survey and no Recycle Bin: an entry has none of those. The container
+            // is rewritten without it, and the whole original is what Ctrl+Z puts back.
+            var owner2 = Window.GetWindow(this);
+            var what = selection.Count == 1
+                ? selection[0].Name
+                : $"{selection.Count:N0} items";
+            var confirmed = MessageDialog.Show(
+                owner2,
+                $"Remove {what} from this archive?\n\n" +
+                "The whole archive is rewritten to do it. Ctrl+Z puts the original back.",
+                "Archive", MessageDialogKind.Warning, showCancel: true);
+
+            if (confirmed)
+                await RunArchiveEditAsync(
+                    _shell.RemovalsFor(selection.Select(i => i.FullPath).ToList()), owner2);
+            return;
+        }
 
         // In the order the list shows them, so the confirmation reads down the screen.
         var ordered = Tab.FileList.Items

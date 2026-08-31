@@ -33,6 +33,13 @@ dialog duplicates   06c-duplicates-dark
 # The syntax reference: a page of monospaced examples in the link colour over a raised panel,
 # which is a lot of new surface for one theme to lose a colour in.
 dialog search-syntax 06d-search-syntax-dark
+# Two combo boxes, two radio groups and a Browse button — none of which appear in any other
+# dialog, so a token that only they use would go unnoticed anywhere else.
+dialog compress     06e-compress-dark
+dialog extract      06f-extract-dark
+# The only PasswordBox in the app, so it is the only place a caret or selection colour on that
+# control could be wrong without anything else noticing.
+dialog archive-password 06g-password-dark
 
 theme light-plus
 shot 07-light-plus
@@ -45,6 +52,9 @@ dialog properties 11-properties-light
 dialog transfer   11b-transfer-light
 dialog duplicates 11c-duplicates-light
 dialog search-syntax 11d-search-syntax-light
+dialog compress   11e-compress-light
+dialog extract    11f-extract-light
+dialog archive-password 11g-password-light
 progress-demo off
 
 # A search result and the tile view in a light theme: the flattened list's Folder column and the

@@ -12,6 +12,12 @@
          lib.e_sqlite3 on its own; "dotnet list package" with the vulnerable and include-transitive
          flags says when, and NuGetAudit fails the build if it regresses. -->
     <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.53.3" />
+    <!-- Reading 7z, rar, tar and the rest. MIT, and its net10.0 target group carries no
+         transitive dependencies at all (net48/netstandard2.0 carry four; we take neither).
+         Reached from exactly one class, Services/Archives/ArchiveReader.cs, which is what makes
+         it replaceable — see the Archives section of CLAUDE.md for why this dependency exists
+         where Markdig and PdfPig deliberately do not. -->
+    <PackageReference Include="SharpCompress" Version="1.0.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -20,6 +26,10 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="BertBrowser.Core.Tests" />
+    <!-- The UI harness is the other half of verification, and reaches ArchiveFixtures for the
+         containers nothing in the graph can write. One copy of those bytes, so a script and a
+         unit test cannot disagree about what they are looking at. -->
+    <InternalsVisibleTo Include="BertBrowser.Harness" />
   </ItemGroup>
 
 </Project>

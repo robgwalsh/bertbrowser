@@ -181,17 +181,23 @@ public sealed class FolderTreeViewModel
         catch (UnauthorizedAccessException) { return null; }
     }
 
-    /// <summary>Enumerates immediate subdirectories as <see cref="DirectoryInfo"/> objects, whose
-    /// <c>Attributes</c> come pre-populated from the directory scan — so the child nodes' hidden
-    /// check costs no extra per-child stat.</summary>
-    internal IReadOnlyList<DirectoryInfo> GetSubdirectories(string path)
+    /// <summary>Enumerates immediate subdirectories, whose <c>Attributes</c> come pre-populated
+    /// from the directory scan — so the child nodes' hidden check costs no extra per-child stat.
+    /// </summary>
+    /// <remarks>
+    /// Through <see cref="IFileSystemService"/> rather than <c>DirectoryInfo</c> directly, so this
+    /// stops being the one listing path in the app that bypasses the seam. Nothing about the tree
+    /// depends on that today; it is what lets a decorating lister be reached from here at all.
+    /// The seam throws where this must not, so the catch set stays exactly what it was.
+    /// </remarks>
+    internal IReadOnlyList<FileEntry> GetSubdirectories(string path)
     {
         try
         {
-            return new DirectoryInfo(path).EnumerateDirectories().ToList();
+            return _fileSystem.ListDirectory(path).Where(e => e.IsDirectory).ToList();
         }
-        catch (UnauthorizedAccessException) { return Array.Empty<DirectoryInfo>(); }
-        catch (IOException) { return Array.Empty<DirectoryInfo>(); }
+        catch (UnauthorizedAccessException) { return Array.Empty<FileEntry>(); }
+        catch (IOException) { return Array.Empty<FileEntry>(); }
     }
 
     /// <summary>
@@ -471,10 +477,11 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
     {
     }
 
-    /// <summary>Child ctor: <paramref name="info"/> came from a directory enumeration, so its
+    /// <summary>Child ctor: <paramref name="entry"/> came from a directory enumeration, so its
     /// <c>Attributes</c> are already cached — the hidden check adds no per-child disk stat.</summary>
-    internal DirectoryNodeViewModel(FolderTreeViewModel tree, DirectoryInfo info, int depth)
-        : this(tree, info.FullName, IsHiddenDirectory(info), displayName: null, depth: depth)
+    internal DirectoryNodeViewModel(FolderTreeViewModel tree, FileEntry entry, int depth)
+        : this(tree, entry.FullPath, entry.Attributes.HasFlag(FileAttributes.Hidden),
+               displayName: null, depth: depth)
     {
     }
 
@@ -577,18 +584,6 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
         }
     }
 
-    /// <summary>Hidden attribute from an already-enumerated <see cref="DirectoryInfo"/> (no extra stat).</summary>
-    private static bool IsHiddenDirectory(DirectoryInfo info)
-    {
-        try
-        {
-            return info.Attributes.HasFlag(FileAttributes.Hidden);
-        }
-        catch
-        {
-            return false;
-        }
-    }
 
     partial void OnIsExpandedChanged(bool value)
     {
@@ -626,10 +621,10 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
     {
         // Enumeration plus each child node's has-children probe are disk I/O — do them off the
         // UI thread, then swap the children in on it. (The hidden-attribute check is free: it
-        // reads the DirectoryInfo.Attributes already cached by the enumeration.)
+        // reads the attributes already cached by the enumeration.)
         var children = await Task.Run(() => _tree!.GetSubdirectories(FullPath)
-            .OrderBy(info => info.Name, Interop.NaturalStringComparer.Instance)
-            .Select(info => new DirectoryNodeViewModel(_tree, info, depth: Depth + 1))
+            .OrderBy(entry => entry.Name, Interop.NaturalStringComparer.Instance)
+            .Select(entry => new DirectoryNodeViewModel(_tree, entry, depth: Depth + 1))
             .ToList());
 
         // Hidden children are kept here and filtered out of Children, not dropped: that is what
