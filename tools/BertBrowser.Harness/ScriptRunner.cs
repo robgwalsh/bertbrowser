@@ -13,6 +13,7 @@ using BertBrowser.App.Views;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services.Columns;
+using BertBrowser.Core.Services.Compare;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.Elevation;
 using BertBrowser.Core.Services.DiskUsage;
@@ -156,6 +157,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "compare": Compare(); break;
             case "compare-filter": CompareFilter(rest); break;
             case "compare-end": CompareEnd(); break;
+            case "compare-refused": CompareRefused(); break;
+            case "sync": Sync(rest); break;
             case "assert-compare": AssertCompare(rest); break;
             case "assert-compare-row": AssertCompareRow(rest); break;
             case "duplicates": Duplicates(rest); break;
@@ -1508,6 +1511,12 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     /// </remarks>
     private void Compare()
     {
+        // The command is a toggle, so a second one would quietly stop the comparison and leave
+        // every assertion after it reading an empty session.
+        if (session.Dispatcher.Invoke(() => session.Shell.CompareSession) is not null)
+            throw new AssertionException(
+                "A comparison is already running. Use 'compare-end' before starting another.");
+
         Await(() => session.Dispatcher.Invoke(
             () => session.Shell.CompareWithOtherPaneCommand.ExecuteAsync(null)));
 
@@ -1516,6 +1525,17 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
                 "No comparison started. Compare needs two panes and two real folders.");
 
         session.Settle();
+    }
+
+    /// <summary>The other half of <c>compare</c>: asserts the pair was turned down, and leaves the
+    /// reason in the status bar for <c>assert-status</c> to read.</summary>
+    private void CompareRefused()
+    {
+        Await(() => session.Dispatcher.Invoke(
+            () => session.Shell.CompareWithOtherPaneCommand.ExecuteAsync(null)));
+
+        if (session.Dispatcher.Invoke(() => session.Shell.CompareSession) is not null)
+            throw new AssertionException("The comparison was accepted, and should not have been.");
     }
 
     private void CompareFilter(string rest)
@@ -1562,6 +1582,28 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         if (actual is null) throw new AssertionException($"There is no row called '{name}'.");
         if (!actual.Equals(expected.Trim(), StringComparison.OrdinalIgnoreCase))
             throw new AssertionException($"'{name}' reads '{actual}', not '{expected.Trim()}'.");
+    }
+
+    /// <summary>
+    /// Runs the sync the comparison on show would do, through the same planner, runner and undo
+    /// slot the dialog's Sync button goes through — the dialog itself is skipped, because a run
+    /// never clicks. <c>with-deletes</c> ticks the destructive half, which the dialog leaves off.
+    /// </summary>
+    private void Sync(string rest)
+    {
+        var compare = RequireCompare("sync").Result
+            ?? throw new AssertionException("The comparison has no result to sync.");
+
+        var withDeletes = rest.Trim().Equals("with-deletes", StringComparison.OrdinalIgnoreCase);
+        if (rest.Trim().Length > 0 && !withDeletes)
+            throw new FormatException($"sync takes 'with-deletes' or nothing, not '{rest.Trim()}'.");
+
+        var preview = SyncPlanner.Preview(compare, withDeletes);
+        if (!preview.HasWork)
+            throw new AssertionException("There is nothing for a sync to do.");
+
+        Await(() => session.Dispatcher.Invoke(() => session.Shell.ExecuteSyncAsync(preview)));
+        session.Settle();
     }
 
     private CompareSessionViewModel RequireCompare(string command) =>
@@ -2025,6 +2067,15 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             session.Services.GetRequiredService<IThemeService>())),
 
         "disk-usage" => DiskUsageWindowFor(),
+
+        // Needs a 'compare' first, for the reason 'duplicates' does: the dialog shows what that
+        // comparison found rather than starting one of its own while a capture waits on it.
+        "sync-preview" => session.Dispatcher.Invoke(() => session.Shell.CompareSession?.Result) is { } compared
+            ? SyncPreviewDialog.Create(new SyncPreviewViewModel(
+                remove => session.Shell.PlanSync(compared, remove),
+                compared.LeftPath, compared.RightPath))
+            : throw new AssertionException(
+                "There is no comparison to sync. Run 'compare' before 'dialog sync-preview'."),
 
         // Needs a 'duplicates' first, so the window shows the results that run found rather than
         // starting a scan of its own while a capture waits on it.

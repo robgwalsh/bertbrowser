@@ -58,6 +58,7 @@ public partial class MainWindow : ThemedWindow
         _shell.GlobalSearchFocusRequested += FocusGlobalSearchBox;
         _shell.DiskUsageRequested += ShowDiskUsage;
         _shell.DuplicatesRequested += ShowDuplicates;
+        _shell.SyncRequested += ShowSyncPreview;
         _shell.PropertyChanged += Shell_TransferProgressChanged;
         _shell.PropertyChanged += Shell_DrivesViewModeChanged;
 
@@ -221,6 +222,26 @@ public partial class MainWindow : ThemedWindow
         _diskUsage.Closed += (_, _) => _diskUsage = null;
         _diskUsage.Show();
         _diskUsage.Load(path);
+    }
+
+    /// <summary>
+    /// Shows what a sync would do, and runs it if the user agrees.
+    /// </summary>
+    /// <remarks>
+    /// Modal, unlike the disk-usage and duplicates windows, and for the reason a delete
+    /// confirmation is: it is a question with an answer rather than a view to leave open — and the
+    /// two folders behind it are about to change, which would leave a modeless copy describing a
+    /// state that no longer exists.
+    /// </remarks>
+    private void ShowSyncPreview(CompareSessionViewModel session)
+    {
+        if (session.Result is not { } compare) return;
+
+        var view = new SyncPreviewViewModel(
+            remove => _shell.PlanSync(compare, remove), compare.LeftPath, compare.RightPath);
+
+        if (SyncPreviewDialog.Confirm(this, view) is { } preview)
+            _ = _shell.ExecuteSyncAsync(preview);
     }
 
     /// <summary>

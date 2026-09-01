@@ -265,6 +265,10 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     public void EndCompare() => CompareSession?.End(null);
 
     private readonly IFolderCompareService _folderCompare;
+
+    /// <summary>Sequencing only: every byte goes through the transfer executor and every removal
+    /// through the delete executor, so a sync inherits all of their guarantees unchanged.</summary>
+    private readonly SyncRunner _syncRunner;
     private readonly IArchiveBrowser _archives;
     private readonly IArchivePasswords _archivePasswords;
     private readonly ExtractPlanner _extractPlanner;
@@ -303,6 +307,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         IFolderCompareService folderCompare)
     {
         _folderCompare = folderCompare;
+        _syncRunner = new SyncRunner(transferExecutor, deleteExecutor);
         _elevation = elevation;
         _elevationPrompt = elevationPrompt;
         _archiveEditPlanner = archiveEditPlanner;
@@ -1514,6 +1519,15 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// </summary>
     private ArchiveEditOutcome? _undoableArchiveEdit;
 
+    /// <summary>
+    /// A fifth arm, and the only one that is two operations at once: a sync both writes and
+    /// removes, so its record carries the transfer outcomes <em>and</em> the delete outcome, and
+    /// undoing it reverses both. It is also the only copy in the app that can be undone — see
+    /// <see cref="ConflictResolution.Overwrite"/> for why that is a property of the record kept
+    /// rather than of the copy itself.
+    /// </summary>
+    private SyncOutcome? _undoableSync;
+
     /// <summary>True while a drop is being carried out; blocks a second one from overlapping it.</summary>
     [ObservableProperty]
     private bool _isTransferring;
@@ -1532,7 +1546,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
     public bool CanUndo =>
         (_undoableTransfer?.CanUndo == true || _undoableRename?.CanUndo == true ||
-            _undoableDelete?.CanUndo == true || _undoableArchiveEdit?.CanUndo == true)
+            _undoableDelete?.CanUndo == true || _undoableArchiveEdit?.CanUndo == true ||
+            _undoableSync?.CanUndo == true)
         && !IsTransferring;
 
     /// <summary>"Undo move of 3 items" for the menu/tooltip; empty when there is nothing to undo.</summary>
@@ -1597,6 +1612,139 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             IsTransferring = false;
             UndoCommand.NotifyCanExecuteChanged();
         }
+    }
+
+    // --- Syncing two folders ---
+
+    /// <summary>Turns a comparison into the list of things a sync would do. Pure, so the dialog can
+    /// ask again every time the "delete what is only on the right" box is toggled.</summary>
+    public SyncPreview PlanSync(FolderCompareOutcome compare, bool removeRightOnly) =>
+        SyncPlanner.Preview(compare, removeRightOnly);
+
+    /// <summary>
+    /// Carries out a sync the preview already showed, then refreshes both sides.
+    /// </summary>
+    /// <remarks>
+    /// Shaped after <see cref="ExecuteDropAsync"/> and sharing its <see cref="IsTransferring"/>
+    /// flag, so Ctrl+Z cannot reach the previous operation's record while this is running and two
+    /// of these cannot overlap. The plans are advisory in the same way a drop plan is: they were
+    /// built while a dialog was open, and both executors re-check every path against live disk
+    /// before they write.
+    /// </remarks>
+    public async Task<SyncOutcome?> ExecuteSyncAsync(SyncPreview preview)
+    {
+        var plans = SyncPlanner.ToPlans(preview, _transferPlanner, _deletePlanner, DeleteMode.Recycle);
+        if (IsTransferring || !plans.HasWork) return null;
+
+        IsTransferring = true;
+        UndoCommand.NotifyCanExecuteChanged();
+
+        var cancellation = new CancellationTokenSource();
+        try
+        {
+            var surface = SyncProgressSurface(plans, cancellation.Cancel);
+            TransferProgress = surface;
+            SetStatus(surface.Headline);
+
+            var progress = new Progress<TransferProgress>(surface.Apply);
+            var outcome = await Task.Run(
+                () => _syncRunner.Run(plans, cancellation.Token, progress));
+
+            RetireUndoable();
+            if (outcome.CanUndo)
+            {
+                _undoableSync = outcome;
+                UndoDescription = $"Ctrl+Z: undo sync of {Touched(outcome):N0} item(s)";
+            }
+
+            await RefreshAfterSyncAsync(outcome);
+            SetStatus(DescribeSync(outcome, plans));
+
+            // Everything the verdicts were about has just moved, so they describe a folder that no
+            // longer exists. Rescanning is how the banner comes back saying "these folders match".
+            if (CompareSession is { } session) await session.RescanAsync();
+
+            return outcome;
+        }
+        finally
+        {
+            TransferProgress = null;
+            cancellation.Dispose();
+            IsTransferring = false;
+            UndoCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>
+    /// One progress surface for the whole run.
+    /// </summary>
+    /// <remarks>
+    /// Built from a synthetic plan holding every copy across every destination folder, because
+    /// <see cref="TransferProgressViewModel"/> takes one and a sync has several — and a surface per
+    /// plan would announce a recursive sync as nearly finished once for each folder it wrote into.
+    /// The byte total still comes from the size index rather than a walk, exactly as a drop's does.
+    /// </remarks>
+    private TransferProgressViewModel SyncProgressSurface(SyncPlans plans, Action cancel)
+    {
+        var whole = new TransferPlan(
+            TransferVerb.Copy,
+            plans.Copies.Count > 0 ? plans.Copies[0].DestinationDirectory : "",
+            [.. plans.Copies.SelectMany(c => c.Transfers)],
+            []);
+
+        var estimate = TransferEstimator.Estimate(
+            whole, IndexedTransferSizeSource.For(whole, _dirSizes));
+
+        return new TransferProgressViewModel(whole, estimate, cancel)
+        {
+            Headline = $"Syncing {plans.ItemCount:N0} item(s)…",
+        };
+    }
+
+    private static int Touched(SyncOutcome outcome) =>
+        outcome.CopiedCount + outcome.ReplacedCount + outcome.RemovedCount;
+
+    /// <summary>
+    /// What the status bar says afterwards. Each half is named separately: "synced 20 items" hides
+    /// the only number anyone checks twice, which is how many were taken away.
+    /// </summary>
+    private static string DescribeSync(SyncOutcome outcome, SyncPlans plans)
+    {
+        var parts = new List<string>();
+        if (outcome.CopiedCount > 0) parts.Add($"copied {outcome.CopiedCount:N0}");
+        if (outcome.ReplacedCount > 0) parts.Add($"replaced {outcome.ReplacedCount:N0}");
+        if (outcome.RemovedCount > 0) parts.Add($"removed {outcome.RemovedCount:N0}");
+        if (parts.Count == 0) parts.Add("nothing to do");
+
+        var text = outcome.Cancelled
+            ? $"Sync cancelled — {string.Join(", ", parts)}"
+            : $"Synced — {string.Join(", ", parts)}";
+
+        var failed = outcome.FailedCopies.Count + outcome.Removals.Failed.Count;
+        if (failed > 0) text += $", {failed:N0} failed — {FirstSyncFailure(outcome)}";
+        else if (plans.Refused.Count > 0) text += $", {plans.Refused.Count:N0} refused — {plans.Refused[0]}";
+        else if (outcome.CanUndo) text += " — Ctrl+Z to undo";
+        return text;
+    }
+
+    private static string FirstSyncFailure(SyncOutcome outcome) =>
+        outcome.FailedCopies.Count > 0
+            ? outcome.FailedCopies[0].Message
+            : outcome.Removals.Failed[0].Message;
+
+    /// <summary>Both roots and every folder written into, since a recursive sync touches many.</summary>
+    private async Task RefreshAfterSyncAsync(SyncOutcome outcome)
+    {
+        var directories = outcome.Copies
+            .SelectMany(c => c.Completed.Select(t => Path.GetDirectoryName(t.FinalPath)))
+            .Concat(outcome.Copies.Select(c => (string?)c.DestinationDirectory))
+            .Concat(outcome.Removals.Deleted.Select(d => Path.GetDirectoryName(d.SourcePath)))
+            .OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        await Tree.RefreshDirectoriesAsync(directories);
+        await RefreshTabsShowingAsync(directories);
     }
 
     // --- Trying again with an administrator token ---
@@ -2111,6 +2259,35 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         else if (_undoableDelete is { } deletion) await UndoDeleteAsync(deletion);
         else if (_undoableTransfer is { } transfer) await UndoTransferAsync(transfer);
         else if (_undoableArchiveEdit is { } edit) await UndoArchiveEditAsync(edit);
+        else if (_undoableSync is { } sync) await UndoSyncAsync(sync);
+    }
+
+    private async Task UndoSyncAsync(SyncOutcome outcome)
+    {
+        IsTransferring = true;
+        UndoCommand.NotifyCanExecuteChanged();
+        try
+        {
+            SetStatus("Putting the sync back…");
+            var result = await Task.Run(() => _syncRunner.Undo(outcome));
+
+            _undoableSync = null;
+            UndoDescription = "";
+
+            await RefreshAfterSyncAsync(outcome);
+
+            SetStatus(result.Failed.Count == 0
+                ? $"Put back {result.Restored:N0} item(s)."
+                : $"Put back {result.Restored:N0} item(s), {result.Failed.Count:N0} could not be — {result.Failed[0]}");
+
+            // The verdicts described the folder as it was a moment ago and no longer do.
+            CompareSession?.RescanCommand.Execute(null);
+        }
+        finally
+        {
+            IsTransferring = false;
+            UndoCommand.NotifyCanExecuteChanged();
+        }
     }
 
     private async Task UndoArchiveEditAsync(ArchiveEditOutcome outcome)
@@ -2189,10 +2366,15 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             DeleteExecutor.CommitStaging(deletion);
         if (_undoableArchiveEdit is { } edit)
             ArchiveEditExecutor.CommitStaging(edit);
+        // Both halves at once: a sync's staging folders hold what it replaced, and its Recycle Bin
+        // items are what it removed.
+        if (_undoableSync is { } sync)
+            SyncRunner.Retire(sync);
         _undoableTransfer = null;
         _undoableRename = null;
         _undoableDelete = null;
         _undoableArchiveEdit = null;
+        _undoableSync = null;
         UndoDescription = "";
         UndoCommand.NotifyCanExecuteChanged();
     }

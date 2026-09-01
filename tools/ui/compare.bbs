@@ -67,3 +67,47 @@ up
 # Leaving the compared folder ends it, rather than silently re-rooting onto wherever the pane went.
 go .
 assert-no-column CompareStatus
+
+# And a folder containing the other side is refused outright: every file under the inner one would
+# appear twice, at two different relative paths, and "only on the right" would name the tree itself.
+compare-refused
+assert-status neither inside the other
+
+go left
+refresh
+
+# --- Syncing, and putting it back ---
+#
+# Run again from a clean pairing, so the assertions below are about the sync rather than about
+# whatever the navigation above left behind.
+compare
+dialog sync-preview
+
+# The additive half runs on its own: nothing on the right is removed unless removal was asked for.
+sync
+assert-exists right/only-left.txt
+assert-exists right/newfolder/inner.txt
+assert-exists right/only-right.txt
+assert-can-undo
+
+# And the whole thing goes back: what arrived is gone, what was replaced is back.
+undo
+assert-missing right/only-left.txt
+assert-missing right/newfolder
+assert-exists right/only-right.txt
+assert-exists left/only-left.txt
+
+# The comparison outlives its own sync -- and its undo -- and rescans itself each time, so what is
+# on screen is never a verdict about a folder as it was before the run.
+# With the destructive half ticked, the right side matches the left and nothing is left over.
+sync with-deletes
+assert-exists right/only-left.txt
+assert-missing right/only-right.txt
+assert-compare These folders match
+assert-can-undo
+
+# Ctrl+Z reverses both halves at once -- the copies and the deletion.
+undo
+assert-missing right/only-left.txt
+assert-exists right/only-right.txt
+shot compare-after-undo
