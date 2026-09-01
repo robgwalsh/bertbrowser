@@ -61,6 +61,7 @@ you where and what to watch for.
 | Delete / Recycle Bin | `Core/Services/Delete/*`, `Interop/ShellRecycleBin` |
 | Disk usage | `Core/Services/DiskUsage/*`, `Views/DiskUsageWindow`, `TreemapLayout` |
 | Duplicate finder | `Core/Services/Duplicates/*` |
+| Compare / sync two folders | `Core/Services/Compare/*`, `ViewModels/CompareSessionViewModel` |
 | Search query language | `Core/Services/Search/*`, `docs/search-indexing.md` |
 | Content search (`content:`) | `Core/Services/Search/ContentTerm.cs`, `Core/Services/Search/ContentReader.cs` |
 | Elevated MFT indexer | `src/BertBrowser.Indexer`, `Core/Services/MftIndexClient` |
@@ -96,9 +97,17 @@ you where and what to watch for.
   re-applies the plan's rules against live disk state before writing, and "one item's failure never
   affects the others." Nothing ever does `Directory.Delete(recursive: true)` — use
   `Core/Services/DirectoryRemoval` (handles junctions correctly).
-- **There is one undo slot**, shared across move/rename/delete (four-way once archive-edit is
-  included), one level, whichever operation happened last. `RetireUndoable` is what finally commits
-  staged/held data — call it before assuming a Replace or Delete's staging is irreversibly gone.
+- **There is one undo slot**, shared across move/rename/delete/archive-edit/sync — five-way, one
+  level, whichever operation happened last. `RetireUndoable` is what finally commits staged/held
+  data — call it before assuming a Replace or Delete's staging is irreversibly gone. Sync is the
+  only arm that is two operations at once (copies *and* removals) and the only undoable copy: a
+  copy's outcome still reports `CanUndo == false`, and `ConflictResolution.Overwrite` exists
+  precisely because a copy that displaced something with no record kept would strand it in staging
+  for ever. Only a caller that keeps the outcome may ask for it.
+- **A comparison's "same" is what authorises a delete**, so every doubt resolves away from it: a
+  missing timestamp is `Unknown` and one `Unknown` descendant carries a whole subtree to `Unknown`.
+  `dir_size_cache` deliberately never classifies a folder — equal totals do not mean equal trees,
+  and the rows are missing on exactly the unmeasured backup drive the comparison is usually about.
 - **`SearchNode.Matches` (definition) and `WriteSql` (optimization) must never disagree** — SQL may
   be a superset (re-checked per row) but never a subset. `ContentTerm` extends this to three-valued
   matching (`Yes`/`No`/`NeedsContent`) since content can't be answered from a column.

@@ -110,6 +110,19 @@ unlock <password>           give the archive on show a password and reload; writ
                             store directly, because the harness never clicks
 undo
 
+compare                     compare the active pane with the one beside it, as F7 does, and wait
+                            for the scan. Refuses to start a second one, because the command is a
+                            toggle and a stray `compare` would quietly stop the first
+compare-refused             the other half: assert the pair was turned down (an archive interior,
+                            a folder containing the other side) and leave the reason in the status
+                            bar for `assert-status`
+compare-filter on|off       "show only differences", on both panes at once
+compare-end                 stop comparing and clear the colours
+sync [with-deletes]         run what the comparison would do, through the same planner, runner and
+                            undo slot the dialog's Sync button uses — the dialog is skipped,
+                            because a run never clicks. `with-deletes` ticks the destructive half,
+                            which the dialog leaves off. `undo` reverses the whole thing
+
 duplicates [folder]         scan for byte-identical files, defaulting to the folder on show. It
                             crawls the folder into fs_entry first — a harness run is unelevated, so
                             the MFT pass indexes nothing and there is no shortlist otherwise — and
@@ -137,9 +150,11 @@ preview-mode auto|raw|hex   the pane's view override; sticky across selections, 
 shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, rename-advanced,
                             delete, delete-permanent, message, warning, properties, settings,
-                            theme-editor, disk-usage, duplicates, search-syntax, extract,
-                            compress, archive-password, elevation, settings-columns, columns,
-                            settings-columns-dragging
+                            theme-editor, disk-usage, duplicates, sync-preview, search-syntax,
+                            extract, compress, archive-password, elevation, settings-columns,
+                            columns, settings-columns-dragging
+                            (sync-preview needs a `compare` first, like `dialog duplicates`: it
+                            shows what that comparison found rather than starting one of its own)
                             (settings opens on General, so settings-columns is how the Columns
                             page gets photographed at all; it shows the *saved default*, so put an
                             arrangement in front of it with `columns default` first.
@@ -181,6 +196,11 @@ assert-columns <id>, <id>, ...            the whole column order, injected ones 
 assert-metadata <row> <canonical> <text>  what a shell-metadata cell actually reads (substring)
 assert-header-menu columns|files          which menu a right-click past the last column opens
 assert-can-undo | assert-cannot-undo | assert-exists <path> | assert-missing <path>
+assert-compare <substring>                the comparison banner's summary
+assert-compare-row <row> <status>         a row's compare state, by the words its Status column
+                                          shows. Read off the row, never off a screenshot: the
+                                          tints are faint by necessity, so a pixel test would be
+                                          asserting about the theme rather than about the verdict
 assert-duplicate-groups <n> | assert-duplicate-selected <n>
 assert-duplicate-row <name> | assert-no-duplicate-row <name>
 assert-visible <Name> | assert-hidden <Name> | assert-not-launched
