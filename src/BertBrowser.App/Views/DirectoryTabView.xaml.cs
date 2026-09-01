@@ -844,6 +844,14 @@ public partial class DirectoryTabView : UserControl
         // every size inside a container is already exact, so it stays on — see the Archives section.
         DuplicatesMenuItem.IsEnabled = DiskUsageMenuItem.IsEnabled && !inArchive;
 
+        // Not keyed on the selection at all: it compares this pane with the next one, so what it
+        // needs is a second pane. The header flips because pressing it again is how a comparison is
+        // stopped, and a menu that still said "Compare" would be lying about what it does.
+        CompareMenuItem.IsEnabled = _shell.CompareWithOtherPaneCommand.CanExecute(null);
+        CompareMenuItem.Header = _shell.CompareSession is null
+            ? "Compare with other pane"
+            : "Stop comparing";
+
         // Extract shows from either side of the container: on a single selected archive out here,
         // or on the selection (or everything, with nothing selected) in there. It is the one write
         // verb that is *more* available inside an archive than outside one.
@@ -1155,6 +1163,17 @@ public partial class DirectoryTabView : UserControl
             : Tab.CurrentPath;
 
         _shell.OpenDuplicates(target is { Length: > 0 } ? target : null);
+    }
+
+    /// <summary>
+    /// Compares this pane with the one beside it. Deliberately routed through the shell's command
+    /// rather than acting on the selection: the pair is decided by which panes are on screen, and a
+    /// selected folder has nothing to do with it.
+    /// </summary>
+    private void ContextCompare_Click(object sender, RoutedEventArgs e)
+    {
+        if (_shell.CompareWithOtherPaneCommand.CanExecute(null))
+            _shell.CompareWithOtherPaneCommand.Execute(null);
     }
 
     private void ContextOpenVSCode_Click(object sender, RoutedEventArgs e)

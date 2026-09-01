@@ -50,10 +50,11 @@ public static class SyncPlanner
             // what is inside it, so treating that "differs" as something to write would replace a
             // whole tree to sync one file in it — and treating an "unknown" rolled up from one
             // descendant as an uncomparable entry would count the same doubt once per folder above
-            // it. Only the entries that were really compared are counted or acted on.
-            if (result.Left.TryGetValue(key, out var leftEntry) &&
-                result.Right.TryGetValue(key, out var rightEntry) &&
-                leftEntry.IsDirectory && rightEntry.IsDirectory)
+            // it. The same predicate the banner counts through, so what it offers to do and what it
+            // said it found cannot disagree.
+            if (result.Left.TryGetValue(key, out var leftDir) &&
+                result.Right.TryGetValue(key, out var rightDir) &&
+                leftDir.IsDirectory && rightDir.IsDirectory)
                 continue;
 
             var verdict = result.For(key);

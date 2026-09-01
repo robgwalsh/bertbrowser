@@ -153,6 +153,11 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "extract": Extract(rest); break;
             case "compress": Compress(rest); break;
             case "unlock": Unlock(rest); break;
+            case "compare": Compare(); break;
+            case "compare-filter": CompareFilter(rest); break;
+            case "compare-end": CompareEnd(); break;
+            case "assert-compare": AssertCompare(rest); break;
+            case "assert-compare-row": AssertCompareRow(rest); break;
             case "duplicates": Duplicates(rest); break;
             case "duplicates-keep": DuplicatesKeep(rest); break;
             case "duplicates-remove": DuplicatesRemove(); break;
@@ -1491,6 +1496,79 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     /// hashing was still going.
     /// </para>
     /// </remarks>
+    // --- Comparing two panes ---
+
+    /// <summary>
+    /// Compares the active pane with the one beside it, exactly as F7 does, and waits for the scan.
+    /// </summary>
+    /// <remarks>
+    /// The scan is awaited here rather than left to <c>settle</c>, which knows about loads and
+    /// metadata but not about this — a capture taken before the verdicts arrive photographs an
+    /// uncoloured list and looks like the feature not working.
+    /// </remarks>
+    private void Compare()
+    {
+        Await(() => session.Dispatcher.Invoke(
+            () => session.Shell.CompareWithOtherPaneCommand.ExecuteAsync(null)));
+
+        if (session.Dispatcher.Invoke(() => session.Shell.CompareSession) is null)
+            throw new AssertionException(
+                "No comparison started. Compare needs two panes and two real folders.");
+
+        session.Settle();
+    }
+
+    private void CompareFilter(string rest)
+    {
+        var view = RequireCompare("compare-filter");
+        var on = Switch(rest, "compare-filter");
+        Invoke(() => view.DifferencesOnly = on);
+        session.Settle();
+    }
+
+    private void CompareEnd()
+    {
+        Invoke(() => session.Shell.EndCompare());
+        session.Settle();
+    }
+
+    /// <summary>Asserts on the banner's summary, which is where every count a comparison found is
+    /// written out in words.</summary>
+    private void AssertCompare(string rest)
+    {
+        var summary = session.Dispatcher.Invoke(() => RequireCompare("assert-compare").Summary);
+        if (!summary.Contains(rest.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new AssertionException($"The comparison says '{summary}', not '{rest.Trim()}'.");
+    }
+
+    /// <summary>
+    /// Asserts a row's compare state, by the words the Status column shows.
+    /// </summary>
+    /// <remarks>
+    /// Read off the row rather than off a screenshot: the tints are faint by necessity, and a test
+    /// that looked at pixels would be asserting on the theme rather than on the verdict.
+    /// </remarks>
+    private void AssertCompareRow(string rest)
+    {
+        var (name, expected) = Split(rest);
+        if (expected.Length == 0)
+            throw new FormatException("assert-compare-row wants a row name and a status.");
+
+        var actual = session.Dispatcher.Invoke(() =>
+            session.Tab.FileList.Items
+                .FirstOrDefault(i => i.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                ?.CompareStatusDisplay);
+
+        if (actual is null) throw new AssertionException($"There is no row called '{name}'.");
+        if (!actual.Equals(expected.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new AssertionException($"'{name}' reads '{actual}', not '{expected.Trim()}'.");
+    }
+
+    private CompareSessionViewModel RequireCompare(string command) =>
+        session.Dispatcher.Invoke(() => session.Shell.CompareSession)
+        ?? throw new AssertionException(
+            $"There is no comparison running. Run 'compare' before '{command}'.");
+
     private void Duplicates(string rest)
     {
         var path = rest.Length == 0

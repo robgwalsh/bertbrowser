@@ -195,8 +195,13 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
 
     /// <summary>Cancels anything in flight and unsubscribes. A tab is closable, unlike the shell,
     /// so its subscriptions have to be given back.</summary>
+    /// <summary>Raised as the tab is torn down, so anything holding it — a folder comparison — can
+    /// let go. Distinct from <see cref="LocationChanged"/>: a tab that closed did not navigate.</summary>
+    public event Action<DirectoryTabViewModel>? Closing;
+
     public void Dispose()
     {
+        Closing?.Invoke(this);
         _navigationCts.Cancel();
         _searchDebounceCts.Cancel();
         _searchStopCts?.Cancel();

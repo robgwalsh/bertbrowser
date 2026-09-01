@@ -51,6 +51,42 @@ public sealed record CompareResult(
         return string.Join(CompareKeys.Separator, segments);
     }
 
+    /// <summary>
+    /// Whether this path is answered by something else rather than on its own.
+    /// </summary>
+    /// <remarks>
+    /// Two things answer for a path. A folder both sides have carries only the roll-up of what is
+    /// inside it, so counting it as well as its contents would report one changed file as two
+    /// differences. And everything under a folder one side is missing entirely is missing for the
+    /// same single reason, so a new folder of two hundred files is one thing to say, not
+    /// two hundred and one. Both are also exactly what a sync does about them — one action, or
+    /// none — which is what keeps the summary and the preview from disagreeing.
+    /// </remarks>
+    public bool IsAnsweredByAnAncestor(string relativeKey)
+    {
+        if (Left.TryGetValue(relativeKey, out var left) &&
+            Right.TryGetValue(relativeKey, out var right) &&
+            left.IsDirectory && right.IsDirectory)
+            return true;
+
+        foreach (var ancestor in CompareKeys.Ancestors(relativeKey))
+        {
+            if (For(ancestor) is CompareVerdict.LeftOnly or CompareVerdict.RightOnly) return true;
+        }
+        return false;
+    }
+
+    /// <summary>How many entries carry this verdict in their own right.</summary>
+    public int Count(CompareVerdict verdict)
+    {
+        var count = 0;
+        foreach (var (key, value) in ByRelativeKey)
+        {
+            if (value == verdict && !IsAnsweredByAnAncestor(key)) count++;
+        }
+        return count;
+    }
+
     public static readonly CompareResult None = new(
         new Dictionary<string, CompareVerdict>(StringComparer.Ordinal),
         new Dictionary<string, CompareEntry>(StringComparer.Ordinal),

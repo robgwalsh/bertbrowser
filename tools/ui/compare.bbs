@@ -1,0 +1,69 @@
+# Comparing two panes: the colours, the status column, the filter, and what ends it.
+#
+# The verdicts are asserted through the Status column rather than off the pixels. The tints are
+# faint by necessity — the darkest built-in themes leave very little contrast to spend — so a test
+# that read colours would be asserting about the theme, not about the comparison.
+
+sandbox
+mkdir left
+mkdir right
+
+# Present on both sides, byte for byte: the rows that must stay uncoloured.
+write left/shared.txt 100
+write right/shared.txt 100
+mkdir left/common
+mkdir right/common
+write left/common/same.txt 20
+write right/common/same.txt 20
+
+# One on each side alone, and a whole folder that only the left has.
+write left/only-left.txt 50
+write right/only-right.txt 60
+mkdir left/newfolder
+write left/newfolder/inner.txt 10
+
+# A folder both sides have, differing only deep inside it. Its row is the roll-up.
+mkdir left/deep
+mkdir right/deep
+write left/deep/changed.txt 10
+write right/deep/changed.txt 999
+
+go left
+split right right
+pane 2
+go right
+pane 1
+refresh
+
+compare
+assert-compare only on the left
+shot compare-left
+
+# The counts are what the sync would do, not raw entries: a folder the right side lacks is one
+# thing however much is inside it, and a folder both sides have is not a difference of its own.
+assert-compare 2 only on the left
+assert-compare 1 only on the right
+assert-compare 1 differ
+
+# The status column says in words what the tints say in colour.
+assert-column CompareStatus
+assert-compare-row only-left.txt Only here
+assert-compare-row shared.txt Same
+assert-compare-row newfolder Only here
+assert-compare-row deep Differs
+assert-compare-row common Same
+
+# Only differences, on both sides at once.
+compare-filter on
+shot compare-filtered
+compare-filter off
+
+# Walking into a subfolder both sides have keeps the comparison: the result is keyed by relative
+# path, so a subfolder is already answered and no rescan is needed.
+enter deep
+assert-compare-row changed.txt Differs
+up
+
+# Leaving the compared folder ends it, rather than silently re-rooting onto wherever the pane went.
+go .
+assert-no-column CompareStatus

@@ -54,6 +54,11 @@
         <!-- Duplicates. Same reasoning as Ctrl+Shift+D above; U because D is taken. -->
         <KeyBinding Key="U" Modifiers="Ctrl+Shift" Command="{Binding FindDuplicatesCommand}"/>
 
+        <!-- Compare this pane with the one beside it, and press it again to stop. F7 because that
+             is where every other two-pane file manager puts it, and a bare function key is safe for
+             the same reason Ctrl+Shift+D is. -->
+        <KeyBinding Key="F7" Command="{Binding CompareWithOtherPaneCommand}"/>
+
         <!-- Reopen the last tab closed in this pane. -->
         <KeyBinding Key="T" Modifiers="Ctrl+Shift" Command="{Binding ActivePane.ReopenClosedTabCommand}"/>
 
@@ -192,6 +197,13 @@
                         Command="{Binding FindDuplicatesCommand}"
                         AutomationProperties.Name="Duplicates">
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Duplicates}"/>
+                </Button>
+
+                <Button Style="{StaticResource ToolbarButton}"
+                        ToolTip="Compare this pane with the one beside it (F7)"
+                        Command="{Binding CompareWithOtherPaneCommand}"
+                        AutomationProperties.Name="Compare folders">
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Compare}"/>
                 </Button>
 
                 <Button Style="{StaticResource ToolbarButton}"
@@ -732,7 +744,52 @@
 
             <!-- Panes. Built in code: the arrangement is a tree of grids and splitters, which
                  XAML cannot express declaratively (ColumnDefinitions are not bindable). -->
-            <Border x:Name="PaneHostSite" Grid.Column="2"/>
+            <!--
+              The panes, with the compare banner above them.
+
+              The banner sits here rather than inside a pane because a comparison is one thing
+              spanning two of them: put in a pane it would have to appear twice and say the same
+              thing, and neither copy could own the End button.
+            -->
+            <DockPanel Grid.Column="2">
+                <Border DockPanel.Dock="Top" Padding="8,5"
+                        Background="{StaticResource Theme.Surface.Raised}"
+                        BorderBrush="{StaticResource Theme.Border.Subtle}" BorderThickness="0,0,0,1"
+                        Visibility="{Binding CompareSession, Converter={StaticResource NullToCollapsed}}">
+                    <DockPanel>
+                        <Path DockPanel.Dock="Left" Style="{StaticResource IconPath}"
+                              Data="{StaticResource Icon.Compare}" Margin="2,0,8,0"/>
+
+                        <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}" Margin="12,0,2,0"
+                                Content="End" ToolTip="Stop comparing and clear the colours"
+                                Command="{Binding CompareSession.EndByRequestCommand}"/>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}" Margin="12,0,0,0"
+                                Content="Rescan" ToolTip="Read both folders again"
+                                Command="{Binding CompareSession.RescanCommand}"/>
+                        <Button DockPanel.Dock="Right" Margin="12,0,0,0" MinWidth="90"
+                                Content="Sync →" ToolTip="Make the right side match the left"
+                                Command="{Binding CompareSession.SyncCommand}"/>
+                        <CheckBox DockPanel.Dock="Right" VerticalAlignment="Center" Margin="12,0,0,0"
+                                  Content="Only differences"
+                                  IsChecked="{Binding CompareSession.DifferencesOnly}"/>
+
+                        <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                            <Run Text="{Binding CompareSession.Summary, Mode=OneWay}"/>
+                        </TextBlock>
+                    </DockPanel>
+                </Border>
+
+                <!-- Said separately from the summary: a caveat changes what the numbers beside it
+                     are worth, and running the two together reads as one sentence. -->
+                <Border DockPanel.Dock="Top" Padding="8,4"
+                        Background="{StaticResource Theme.Warning.Background}"
+                        Visibility="{Binding CompareSession.Message, Converter={StaticResource NullToCollapsed}}">
+                    <TextBlock Text="{Binding CompareSession.Message}" TextWrapping="Wrap"
+                               Foreground="{StaticResource Theme.Warning.Foreground}"/>
+                </Border>
+
+                <Border x:Name="PaneHostSite"/>
+            </DockPanel>
         </Grid>
     </DockPanel>
 </v:ThemedWindow>

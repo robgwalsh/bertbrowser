@@ -185,6 +185,47 @@ public sealed class FolderComparerTests
     public void ATopLevelDisplayPathIsJustTheName() =>
         Assert.Equal("ReadMe.md", Compare([File_("ReadMe.md")], []).DisplayPath("README.MD", CompareSide.Left));
 
+    // --- What counts as one difference ---
+
+    /// <summary>
+    /// A folder the other side lacks is one thing to report, however much is inside it. Counting
+    /// its contents as well would have the banner say "201 only on the left" over a list showing
+    /// one new folder — and disagree with the sync, which copies it in one action.
+    /// </summary>
+    [Fact]
+    public void AMissingFolderCountsOnceForItsWholeSubtree()
+    {
+        var left = new[] { Folder("bin"), Folder(@"bin\deep"), File_(@"bin\deep\a"), File_(@"bin\b") };
+
+        Assert.Equal(1, Compare(left, []).Count(CompareVerdict.LeftOnly));
+    }
+
+    /// <summary>
+    /// A folder both sides have carries only the roll-up of its contents, so counting it as well
+    /// would report one changed file as two differences.
+    /// </summary>
+    [Fact]
+    public void AFolderBothSidesHaveIsNotADifferenceOfItsOwn()
+    {
+        var left = new[] { Folder("deep"), File_(@"deep\a.txt", size: 10) };
+        var right = new[] { Folder("deep"), File_(@"deep\a.txt", size: 99) };
+
+        var result = Compare(left, right);
+
+        Assert.Equal(CompareVerdict.Differs, result.For("DEEP"));
+        Assert.True(result.IsAnsweredByAnAncestor("DEEP"));
+        Assert.Equal(1, result.Count(CompareVerdict.Differs));
+    }
+
+    [Fact]
+    public void AnEntryWithNoFolderAnsweringForItCountsItself()
+    {
+        var result = Compare([File_("a.txt"), File_("b.txt")], []);
+
+        Assert.False(result.IsAnsweredByAnAncestor("A.TXT"));
+        Assert.Equal(2, result.Count(CompareVerdict.LeftOnly));
+    }
+
     // --- Counts ---
 
     [Fact]

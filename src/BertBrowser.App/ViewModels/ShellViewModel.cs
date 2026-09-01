@@ -10,6 +10,7 @@ using BertBrowser.Core.Layout;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Archives;
+using BertBrowser.Core.Services.Compare;
 using BertBrowser.Core.Services.Columns;
 using BertBrowser.Core.Services.Elevation;
 using BertBrowser.Core.Services.Delete;
@@ -101,7 +102,10 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     public event Action<PaneViewModel>? PaneFocusRequested;
 
     /// <summary>The pane the window chrome (toolbar, status bar, folder tree) follows.</summary>
+    // Compare works on this pane and the one beside it, so moving between panes can turn it from
+    // available to not (and back) without the layout changing at all.
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CompareWithOtherPaneCommand))]
     private PaneViewModel _activePane;
 
     /// <summary>The directory the window chrome follows: the visible tab of the active pane.</summary>
@@ -183,6 +187,84 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private void FindDuplicates() =>
         OpenDuplicates(ActiveTab.CurrentPath is { Length: > 0 } path ? path : null);
 
+    // --- Comparing two panes ---
+
+    /// <summary>The comparison currently running, or null. One at a time: it decorates two file
+    /// lists, and a second would be fighting the first for the same rows.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CompareWithOtherPaneCommand))]
+    private CompareSessionViewModel? _compareSession;
+
+    /// <summary>Raised when a comparison wants its sync preview. The window builds it; every route
+    /// goes through here, exactly as disk usage and duplicates do.</summary>
+    public event Action<CompareSessionViewModel>? SyncRequested;
+
+    /// <summary>
+    /// The active pane and the one beside it, in the order they appear on screen.
+    /// </summary>
+    /// <remarks>
+    /// The layout is an N-ary tree, so three panes in a row are three siblings and "the two panes"
+    /// needs a rule. It is the pane you are in and the next one along — already what F6 means — put
+    /// into screen order, so the words "left" and "right" match what the user is looking at
+    /// whichever of the two happened to be active.
+    /// </remarks>
+    public (PaneViewModel Left, PaneViewModel Right)? ComparePair
+    {
+        get
+        {
+            if (LayoutTree.FindLeaf(Layout, ActivePane) is not { } leaf) return null;
+
+            var other = LayoutTree.NextLeaf(Layout, leaf, 1).Value;
+            if (ReferenceEquals(other, ActivePane)) return null;
+
+            var order = AllPanes.ToList();
+            return order.IndexOf(ActivePane) < order.IndexOf(other)
+                ? (ActivePane, other)
+                : (other, ActivePane);
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanCompareWithOtherPane))]
+    private async Task CompareWithOtherPaneAsync()
+    {
+        if (CompareSession is not null)
+        {
+            EndCompare();
+            return;
+        }
+
+        if (ComparePair is not { } pair)
+        {
+            SetStatus("Compare needs two panes — split one with Ctrl+Alt+Right.");
+            return;
+        }
+
+        if (pair.Left.ActiveTab is not { } left || pair.Right.ActiveTab is not { } right)
+            return;
+
+        var session = new CompareSessionViewModel(
+            _folderCompare, left, right, () => _settings.ShowHiddenItems);
+        session.Ended += _ => CompareSession = null;
+        session.SyncRequested += s => SyncRequested?.Invoke(s);
+
+        CompareSession = session;
+        await session.RescanAsync();
+
+        // A pair the service refused never becomes a session: the banner would have nothing to
+        // offer and an End button is a poor way to deliver an error message.
+        if (session.Result is { Availability: CompareAvailability.Refused } refused)
+        {
+            session.End(null);
+            SetStatus(refused.Problem ?? "These folders cannot be compared.");
+        }
+    }
+
+    /// <summary>True while there is a comparison to end, or two panes to start one between.</summary>
+    private bool CanCompareWithOtherPane() => CompareSession is not null || ComparePair is not null;
+
+    public void EndCompare() => CompareSession?.End(null);
+
+    private readonly IFolderCompareService _folderCompare;
     private readonly IArchiveBrowser _archives;
     private readonly IArchivePasswords _archivePasswords;
     private readonly ExtractPlanner _extractPlanner;
@@ -217,8 +299,10 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         ArchiveEditPlanner archiveEditPlanner,
         ArchiveEditExecutor archiveEditExecutor,
         IElevatedOperationRunner elevation,
-        IElevationPrompt elevationPrompt)
+        IElevationPrompt elevationPrompt,
+        IFolderCompareService folderCompare)
     {
+        _folderCompare = folderCompare;
         _elevation = elevation;
         _elevationPrompt = elevationPrompt;
         _archiveEditPlanner = archiveEditPlanner;
@@ -489,6 +573,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
         Layout = LayoutTree.Split(Layout, leaf, orientation, created, out _);
         LayoutChanged?.Invoke();
+        CompareWithOtherPaneCommand.NotifyCanExecuteChanged();
         ActivatePane(created);
         PaneFocusRequested?.Invoke(created);
     }
@@ -509,6 +594,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
         pane.Dispose();
         LayoutChanged?.Invoke();
+        CompareWithOtherPaneCommand.NotifyCanExecuteChanged();
 
         // After the rebuild, so the pane taking over already has a view to focus.
         if (wasActive) PaneFocusRequested?.Invoke(ActivePane);
