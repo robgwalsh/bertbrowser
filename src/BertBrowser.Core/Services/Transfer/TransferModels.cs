@@ -54,6 +54,26 @@ public enum ConflictResolution
     /// <summary>Take over the existing name. The displaced entry is moved to a staging folder
     /// rather than deleted, so an undo can put it back. Move only.</summary>
     Replace,
+
+    /// <summary>
+    /// Take over the existing name on a <b>copy</b>. Writes exactly what
+    /// <see cref="Replace"/> writes, through the same staging folder.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// What separates it from <see cref="Replace"/> is not the writing but the undo. A copy's
+    /// outcome is not undoable — see <see cref="TransferOutcome.CanUndo"/> — so a copy that
+    /// displaced something would leave that entry in a hidden folder with no record pointing at it:
+    /// never committed, never purged, and gone as far as the user could ever tell. Which is why
+    /// <see cref="Replace"/> is still refused for a copy, and why this exists as a separate value
+    /// rather than as a relaxation of that rule.
+    /// </para>
+    /// <para>
+    /// Only a caller that keeps the outcome and can undo it may ask for this. Today that is a
+    /// folder sync, which does both.
+    /// </para>
+    /// </remarks>
+    Overwrite,
 }
 
 /// <summary>One source the planner accepted, with the name it would land under.</summary>

@@ -129,7 +129,10 @@ public sealed class TransferExecutor
                 case ConflictResolution.Skip:
                     return null;
 
+                // One arm for both, because they write the same thing: the difference between them
+                // is whether the caller can undo the result, which is settled before we get here.
                 case ConflictResolution.Replace:
+                case ConflictResolution.Overwrite:
                     stagingDirectory ??= CreateStagingDirectory(plan.DestinationDirectory);
                     displacedStagePath = Path.Combine(stagingDirectory, Path.GetFileName(destinationPath));
                     displacedStagePath = UniquePath(displacedStagePath);
@@ -268,6 +271,69 @@ public sealed class TransferExecutor
             catch (Exception ex) when (IsTransferFailure(ex))
             {
                 failed.Add(new FailedTransfer(item.SourcePath, $"{name}: {ex.Message}", AccessDenied.Caused(ex)));
+            }
+        }
+
+        PurgeStaging(outcome);
+        return new TransferUndoResult(restored, failed);
+    }
+
+    /// <summary>
+    /// Undoes a completed <em>copy</em>: what it added is removed, and what it displaced is put
+    /// back. <see cref="Undo"/> refuses a copy; this is the door a caller that kept the outcome
+    /// and means to reverse the whole thing comes in by.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Removing what a copy added is not a breach of "nothing is ever deleted to make room".</b>
+    /// That rule is about displacing something already there, and it still holds: the displaced
+    /// entry is in staging and comes back here. What goes is only what this run wrote — the same
+    /// thing a cancelled copy erases, for the same reason. Every path removed is one
+    /// <see cref="ExecuteOne"/> created: an <see cref="ConflictResolution.Overwrite"/> cleared the
+    /// name into staging before writing, and every other resolution wrote to a name that was free,
+    /// so no destination here ever held anything but this run's own bytes.
+    /// </para>
+    /// <para>
+    /// It is still a real undo of a real write, so an edit made to a copied file between the copy
+    /// and the undo goes with it — as it would when undoing a paste anywhere else. The window is
+    /// one operation wide, because there is one undo slot.
+    /// </para>
+    /// <para>
+    /// Removal goes through <see cref="DirectoryRemoval.RemoveTree"/> rather than
+    /// <c>Directory.Delete(recursive: true)</c>, which erases the rest of a tree before throwing
+    /// when it meets a junction — and a copied tree can hold one.
+    /// </para>
+    /// </remarks>
+    public TransferUndoResult UndoCopies(TransferOutcome outcome, CancellationToken ct = default)
+    {
+        if (outcome.Verb != TransferVerb.Copy)
+            return new TransferUndoResult(0, [new FailedTransfer("", "Only a copy can be undone here.")]);
+
+        var failed = new List<FailedTransfer>();
+        var restored = 0;
+
+        // Reverse order, so a folder is not removed out from under the entries copied into it.
+        foreach (var item in outcome.Completed.Reverse())
+        {
+            if (ct.IsCancellationRequested) break;
+            var name = Path.GetFileName(item.FinalPath);
+            try
+            {
+                if (Exists(item.FinalPath))
+                {
+                    if (item.IsDirectory) DirectoryRemoval.RemoveTree(item.FinalPath);
+                    else File.Delete(item.FinalPath);
+                }
+
+                // The name is free again: put back whatever the copy took it from.
+                if (item.DisplacedStagePath is { } staged && Exists(staged) && !Exists(item.FinalPath))
+                    MoveEntry(staged, item.FinalPath, Directory.Exists(staged), ProgressCoalescer.Silent());
+
+                restored++;
+            }
+            catch (Exception ex) when (IsTransferFailure(ex))
+            {
+                failed.Add(new FailedTransfer(item.FinalPath, $"{name}: {ex.Message}", AccessDenied.Caused(ex)));
             }
         }
 
