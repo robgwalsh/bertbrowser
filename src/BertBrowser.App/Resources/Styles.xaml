@@ -2,7 +2,8 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:conv="clr-namespace:BertBrowser.App.Converters"
                     xmlns:v="clr-namespace:BertBrowser.App.Views"
-                    xmlns:search="clr-namespace:BertBrowser.Core.Services.Search;assembly=BertBrowser.Core">
+                    xmlns:search="clr-namespace:BertBrowser.Core.Services.Search;assembly=BertBrowser.Core"
+                    xmlns:cmp="clr-namespace:BertBrowser.Core.Services.Compare;assembly=BertBrowser.Core">
 
     <!-- Merged, not merely listed alongside in App.xaml: StaticResource resolves against a
          dictionary's own merged children, never its siblings. -->
@@ -398,6 +399,24 @@
                                               VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
+                        <!-- Compare tints first, so hover, selection and a drag hovering the row
+                             all still win over them. A row's compare status is context, not state:
+                             it must never be the thing a moving mouse is fighting. -->
+                        <DataTrigger Binding="{Binding CompareState}" Value="{x:Static cmp:CompareRowState.OnlyHere}">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.Compare.OnlyHere}"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CompareState}" Value="{x:Static cmp:CompareRowState.Newer}">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.Compare.Newer}"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CompareState}" Value="{x:Static cmp:CompareRowState.Older}">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.Compare.Older}"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CompareState}" Value="{x:Static cmp:CompareRowState.Differs}">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.Compare.Differs}"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CompareState}" Value="{x:Static cmp:CompareRowState.Unknown}">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.Compare.Unknown}"/>
+                        </DataTrigger>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.HoverBackground}"/>
                         </Trigger>
@@ -499,6 +518,24 @@
                         <ContentPresenter HorizontalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
+                        <!-- Compare tints first, so hover, selection and a drag hovering the row
+                             all still win over them. A row's compare status is context, not state:
+                             it must never be the thing a moving mouse is fighting. -->
+                        <DataTrigger Binding="{Binding CompareState}" Value="{x:Static cmp:CompareRowState.OnlyHere}">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.Compare.OnlyHere}"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CompareState}" Value="{x:Static cmp:CompareRowState.Newer}">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.Compare.Newer}"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CompareState}" Value="{x:Static cmp:CompareRowState.Older}">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.Compare.Older}"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CompareState}" Value="{x:Static cmp:CompareRowState.Differs}">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.Compare.Differs}"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CompareState}" Value="{x:Static cmp:CompareRowState.Unknown}">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.Compare.Unknown}"/>
+                        </DataTrigger>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.List.HoverBackground}"/>
                         </Trigger>
@@ -554,6 +591,15 @@
     <!-- The matching line from a content: search. Its column is unsortable (ColumnSpec.Sortable),
          because sorting a result set by the line number a needle was found on means nothing across
          different files. -->
+    <!-- The compare status in words. The row tints say the same thing faster, but they are faint by
+         necessity (the darkest built-in themes leave very little contrast to spend) and colour is
+         not something every reader has. -->
+    <DataTemplate x:Key="Column.Cell.CompareStatus">
+        <TextBlock Text="{Binding CompareStatusDisplay, Mode=OneWay}"
+                   Foreground="{StaticResource Theme.Text.Secondary}"
+                   TextTrimming="CharacterEllipsis"/>
+    </DataTemplate>
+
     <DataTemplate x:Key="Column.Cell.Match">
         <TextBlock TextTrimming="CharacterEllipsis">
             <Run Text="{Binding MatchLineNumber, Mode=OneWay}"

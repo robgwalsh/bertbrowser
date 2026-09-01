@@ -80,8 +80,11 @@ public static class ColumnLayoutRules
     /// <c>NewFileTypes</c>, because the Name rule in <see cref="Normalize"/> means an empty layout is
     /// still a usable one, and one rule beats two.
     /// </param>
+    /// <param name="isComparing">This list is one side of a folder comparison, so every row has a
+    /// status worth naming in words as well as tinting.</param>
     public static IReadOnlyList<ResolvedColumn> Resolve(
-        IReadOnlyList<ColumnSetting>? user, bool isFlattened, bool showsContentMatches)
+        IReadOnlyList<ColumnSetting>? user, bool isFlattened, bool showsContentMatches,
+        bool isComparing = false)
     {
         var settings = Normalize(user);
         var resolved = new List<ResolvedColumn>(settings.Count + 2);
@@ -103,6 +106,12 @@ public static class ColumnLayoutRules
         // box would read as a rendering fault.
         if (showsContentMatches)
             resolved.Insert(Math.Min(at, resolved.Count), Injected(ColumnCatalog.Match));
+
+        // Status goes at the end rather than beside the name: it is the answer to a question about
+        // the row, not part of what the row is, and putting it first would push the columns someone
+        // arranged for this folder along by one every time a comparison started.
+        if (isComparing)
+            resolved.Add(Injected(ColumnCatalog.CompareStatus));
 
         return resolved;
 

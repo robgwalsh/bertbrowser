@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Columns;
+using BertBrowser.Core.Services.Compare;
 
 namespace BertBrowser.App.ViewModels;
 
@@ -150,6 +151,39 @@ public sealed partial class FileItemViewModel : ObservableObject
 
     [ObservableProperty]
     private DateTime? _sizeComputedUtc;
+
+    /// <summary>
+    /// How this row stands against the folder the other pane is showing, or
+    /// <see cref="CompareRowState.None"/> when no comparison is running.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Stamped on by <c>FileListViewModel</c> as the row is built, never worked out here: a row is
+    /// rebuilt whenever its file changes on disk, so it cannot be the thing that remembers. The
+    /// comparison is.
+    /// </para>
+    /// <para>
+    /// Deliberately outside <see cref="ToEntry"/>, and therefore outside what
+    /// <c>FileListDiff.Differs</c> weighs. It is not a property of the file, and counting it would
+    /// have every refresh call every row changed for as long as a comparison was on screen.
+    /// </para>
+    /// </remarks>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CompareStatusDisplay))]
+    private CompareRowState _compareState;
+
+    /// <summary>What the compare status column shows. Colour alone is not something everyone can
+    /// read, and it is the one thing no contrast test can check.</summary>
+    public string CompareStatusDisplay => CompareState switch
+    {
+        CompareRowState.OnlyHere => "Only here",
+        CompareRowState.Newer => "Newer",
+        CompareRowState.Older => "Older",
+        CompareRowState.Differs => "Differs",
+        CompareRowState.Same => "Same",
+        CompareRowState.Unknown => "Not compared",
+        _ => "",
+    };
 
     private ImageSource? _icon;
     private bool _iconLoaded;

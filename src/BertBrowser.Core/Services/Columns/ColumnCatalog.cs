@@ -23,16 +23,22 @@ public static class ColumnCatalog
     public const string RelativePath = "RelativePath";
     public const string Match = "Match";
 
+    /// <summary>How this row stands against the other pane, while a comparison is running. Injected
+    /// because colour alone is not something every reader can use, and because the tints are
+    /// necessarily faint — no contrast test can check that five washes are told apart.</summary>
+    public const string CompareStatus = "CompareStatus";
+
     /// <summary>Columns the app places itself, following the list's mode rather than anyone's
     /// choice. They are never persisted and never appear on the header menu.</summary>
     public static bool IsInjected(string id) =>
-        id is RelativePath or Match;
+        id is RelativePath or Match or CompareStatus;
 
     public static IReadOnlyList<ColumnSpec> BuiltIns { get; } =
     [
         new(Name, "Name", ColumnKind.BuiltIn, 320),
         new(RelativePath, "Folder", ColumnKind.BuiltIn, 220),
         new(Match, "Match", ColumnKind.BuiltIn, 420, Sortable: false),
+        new(CompareStatus, "Status", ColumnKind.BuiltIn, 110, Sortable: false),
         new(Size, "Size", ColumnKind.BuiltIn, 110, RightAligned: true),
         new(Type, "Type", ColumnKind.BuiltIn, 120),
         new(Modified, "Modified", ColumnKind.BuiltIn, 140),

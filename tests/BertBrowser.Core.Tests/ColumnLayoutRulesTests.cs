@@ -138,6 +138,32 @@ public class ColumnLayoutRulesTests
             Ids(ColumnLayoutRules.Resolve(null, isFlattened: true, showsContentMatches: true)));
 
     [Fact]
+    public void StatusAppearsOnlyWhileTwoFoldersAreBeingCompared()
+    {
+        Assert.DoesNotContain("CompareStatus", Ids(Listing(null)));
+        Assert.Contains("CompareStatus", Ids(ColumnLayoutRules.Resolve(
+            null, isFlattened: false, showsContentMatches: false, isComparing: true)));
+    }
+
+    /// <summary>
+    /// At the end, unlike Folder and Match. It answers a question about the row rather than saying
+    /// what the row is, and putting it first would shove the columns someone arranged for this
+    /// folder along by one every time a comparison started.
+    /// </summary>
+    [Fact]
+    public void StatusGoesAfterEverythingElse()
+    {
+        var columns = Ids(ColumnLayoutRules.Resolve(
+            null, isFlattened: false, showsContentMatches: false, isComparing: true));
+
+        Assert.Equal("CompareStatus", columns[^1]);
+    }
+
+    [Fact]
+    public void StatusIsNeverPersistedOrOfferedOnTheHeaderMenu() =>
+        Assert.True(ColumnCatalog.IsInjected(ColumnCatalog.CompareStatus));
+
+    [Fact]
     public void TheInjectedColumnsAreMarkedAsSuch()
     {
         var columns = ColumnLayoutRules.Resolve(null, isFlattened: true, showsContentMatches: true);

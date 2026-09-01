@@ -8,6 +8,7 @@ using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Columns;
+using BertBrowser.Core.Services.Compare;
 
 namespace BertBrowser.App.ViewModels;
 
@@ -86,7 +87,7 @@ public sealed partial class FileListViewModel : ObservableObject
     /// currently showing.
     /// </summary>
     public IReadOnlyList<ResolvedColumn> ResolvedColumns =>
-        ColumnLayoutRules.Resolve(ColumnLayout, IsFlattened, ShowsContentMatches);
+        ColumnLayoutRules.Resolve(ColumnLayout, IsFlattened, ShowsContentMatches, RowState is not null);
 
     /// <summary>Fills the shell-metadata cells. Created lazily, so a list that never shows such a
     /// column never builds one.</summary>
@@ -253,6 +254,83 @@ public sealed partial class FileListViewModel : ObservableObject
     [ObservableProperty]
     private ObservableCollection<FileItemViewModel> _items = new();
 
+    // --- Folder compare ---
+
+    /// <summary>
+    /// Stamps a compare state onto each row as it is built, or null when nothing is decorating
+    /// this list.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A delegate rather than a subscription, because rows are not stable. A load replaces the
+    /// whole collection and a live refresh replaces individual rows the moment their file changes
+    /// on disk, so anything watching the list would have to watch both the collection's contents
+    /// and the collection reference being swapped — and would still race the refresh. Applied at
+    /// construction, a stamp cannot be stale by the time anyone sees the row.
+    /// </para>
+    /// <para>
+    /// It is asked on <em>every</em> path that creates or replaces a row, which is the whole
+    /// contract: miss one and a file that just changed keeps the colour it had before it changed.
+    /// </para>
+    /// </remarks>
+    public Func<FileItemViewModel, CompareRowState>? RowState
+    {
+        get => _rowState;
+        set
+        {
+            var had = _rowState is not null;
+            _rowState = value;
+            // Whether a comparison is running is also what decides the Status column, so starting
+            // or ending one has to rebuild the header — there is no bindable path to GridView.Columns.
+            if (had != (value is not null)) ColumnsChanged?.Invoke(this, EventArgs.Empty);
+            RestampRows();
+        }
+    }
+
+    private Func<FileItemViewModel, CompareRowState>? _rowState;
+
+    /// <summary>Show only the rows a comparison found something to say about.</summary>
+    [ObservableProperty]
+    private bool _differencesOnly;
+
+    /// <summary>Re-runs the stamp over the rows already on screen, for when the comparison itself
+    /// changes — a rescan, or the session ending.</summary>
+    public void RestampRows()
+    {
+        foreach (var item in Items)
+            Stamp(item);
+
+        ApplyRowFilter();
+    }
+
+    private FileItemViewModel Stamp(FileItemViewModel item)
+    {
+        item.CompareState = RowState?.Invoke(item) ?? CompareRowState.None;
+        return item;
+    }
+
+    /// <summary>
+    /// Hides matching rows through the collection's view rather than by taking them out of it.
+    /// </summary>
+    /// <remarks>
+    /// Removing them would lose the selection and the scroll position, and would fight the live
+    /// refresh, which diffs <see cref="Items"/> against a fresh listing and would put every hidden
+    /// row straight back. Re-applied after every load, because the collection instance is replaced
+    /// and the old view's filter goes with it.
+    /// </remarks>
+    private void ApplyRowFilter()
+    {
+        var view = System.Windows.Data.CollectionViewSource.GetDefaultView(Items);
+        if (view is null) return;
+
+        view.Filter = DifferencesOnly && RowState is not null
+            ? o => o is FileItemViewModel row &&
+                   row.CompareState is not CompareRowState.Same and not CompareRowState.None
+            : null;
+    }
+
+    partial void OnDifferencesOnlyChanged(bool value) => ApplyRowFilter();
+
     public FileListViewModel(
         IFileSystemService fileSystem, DirSizeRepository dirSizeRepository, AppSettings settings,
         BertBrowser.Core.Services.Archives.IArchiveBrowser archives)
@@ -411,11 +489,11 @@ public sealed partial class FileListViewModel : ObservableObject
         foreach (var entry in changes.Updated)
         {
             var index = IndexOfKey(PathKey.Canonicalize(entry.FullPath));
-            if (index >= 0) Items[index] = new FileItemViewModel(entry);
+            if (index >= 0) Items[index] = Stamp(new FileItemViewModel(entry));
         }
 
         foreach (var entry in changes.Added)
-            Items.Insert(InsertionPointFor(entry), new FileItemViewModel(entry));
+            Items.Insert(InsertionPointFor(entry), Stamp(new FileItemViewModel(entry)));
     }
 
     private int IndexOfKey(string key)
@@ -497,7 +575,7 @@ public sealed partial class FileListViewModel : ObservableObject
     public void AppendSearchHits(IReadOnlyList<SearchHit> hits)
     {
         foreach (var hit in hits)
-            Items.Add(CreateSearchItem(hit));
+            Items.Add(Stamp(CreateSearchItem(hit)));
     }
 
     /// <summary>Replaces the streamed list with the final sorted outcome and hydrates sizes.
@@ -596,7 +674,11 @@ public sealed partial class FileListViewModel : ObservableObject
 
     private void ReplaceItems(IReadOnlyList<FileItemViewModel> items)
     {
+        foreach (var item in items)
+            Stamp(item);
+
         Items = new ObservableCollection<FileItemViewModel>(items);
+        ApplyRowFilter();
         // Every row needs the way back to the hydrator, and a new listing abandons whatever the
         // last one had in flight — those reads are for rows that are gone.
         _hydrator?.Reset();
