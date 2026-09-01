@@ -35,7 +35,14 @@ go right
 pane 1
 refresh
 
+# The banner takes no room at all until there is something to put in it. It sat there empty for a
+# while: the caveat's own binding reads through CompareSession, so with no comparison the path did
+# not resolve, the binding failed rather than yielding null, and Visibility fell back to its
+# default of Visible — an empty warning-coloured strip above the panes for the whole session.
+assert-hidden CompareBanner
+
 compare
+assert-visible CompareBanner
 assert-compare only on the left
 shot compare-left
 
@@ -67,6 +74,7 @@ up
 # Leaving the compared folder ends it, rather than silently re-rooting onto wherever the pane went.
 go .
 assert-no-column CompareStatus
+assert-hidden CompareBanner
 
 # And a folder containing the other side is refused outright: every file under the inner one would
 # appear twice, at two different relative paths, and "only on the right" would name the tree itself.
