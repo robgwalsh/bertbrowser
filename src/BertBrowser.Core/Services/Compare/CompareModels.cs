@@ -6,8 +6,10 @@ namespace BertBrowser.Core.Services.Compare;
 /// <param name="RelativeKey">Uppercased, '\'-separated, with no leading separator — a
 /// <see cref="Paths.PathKey"/> with the root sliced off. Pairing the two sides by this string is
 /// what makes the comparison agree with the rest of the app about what "the same path" means.</param>
-/// <param name="RelativeDisplay">The same path in its original casing, for showing to the user.</param>
-/// <param name="Name">The leaf name, display-cased.</param>
+/// <param name="Name">The leaf name, display-cased. There is deliberately no whole display path
+/// here: over a real 1.65-million-row index that second copy of every path is the largest
+/// avoidable thing a comparison holds, and only the entries that reach a dialog need one — so
+/// <see cref="CompareResult.DisplayPath"/> rebuilds them from the ancestors' names instead.</param>
 /// <param name="IsDirectory">True for a folder.</param>
 /// <param name="SizeBytes">Bytes for a file; ignored for a folder, whose size is never compared.</param>
 /// <param name="ModifiedUtc">Last write time. <see cref="DateTime.MinValue"/> means <em>unknown</em>
@@ -15,7 +17,6 @@ namespace BertBrowser.Core.Services.Compare;
 /// <see cref="CompareVerdict.Unknown"/> rather than a guess.</param>
 public readonly record struct CompareEntry(
     string RelativeKey,
-    string RelativeDisplay,
     string Name,
     bool IsDirectory,
     long SizeBytes,

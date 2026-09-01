@@ -14,10 +14,10 @@ public sealed class CompareEqualityTests
     private static readonly DateTime Noon = new(2026, 3, 14, 12, 0, 0, DateTimeKind.Utc);
 
     private static CompareEntry File_(long size, DateTime modified, string key = "A.TXT") =>
-        new(key, key.ToLowerInvariant(), Path.GetFileName(key), false, size, modified);
+        new(key, Path.GetFileName(key), false, size, modified);
 
     private static CompareEntry Folder(string key = "SUB") =>
-        new(key, key.ToLowerInvariant(), key, true, 0, Noon);
+        new(key, key, true, 0, Noon);
 
     // --- Timestamp tolerance ---
 

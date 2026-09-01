@@ -13,10 +13,10 @@ public sealed class FolderComparerTests
     private static readonly DateTime Noon = new(2026, 3, 14, 12, 0, 0, DateTimeKind.Utc);
 
     private static CompareEntry File_(string display, long size = 10, DateTime? modified = null) =>
-        new(display.ToUpperInvariant(), display, Path.GetFileName(display), false, size, modified ?? Noon);
+        new(display.ToUpperInvariant(), Path.GetFileName(display), false, size, modified ?? Noon);
 
     private static CompareEntry Folder(string display) =>
-        new(display.ToUpperInvariant(), display, Path.GetFileName(display), true, 0, Noon);
+        new(display.ToUpperInvariant(), Path.GetFileName(display), true, 0, Noon);
 
     private static CompareResult Compare(CompareEntry[] left, CompareEntry[] right) =>
         FolderComparer.Compare(left, right, CompareTolerance.Strict);
@@ -152,6 +152,38 @@ public sealed class FolderComparerTests
 
         Assert.Equal(CompareVerdict.Differs, result.For("SRC"));
     }
+
+    // --- Display paths ---
+
+    /// <summary>
+    /// Rebuilt rather than stored, so this is the only place a path a dialog shows is spelled — and
+    /// it must come back in the casing that side recorded, not the uppercased key it was paired on.
+    /// </summary>
+    [Fact]
+    public void ADisplayPathIsRebuiltInEachSidesOwnCasing()
+    {
+        var left = new[] { Folder("Source"), File_(@"Source\ReadMe.md") };
+        var right = new[] { Folder("source"), File_(@"source\readme.MD") };
+
+        var result = Compare(left, right);
+
+        Assert.Equal(@"Source\ReadMe.md", result.DisplayPath(@"SOURCE\README.MD", CompareSide.Left));
+        Assert.Equal(@"source\readme.MD", result.DisplayPath(@"SOURCE\README.MD", CompareSide.Right));
+    }
+
+    /// <summary>A listing can hold a file whose folder row is missing. Falling back to that segment
+    /// of the key is ugly, but it still points at the right file.</summary>
+    [Fact]
+    public void AMissingFolderRowFallsBackToTheKeysOwnSpelling()
+    {
+        var result = Compare([File_(@"Gone\orphan.txt")], []);
+
+        Assert.Equal(@"GONE\orphan.txt", result.DisplayPath(@"GONE\ORPHAN.TXT", CompareSide.Left));
+    }
+
+    [Fact]
+    public void ATopLevelDisplayPathIsJustTheName() =>
+        Assert.Equal("ReadMe.md", Compare([File_("ReadMe.md")], []).DisplayPath("README.MD", CompareSide.Left));
 
     // --- Counts ---
 

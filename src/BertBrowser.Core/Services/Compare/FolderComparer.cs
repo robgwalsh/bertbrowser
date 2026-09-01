@@ -24,6 +24,33 @@ public sealed record CompareResult(
     public CompareVerdict For(string relativeKey) =>
         ByRelativeKey.TryGetValue(relativeKey, out var verdict) ? verdict : CompareVerdict.Unknown;
 
+    /// <summary>
+    /// The relative path in the casing its side recorded, rebuilt from the ancestors' names.
+    /// </summary>
+    /// <remarks>
+    /// The one place a display path is assembled, so a dialog and a status column cannot disagree
+    /// about how a path is spelled. A key whose folder row is missing — the index can hold a file
+    /// whose parent was swept — falls back to that segment of the uppercased key: ugly, but still
+    /// pointing at the right file. Asked for a handful of entries, never for all of them, which is
+    /// why no side stores one per row.
+    /// </remarks>
+    public string DisplayPath(string relativeKey, CompareSide side)
+    {
+        var names = side is CompareSide.Left ? Left : Right;
+
+        var segments = new List<string>();
+        for (var key = relativeKey; key.Length > 0;)
+        {
+            var cut = key.LastIndexOf(CompareKeys.Separator);
+            segments.Add(names.TryGetValue(key, out var entry) ? entry.Name : key[(cut + 1)..]);
+            if (cut < 0) break;
+            key = key[..cut];
+        }
+
+        segments.Reverse();
+        return string.Join(CompareKeys.Separator, segments);
+    }
+
     public static readonly CompareResult None = new(
         new Dictionary<string, CompareVerdict>(StringComparer.Ordinal),
         new Dictionary<string, CompareEntry>(StringComparer.Ordinal),
