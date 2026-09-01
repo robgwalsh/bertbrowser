@@ -57,6 +57,15 @@ public static class ThemeToken
     public const string ListHeaderHoverBackground = "Theme.List.HeaderHoverBackground";
     public const string ListHeaderBorder = "Theme.List.HeaderBorder";
 
+    // Row tints while two folders are being compared. Translucent on purpose, like
+    // Theme.Marquee.Fill: they composite over whatever list background a theme has, so nineteen
+    // built-ins do not each need five hand-tuned colours to keep a row readable.
+    public const string CompareOnlyHere = "Theme.Compare.OnlyHere";
+    public const string CompareNewer = "Theme.Compare.Newer";
+    public const string CompareOlder = "Theme.Compare.Older";
+    public const string CompareDiffers = "Theme.Compare.Differs";
+    public const string CompareUnknown = "Theme.Compare.Unknown";
+
     // Folder tree
     public const string TreeChevronForeground = "Theme.Tree.ChevronForeground";
     public const string TreeChevronHoverForeground = "Theme.Tree.ChevronHoverForeground";
@@ -173,6 +182,7 @@ public static class ThemeToken
     private const string GroupBorders = "Borders";
     private const string GroupAccent = "Accent";
     private const string GroupLists = "Lists";
+    private const string GroupCompare = "Folder compare";
     private const string GroupTree = "Folder tree";
     private const string GroupTabs = "Tabs";
     private const string GroupTitleBar = "Title bar";
@@ -229,6 +239,12 @@ public static class ThemeToken
         new(ListHeaderForeground, GroupLists, "Column header text", "", false),
         new(ListHeaderHoverBackground, GroupLists, "Column header hover", "", false),
         new(ListHeaderBorder, GroupLists, "Column header border", "", false),
+
+        new(CompareOnlyHere, GroupCompare, "Only on this side", "Alpha matters: these tint a row rather than paint it.", false),
+        new(CompareNewer, GroupCompare, "Newer here", "", false),
+        new(CompareOlder, GroupCompare, "Older here", "", false),
+        new(CompareDiffers, GroupCompare, "Differs", "Both sides have it and neither is newer.", false),
+        new(CompareUnknown, GroupCompare, "Could not be compared", "Never treated as a match, and never synced.", false),
 
         new(TreeChevronForeground, GroupTree, "Expander chevron", "", false),
         new(TreeChevronHoverForeground, GroupTree, "Expander chevron hover", "", false),

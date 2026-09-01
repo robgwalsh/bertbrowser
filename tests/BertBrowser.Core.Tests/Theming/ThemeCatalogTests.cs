@@ -181,6 +181,41 @@ public class ThemeCatalogTests
         Assert.True(ratio >= 1.4, $"{id}: scrollbar thumb is only {ratio:0.00}:1 against the list");
     }
 
+    /// <summary>
+    /// A row tinted by a comparison is still a row you have to read.
+    /// </summary>
+    /// <remarks>
+    /// The tints are translucent by design, so unlike every other pair here the background is not a
+    /// token but the composite of one over another — which is why this does its own compositing
+    /// rather than going through <see cref="AssertContrast"/>. Make one of them opaque, or give it
+    /// an alpha heavy enough to swallow the text, and this is what says so.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(BuiltInIds))]
+    public void Text_on_a_compare_tinted_row_is_readable(string id)
+    {
+        var theme = Resolve(id);
+        var background = theme[ThemeToken.ListBackground];
+
+        foreach (var token in CompareTints)
+        {
+            var tint = theme[token].CompositeOver(background);
+            var ratio = ThemeContrast.Ratio(theme[ThemeToken.TextPrimary], tint);
+            Assert.True(ratio >= ThemeContrast.AaNormalText,
+                $"{theme.Id}: text on {token} over the list background is {ratio:0.00}:1, " +
+                $"below the {ThemeContrast.AaNormalText:0.0}:1 minimum");
+        }
+    }
+
+    private static readonly string[] CompareTints =
+    [
+        ThemeToken.CompareOnlyHere,
+        ThemeToken.CompareNewer,
+        ThemeToken.CompareOlder,
+        ThemeToken.CompareDiffers,
+        ThemeToken.CompareUnknown,
+    ];
+
     private static void AssertContrast(ResolvedTheme theme, string foreground, string background, double minimum)
     {
         var ratio = ThemeContrast.Ratio(theme, foreground, background);

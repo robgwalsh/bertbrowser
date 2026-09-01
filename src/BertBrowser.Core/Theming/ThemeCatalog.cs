@@ -72,6 +72,14 @@ public static class ThemeCatalog
             [T.ListHeaderHoverBackground] = "#2A2D2E",
             [T.ListHeaderBorder] = "#3C3C3C",
 
+            // Compare tints. Translucent, so they read over whatever list background a theme
+            // inheriting from here defines, and so the text on top keeps its own contrast.
+            [T.CompareOnlyHere] = "#262E9E7A",
+            [T.CompareNewer] = "#282F7FD8",
+            [T.CompareOlder] = "#2AB8860B",
+            [T.CompareDiffers] = "#28A06AA8",
+            [T.CompareUnknown] = "#24808080",
+
             [T.TreeChevronForeground] = "#C5C5C5",
             [T.TreeChevronHoverForeground] = "#E7E7E7",
 
@@ -216,6 +224,12 @@ public static class ThemeCatalog
             [T.ListHeaderForeground] = "#4A4A4A",
             [T.ListHeaderHoverBackground] = "#E8E8E8",
             [T.ListHeaderBorder] = "#DDDDDD",
+
+            [T.CompareOnlyHere] = "#382E9E6B",
+            [T.CompareNewer] = "#380F6CBD",
+            [T.CompareOlder] = "#3CB8860B",
+            [T.CompareDiffers] = "#388B5CB8",
+            [T.CompareUnknown] = "#30909090",
 
             [T.TreeChevronForeground] = "#6E6E6E",
             [T.TreeChevronHoverForeground] = "#007ACC",

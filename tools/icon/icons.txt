@@ -87,3 +87,7 @@ CustomCommand     | Apps                    | apps                    | 20
 # "Files you have more than one of" — a different idea from the clipboard's Copy, which it used to
 # share codepoint E8C8 with.
 Duplicates        | Document Multiple       | document_multiple       | 20
+
+# Comparing this pane with the one beside it. "Arrow swap" rather than a scales or a diff glyph:
+# what the command actually offers is moving files from one side to the other.
+Compare           | Arrow Swap              | arrow_swap              | 20
