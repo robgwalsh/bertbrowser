@@ -15,23 +15,43 @@ namespace BertBrowser.App.Views;
 /// </remarks>
 public partial class SyncPreviewDialog : ThemedWindow
 {
+    private readonly SyncPreviewViewModel _view;
+
     private SyncPreviewDialog(SyncPreviewViewModel view)
     {
         InitializeComponent();
         DataContext = view;
+        _view = view;
         HeadingText.Text = $"Make {Short(view.RightPath)} match {Short(view.LeftPath)}";
+
+        view.Finished += OnFinished;
+        Closed += (_, _) => view.Finished -= OnFinished;
     }
 
     /// <summary>The harness's way in, so a capture is of the same window the menu opens.</summary>
     internal static SyncPreviewDialog Create(SyncPreviewViewModel view) => new(view);
 
-    /// <summary>Shows the preview and returns what to run, or null when the user backed out.</summary>
-    public static SyncPreview? Confirm(Window? owner, SyncPreviewViewModel view)
+    /// <summary>
+    /// Shows the preview, and stays up while the sync it agrees to runs.
+    /// </summary>
+    /// <remarks>
+    /// It does not hand the answer back to be run elsewhere. Closing on Sync would leave the only
+    /// account of a long operation — and the only way to stop it — in the status bar of a window
+    /// the user has just been given a reason to look away from.
+    /// </remarks>
+    public static void Show(Window? owner, SyncPreviewViewModel view)
     {
         var dialog = new SyncPreviewDialog(view);
         if (owner is not null && !ReferenceEquals(owner, dialog)) dialog.Owner = owner;
 
-        return dialog.ShowDialog() == true ? view.Result : null;
+        dialog.ShowDialog();
+    }
+
+    private void OnFinished()
+    {
+        // Guarded because a cancelled run finishes too, and a dialog already closing must not be
+        // told to close again.
+        if (IsLoaded) DialogResult = true;
     }
 
     /// <summary>Just the folder's own name: the full paths are in the two panes behind this window,
@@ -41,7 +61,9 @@ public partial class SyncPreviewDialog : ThemedWindow
             ? name
             : path;
 
-    private void Run_Click(object sender, RoutedEventArgs e) => DialogResult = true;
+    /// <summary>Starts the sync and hands the window over to it. Async void because it is an event
+    /// handler; the modal message loop keeps pumping, so the bar and its Cancel stay live.</summary>
+    private async void Run_Click(object sender, RoutedEventArgs e) => await _view.RunAsync();
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => DialogResult = false;
 }

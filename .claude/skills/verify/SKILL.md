@@ -110,12 +110,15 @@ unlock <password>           give the archive on show a password and reload; writ
                             store directly, because the harness never clicks
 undo
 
-compare                     compare the active pane with the one beside it, as F7 does, and wait
-                            for the scan. Refuses to start a second one, because the command is a
+compare                     compare the two open panes, as F7 does, and wait for the scan. There
+                            must be exactly two — with any other number the app refuses and says
+                            why. Refuses to start a second comparison, because the command is a
                             toggle and a stray `compare` would quietly stop the first
-compare-refused             the other half: assert the pair was turned down (an archive interior,
-                            a folder containing the other side) and leave the reason in the status
-                            bar for `assert-status`
+compare-refused [text]      the other half: assert the pair was turned down (not exactly two panes,
+                            an archive interior, a folder containing the other side) and that the
+                            user was told. `text` is checked against what the app said. It says it
+                            in a modal, which a run cannot dismiss, so the notice service is
+                            recorded instead — which is also what makes the wording testable
 compare-filter on|off       "show only differences", on both panes at once
 compare-end                 stop comparing and clear the colours
 sync [with-deletes]         run what the comparison would do, through the same planner, runner and
@@ -150,11 +153,16 @@ preview-mode auto|raw|hex   the pane's view override; sticky across selections, 
 shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, rename-advanced,
                             delete, delete-permanent, message, warning, properties, settings,
-                            theme-editor, disk-usage, duplicates, sync-preview, search-syntax,
-                            extract, compress, archive-password, elevation, settings-columns,
-                            columns, settings-columns-dragging
-                            (sync-preview needs a `compare` first, like `dialog duplicates`: it
-                            shows what that comparison found rather than starting one of its own)
+                            theme-editor, disk-usage, duplicates, sync-preview,
+                            sync-preview-running, search-syntax, extract, compress,
+                            archive-password, elevation, settings-columns, columns,
+                            settings-columns-dragging
+                            (both sync ones need a `compare` first, like `dialog duplicates`: they
+                            show what that comparison found rather than starting one of their own.
+                            sync-preview-running is the same window once Sync has been pressed —
+                            the list read-only, and a bar and Cancel where the buttons were. Posed,
+                            like `dialog transfer`, because it is a state that only exists while
+                            something slow is happening)
                             (settings opens on General, so settings-columns is how the Columns
                             page gets photographed at all; it shows the *saved default*, so put an
                             arrangement in front of it with `columns default` first.
@@ -239,6 +247,10 @@ Element names come from the XAML: window-level are `FolderTree`, `GlobalSearchBo
   did rather than trusting the registration. Everything above the launcher is real, so the
   discriminator, the rules and the merge are genuinely exercised; only the process and the token are
   missing. `dialog elevation` poses the consent window.
+- **A modal the shell raises is recorded, not shown.** `IUserNotice` is how the shell says
+  something that must be acknowledged — so far only "comparing needs two panes". The real one opens
+  a `MessageDialog`, which a run could never dismiss; a run gets one that writes the message down
+  for `compare-refused` to check, which is also what makes the wording itself testable.
 - **No media is ever played.** The preview pane stops at a poster frame until someone presses play,
   and no script presses it. That keeps a run silent on a machine someone is using — and a
   `MediaElement` renders through its own composition surface, so it would come back as a hole in a

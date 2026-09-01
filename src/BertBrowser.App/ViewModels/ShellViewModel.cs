@@ -102,10 +102,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     public event Action<PaneViewModel>? PaneFocusRequested;
 
     /// <summary>The pane the window chrome (toolbar, status bar, folder tree) follows.</summary>
-    // Compare works on this pane and the one beside it, so moving between panes can turn it from
-    // available to not (and back) without the layout changing at all.
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(CompareWithOtherPaneCommand))]
     private PaneViewModel _activePane;
 
     /// <summary>The directory the window chrome follows: the visible tab of the active pane.</summary>
@@ -192,7 +189,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// <summary>The comparison currently running, or null. One at a time: it decorates two file
     /// lists, and a second would be fighting the first for the same rows.</summary>
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(CompareWithOtherPaneCommand))]
     private CompareSessionViewModel? _compareSession;
 
     /// <summary>Raised when a comparison wants its sync preview. The window builds it; every route
@@ -200,31 +196,36 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     public event Action<CompareSessionViewModel>? SyncRequested;
 
     /// <summary>
-    /// The active pane and the one beside it, in the order they appear on screen.
+    /// The two panes to compare, in the order they appear on screen, or null when there are not
+    /// exactly two open.
     /// </summary>
     /// <remarks>
-    /// The layout is an N-ary tree, so three panes in a row are three siblings and "the two panes"
-    /// needs a rule. It is the pane you are in and the next one along — already what F6 means — put
-    /// into screen order, so the words "left" and "right" match what the user is looking at
-    /// whichever of the two happened to be active.
+    /// <b>Exactly two, not "the active one and the next".</b> That rule worked, but with three or
+    /// more panes open it made the command mean something different depending on which pane the
+    /// caret happened to be in, with nothing on screen saying which pair had been chosen — and the
+    /// answer is a coloured overlay on two of them and a Sync button pointing at one. Refusing is
+    /// the honest response to an ambiguous question.
     /// </remarks>
     public (PaneViewModel Left, PaneViewModel Right)? ComparePair
     {
         get
         {
-            if (LayoutTree.FindLeaf(Layout, ActivePane) is not { } leaf) return null;
-
-            var other = LayoutTree.NextLeaf(Layout, leaf, 1).Value;
-            if (ReferenceEquals(other, ActivePane)) return null;
-
-            var order = AllPanes.ToList();
-            return order.IndexOf(ActivePane) < order.IndexOf(other)
-                ? (ActivePane, other)
-                : (other, ActivePane);
+            var panes = AllPanes.ToList();
+            return panes.Count == 2 ? (panes[0], panes[1]) : null;
         }
     }
 
-    [RelayCommand(CanExecute = nameof(CanCompareWithOtherPane))]
+    /// <summary>
+    /// Why comparing cannot run, said in a modal rather than in the status bar.
+    /// </summary>
+    /// <remarks>
+    /// This is the answer to a button someone just pressed at the top of the window, and the
+    /// footer of a two-pane window is about as far from where they are looking as the text could
+    /// be put — it got written, and never read.
+    /// </remarks>
+    private void ExplainNoCompare(string reason) => _notice.Say(reason, "Compare folders");
+
+    [RelayCommand]
     private async Task CompareWithOtherPaneAsync()
     {
         if (CompareSession is not null)
@@ -233,9 +234,16 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             return;
         }
 
+        // Always runnable, so pressing it can explain itself. A disabled button with a tooltip
+        // nobody hovers is how "why is this greyed out?" happens.
         if (ComparePair is not { } pair)
         {
-            SetStatus("Compare needs two panes — split one with Ctrl+Alt+Right.");
+            var panes = AllPanes.Count();
+            ExplainNoCompare(panes < 2
+                ? "Comparing needs two panes side by side. Split this one with the split button " +
+                  "above the file list, or Ctrl+Alt+Right, and open the other folder in it."
+                : $"Comparing works between exactly two panes, and there are {panes} open. " +
+                  "Close the ones you are not comparing.");
             return;
         }
 
@@ -255,16 +263,17 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         if (session.Result is { Availability: CompareAvailability.Refused } refused)
         {
             session.End(null);
-            SetStatus(refused.Problem ?? "These folders cannot be compared.");
+            ExplainNoCompare(refused.Problem ?? "These folders cannot be compared.");
         }
     }
-
-    /// <summary>True while there is a comparison to end, or two panes to start one between.</summary>
-    private bool CanCompareWithOtherPane() => CompareSession is not null || ComparePair is not null;
 
     public void EndCompare() => CompareSession?.End(null);
 
     private readonly IFolderCompareService _folderCompare;
+
+    /// <summary>How the shell says something that has to be acknowledged. Injected so a scripted
+    /// run can record it instead of putting a modal on a window nobody is watching.</summary>
+    private readonly IUserNotice _notice;
 
     /// <summary>Sequencing only: every byte goes through the transfer executor and every removal
     /// through the delete executor, so a sync inherits all of their guarantees unchanged.</summary>
@@ -304,9 +313,11 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         ArchiveEditExecutor archiveEditExecutor,
         IElevatedOperationRunner elevation,
         IElevationPrompt elevationPrompt,
-        IFolderCompareService folderCompare)
+        IFolderCompareService folderCompare,
+        IUserNotice notice)
     {
         _folderCompare = folderCompare;
+        _notice = notice;
         _syncRunner = new SyncRunner(transferExecutor, deleteExecutor);
         _elevation = elevation;
         _elevationPrompt = elevationPrompt;
@@ -578,7 +589,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
         Layout = LayoutTree.Split(Layout, leaf, orientation, created, out _);
         LayoutChanged?.Invoke();
-        CompareWithOtherPaneCommand.NotifyCanExecuteChanged();
         ActivatePane(created);
         PaneFocusRequested?.Invoke(created);
     }
@@ -599,7 +609,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
         pane.Dispose();
         LayoutChanged?.Invoke();
-        CompareWithOtherPaneCommand.NotifyCanExecuteChanged();
 
         // After the rebuild, so the pane taking over already has a view to focus.
         if (wasActive) PaneFocusRequested?.Invoke(ActivePane);
@@ -1631,7 +1640,12 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// built while a dialog was open, and both executors re-check every path against live disk
     /// before they write.
     /// </remarks>
-    public async Task<SyncOutcome?> ExecuteSyncAsync(SyncPreview preview)
+    /// <param name="show">Where the progress surface goes, called with it as the run starts and
+    /// with null as it ends. The sync dialog stays open and takes it, so the bar and its Cancel are
+    /// under the list of what is being synced rather than in a footer behind a modal window.
+    /// Null puts it in the status bar, which is what a run with no dialog wants.</param>
+    public async Task<SyncOutcome?> ExecuteSyncAsync(
+        SyncPreview preview, Action<TransferProgressViewModel?>? show = null)
     {
         var plans = SyncPlanner.ToPlans(preview, _transferPlanner, _deletePlanner, DeleteMode.Recycle);
         if (IsTransferring || !plans.HasWork) return null;
@@ -1640,10 +1654,11 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         UndoCommand.NotifyCanExecuteChanged();
 
         var cancellation = new CancellationTokenSource();
+        show ??= surface => TransferProgress = surface;
         try
         {
             var surface = SyncProgressSurface(plans, cancellation.Cancel);
-            TransferProgress = surface;
+            show(surface);
             SetStatus(surface.Headline);
 
             var progress = new Progress<TransferProgress>(surface.Apply);
@@ -1668,7 +1683,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         }
         finally
         {
-            TransferProgress = null;
+            show(null);
             cancellation.Dispose();
             IsTransferring = false;
             UndoCommand.NotifyCanExecuteChanged();

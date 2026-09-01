@@ -8,6 +8,7 @@ using BertBrowser.App.Theming;
 using BertBrowser.App.ViewModels;
 using BertBrowser.App.Views;
 using BertBrowser.Core.Data;
+using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Elevation;
 using BertBrowser.Core.Services.Mft;
 using Microsoft.Extensions.DependencyInjection;
@@ -43,9 +44,11 @@ internal sealed class UiSession : IDisposable
         IServiceProvider services,
         RefusingProcessLauncher launcher,
         ForegroundGuard guard,
-        RecordingElevationPrompt elevationPrompt)
+        RecordingElevationPrompt elevationPrompt,
+        RecordingUserNotice notice)
     {
         ElevationPrompt = elevationPrompt;
+        Notice = notice;
         _options = options;
         Window = window;
         Services = services;
@@ -65,6 +68,9 @@ internal sealed class UiSession : IDisposable
     /// access-denied failure reached the offer — the discriminator and the dialog live on opposite
     /// sides of that seam, and no unit test spans it.</summary>
     public RecordingElevationPrompt ElevationPrompt { get; }
+
+    /// <summary>What the shell has told the user, in place of the modals it would have opened.</summary>
+    public RecordingUserNotice Notice { get; }
 
     public ShellViewModel Shell => (ShellViewModel)Window.DataContext;
 
@@ -115,6 +121,7 @@ internal sealed class UiSession : IDisposable
 
         var launcher = new RefusingProcessLauncher();
         var elevationPrompt = new RecordingElevationPrompt();
+        var notice = new RecordingUserNotice();
         var services = AppShell.BuildServices(s =>
         {
             s.AddSingleton<IProcessLauncher>(launcher);
@@ -145,6 +152,10 @@ internal sealed class UiSession : IDisposable
             // is the process boundary and the token — which is the part a scripted run cannot have.
             s.AddSingleton<IElevationLauncher>(new RefusingElevationLauncher());
             s.AddSingleton<IElevationPrompt>(elevationPrompt);
+
+            // The shell says "comparing needs two panes" in a modal. A run cannot dismiss one, so
+            // it gets one that writes the message down for assert-notice to read.
+            s.AddSingleton<IUserNotice>(_ => notice);
         });
         AppShell.UseServices(services);
 
@@ -198,7 +209,7 @@ internal sealed class UiSession : IDisposable
         window.Activated += (_, _) => Native.RestoreForeground(before.Handle);
         window.Show();
 
-        var session = new UiSession(options, window, services, launcher, guard, elevationPrompt);
+        var session = new UiSession(options, window, services, launcher, guard, elevationPrompt, notice);
 
         // The MFT indexer is off unless asked for: it reads every NTFS volume's master file table,
         // which is minutes of disk on a machine someone is using. With --index it runs *in this

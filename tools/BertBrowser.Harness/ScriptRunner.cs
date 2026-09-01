@@ -157,7 +157,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "compare": Compare(); break;
             case "compare-filter": CompareFilter(rest); break;
             case "compare-end": CompareEnd(); break;
-            case "compare-refused": CompareRefused(); break;
+            case "compare-refused": CompareRefused(rest); break;
             case "sync": Sync(rest); break;
             case "assert-compare": AssertCompare(rest); break;
             case "assert-compare-row": AssertCompareRow(rest); break;
@@ -1527,15 +1527,33 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         session.Settle();
     }
 
-    /// <summary>The other half of <c>compare</c>: asserts the pair was turned down, and leaves the
-    /// reason in the status bar for <c>assert-status</c> to read.</summary>
-    private void CompareRefused()
+    /// <summary>
+    /// The other half of <c>compare</c>: asserts the pair was turned down, and that the reason was
+    /// said out loud.
+    /// </summary>
+    /// <remarks>
+    /// The app puts that reason in a modal, which a run cannot dismiss — so the notice service is
+    /// recorded instead, and the expected wording is checked against what it was handed. That is
+    /// the only way to prove the message a user actually sees is the right one.
+    /// </remarks>
+    private void CompareRefused(string rest)
     {
+        var before = session.Notice.Said.Count;
+
         Await(() => session.Dispatcher.Invoke(
             () => session.Shell.CompareWithOtherPaneCommand.ExecuteAsync(null)));
 
         if (session.Dispatcher.Invoke(() => session.Shell.CompareSession) is not null)
             throw new AssertionException("The comparison was accepted, and should not have been.");
+
+        var said = session.Notice.Said.Skip(before).ToList();
+        if (said.Count == 0)
+            throw new AssertionException("Comparing was refused, but the user was told nothing.");
+
+        var expected = rest.Trim();
+        if (expected.Length > 0 &&
+            !said.Any(s => s.Contains(expected, StringComparison.OrdinalIgnoreCase)))
+            throw new AssertionException($"It said '{said[^1]}', not '{expected}'.");
     }
 
     private void CompareFilter(string rest)
@@ -1604,6 +1622,36 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         Await(() => session.Dispatcher.Invoke(() => session.Shell.ExecuteSyncAsync(preview)));
         session.Settle();
+    }
+
+    private SyncPreviewViewModel SyncPreviewFor()
+    {
+        var compared = session.Dispatcher.Invoke(() => session.Shell.CompareSession?.Result)
+            ?? throw new AssertionException(
+                "There is no comparison to sync. Run 'compare' before 'dialog sync-preview'.");
+
+        return new SyncPreviewViewModel(
+            remove => session.Shell.PlanSync(compared, remove), compared.LeftPath, compared.RightPath);
+    }
+
+    /// <summary>The sync dialog part-way through its run, with the bar and the Cancel it swaps its
+    /// buttons for. Posed on a plan that is not moving, so the capture is deterministic.</summary>
+    private SyncPreviewDialog SyncRunningDialog()
+    {
+        var view = SyncPreviewFor();
+        var plan = new TransferPlan(
+            TransferVerb.Copy, session.Dispatcher.Invoke(() => session.Tab.CurrentPath),
+            [.. view.Actions.Where(a => a.Ticked).Select(a => new PlannedTransfer(
+                a.Action.SourcePath, a.Action.IsDirectory, a.Action.TargetPath, false))],
+            []);
+
+        var surface = new TransferProgressViewModel(
+            plan, new TransferEstimate(64L * 1024 * 1024, plan.Transfers.Count, Complete: true),
+            cancel: () => { });
+        surface.PoseForCapture(itemsDone: 1, bytesDone: 21_500_000, bytesPerSecond: 42_000_000);
+
+        view.PoseRunning(surface);
+        return SyncPreviewDialog.Create(view);
     }
 
     private CompareSessionViewModel RequireCompare(string command) =>
@@ -2070,12 +2118,12 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         // Needs a 'compare' first, for the reason 'duplicates' does: the dialog shows what that
         // comparison found rather than starting one of its own while a capture waits on it.
-        "sync-preview" => session.Dispatcher.Invoke(() => session.Shell.CompareSession?.Result) is { } compared
-            ? SyncPreviewDialog.Create(new SyncPreviewViewModel(
-                remove => session.Shell.PlanSync(compared, remove),
-                compared.LeftPath, compared.RightPath))
-            : throw new AssertionException(
-                "There is no comparison to sync. Run 'compare' before 'dialog sync-preview'."),
+        "sync-preview" => SyncPreviewDialog.Create(SyncPreviewFor()),
+
+        // The same window once Sync has been pressed. Posed rather than run, for the reasons on
+        // ProgressDemo — and worth photographing precisely because it is a state the dialog only
+        // has while something slow is happening, which a script cannot otherwise hold still.
+        "sync-preview-running" => SyncRunningDialog(),
 
         // Needs a 'duplicates' first, so the window shows the results that run found rather than
         // starting a scan of its own while a capture waits on it.

@@ -1,3 +1,4 @@
+using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Elevation;
 
 namespace BertBrowser.Harness;
@@ -47,5 +48,28 @@ internal sealed class RecordingElevationPrompt : IElevationPrompt
     {
         lock (_offers) _offers.Add(offer);
         return Answer;
+    }
+}
+
+/// <summary>
+/// An <see cref="IUserNotice"/> that writes the message down instead of putting it on screen.
+/// </summary>
+/// <remarks>
+/// The real one opens a modal over the main window. In a run that would block the script thread on
+/// a dialog nobody can dismiss — the harness never clicks — so the notice is recorded and
+/// <c>assert-notice</c> reads it, which also makes the wording itself testable.
+/// </remarks>
+internal sealed class RecordingUserNotice : IUserNotice
+{
+    private readonly List<string> _said = [];
+
+    internal IReadOnlyList<string> Said
+    {
+        get { lock (_said) return [.. _said]; }
+    }
+
+    public void Say(string message, string caption)
+    {
+        lock (_said) _said.Add(message);
     }
 }

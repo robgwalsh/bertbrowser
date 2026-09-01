@@ -844,10 +844,11 @@ public partial class DirectoryTabView : UserControl
         // every size inside a container is already exact, so it stays on — see the Archives section.
         DuplicatesMenuItem.IsEnabled = DiskUsageMenuItem.IsEnabled && !inArchive;
 
-        // Not keyed on the selection at all: it compares this pane with the next one, so what it
-        // needs is a second pane. The header flips because pressing it again is how a comparison is
-        // stopped, and a menu that still said "Compare" would be lying about what it does.
-        CompareMenuItem.IsEnabled = _shell.CompareWithOtherPaneCommand.CanExecute(null);
+        // Not keyed on the selection at all, and never disabled: it compares the two panes, so what
+        // it needs is that there be two, and pressing it is how you find that out — a greyed row
+        // with no explanation is exactly the thing this feature answers with a modal instead. The
+        // header flips because pressing it again is how a comparison is stopped, and a menu that
+        // still said "Compare" would be lying about what it does.
         CompareMenuItem.Header = _shell.CompareSession is null
             ? "Compare with other pane"
             : "Stop comparing";
@@ -1172,8 +1173,7 @@ public partial class DirectoryTabView : UserControl
     /// </summary>
     private void ContextCompare_Click(object sender, RoutedEventArgs e)
     {
-        if (_shell.CompareWithOtherPaneCommand.CanExecute(null))
-            _shell.CompareWithOtherPaneCommand.Execute(null);
+        _shell.CompareWithOtherPaneCommand.Execute(null);
     }
 
     private void ContextOpenVSCode_Click(object sender, RoutedEventArgs e)

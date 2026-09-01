@@ -70,8 +70,8 @@ assert-no-column CompareStatus
 
 # And a folder containing the other side is refused outright: every file under the inner one would
 # appear twice, at two different relative paths, and "only on the right" would name the tree itself.
-compare-refused
-assert-status neither inside the other
+# The reason is said in a modal, not written into the footer where it would not be read.
+compare-refused neither inside the other
 
 go left
 refresh
@@ -82,6 +82,7 @@ refresh
 # whatever the navigation above left behind.
 compare
 dialog sync-preview
+dialog sync-preview-running
 
 # The additive half runs on its own: nothing on the right is removed unless removal was asked for.
 sync
@@ -111,3 +112,21 @@ undo
 assert-missing right/only-left.txt
 assert-exists right/only-right.txt
 shot compare-after-undo
+
+# --- What it refuses, and how it says so ---
+#
+# Exactly two panes, and the button explains itself rather than sitting greyed out. Three panes is
+# an ambiguous question -- which two? -- and the answer is a coloured overlay on two of them and a
+# Sync button pointing at one, so refusing is the honest response.
+compare-end
+split right right
+assert-panes 3
+compare-refused exactly two panes
+
+closepane
+assert-panes 2
+
+# And one pane cannot be compared with itself.
+closepane
+assert-panes 1
+compare-refused needs two panes side by side

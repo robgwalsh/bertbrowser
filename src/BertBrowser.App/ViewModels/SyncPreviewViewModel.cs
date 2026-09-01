@@ -56,13 +56,72 @@ public sealed partial class SyncActionViewModel : ObservableObject
 public sealed partial class SyncPreviewViewModel : ObservableObject
 {
     private readonly Func<bool, SyncPreview> _plan;
+    private readonly Func<SyncPreview, Action<TransferProgressViewModel?>, Task>? _run;
 
-    public SyncPreviewViewModel(Func<bool, SyncPreview> plan, string leftPath, string rightPath)
+    /// <param name="run">Carries out the sync, handing back the progress surface to show while it
+    /// does. Optional so the harness can pose the dialog without one.</param>
+    public SyncPreviewViewModel(
+        Func<bool, SyncPreview> plan,
+        string leftPath,
+        string rightPath,
+        Func<SyncPreview, Action<TransferProgressViewModel?>, Task>? run = null)
     {
         _plan = plan;
+        _run = run;
         LeftPath = leftPath;
         RightPath = rightPath;
         Rebuild();
+    }
+
+    /// <summary>
+    /// True while the sync is running, which is what turns the dialog from a question into a
+    /// report: the list goes read-only and the buttons become a bar and a Cancel.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanRun))]
+    private bool _isRunning;
+
+    /// <summary>The live byte-level state of the run, or null when none is going. Bound inside the
+    /// dialog rather than left to the status bar, which is behind a modal window and cannot be
+    /// clicked even when it can be seen.</summary>
+    [ObservableProperty]
+    private TransferProgressViewModel? _progress;
+
+    /// <summary>Raised when the run has finished, so the dialog can close itself. A dialog that
+    /// stayed up showing a finished bar would need a second dismissal for no reason.</summary>
+    public event Action? Finished;
+
+    /// <summary>Puts the dialog into its running state without a run, so the UI harness can
+    /// photograph a state it otherwise only has while something slow is happening.</summary>
+    internal void PoseRunning(TransferProgressViewModel surface)
+    {
+        Progress = surface;
+        IsRunning = true;
+    }
+
+    /// <summary>
+    /// Runs the sync and keeps the dialog up while it does.
+    /// </summary>
+    /// <remarks>
+    /// The window stays open on purpose. Closing it the instant Sync is pressed leaves the only
+    /// account of a long operation in the status bar of a window the user has already looked away
+    /// from — and the Cancel button with it.
+    /// </remarks>
+    public async Task RunAsync()
+    {
+        if (IsRunning || _run is null) return;
+
+        IsRunning = true;
+        try
+        {
+            await _run(Result, surface => Progress = surface);
+        }
+        finally
+        {
+            IsRunning = false;
+            Progress = null;
+            Finished?.Invoke();
+        }
     }
 
     public string LeftPath { get; }
@@ -85,7 +144,7 @@ public sealed partial class SyncPreviewViewModel : ObservableObject
     [ObservableProperty]
     private string? _caveat;
 
-    public bool CanRun => Actions.Any(a => a.Ticked);
+    public bool CanRun => !IsRunning && Actions.Any(a => a.Ticked);
 
     partial void OnRemoveRightOnlyChanged(bool value) => Rebuild();
 

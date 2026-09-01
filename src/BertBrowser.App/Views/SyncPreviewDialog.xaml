@@ -22,19 +22,52 @@
         </DockPanel>
 
         <!-- Buttons: Cancel is the default, so Enter and Escape both back out. A sync writes and
-             can remove, and neither should be one stray keystroke away. -->
-        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
-                    HorizontalAlignment="Right" Margin="0,12,0,0">
+             can remove, and neither should be one stray keystroke away. Hidden while the run is
+             going, when the progress row below takes over. -->
+        <StackPanel x:Name="ChoiceRow" DockPanel.Dock="Bottom" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Margin="0,12,0,0"
+                    Visibility="{Binding IsRunning, Converter={StaticResource InverseBoolToVisibility}}">
             <Button x:Name="CancelButton" Content="Cancel" MinWidth="88" Margin="0,0,8,0"
                     IsCancel="True" IsDefault="True" Click="Cancel_Click"/>
             <Button x:Name="RunButton" Content="Sync" MinWidth="110"
                     IsEnabled="{Binding CanRun}" Click="Run_Click"/>
         </StackPanel>
 
+        <!--
+          The run, reported where the list of what is being synced is.
+
+          It replaces the buttons rather than sitting beside them: there is exactly one thing to do
+          while a sync is going, and offering Sync again next to a running one is an invitation to
+          press it. The status bar strip is deliberately not used — it is behind this window.
+        -->
+        <Grid x:Name="ProgressRow" DockPanel.Dock="Bottom" Margin="0,12,0,0"
+              Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                <TextBlock Text="{Binding Progress.Headline}" TextTrimming="CharacterEllipsis"/>
+                <ProgressBar Height="4" Margin="0,5,0,0" Minimum="0" Maximum="1"
+                             Value="{Binding Progress.Fraction, Mode=OneWay}"
+                             IsIndeterminate="{Binding Progress.IsIndeterminate}"/>
+                <TextBlock Margin="0,5,0,0" FontSize="11" TextTrimming="CharacterEllipsis"
+                           Foreground="{StaticResource Theme.Text.Secondary}"
+                           Text="{Binding Progress.DetailText}"/>
+            </StackPanel>
+
+            <Button Grid.Column="1" Content="Cancel" MinWidth="88" Margin="16,0,0,0"
+                    VerticalAlignment="Center"
+                    Command="{Binding Progress.CancelCommand}"
+                    ToolTip="Stop the sync. What has already been copied stays, and Ctrl+Z still puts it back."/>
+        </Grid>
+
         <!-- The destructive option, kept at the bottom next to the button that acts on it and off
              until it is asked for. Its own row, not a column of the list, because it changes what
              the list contains rather than which of it is ticked. -->
-        <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+        <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0"
+                    IsEnabled="{Binding IsRunning, Converter={StaticResource InverseBool}}">
             <TextBlock x:Name="CaveatText" TextWrapping="Wrap" Margin="0,0,0,6"
                        Text="{Binding Caveat}"
                        Foreground="{StaticResource Theme.Warning.Foreground}"
@@ -46,7 +79,10 @@
                        Text="Ctrl+Z puts the whole sync back, and they go to the Recycle Bin on any volume that has one."/>
         </StackPanel>
 
+        <!-- Read-only once the run starts: what is ticked is what is being carried out, and the
+             list is now a record of it rather than a question. -->
         <ListView x:Name="ActionList" ItemsSource="{Binding Actions}"
+                  IsEnabled="{Binding IsRunning, Converter={StaticResource InverseBool}}"
                   BorderBrush="{StaticResource Theme.Border.Default}" BorderThickness="1"
                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListView.View>

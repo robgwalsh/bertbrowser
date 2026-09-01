@@ -248,6 +248,7 @@ public partial class App : Application
         // Comparing two folders reads each side from whichever source can answer it — the index
         // when the volume is measured and live, a walk otherwise — so it needs both the repository
         // and the MFT service, and no I/O of its own.
+        services.AddSingleton<BertBrowser.Core.Services.IUserNotice, Views.UserNotice>();
         services.AddSingleton<BertBrowser.Core.Services.Compare.IFolderCompareService>(sp =>
             new BertBrowser.Core.Services.Compare.FolderCompareService(
                 sp.GetRequiredService<FsIndexRepository>(),

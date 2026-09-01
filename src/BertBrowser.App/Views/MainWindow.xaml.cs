@@ -58,7 +58,7 @@ public partial class MainWindow : ThemedWindow
         _shell.GlobalSearchFocusRequested += FocusGlobalSearchBox;
         _shell.DiskUsageRequested += ShowDiskUsage;
         _shell.DuplicatesRequested += ShowDuplicates;
-        _shell.SyncRequested += ShowSyncPreview;
+        _shell.SyncRequested += ShowSyncPreview;
         _shell.PropertyChanged += Shell_TransferProgressChanged;
         _shell.PropertyChanged += Shell_DrivesViewModeChanged;
 
@@ -225,6 +225,17 @@ public partial class MainWindow : ThemedWindow
     }
 
     /// <summary>
+    /// Says why comparing cannot run, in a modal.
+    /// </summary>
+    /// <remarks>
+    /// The status bar is the wrong place for it. This is the answer to a button someone just
+    /// pressed at the top of the window, and the footer of a two-pane window is about as far from
+    /// their eyes as the text could be put — it was written, and never read.
+    /// </remarks>
+    private void ExplainNoCompare(string reason) =>
+        MessageDialog.Show(this, reason, "Compare folders", MessageDialogKind.Information);
+
+    /// <summary>
     /// Shows what a sync would do, and runs it if the user agrees.
     /// </summary>
     /// <remarks>
@@ -238,10 +249,11 @@ public partial class MainWindow : ThemedWindow
         if (session.Result is not { } compare) return;
 
         var view = new SyncPreviewViewModel(
-            remove => _shell.PlanSync(compare, remove), compare.LeftPath, compare.RightPath);
+            remove => _shell.PlanSync(compare, remove),
+            compare.LeftPath, compare.RightPath,
+            (preview, show) => _shell.ExecuteSyncAsync(preview, show));
 
-        if (SyncPreviewDialog.Confirm(this, view) is { } preview)
-            _ = _shell.ExecuteSyncAsync(preview);
+        SyncPreviewDialog.Show(this, view);
     }
 
     /// <summary>
