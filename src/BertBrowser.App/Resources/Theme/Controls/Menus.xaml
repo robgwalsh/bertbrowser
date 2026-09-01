@@ -59,11 +59,10 @@
                               everything else, so without this IsCheckable/IsChecked set perfectly
                               and render nothing at all — the state is simply invisible.
 
-                              Drawn rather than set in Segoe Fluent Icons, because SymbolFont lives
-                              in Styles.xaml and StaticResource reaches a dictionary's own merged
-                              children, never its siblings: this file merges Primitives → Tokens, so
-                              naming that key here would fail at load. A path needs no lookup and no
-                              second copy of the font stack.
+                              Drawn inline rather than named from Icons.xaml, because StaticResource
+                              reaches a dictionary's own merged children, never its siblings: this
+                              file merges Primitives → Tokens, so naming that key here would fail at
+                              load.
                             -->
                             <Path x:Name="Check" Visibility="Collapsed"
                                   Data="M 0,4.5 L 3.2,7.8 L 9,1.2"

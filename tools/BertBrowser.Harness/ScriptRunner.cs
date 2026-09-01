@@ -117,6 +117,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "refresh": Invoke(() => session.Tab.RefreshCommand.Execute(null)); break;
             case "enter": Enter(rest); break;
             case "tree-click": TreeClick(rest); break;
+            case "tree-expand": TreeExpand(rest); break;
 
             // selection
             case "select": Select(rest); break;
@@ -165,6 +166,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "content-fixture": ContentFixture(rest); break;
             case "sort": Sort(rest); break;
             case "theme": Theme(rest); break;
+            case "drives-view": DrivesView(rest); break;
+            case "tree-scroll": TreeScroll(rest); break;
 
             // capturing and reading back
             case "shot": Shot(rest); break;
@@ -515,6 +518,36 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         session.Settle(quietMs: 200);
     }
 
+    /// <summary>Expands (or collapses) a row's chevron without selecting it — a drive opened this
+    /// way stays expanded alongside whichever one the active tab is browsing, unlike
+    /// <see cref="TreeClick"/>, which navigates and so promotes/collapses siblings.</summary>
+    private void TreeExpand(string rest)
+    {
+        var (pathPart, expand) = ParseExpandArg(rest);
+        var path = _sandbox.Resolve(pathPart);
+
+        session.Dispatcher.Invoke(() =>
+        {
+            var node = TreeNode(session.Shell.Tree.Roots.OfType<DirectoryNodeViewModel>(), path)
+                ?? throw new AssertionException(
+                    $"The tree has no row for '{path}' showing; navigate there or to its parent first.");
+
+            node.IsExpanded = expand;
+        });
+
+        session.Settle(quietMs: 200);
+    }
+
+    private static (string path, bool expand) ParseExpandArg(string rest)
+    {
+        rest = Require(rest, "tree-expand").Trim();
+        if (rest.EndsWith(" off", StringComparison.OrdinalIgnoreCase))
+            return (rest[..^4].TrimEnd(), false);
+        if (rest.EndsWith(" on", StringComparison.OrdinalIgnoreCase))
+            return (rest[..^3].TrimEnd(), true);
+        return (rest, true);
+    }
+
     private static DirectoryNodeViewModel? TreeNode(
         IEnumerable<DirectoryNodeViewModel> nodes, string path)
     {
@@ -612,9 +645,23 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
                 Invoke(() => session.Tab.FileList.ColumnLayout = null);
                 break;
 
+            // The header menu's "Set as default for new tabs". Reachable from a script because it
+            // is the only way to put an arrangement in front of the settings page, which reads the
+            // saved default and not the tab.
+            case "default":
+                Invoke(() =>
+                {
+                    var settings = session.Services.GetRequiredService<AppSettings>();
+                    settings.FileListColumns = ColumnLayoutRules
+                        .Normalize(session.Tab.FileList.ColumnLayout)
+                        .Select(c => c.Copy())
+                        .ToList();
+                });
+                break;
+
             default:
                 throw new FormatException(
-                    $"columns wants add, remove, move, width or reset, got '{verb}'.");
+                    $"columns wants add, remove, move, width, reset or default, got '{verb}'.");
         }
 
         void Edit(Func<IReadOnlyList<ColumnSetting>?, IReadOnlyList<ColumnSetting>> change) =>
@@ -1636,6 +1683,37 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         session.Settle(quietMs: 400);
     }
 
+    /// <summary>Scrolls the sidebar's folder tree to a vertical offset, in pixels — the only way
+    /// to exercise its scroll-driven sticky headers (<c>PinnedRow</c>/<c>PinnedRootRow</c>) from a
+    /// script, since nothing here synthesises real mouse-wheel input.</summary>
+    private void TreeScroll(string rest)
+    {
+        var offset = double.Parse(Require(rest, "tree-scroll"), CultureInfo.InvariantCulture);
+        var tree = FindNamed<TreeView>("FolderTree")
+            ?? throw new InvalidOperationException("FolderTree is not in the visual tree.");
+        var scroller = VisualTreeUtil.FindDescendant<ScrollViewer>(tree)
+            ?? throw new InvalidOperationException("FolderTree has no ScrollViewer yet.");
+
+        Invoke(() => scroller.ScrollToVerticalOffset(offset));
+        session.Settle();
+    }
+
+    /// <summary>Switches the "DRIVES &amp; DEVICES" sidebar section between its tree and card
+    /// layouts — what clicking the header's toggle button does.</summary>
+    private void DrivesView(string rest)
+    {
+        var mode = Require(rest, "drives-view").ToLowerInvariant() switch
+        {
+            "tree" => DrivesViewMode.Tree,
+            "cards" => DrivesViewMode.Cards,
+            var other => throw new FormatException(
+                $"drives-view wants tree or cards, got '{other}'."),
+        };
+
+        Invoke(() => session.Shell.DrivesViewMode = mode);
+        session.Settle();
+    }
+
     private void Sort(string rest)
     {
         var wanted = Require(rest, "sort");
@@ -1744,6 +1822,59 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         }
     }
 
+    /// <summary>
+    /// The "Add column" list, in a bare window so <c>dialog</c> can photograph it.
+    /// </summary>
+    /// <remarks>
+    /// In the app it lives in a <c>Popup</c>, which is not a <see cref="Window"/> and so has nothing
+    /// for the capture to walk. The window contributes no chrome of its own — what is in the picture
+    /// is the panel's own border, which is all a popup ever shows.
+    /// </remarks>
+    /// <summary>
+    /// The Columns page with a row being dragged, i.e. showing the insertion line.
+    /// </summary>
+    /// <remarks>
+    /// The line is placed rather than dragged into place: a run posts no mouse input, so this is the
+    /// only way it is ever on screen in a capture. It is also the regression test for the crash that
+    /// made this whole gesture unusable — building the line threw, because its pen held a live theme
+    /// brush and a Freezable holding one cannot be frozen. Reaching a screenshot at all proves the
+    /// adorner constructs and renders against the real theme.
+    /// </remarks>
+    private Window ColumnsPageMidDrag()
+    {
+        var window = new SettingsWindow(SettingsFor(SettingsCategory.Columns));
+        window.Loaded += (_, _) =>
+        {
+            if (window.FindName("ColumnDefaultsList") is not ListBox list)
+                throw new AssertionException("The Columns page has no ColumnDefaultsList.");
+
+            // Containers are generated by the layout pass, and the line is positioned off them.
+            list.UpdateLayout();
+            if (ListReorderDrag.ShowInsertionLine(list, 2) is null)
+                throw new AssertionException("The column list has no adorner layer to draw on.");
+        };
+        return window;
+    }
+
+    private Window ColumnAddPanelWindow()
+    {
+        // Blocking, deliberately, and only here: the panel fills its second half when the property
+        // system comes back, and a screenshot taken before that says "reading…" some runs and lists
+        // the machine on others.
+        ColumnAddPanel.Preload().GetAwaiter().GetResult();
+
+        var panel = new ColumnAddPanel();
+        panel.Bind(() => session.Tab.FileList.ColumnLayout);
+        return new Window
+        {
+            Content = panel,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+        };
+    }
+
     private SettingsViewModel SettingsFor(SettingsCategory category)
     {
         var vm = new SettingsViewModel(
@@ -1808,11 +1939,9 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         // photographed at all.
         "settings-columns" => new SettingsWindow(SettingsFor(SettingsCategory.Columns)),
 
-        "columns" => ColumnPickerDialog.Create(
-            session.Window, session.Tab.FileList.ResolvedColumns
-                .Where(c => !c.Injected)
-                .Select(c => new ColumnSetting(c.Id, c.Width))
-                .ToList()),
+        "settings-columns-dragging" => ColumnsPageMidDrag(),
+
+        "columns" => ColumnAddPanelWindow(),
 
         "theme-editor" => new ThemeEditorWindow(new AppearanceViewModel(
             session.Services.GetRequiredService<IThemeService>())),

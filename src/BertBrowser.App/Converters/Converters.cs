@@ -84,6 +84,24 @@ public sealed class ColorAlphaToOpacityConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+/// <summary>An enum value's name compared against <c>ConverterParameter</c>, as Visibility — for
+/// swapping between more than two mutually exclusive views (e.g. the drives sidebar's Tree vs
+/// Cards mode), where a plain bool converter doesn't fit.</summary>
+public sealed class EnumEqualsVisibilityConverter : IValueConverter
+{
+    public bool Invert { get; set; }
+
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        var equal = value?.ToString() == parameter?.ToString();
+        if (Invert) equal = !equal;
+        return equal ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
 /// <summary>
 /// Tree nesting depth to a left margin, so indentation lives inside the row and the
 /// row's highlight/hit area can span the full width of the tree panel.

@@ -267,4 +267,56 @@ public class ColumnLayoutRulesTests
     [Fact]
     public void CaptureOrderSnapsADraggedNameColumnBackToTheFront() =>
         Assert.Equal(["Name", "Size", "Type"], Ids(ColumnLayoutRules.CaptureOrder(["Size", "Type", "Name"], null)));
+
+    // --- Stepping a width with the wheel ---
+
+    [Fact]
+    public void AWheelNotchMovesTheWidthByTen()
+    {
+        Assert.Equal(150, ColumnLayoutRules.StepWidth(140, 1, fine: false));
+        Assert.Equal(130, ColumnLayoutRules.StepWidth(140, -1, fine: false));
+    }
+
+    [Fact]
+    public void EachNotchOfOneEventCounts() =>
+        Assert.Equal(170, ColumnLayoutRules.StepWidth(140, 3, fine: false));
+
+    [Fact]
+    public void ACoarseNotchSnapsAnOffGridWidthOntoTheGrid()
+    {
+        // 137 up is 140, not 147. The point of a coarse step is that spinning the wheel walks a
+        // tidy sequence instead of carrying an arbitrary dragged width along with it forever.
+        Assert.Equal(140, ColumnLayoutRules.StepWidth(137, 1, fine: false));
+        Assert.Equal(130, ColumnLayoutRules.StepWidth(137, -1, fine: false));
+    }
+
+    [Fact]
+    public void AFineNotchMovesByOneAndDoesNotSnap()
+    {
+        Assert.Equal(138, ColumnLayoutRules.StepWidth(137, 1, fine: true));
+        Assert.Equal(136, ColumnLayoutRules.StepWidth(137, -1, fine: true));
+    }
+
+    [Fact]
+    public void SteppingStopsAtTheBoundsADraggedGripperStopsAt()
+    {
+        Assert.Equal(ColumnLayoutRules.MinWidth, ColumnLayoutRules.StepWidth(ColumnLayoutRules.MinWidth, -1, fine: false));
+        Assert.Equal(ColumnLayoutRules.MaxWidth, ColumnLayoutRules.StepWidth(ColumnLayoutRules.MaxWidth, 1, fine: false));
+    }
+
+    [Fact]
+    public void SteppingAnUnusableWidthRepairsItRatherThanPropagatingIt()
+    {
+        // NaN is what double-clicking a gripper leaves behind, and it is a real saved value. The
+        // wheel must not turn it into NaN + 10.
+        Assert.Equal(110, ColumnLayoutRules.StepWidth(double.NaN, -1, fine: false));
+        Assert.Equal(130, ColumnLayoutRules.StepWidth(double.PositiveInfinity, 1, fine: false));
+    }
+
+    [Fact]
+    public void NoNotchesLeavesTheWidthAloneButStillRepairsIt()
+    {
+        Assert.Equal(137, ColumnLayoutRules.StepWidth(137, 0, fine: false));
+        Assert.Equal(120, ColumnLayoutRules.StepWidth(double.NaN, 0, fine: false));
+    }
 }

@@ -1,0 +1,89 @@
+# The name -> picture mapping, and the only place a wrong icon can be introduced.
+#
+# Every icon the app draws is listed here by the job it does, not by a number. `build-icons.ps1`
+# fetches each one from Fluent UI System Icons (MIT, github.com/microsoft/fluentui-system-icons) and
+# writes src/BertBrowser.App/Resources/Icons.xaml. Call sites say Icon.Back; a name that is not in
+# this file fails to load rather than drawing the wrong thing.
+#
+# Why not the Segoe Fluent Icons font, which this replaced:
+#   - a call site was a bare codepoint, so nothing could tell E76E (a smiley face) from a split-pane
+#     button, and four wrong pictures shipped: E76F and E76E on the pane buttons, E8B0 (a mouse
+#     cursor) on "Open in new pane", E74B (a down arrow) on "Delete permanently".
+#   - the font is Windows 11 only. Windows 10 falls back to Segoe MDL2 Assets, where some of those
+#     codepoints are simply absent and render as tofu.
+#   - Segoe is licensed for use on Windows, not for redistribution, so its outlines could not be
+#     bundled to fix that.
+#
+# Format: Name | Fluent asset folder | file stem | size. Size picks the artwork's own grid; 20 is
+# the one drawn for small UI. To change a picture, change its line here and re-run the script —
+# never edit Icons.xaml by hand.
+
+# Navigation
+Back              | Arrow Left              | arrow_left              | 20
+Forward           | Arrow Right             | arrow_right             | 20
+Up                | Arrow Up                | arrow_up                | 20
+Refresh           | Arrow Clockwise         | arrow_clockwise         | 20
+
+# Window chrome. Dismiss is also the search box's clear and the pane's close.
+Minimize          | Subtract                | subtract                | 20
+Maximize          | Maximize                | maximize                | 20
+Restore           | Square Multiple         | square_multiple         | 20
+Dismiss           | Dismiss                 | dismiss                 | 20
+
+# Panes and tabs
+SplitRight        | Layout Column Two       | layout_column_two       | 20
+SplitBelow        | Layout Row Two          | layout_row_two          | 20
+OpenInNewTab      | Tab Add                 | tab_add                 | 20
+OpenInNewPane     | Split Horizontal        | split_horizontal        | 20
+PreviewPane       | Panel Right             | panel_right             | 20
+DetailsList       | Apps List               | apps_list               | 20
+
+# File operations
+Cut               | Cut                     | cut                     | 20
+Copy              | Copy                    | copy                    | 20
+Paste             | Clipboard Paste         | clipboard_paste         | 20
+Rename            | Rename                  | rename                  | 20
+Delete            | Delete                  | delete                  | 20
+DeletePermanent   | Delete Dismiss          | delete_dismiss          | 20
+MoveToFolder      | Folder Arrow Right      | folder_arrow_right      | 20
+Undo              | Arrow Undo              | arrow_undo              | 20
+
+# Creating things
+Add               | Add                     | add                     | 20
+NewFile           | Document                | document                | 20
+NewFolder         | Folder Add              | folder_add              | 20
+Archive           | Folder Zip              | folder_zip              | 20
+
+# Launching other programs
+Open              | Open                    | open                    | 20
+Terminal          | Window Console          | window_console          | 20
+VSCode            | Code                    | code                    | 20
+Shield            | Shield                  | shield                  | 20
+
+# Everything else
+Search            | Search                  | search                  | 20
+Settings          | Settings                | settings                | 20
+Properties        | Info                    | info                    | 20
+Bookmark          | Star                    | star                    | 20
+DiskUsage         | Data Pie                | data_pie                | 20
+Indexing          | Pulse                   | pulse                   | 20
+Reorder           | Re Order Dots Vertical  | re_order_dots_vertical  | 20
+
+# Dialog severity. MessageDialog and DeleteDialog pick one of these by kind.
+Warning           | Warning                 | warning                 | 20
+Error             | Error Circle            | error_circle            | 20
+Info              | Info                    | info                    | 20
+
+# Settings categories. Preview reuses PreviewPane and New items reuses Add, because they are the
+# same idea in a different place; a second name for the same picture would just be a second thing
+# to keep in step.
+Appearance        | Color                   | color                   | 20
+Columns           | Column Triple           | column_triple           | 20
+
+# A user-defined command in a context menu. This is why the manifest exists: it used to share
+# codepoint E8A7 with "Open in new tab", so one number meant two unrelated things.
+CustomCommand     | Apps                    | apps                    | 20
+
+# "Files you have more than one of" — a different idea from the clipboard's Copy, which it used to
+# share codepoint E8C8 with.
+Duplicates        | Document Multiple       | document_multiple       | 20

@@ -72,7 +72,8 @@ you where and what to watch for.
 | Archives (zip/7z/tar/rar) | `Core/Services/Archives/*` (`ArchivePath`, `ArchiveReader`, `ArchiveIndexBuilder`) |
 | Theming | `Core/Theming/*` (`ThemeCatalog`, `ThemeResolver`), `App/Theming/*` |
 | App icon | `tools/icon/build-app-icon.ps1` → `src/BertBrowser.App/Assets/app.ico` |
-| Columns (file list) | `Core/Services/Columns/*` (`ColumnCatalog`, `ColumnLayoutRules`), `Interop/ShellProperties` |
+| Icons | `tools/icon/icons.txt` (the mapping) → `Resources/Icons.xaml` (generated), `IconPath`/`MenuIconPath`/`IconContent` in `Styles.xaml`, `tools/icon/IconSheet` |
+| Columns (file list) | `Core/Services/Columns/*` (`ColumnCatalog`, `ColumnLayoutRules`, `ColumnCandidates`), `Interop/ShellProperties`, `Views/ColumnAddPanel` |
 | Tabs / panes / layout | `App/ViewModels/DirectoryTabViewModel`, `PaneViewModel`, `ShellViewModel`, `Core/Layout/LayoutTree.cs` |
 | UI test harness | `tools/BertBrowser.Harness`, `tools/ui/*.bbs`, `.claude/skills/verify` |
 
@@ -108,8 +109,25 @@ you where and what to watch for.
 - **Never launch the app to check UI work.** Use the `verify` skill / harness. `RenderTargetBitmap`
   re-renders the visual tree offscreen; posted input goes through `WM_KEYDOWN`/`WM_CHAR`, not
   `SendKeys`. Dialogs are shown modelessly and screenshotted, never `ShowDialog`.
+- **Icons are named, never numbered.** A wrong picture is the one UI mistake nothing catches: it
+  compiles, renders, and passes every test. Call sites say `Data="{StaticResource Icon.Back}"`, so a
+  bad name fails at load instead. Add one by editing `tools/icon/icons.txt` and re-running
+  `pwsh tools/icon/build-icons.ps1` — never hand-edit the generated `Resources/Icons.xaml` — then
+  **look at it**: `dotnet run --project tools/icon/IconSheet` sheets every icon with its name to a
+  PNG (no window is shown). Drawn outlines from Fluent UI System Icons (MIT), not the Segoe font,
+  which is Windows-11-only and not redistributable. What the codepoints cost before: `E76E` was a
+  smiley face on the split-pane button, `E8B0` a mouse cursor on "Open in new pane", `E74B` a down
+  arrow on "Delete permanently", and one number meant two things twice over (`E8A7` = new tab *and*
+  custom command; `E8C8` = Copy *and* Find duplicates).
 - **Theme colors**: no literal colors in XAML/C# — always a `Theme.*` token. `ThemeCatalogTests`
   contrast-checks every built-in; darken a palette's colors if it fails AA.
+- **Never `Freeze()` anything holding a theme brush.** The `Theme.*` brushes are shared mutable
+  instances — that is how a theme change recolours everything in place — so a `Pen`, `Drawing` or
+  `GeometryDrawing` built over one is not freezable and `Freeze()` *throws* rather than merely
+  pinning the colour. It has taken the app down once (`ListReorderDrag`, on the first mouse-move of
+  a drag) after `MarqueeSelector` had already been fixed for it. Leave it unfrozen and it repaints
+  on a theme change for free; freeze a `SolidColorBrush` you built yourself from a `ThemeColor`
+  instead (`TreemapCanvas` does).
 - **When editing a doc file with load-bearing prose** (this file, `docs/*.md`), keep new content as
   terse pointers/gotchas, not a re-narration of the code — the code and its tests are the source of
   truth; this file is a map, not a manual.

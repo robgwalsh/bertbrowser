@@ -13,7 +13,7 @@
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Padding" Value="6,2"/>
             <Setter Property="Foreground" Value="{StaticResource Theme.Text.Secondary}"/>
-            <Setter Property="FontFamily" Value="{StaticResource SymbolFont}"/>
+            <Setter Property="ContentTemplate" Value="{StaticResource IconContent}"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="Template">
                 <Setter.Value>
@@ -109,7 +109,7 @@
                                         <DockPanel>
                                             <Button DockPanel.Dock="Right" Style="{StaticResource TabStripButton}"
                                                     Margin="6,0,0,0" Padding="3,0" ToolTip="Close tab (Ctrl+W)"
-                                                    Content="&#xE711;"
+                                                    Content="{StaticResource Icon.Dismiss}"
                                                     Command="{Binding DataContext.CloseTabCommand,
                                                                       RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                     CommandParameter="{Binding}"/>
@@ -123,17 +123,17 @@
                     </ScrollViewer>
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="4,0">
-                        <Button Style="{StaticResource TabStripButton}" Content="&#xE710;"
+                        <Button Style="{StaticResource TabStripButton}" Content="{StaticResource Icon.Add}"
                                 ToolTip="New tab (Ctrl+T)" Command="{Binding NewTabCommand}"/>
                         <Border Width="1" Margin="4,5" Background="{StaticResource Theme.Border.Subtle}"/>
-                        <Button Style="{StaticResource TabStripButton}" Content="&#xE76F;"
+                        <Button Style="{StaticResource TabStripButton}" Content="{StaticResource Icon.SplitRight}"
                                 ToolTip="Split pane to the right (Ctrl+Alt+Right)"
                                 Command="{Binding SplitVerticalCommand}"/>
-                        <Button Style="{StaticResource TabStripButton}" Content="&#xE76E;"
+                        <Button Style="{StaticResource TabStripButton}" Content="{StaticResource Icon.SplitBelow}"
                                 ToolTip="Split pane below (Ctrl+Alt+Down)"
                                 Command="{Binding SplitHorizontalCommand}"/>
                         <Button x:Name="ClosePaneButton" Style="{StaticResource TabStripButton}"
-                                Content="&#xE8BB;" ToolTip="Close pane (Ctrl+Shift+W)"
+                                Content="{StaticResource Icon.Dismiss}" ToolTip="Close pane (Ctrl+Shift+W)"
                                 Command="{Binding ClosePaneCommand}"/>
                     </StackPanel>
                 </Grid>

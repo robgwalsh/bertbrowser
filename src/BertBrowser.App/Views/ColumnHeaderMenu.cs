@@ -69,8 +69,27 @@ internal sealed class ColumnHeaderMenu
             _menu.Items.Add(submenu);
         }
 
+        // Anything showing that neither list above named — a property added through the picker,
+        // which offers the machine's whole property system. Without this its only way back off would
+        // be the settings page: the picker adds and never removes, so the tick here is the one thing
+        // that can turn it off again.
+        var extra = current
+            .Where(c => !ColumnCatalog.BuiltIns.Any(s => s.Id.Equals(c.Id, StringComparison.OrdinalIgnoreCase)))
+            .Where(c => !ColumnCatalog.Curated.Any(s => s.Id.Equals(c.Id, StringComparison.OrdinalIgnoreCase)))
+            .Select(c => ColumnCatalog.TryGet(c.Id))
+            .OfType<ColumnSpec>()
+            .ToList();
+
+        if (extra.Count > 0)
+        {
+            _menu.Items.Add(new Separator());
+            foreach (var spec in extra) _menu.Items.Add(Checkable(spec, showing));
+        }
+
         _menu.Items.Add(new Separator());
 
+        // This item is at the bottom of a menu most of a window tall, so what opens from it is
+        // placed at the pointer rather than anywhere in the window — see ColumnAddPopup.
         var more = new MenuItem { Header = "More columns…" };
         more.Click += (_, _) => _more();
         _menu.Items.Add(more);

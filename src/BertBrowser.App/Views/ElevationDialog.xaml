@@ -24,14 +24,14 @@
         </StackPanel>
 
         <DockPanel>
-            <!-- Segoe Fluent Icons E1A8, the shield, through the app's own SymbolFont — the same
-                 glyph the "Run as administrator" menu item uses. Deliberately not the OS stock
+            <!-- The same shield the "Run as administrator" menu item uses, from Icons.xaml.
+                 Deliberately not the OS stock
                  shield from SHGetStockIconInfo: that is a system-drawn colour bitmap and would be
                  the one unthemed thing in an app whose entire theming section exists because
                  MessageBox cannot be themed. -->
-            <TextBlock x:Name="Glyph" DockPanel.Dock="Left" FontSize="22" Margin="0,0,12,0"
-                       VerticalAlignment="Top" FontFamily="{StaticResource SymbolFont}"
-                       Foreground="{StaticResource Theme.Text.Link}" Text="&#xEA18;"/>
+            <Path Style="{StaticResource IconPath}" x:Name="Glyph" DockPanel.Dock="Left" Width="22" Height="22" Margin="0,0,12,0"
+                       VerticalAlignment="Top"
+                       Fill="{StaticResource Theme.Text.Link}" Data="{StaticResource Icon.Shield}"/>
             <StackPanel>
                 <TextBlock x:Name="Headline" TextWrapping="Wrap" FontWeight="SemiBold"/>
                 <TextBlock x:Name="Explanation" TextWrapping="Wrap" Margin="0,6,0,0"

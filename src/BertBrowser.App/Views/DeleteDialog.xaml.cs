@@ -45,11 +45,10 @@ public partial class DeleteDialog : ThemedWindow
         InitializeComponent();
 
         Title = plan.Permanent ? "Delete permanently" : "Delete";
-        // Segoe Fluent Icons: Warning for the ordinary case, the heavier Error mark when there is
-        // no way back.
-        Glyph.Text = char.ConvertFromUtf32(plan.Permanent ? 0xE783 : 0xE7BA);
+        // Warning for the ordinary case, the heavier Error mark when there is no way back.
+        Glyph.Data = (Geometry)FindResource(plan.Permanent ? "Icon.Error" : "Icon.Warning");
         if (plan.Permanent && TryFindResource(ThemeToken.ErrorForeground) is Brush error)
-            Glyph.Foreground = error;
+            Glyph.Fill = error;
 
         HeadingText.Text = Heading(plan);
         PermanentBanner.Visibility = plan.Permanent ? Visibility.Visible : Visibility.Collapsed;

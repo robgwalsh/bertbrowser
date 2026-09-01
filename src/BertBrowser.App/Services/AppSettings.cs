@@ -2,6 +2,24 @@ using System.Text.Json;
 
 namespace BertBrowser.App.Services;
 
+/// <summary>How the "DRIVES &amp; DEVICES" sidebar section is laid out.</summary>
+public enum DrivesViewMode
+{
+    /// <summary>The existing expandable folder tree, rooted at each drive/device.</summary>
+    Tree,
+
+    /// <summary>Each drive/device as a card in a flat list; clicking one opens it per
+    /// <see cref="AppSettings.DrivesOpenTarget"/> rather than navigating in place.</summary>
+    Cards,
+}
+
+/// <summary>Where selecting a drive/device in Cards view (or its context menu) opens it.</summary>
+public enum DrivesOpenTarget
+{
+    NewTab,
+    NewPanel,
+}
+
 public sealed class AppSettings
 {
     public double? WindowLeft { get; set; }
@@ -157,6 +175,15 @@ public sealed class AppSettings
     /// same reasoning <see cref="ShowPreviewPane"/> carries.
     /// </remarks>
     public bool EnterArchivesOnDoubleClick { get; set; } = true;
+
+    /// <summary>How the "DRIVES &amp; DEVICES" sidebar section is displayed. Not nullable: "never
+    /// configured" and "the tree" mean the same thing, matching the existing tree-only behavior.</summary>
+    public DrivesViewMode DrivesViewMode { get; set; } = DrivesViewMode.Tree;
+
+    /// <summary>Where selecting a drive/device opens it. Only observable in Cards view — the tree
+    /// keeps navigating the active tab in place, as it always has. Defaults to a new tab, matching
+    /// every other "open elsewhere" action in the app (bookmarks, the tree's own context menu).</summary>
+    public DrivesOpenTarget DrivesOpenTarget { get; set; } = DrivesOpenTarget.NewTab;
 
     private static string FilePath => AppPaths.SettingsPath;
 

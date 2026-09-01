@@ -53,9 +53,8 @@
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <StackPanel Orientation="Horizontal">
-                            <!-- Only the glyph gets the symbol font; the label would be tofu. -->
-                            <TextBlock Text="{Binding Glyph}" FontFamily="{StaticResource SymbolFont}"
-                                       FontSize="15" Width="24" VerticalAlignment="Center"/>
+                            <Path Style="{StaticResource IconPath}" Data="{Binding Icon}"
+                                  Width="16" Height="16" Margin="0,0,8,0" VerticalAlignment="Center"/>
                             <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
                         </StackPanel>
                     </DataTemplate>
@@ -90,6 +89,11 @@
                               IsChecked="{Binding EnterArchivesOnDoubleClick}"/>
                     <TextBlock Style="{StaticResource Hint}"
                                Text="Double-clicking a zip, 7z, tar or rar walks into it. With this off they open in whichever program owns them — and the breadcrumb, Enter and typing the path still go in."/>
+
+                    <CheckBox Content="Open drives/devices in a new panel" Margin="0,12,0,0"
+                              IsChecked="{Binding OpenDrivesInNewPanel}"/>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="In the sidebar's card view of DRIVES &amp; DEVICES, clicking a drive or device opens it in a new panel instead of a new tab."/>
 
                     <DockPanel>
                         <TextBlock Text="Vertical scroll speed" VerticalAlignment="Center"/>
@@ -354,70 +358,111 @@
                         </Style>
                     </DockPanel.Style>
 
-                    <TextBlock DockPanel.Dock="Top" Text="Columns" FontSize="18" Margin="0,0,0,4"/>
-                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,12"
+                    <TextBlock DockPanel.Dock="Top" Text="Columns" Style="{StaticResource PageHeading}"
+                               Margin="0,0,0,4"/>
+                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,10"
                                Foreground="{StaticResource Theme.Text.Secondary}"
                                Text="What a new tab starts with. Columns are per tab, so you can also right-click any column header to change just the tab you are in. Tabs you have already arranged by hand are left alone."/>
 
+                    <!-- Two buttons where there were four: the popup behind Add reaches the whole
+                         property system, and dragging a row replaced the up and down pair. -->
                     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,10,0,0">
-                        <ComboBox x:Name="ColumnToAddBox" Width="220" Margin="0,0,6,0"
-                                  ItemsSource="{Binding AvailableColumns}"
-                                  SelectedItem="{Binding ColumnToAdd, Mode=TwoWay}">
-                            <!-- ItemTemplate, never DisplayMemberPath: a retemplated ComboBox renders
-                                 its closed state from SelectionBoxItemTemplate, which WPF derives
-                                 from ItemTemplate alone. -->
-                            <ComboBox.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding Header}"/>
-                                </DataTemplate>
-                            </ComboBox.ItemTemplate>
-                        </ComboBox>
-                        <Button Content="Add" Padding="12,3" Margin="0,0,6,0"
-                                Command="{Binding AddColumnCommand}"/>
-                        <!-- Everything the box above does not list: the machine's whole property
-                             system, the same picker the column header's menu opens. -->
-                        <Button Content="More columns…" Padding="12,3" Margin="0,0,6,0"
-                                Click="MoreColumns_Click"/>
-                        <Button Content="Reset" Padding="12,3"
-                                Command="{Binding ResetColumnsCommand}"/>
+                        <Button x:Name="AddColumnButton" Padding="10,3" Margin="0,0,6,0"
+                                Click="AddColumn_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Add}"
+                                           Width="11" Height="11" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <TextBlock Text="Add column"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Content="Reset" Padding="12,3" Command="{Binding ResetColumnsCommand}"/>
+                        <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11"
+                                   Foreground="{StaticResource Theme.Text.Muted}"
+                                   Text="Drag to reorder. Scroll a width to change it."/>
                     </StackPanel>
 
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="12"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
+                    <ListBox x:Name="ColumnDefaultsList"
+                             AutomationProperties.AutomationId="ColumnDefaultsList"
+                             ItemsSource="{Binding Columns}"
+                             SelectedItem="{Binding SelectedColumn, Mode=TwoWay}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             PreviewKeyDown="ColumnList_KeyDown">
+                        <ListBox.ItemContainerStyle>
+                            <!-- One line per column, not two: the canonical name moved onto the row
+                                 beside the header, which is what took the height off these. -->
+                            <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                                <Setter Property="Padding" Value="4,0"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Height="26">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <!-- Fixed rather than Auto: Name has no × and the width boxes would
+                                             otherwise sit a button further right on that one row. -->
+                                        <ColumnDefinition Width="26"/>
+                                    </Grid.ColumnDefinitions>
 
-                        <ListBox Grid.Column="0"
-                                 AutomationProperties.AutomationId="ColumnDefaultsList"
-                                 ItemsSource="{Binding Columns}"
-                                 SelectedItem="{Binding SelectedColumn, Mode=TwoWay}">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate>
-                                    <DockPanel Margin="2">
-                                        <TextBox DockPanel.Dock="Right" Width="60" Margin="8,0,0,0"
-                                                 ToolTip="Width in pixels"
-                                                 Text="{Binding Width, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:0}}"/>
-                                        <StackPanel>
-                                            <TextBlock Text="{Binding Header}"/>
-                                            <TextBlock Text="{Binding Detail}" FontSize="11"
-                                                       Foreground="{StaticResource Theme.Text.Secondary}"/>
-                                        </StackPanel>
+                                    <!-- The grip is a label, not a handle: the whole row is draggable,
+                                         and a target this small would be a worse one. E75F is the dot
+                                         gripper — E76F next to it is two thin bars that read as an
+                                         equals sign at this size. -->
+                                    <Path Style="{StaticResource IconPath}" Grid.Column="0" Data="{StaticResource Icon.Reorder}" Margin="2,0,8,0" Width="12" Height="12"
+                                               VerticalAlignment="Center" Opacity="0.55"/>
+
+                                    <!-- DockPanel, not a horizontal StackPanel: a stack hands both
+                                         children their full desired width, so the canonical name
+                                         would be hard-clipped by the column instead of trimmed. -->
+                                    <DockPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock DockPanel.Dock="Left" Text="{Binding Header}"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <!-- What lands in settings.json, and the only way to tell
+                                             two similarly-named properties apart. Empty for a
+                                             built-in, whose id is its header. -->
+                                        <TextBlock Text="{Binding Detail}" Margin="8,0,0,0"
+                                                   FontSize="11" VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Foreground="{StaticResource Theme.Text.Secondary}"/>
                                     </DockPanel>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
+                                    <TextBox Grid.Column="2" Width="52" VerticalAlignment="Center"
+                                             Padding="4,2" TextAlignment="Right"
+                                             ToolTip="Width in pixels. Scroll to change it, or hold Ctrl to scroll by one."
+                                             PreviewMouseWheel="ColumnWidth_Wheel"
+                                             Text="{Binding Width, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:0}}"/>
 
-                        <StackPanel Grid.Column="2" VerticalAlignment="Top">
-                            <Button Content="Remove" Padding="12,3" Margin="0,0,0,6"
-                                    Command="{Binding RemoveColumnCommand}"/>
-                            <Button Content="↑" Padding="9,3" Margin="0,0,0,6" ToolTip="Move up"
-                                    Command="{Binding MoveColumnUpCommand}"/>
-                            <Button Content="↓" Padding="9,3" ToolTip="Move down"
-                                    Command="{Binding MoveColumnDownCommand}"/>
-                        </StackPanel>
-                    </Grid>
+                                    <!-- Hover-revealed, so a list of columns reads as a list of
+                                         columns rather than a column of buttons. Absent on Name,
+                                         the one row that cannot be removed. -->
+                                    <Button Grid.Column="3" Width="22" Height="22" Margin="4,0,0,0"
+                                            ToolTip="Remove this column"
+                                            Visibility="{Binding Removable, Converter={StaticResource BoolToVisibility}}"
+                                            Command="{Binding DataContext.RemoveColumnCommand,
+                                                      RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                            CommandParameter="{Binding}">
+                                        <Button.Content>
+                                            <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Dismiss}"
+                                                       Width="11" Height="11"/>
+                                        </Button.Content>
+                                        <Button.Style>
+                                            <Style TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+                                                <Setter Property="Opacity" Value="0"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Value="True"
+                                                                 Binding="{Binding IsMouseOver,
+                                                                           RelativeSource={RelativeSource AncestorType=ListBoxItem}}">
+                                                        <Setter Property="Opacity" Value="1"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
                 </DockPanel>
                 <!-- Custom context menu commands -->
                 <DockPanel>

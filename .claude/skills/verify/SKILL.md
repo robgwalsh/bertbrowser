@@ -75,6 +75,9 @@ go <path>                   navigate the active tab (relative paths resolve in t
 up | back | forward | refresh
 enter <name>                open a folder row, as double-click does
 tree-click <path>           click a folder in the sidebar tree (it must be showing already)
+tree-expand <path> [on|off] toggle a row's chevron without selecting it (default on) — unlike
+                            tree-click this doesn't navigate, so it won't promote/collapse siblings;
+                            the only way to get two drive/device roots expanded at once
 
 select <name>[, <name>…] | select-all | deselect
 
@@ -119,6 +122,13 @@ hidden on|off | thumbnails <0..1> | sort <column-id> | theme <id>
                             (sort takes any catalogue id: Name, Size, Type, Modified, Created,
                             Accessed, Extension, or a canonical name such as
                             System.Image.Dimensions. "date" still means Modified.)
+drives-view tree|cards      the "DRIVES & DEVICES" sidebar section's layout — what clicking its
+                            header toggle button does
+tree-scroll <px>            scrolls the sidebar's folder tree to a vertical offset, in pixels —
+                            the only way to exercise PinnedRow/PinnedRootRow's scroll-driven
+                            sticky headers, since nothing here synthesises mouse-wheel input
+                            (PinnedRow itself is Depth-aware: it renders as the drive/device tile
+                            style when pinning a root browsed directly, not just PinnedRootRow)
 preview on|off              the active tab's preview pane, with its debounce and off-thread read
                             waited out (so assert after this, not straight after a `select`)
 preview-mode auto|raw|hex   the pane's view override; sticky across selections, settled the same
@@ -128,9 +138,15 @@ shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, rename-advanced,
                             delete, delete-permanent, message, warning, properties, settings,
                             theme-editor, disk-usage, duplicates, search-syntax, extract,
-                            compress, archive-password, elevation, settings-columns, columns
+                            compress, archive-password, elevation, settings-columns, columns,
+                            settings-columns-dragging
                             (settings opens on General, so settings-columns is how the Columns
-                            page gets photographed at all)
+                            page gets photographed at all; it shows the *saved default*, so put an
+                            arrangement in front of it with `columns default` first.
+                            `columns` is the Add-column list, which the app shows in a Popup —
+                            not a Window — so the harness hosts it in a bare one to photograph it)
+                            (settings-columns-dragging is that page with a row being dragged: the
+                            insertion line is placed, not dragged, because a run posts no mouse input)
                             (new-folder/new-file/search-syntax need no selection; every other
                             kind uses one.
                             rename-advanced is the rename dialog with its options panel open —
@@ -147,6 +163,8 @@ columns add|remove <id>     edit the active tab's columns through ColumnLayoutRu
 columns move <id> <index>   functions the header menu and a header drag go through
 columns width <id> <px>
 columns reset               back to the saved default
+columns default             the header menu's "Set as default for new tabs" — what the settings
+                            page reads, and the only way to seed it from a script
 menu columns [name]         PNG of the column header menu's items. They are rendered detached, not
                             opened: a ContextMenu is a Popup with its own top-level window that WPF
                             repositions onto the nearest monitor, i.e. onto the user's screen

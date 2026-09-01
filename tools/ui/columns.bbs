@@ -147,6 +147,39 @@ sort Name
 columns add Created
 menu columns 06-column-menu
 
+# A property added through the popup is showing but is on neither the built-in nor the curated
+# list, so without the group the menu grows for it there would be no way to turn it off again:
+# the popup only ever adds. Photographed, because the group is built only when there is one.
+columns add System.DateAcquired
+menu columns 07-column-menu-extra
+columns remove System.DateAcquired
+
+# --- The two surfaces the picker turned into ---
+#
+# The settings page, one line per column with a grip, the canonical name beside the header and a
+# width box the wheel drives. The row height and the vertical centring are the whole point of the
+# change and neither is assertable. Seeded with two shell properties, because theirs is the row
+# that can go wrong: the canonical name shares the line with the header now, and it is the half
+# that has to trim.
+columns reset
+columns add Created
+columns add System.Photo.CameraManufacturer
+columns default
+dialog settings-columns 08-columns-page
+columns reset
+columns default
+
+# The add list, in the bare window the harness hosts it in — in the app it is a Popup, which is not
+# a Window and has nothing for a capture to walk. Its two sections come from ColumnCandidates,
+# which is unit tested; what this proves is that the second one arrives at all, since it is a few
+# hundred COM activations away and renders "Reading…" until it does.
+dialog columns 09-add-column
+
+# The reorder insertion line. Placed rather than dragged — a run posts no mouse input — and the
+# capture is secondary: building the line is what once crashed the app, so getting here is the test.
+dialog settings-columns-dragging 10-reorder-line
+
 assert-not-launched
 state
+
 

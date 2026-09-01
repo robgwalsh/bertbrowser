@@ -67,15 +67,15 @@
                 <DockPanel>
                     <!-- The glyph carries the syntax help: an unexplained filter language is an
                          undiscoverable one, and this is the only fixed thing beside the box. -->
-                    <TextBlock DockPanel.Dock="Left" FontFamily="{StaticResource SymbolFont}"
-                               Text="&#xE721;" FontSize="13" Margin="8,0,6,0"
-                               VerticalAlignment="Center" Foreground="{StaticResource Theme.Text.Secondary}"
+                    <Path Style="{StaticResource IconPath}" DockPanel.Dock="Left"
+                               Data="{StaticResource Icon.Search}" Width="13" Height="13" Margin="8,0,6,0"
+                               VerticalAlignment="Center" Fill="{StaticResource Theme.Text.Secondary}"
                                ToolTipService.InitialShowDelay="300"
                                ToolTip="{StaticResource SearchSyntaxToolTip}"/>
                     <Button DockPanel.Dock="Right" ToolTip="Clear search (Esc)"
                             Command="{Binding ClearSearchCommand}"
                             Style="{StaticResource SearchClearButton}">
-                        <TextBlock FontFamily="{StaticResource SymbolFont}" Text="&#xE711;" FontSize="12"/>
+                        <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Dismiss}" Width="12" Height="12"/>
                     </Button>
                     <Grid>
                         <!-- These ids repeat once per open tab now. Only the visible tab of each
@@ -183,21 +183,21 @@
                              it is above Open — and why right-clicking empty space, which opens this
                              same menu, gets it without needing its own affordance. -->
                         <MenuItem x:Name="NewMenuItem" Header="New">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE710;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Add}"/></MenuItem.Icon>
                             <MenuItem Header="Folder" InputGestureText="Ctrl+Shift+N"
                                       Click="ContextNewFolder_Click">
-                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8B7;"/></MenuItem.Icon>
+                                <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.NewFolder}"/></MenuItem.Icon>
                             </MenuItem>
                             <!-- The configured file types are built here at ContextMenuOpening. -->
                             <Separator x:Name="NewFileTypesSeparator"/>
                             <Separator/>
                             <MenuItem Header="Empty file…" Click="ContextNewEmptyFile_Click">
-                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE7C3;"/></MenuItem.Icon>
+                                <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.NewFile}"/></MenuItem.Icon>
                             </MenuItem>
                         </MenuItem>
                         <Separator/>
                         <MenuItem Header="Open" Click="ContextOpen_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8E5;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Open}"/></MenuItem.Icon>
                         </MenuItem>
                         <!-- Spelled out rather than folded into "Open" behind a modifier, for the
                              same reason Delete permanently… is below: a menu whose meaning depends
@@ -205,88 +205,88 @@
                              hide "with full access to this computer". -->
                         <MenuItem x:Name="RunAsAdminMenuItem" Header="Run as administrator"
                                   InputGestureText="Ctrl+Shift+Enter" Click="ContextRunAsAdmin_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xEA18;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Shield}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="OpenInNewTabMenuItem" Header="Open in new tab"
                                   Click="ContextOpenInNewTab_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8A7;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.OpenInNewTab}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="OpenInNewPaneMenuItem" Header="Open in new pane">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8B0;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.OpenInNewPane}"/></MenuItem.Icon>
                             <MenuItem Header="To the right" Click="ContextOpenInPaneRight_Click"/>
                             <MenuItem Header="Below" Click="ContextOpenInPaneBelow_Click"/>
                         </MenuItem>
                         <MenuItem x:Name="OpenInTerminalMenuItem" Header="Open in Terminal"
                                   Click="ContextOpenTerminal_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE756;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Terminal}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="OpenInVSCodeMenuItem" Header="Open in VS Code"
                                   Click="ContextOpenVSCode_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE943;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.VSCode}"/></MenuItem.Icon>
                         </MenuItem>
                         <!-- Folders only: a single file's size is already in the Size column, so
                              analysing one would only ever restate it. -->
                         <MenuItem x:Name="DiskUsageMenuItem" Header="Analyse disk usage…"
                                   InputGestureText="Ctrl+Shift+D" Click="ContextDiskUsage_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE9A9;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.DiskUsage}"/></MenuItem.Icon>
                         </MenuItem>
                         <!-- Folders only, for the same reason: one file cannot be a duplicate of
                              itself, so a single selected file has nothing to search. -->
                         <MenuItem x:Name="DuplicatesMenuItem" Header="Find duplicates…"
                                   InputGestureText="Ctrl+Shift+U" Click="ContextDuplicates_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C8;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Duplicates}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="CompressMenuItem" Header="Compress…"
                                   Click="ContextCompress_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xF012;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Archive}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="ExtractHereMenuItem" Header="Extract here"
                                   Click="ContextExtractHere_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8DE;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.MoveToFolder}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="ExtractToMenuItem" Header="Extract to…"
                                   Click="ContextExtractTo_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8DE;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.MoveToFolder}"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator/>
                         <MenuItem x:Name="CopyPathMenuItem" Header="Copy as path"
                                   InputGestureText="Ctrl+Shift+C" Click="ContextCopyPath_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C8;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Copy}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="CopyNameMenuItem" Header="Copy name" Click="ContextCopyName_Click"/>
                         <Separator/>
                         <MenuItem x:Name="CutMenuItem" Header="Cut" InputGestureText="Ctrl+X" Click="ContextCut_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C6;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Cut}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="CopyMenuItem" Header="Copy" InputGestureText="Ctrl+C" Click="ContextCopy_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C8;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Copy}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="PasteMenuItem" Header="Paste" InputGestureText="Ctrl+V" Click="ContextPaste_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE77F;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Paste}"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator/>
                         <MenuItem x:Name="RenameMenuItem" Header="Rename…" InputGestureText="F2"
                                   Click="ContextRename_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8AC;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Rename}"/></MenuItem.Icon>
                         </MenuItem>
                         <!-- Both spelled out rather than one entry that changes with Shift: a menu
                              whose meaning depends on a key you are not holding while you read it is
                              the wrong place to hide "cannot be undone". -->
                         <MenuItem x:Name="DeleteMenuItem" Header="Delete…" InputGestureText="Del"
                                   Click="ContextDelete_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE74D;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Delete}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="DeletePermanentlyMenuItem" Header="Delete permanently…"
                                   InputGestureText="Shift+Del" Click="ContextDeletePermanently_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE74B;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.DeletePermanent}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="BookmarkMenuItem" Header="Bookmark" Click="ContextBookmark_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE734;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Bookmark}"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator x:Name="CustomCommandsSeparator" Visibility="Collapsed"/>
                         <Separator/>
                         <MenuItem Header="Properties…" InputGestureText="Alt+Enter" Click="ContextProperties_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE946;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Properties}"/></MenuItem.Icon>
                         </MenuItem>
                     </ContextMenu>
                 </ListView.ContextMenu>

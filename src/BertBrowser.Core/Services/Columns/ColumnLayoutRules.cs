@@ -42,6 +42,35 @@ public static class ColumnLayoutRules
         return Math.Clamp(safe, MinWidth, MaxWidth);
     }
 
+    /// <summary>How far one notch of the wheel moves a width, and the grid a coarse step snaps to.</summary>
+    public const double WidthStep = 10;
+
+    /// <summary>
+    /// A width nudged by <paramref name="notches"/> turns of the wheel.
+    /// </summary>
+    /// <remarks>
+    /// A coarse step <b>snaps onto the grid</b> rather than adding to whatever arbitrary number a
+    /// dragged gripper left behind: from 137, up is 140. Otherwise spinning the wheel would carry
+    /// that 7 along forever, and the sequence a person watches go by would never look tidy. Fine
+    /// steps do not snap, because their whole purpose is reaching the number between the grid lines.
+    /// Everything lands through <see cref="SaneWidth"/>, so a <c>NaN</c> from an auto-sized column
+    /// is repaired here rather than becoming <c>NaN + 10</c>.
+    /// </remarks>
+    public static double StepWidth(double width, int notches, bool fine)
+    {
+        var from = SaneWidth(width, 120);
+        if (notches == 0) return from;
+
+        if (fine) return SaneWidth(from + notches, from);
+
+        // Snap first, then step, so the notch is never spent only on the snap: 137 up is 140 and
+        // 137 down is 130, both one visible move.
+        var grid = notches > 0
+            ? Math.Floor(from / WidthStep) * WidthStep
+            : Math.Ceiling(from / WidthStep) * WidthStep;
+        return SaneWidth(grid + (notches * WidthStep), from);
+    }
+
     /// <summary>
     /// The columns to show: the saved list, cleaned up, with the mode-driven ones put in place.
     /// </summary>

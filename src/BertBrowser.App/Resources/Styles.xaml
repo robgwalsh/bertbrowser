@@ -48,14 +48,13 @@
     <conv:DepthToIndentConverter x:Key="DepthToIndent" IndentSize="16"/>
     <conv:ColorAlphaToOpacityConverter x:Key="ColorAlphaToOpacity"/>
     <conv:ColorToBrushConverter x:Key="ColorToBrush"/>
+    <conv:EnumEqualsVisibilityConverter x:Key="EnumEqualsVisibility"/>
+    <conv:EnumEqualsVisibilityConverter x:Key="EnumNotEqualsVisibility" Invert="True"/>
 
     <!--
-      Windows-native icon glyphs. Segoe Fluent Icons is the Windows 11 shell font;
-      Segoe MDL2 Assets is the Windows 10 fallback (most codepoints are shared). Used
-      via glyph codepoints (see the Segoe Fluent Icons glyph list) on toolbar buttons
-      and menu items so icons inherit Foreground and stay crisp at any DPI.
+      Icons are drawn outlines in Resources/Icons.xaml, named for the job they do and generated
+      from tools/icon/icons.txt. Draw one with IconPath / MenuIconPath / IconContent below.
     -->
-    <FontFamily x:Key="SymbolFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
     <!--
       The theme picker's rows, in Settings and in the theme editor. This has to be an ItemTemplate
@@ -144,21 +143,45 @@
     </Style>
 
     <!-- Icon glyph inside a toolbar button; inherits the button's Foreground. -->
-    <Style x:Key="ToolbarIcon" TargetType="TextBlock">
-        <Setter Property="FontFamily" Value="{StaticResource SymbolFont}"/>
-        <Setter Property="FontSize" Value="15"/>
+    <!--
+      An icon. A drawn outline from Resources/Icons.xaml, not a font glyph — see tools/icon/icons.txt
+      for why, and always name one: Data="{StaticResource Icon.Back}".
+
+      Fill follows the *inherited* Foreground rather than being set, so an icon inside a button that
+      recolours its content on hover or when disabled recolours with it, exactly as a TextBlock glyph
+      used to. Size is Width/Height, not FontSize; Stretch=Uniform maps the artwork's own 20-unit
+      grid onto whatever size the call site asks for.
+    -->
+    <Style x:Key="IconPath" TargetType="Path">
+        <Setter Property="Width" Value="16"/>
+        <Setter Property="Height" Value="16"/>
+        <Setter Property="Stretch" Value="Uniform"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
         <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="Fill"
+                Value="{Binding Path=(TextElement.Foreground), RelativeSource={RelativeSource Self}}"/>
     </Style>
 
-    <!-- Icon glyph for a MenuItem.Icon slot. -->
-    <Style x:Key="MenuIcon" TargetType="TextBlock">
-        <Setter Property="FontFamily" Value="{StaticResource SymbolFont}"/>
-        <Setter Property="FontSize" Value="16"/>
-        <Setter Property="Foreground" Value="{StaticResource Theme.Menu.IconForeground}"/>
-        <Setter Property="VerticalAlignment" Value="Center"/>
-        <Setter Property="HorizontalAlignment" Value="Center"/>
+    <!-- Icon for a MenuItem.Icon slot, which sets its own colour rather than inheriting the
+         item's — a menu icon stays subdued while the label is highlighted. -->
+    <Style x:Key="MenuIconPath" TargetType="Path" BasedOn="{StaticResource IconPath}">
+        <Setter Property="Fill" Value="{StaticResource Theme.Menu.IconForeground}"/>
     </Style>
+
+    <!--
+      For a Button whose whole content is an icon: the style says ContentTemplate="{StaticResource
+      IconContent}" once, and every call site then reads Content="{StaticResource Icon.Close}".
+      That keeps a one-line call site, and keeps working through a Setter that swaps the icon —
+      which is how the caption button becomes Restore when the window maximises.
+
+      Size comes from the inherited FontSize the same way colour comes from the inherited Foreground,
+      so a button that already said FontSize="10" to size its glyph keeps its one size knob.
+    -->
+    <DataTemplate x:Key="IconContent">
+        <Path Style="{StaticResource IconPath}" Data="{Binding}"
+              Width="{Binding Path=(TextElement.FontSize), RelativeSource={RelativeSource Self}}"
+              Height="{Binding Path=(TextElement.FontSize), RelativeSource={RelativeSource Self}}"/>
+    </DataTemplate>
 
     <Style x:Key="BreadcrumbButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
         <Setter Property="Padding" Value="4,2"/>
@@ -309,6 +332,19 @@
                         <ItemsPresenter x:Name="ItemsHost"/>
                     </StackPanel>
                     <ControlTemplate.Triggers>
+                        <!-- Drive/device roots get a taller rectangular tile, flush against its
+                             neighbours and divided from them by a bottom border rather than a
+                             floating boxed card — this must come before the hover/selected
+                             triggers below so they still win when both apply; only its idle
+                             Background would otherwise be overridden. Exactly matches
+                             PinnedRootRow, which shows the very same row once it scrolls out of
+                             view — see the remark there. -->
+                        <DataTrigger Binding="{Binding Depth}" Value="0">
+                            <Setter TargetName="Bd" Property="MinHeight" Value="40"/>
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Theme.Border.Subtle}"/>
+                            <Setter TargetName="Bd" Property="BorderThickness" Value="0,0,0,1"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.Surface.Raised}"/>
+                        </DataTrigger>
                         <Trigger Property="IsExpanded" Value="False">
                             <Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed"/>
                         </Trigger>

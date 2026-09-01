@@ -129,7 +129,8 @@
                         </TextBox>
 
                         <Button Grid.Column="3" Width="24" Margin="4,0,0,0" Padding="0"
-                                Content="&#xE7A7;" FontFamily="{StaticResource SymbolFont}" FontSize="12"
+                                Content="{StaticResource Icon.Undo}"
+                                ContentTemplate="{StaticResource IconContent}" FontSize="12"
                                 ToolTip="Reset this colour to the theme's own"
                                 Visibility="{Binding IsOverridden, Converter={StaticResource BoolToVisibility}}"
                                 Command="{Binding DataContext.ResetTokenCommand,

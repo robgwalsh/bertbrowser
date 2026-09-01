@@ -14,15 +14,21 @@
         <Setter Property="Height" Value="32"/>
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{StaticResource Theme.TitleBar.Foreground}"/>
-        <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
-        <Setter Property="FontSize" Value="10"/>
         <Setter Property="IsTabStop" Value="False"/>
         <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <!-- The caption buttons draw their own icon rather than borrowing the shared
+                             IconContent template: this dictionary is merged before Styles.xaml, and
+                             StaticResource only sees what came before it. Content is the Geometry,
+                             so the maximise trigger still swaps it for Icon.Restore. 10x10 is the
+                             shell's own caption glyph size. -->
+                        <Path Data="{TemplateBinding Content}" Width="10" Height="10"
+                              Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
+                              Fill="{Binding Path=(TextElement.Foreground),
+                                             RelativeSource={RelativeSource Self}}"/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -49,7 +55,12 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <!-- This style replaces the base Template wholesale, so it repeats the icon
+                             Path rather than inheriting it. -->
+                        <Path Data="{TemplateBinding Content}" Width="10" Height="10"
+                              Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
+                              Fill="{Binding Path=(TextElement.Foreground),
+                                             RelativeSource={RelativeSource Self}}"/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <DataTrigger Value="True"
@@ -69,7 +80,11 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
-                        <ContentPresenter x:Name="Glyph" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <!-- Same again: this style replaces the base Template wholesale. -->
+                        <Path x:Name="Glyph" Data="{TemplateBinding Content}" Width="10" Height="10"
+                              Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
+                              Fill="{Binding Path=(TextElement.Foreground),
+                                             RelativeSource={RelativeSource Self}}"/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -139,13 +154,13 @@
                                 <StackPanel Grid.Column="3" Orientation="Horizontal"
                                             WindowChrome.IsHitTestVisibleInChrome="True">
                                     <Button x:Name="PART_Minimize" Style="{StaticResource CaptionButton}"
-                                            Content="&#xE921;" ToolTip="Minimise"
+                                            Content="{StaticResource Icon.Minimize}" ToolTip="Minimise"
                                             AutomationProperties.Name="Minimise"/>
                                     <Button x:Name="PART_Maximize" Style="{StaticResource CaptionMaximizeButton}"
-                                            Content="&#xE922;" ToolTip="Maximise"
+                                            Content="{StaticResource Icon.Maximize}" ToolTip="Maximise"
                                             AutomationProperties.Name="Maximise"/>
                                     <Button x:Name="PART_Close" Style="{StaticResource CaptionCloseButton}"
-                                            Content="&#xE8BB;" ToolTip="Close"
+                                            Content="{StaticResource Icon.Dismiss}" ToolTip="Close"
                                             AutomationProperties.Name="Close"/>
                                 </StackPanel>
                             </Grid>
@@ -163,7 +178,7 @@
                         </Trigger>
                         <Trigger Property="WindowState" Value="Maximized">
                             <Setter TargetName="Root" Property="BorderThickness" Value="0"/>
-                            <Setter TargetName="PART_Maximize" Property="Content" Value="&#xE923;"/>
+                            <Setter TargetName="PART_Maximize" Property="Content" Value="{StaticResource Icon.Restore}"/>
                             <Setter TargetName="PART_Maximize" Property="ToolTip" Value="Restore"/>
                         </Trigger>
                         <Trigger Property="IsActive" Value="False">

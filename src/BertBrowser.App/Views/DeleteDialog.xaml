@@ -11,9 +11,9 @@
          shape. -->
     <DockPanel Margin="16">
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-            <TextBlock x:Name="Glyph" DockPanel.Dock="Left" FontSize="22" Margin="0,0,12,0"
-                       VerticalAlignment="Top" FontFamily="{StaticResource SymbolFont}"
-                       Foreground="{StaticResource Theme.Warning.Foreground}"/>
+            <Path x:Name="Glyph" Style="{StaticResource IconPath}" DockPanel.Dock="Left"
+                       Width="22" Height="22" Margin="0,0,12,0" VerticalAlignment="Top"
+                       Fill="{StaticResource Theme.Warning.Foreground}"/>
             <StackPanel>
                 <TextBlock x:Name="HeadingText" FontSize="15" TextWrapping="Wrap"/>
                 <!-- Fills in as the survey walks the tree: how much is going matters more than how

@@ -42,15 +42,14 @@ public partial class MessageDialog : ThemedWindow
         dialog.MessageText.Text = message;
         dialog.CancelButton.Visibility = showCancel ? Visibility.Visible : Visibility.Collapsed;
 
-        // Segoe Fluent Icons codepoints: Warning, Error, Info.
-        var (glyph, token) = kind switch
+        var (icon, token) = kind switch
         {
-            MessageDialogKind.Warning => (0xE7BA, ThemeToken.WarningForeground),
-            MessageDialogKind.Error => (0xE783, ThemeToken.ErrorForeground),
-            _ => (0xE946, ThemeToken.TextLink),
+            MessageDialogKind.Warning => ("Icon.Warning", ThemeToken.WarningForeground),
+            MessageDialogKind.Error => ("Icon.Error", ThemeToken.ErrorForeground),
+            _ => ("Icon.Info", ThemeToken.TextLink),
         };
-        dialog.Glyph.Text = char.ConvertFromUtf32(glyph);
-        if (dialog.TryFindResource(token) is Brush brush) dialog.Glyph.Foreground = brush;
+        dialog.Glyph.Data = (Geometry)dialog.FindResource(icon);
+        if (dialog.TryFindResource(token) is Brush brush) dialog.Glyph.Fill = brush;
 
         return dialog;
     }

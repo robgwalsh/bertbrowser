@@ -1,0 +1,74 @@
+<UserControl x:Class="BertBrowser.App.Views.ColumnAddPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:v="clr-namespace:BertBrowser.App.Views"
+             Width="360" MaxHeight="440"
+             FocusManager.FocusedElement="{Binding ElementName=SearchBox}">
+    <UserControl.Resources>
+        <!-- A section heading, riding in the list rather than in a GroupStyle: the container style
+             below takes it out of the tab order and out of hit testing, so it cannot be hovered,
+             selected, arrowed onto, or clicked to add a column that is not there. -->
+        <DataTemplate DataType="{x:Type v:ColumnAddHeading}">
+            <TextBlock Text="{Binding Title}" Margin="0,10,0,4" FontSize="10.5"
+                       FontWeight="SemiBold" TextOptions.TextFormattingMode="Ideal"
+                       Foreground="{StaticResource Theme.Text.Muted}"/>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type v:ColumnAddChoice}">
+            <DockPanel>
+                <TextBlock Text="{Binding Detail}" DockPanel.Dock="Right" Margin="10,0,0,0"
+                           FontSize="11" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" MaxWidth="180"
+                           Foreground="{StaticResource Theme.Text.Secondary}"/>
+                <TextBlock Text="{Binding Header}" TextTrimming="CharacterEllipsis"/>
+            </DockPanel>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Border Background="{StaticResource Theme.Menu.Background}"
+            BorderBrush="{StaticResource Theme.Menu.Border}" BorderThickness="1"
+            TextElement.Foreground="{StaticResource Theme.Text.Primary}">
+        <DockPanel>
+            <!-- One field instead of a second "More columns…" button: the same box that narrows the
+                 curated list is what reaches past it into the machine's own property system. -->
+            <Grid DockPanel.Dock="Top" Margin="10,10,10,6">
+                <TextBox x:Name="SearchBox" Padding="22,4,6,4"
+                         TextChanged="Search_Changed" PreviewKeyDown="Search_KeyDown"/>
+                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Search}" Width="11" Height="11"
+                           Margin="7,0,0,0" IsHitTestVisible="False"
+                           HorizontalAlignment="Left" VerticalAlignment="Center"
+                           Fill="{StaticResource Theme.Text.Secondary}"/>
+                <TextBlock x:Name="SearchPlaceholder" Text="Search all properties"
+                           Margin="24,0,0,0" IsHitTestVisible="False" VerticalAlignment="Center"
+                           Foreground="{StaticResource Theme.Text.Placeholder}"/>
+            </Grid>
+
+            <!-- Which of the three empties this is: still reading the property system, nothing
+                 matched, or no room left. All three look identical without a line saying so. -->
+            <TextBlock x:Name="StatusText" DockPanel.Dock="Bottom" Margin="12,2,12,12"
+                       TextWrapping="Wrap" Visibility="Collapsed"
+                       Foreground="{StaticResource Theme.Text.Secondary}"/>
+
+            <ListBox x:Name="CandidateList"
+                     AutomationProperties.AutomationId="ColumnAddList"
+                     Background="Transparent" BorderThickness="0" Padding="0,0,0,6"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     KeyboardNavigation.DirectionalNavigation="Contained"
+                     PreviewMouseLeftButtonUp="Candidate_Click"
+                     PreviewKeyDown="List_KeyDown">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                        <Setter Property="Padding" Value="12,5"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsHeading}" Value="True">
+                                <Setter Property="Focusable" Value="False"/>
+                                <Setter Property="IsHitTestVisible" Value="False"/>
+                                <Setter Property="Padding" Value="12,0"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+            </ListBox>
+        </DockPanel>
+    </Border>
+</UserControl>

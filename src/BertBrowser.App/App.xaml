@@ -5,8 +5,12 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <!-- Theme first: Styles.xaml resolves its colours from the theme tokens with
-                     StaticResource, which is looked up at parse time. -->
+                <!-- Icons first, then theme, then styles. StaticResource is looked up at parse time
+                     and only sees dictionaries merged before it, so this order is the dependency
+                     order: Icons.xaml is pure geometry and depends on nothing, the window chrome
+                     inside Theme.xaml draws icons, and Styles.xaml resolves colours from the theme
+                     tokens. -->
+                <ResourceDictionary Source="Resources/Icons.xaml"/>
                 <ResourceDictionary Source="Resources/Theme/Theme.xaml"/>
                 <ResourceDictionary Source="Resources/Styles.xaml"/>
             </ResourceDictionary.MergedDictionaries>

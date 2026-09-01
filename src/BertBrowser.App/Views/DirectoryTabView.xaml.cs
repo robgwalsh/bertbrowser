@@ -225,17 +225,20 @@ public partial class DirectoryTabView : UserControl
         saveAsDefault: SaveColumnsAsDefault,
         more: ShowColumnPicker);
 
-    /// <summary>Opens the whole property system, for the columns the curated menu does not list.
-    /// Modal: it is a choice with an OK on it, unlike the analysis windows.</summary>
-    private void ShowColumnPicker()
-    {
-        var current = ColumnLayoutRules.Normalize(Tab.FileList.ColumnLayout);
-        var dialog = ColumnPickerDialog.Create(Window.GetWindow(this), current);
-        if (dialog.ShowDialog() != true) return;
-
-        Tab.FileList.ColumnLayout =
-            ColumnLayoutRules.ApplyPicked(Tab.FileList.ColumnLayout, dialog.Chosen);
-    }
+    /// <summary>
+    /// Opens the whole property system, for the columns the curated menu does not list.
+    /// </summary>
+    /// <remarks>
+    /// The same popup the settings page's Add button opens, so there is one list of what can be
+    /// added rather than a curated menu here and a dialog there. It opens at the pointer, not off
+    /// the file list: the menu item that reaches this is at the bottom of a very tall menu, and the
+    /// item itself has already closed by the time this runs, so it cannot be placed against.
+    /// </remarks>
+    private void ShowColumnPicker() => ColumnAddPopup.Show(
+        FileListView,
+        () => Tab.FileList.ColumnLayout,
+        id => Tab.FileList.ColumnLayout = ColumnLayoutRules.Toggle(Tab.FileList.ColumnLayout, id, on: true),
+        atMouse: true);
 
     /// <summary>Makes this tab's arrangement what a new tab starts from. Saved immediately, the way
     /// a theme change is: there is no dialog here to press Cancel in.</summary>

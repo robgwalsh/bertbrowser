@@ -75,19 +75,19 @@
             <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
                 <Button Style="{StaticResource ToolbarButton}" ToolTip="Back (Alt+Left)"
                         Command="{Binding ActiveTab.BackCommand}">
-                    <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE72B;"/>
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Back}"/>
                 </Button>
                 <Button Style="{StaticResource ToolbarButton}" ToolTip="Forward (Alt+Right)"
                         Command="{Binding ActiveTab.ForwardCommand}">
-                    <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE72A;"/>
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Forward}"/>
                 </Button>
                 <Button Style="{StaticResource ToolbarButton}" ToolTip="Up (Alt+Up)"
                         Command="{Binding ActiveTab.UpCommand}">
-                    <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE74A;"/>
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Up}"/>
                 </Button>
                 <Button Style="{StaticResource ToolbarButton}" ToolTip="Refresh (F5)"
                         Command="{Binding ActiveTab.RefreshCommand}">
-                    <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE72C;"/>
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Refresh}"/>
                 </Button>
             </StackPanel>
 
@@ -109,18 +109,18 @@
                             AutomationProperties.AutomationId="SearchSyntaxButton"
                             AutomationProperties.Name="Search syntax"
                             ToolTip="What you can type here">
-                        <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE946;"/>
+                        <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Properties}"/>
                     </Button>
 
                     <Border Style="{StaticResource HeaderFieldBorder}" Width="300">
                         <DockPanel>
-                            <TextBlock DockPanel.Dock="Left" FontFamily="{StaticResource SymbolFont}"
-                                       Text="&#xE721;" FontSize="13" Margin="8,0,6,0"
-                                       VerticalAlignment="Center" Foreground="{StaticResource Theme.Text.Secondary}"/>
+                            <Path Style="{StaticResource IconPath}" DockPanel.Dock="Left"
+                                       Data="{StaticResource Icon.Search}" Width="13" Height="13" Margin="8,0,6,0"
+                                       VerticalAlignment="Center" Fill="{StaticResource Theme.Text.Secondary}"/>
                             <Button DockPanel.Dock="Right" ToolTip="Clear search (Esc)"
                                     Command="{Binding ActiveTab.ClearSearchCommand}"
                                     Style="{StaticResource GlobalSearchClearButton}">
-                                <TextBlock FontFamily="{StaticResource SymbolFont}" Text="&#xE711;" FontSize="12"/>
+                                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Dismiss}" Width="12" Height="12"/>
                             </Button>
                             <Grid>
                                 <TextBox x:Name="GlobalSearchBox" BorderThickness="0" Background="Transparent"
@@ -175,7 +175,7 @@
                             </Style.Triggers>
                         </Style>
                     </Button.Style>
-                    <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE90D;"/>
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.PreviewPane}"/>
                 </Button>
 
                 <!-- "Show hidden items" lives in the Settings dialog only; it is a preference
@@ -184,20 +184,20 @@
                         ToolTip="Disk usage — what is taking up space (Ctrl+Shift+D)"
                         Command="{Binding AnalyseDiskUsageCommand}"
                         AutomationProperties.Name="Disk usage">
-                    <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE9A9;"/>
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.DiskUsage}"/>
                 </Button>
 
                 <Button Style="{StaticResource ToolbarButton}"
                         ToolTip="Duplicates — files you have more than one of (Ctrl+Shift+U)"
                         Command="{Binding FindDuplicatesCommand}"
                         AutomationProperties.Name="Duplicates">
-                    <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE8C8;"/>
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Duplicates}"/>
                 </Button>
 
                 <Button Style="{StaticResource ToolbarButton}"
                         ToolTip="Settings — appearance and custom context menu commands"
                         Click="Settings_Click">
-                    <TextBlock Style="{StaticResource ToolbarIcon}" Text="&#xE713;"/>
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Settings}"/>
                 </Button>
             </StackPanel>
 
@@ -277,8 +277,8 @@
                     <!-- StatusBar tokens, not Theme.Text.Link: the link colour is chosen to read
                          against the body background, and this strip is the accent colour. The
                          contrast suite covers these two against it. -->
-                    <TextBlock Style="{StaticResource ToolbarIcon}" FontSize="12" Text="&#xE9D9;"
-                               Foreground="{StaticResource Theme.StatusBar.Foreground}" Margin="10,0,4,0" VerticalAlignment="Center"/>
+                    <Path Style="{StaticResource IconPath}" Width="12" Height="12" Data="{StaticResource Icon.Indexing}"
+                               Fill="{StaticResource Theme.StatusBar.Foreground}" Margin="10,0,4,0" VerticalAlignment="Center"/>
                     <TextBlock Text="{Binding IndexingStatus}" Foreground="{StaticResource Theme.StatusBar.Foreground}"
                                VerticalAlignment="Center">
                         <TextBlock.Style>
@@ -307,8 +307,8 @@
             <!-- Thumbnail size: min = details list, dragging right grows thumbnails. -->
             <StatusBarItem DockPanel.Dock="Right">
                 <StackPanel Orientation="Horizontal" ToolTip="Thumbnail size — drag left for the details list">
-                    <TextBlock Style="{StaticResource ToolbarIcon}" FontSize="13" Text="&#xE8FD;"
-                               Margin="0,0,6,0" Foreground="{StaticResource Theme.Text.Secondary}" VerticalAlignment="Center"/>
+                    <Path Style="{StaticResource IconPath}" Width="13" Height="13" Data="{StaticResource Icon.DetailsList}"
+                               Margin="0,0,6,0" Fill="{StaticResource Theme.Text.Secondary}" VerticalAlignment="Center"/>
                     <Slider x:Name="ThumbSlider" Width="130" Minimum="0" Maximum="1"
                             VerticalAlignment="Center"
                             Value="{Binding ActiveTab.FileList.ThumbnailScale, Mode=TwoWay}"
@@ -350,19 +350,19 @@
                                         <Border.ContextMenu>
                                             <ContextMenu>
                                                 <MenuItem Header="Open in new tab" Click="BookmarkOpenInNewTab_Click">
-                                                    <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8A7;"/></MenuItem.Icon>
+                                                    <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.OpenInNewTab}"/></MenuItem.Icon>
                                                 </MenuItem>
                                                 <MenuItem Header="Open in new pane">
-                                                    <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8B0;"/></MenuItem.Icon>
+                                                    <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.OpenInNewPane}"/></MenuItem.Icon>
                                                     <MenuItem Header="To the right" Click="BookmarkOpenInPaneRight_Click"/>
                                                     <MenuItem Header="Below" Click="BookmarkOpenInPaneBelow_Click"/>
                                                 </MenuItem>
                                                 <MenuItem Header="Open" Click="BookmarkOpen_Click">
-                                                    <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8E5;"/></MenuItem.Icon>
+                                                    <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Open}"/></MenuItem.Icon>
                                                 </MenuItem>
                                                 <Separator/>
                                                 <MenuItem Header="Remove bookmark" Click="BookmarkRemove_Click">
-                                                    <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE74D;"/></MenuItem.Icon>
+                                                    <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Delete}"/></MenuItem.Icon>
                                                 </MenuItem>
                                             </ContextMenu>
                                         </Border.ContextMenu>
@@ -387,16 +387,49 @@
 
                 <!-- Drives & devices (fills the sidebar above the bookmarks) -->
                 <DockPanel Grid.Row="0">
-                    <TextBlock DockPanel.Dock="Top" Text="DRIVES &amp; DEVICES" Style="{StaticResource SidebarHeader}"/>
+                    <DockPanel DockPanel.Dock="Top" LastChildFill="False">
+                        <TextBlock Text="DRIVES &amp; DEVICES" Style="{StaticResource SidebarHeader}"/>
+                        <!-- Right-aligned so it sits flush with the tree's scrollbar gutter below.
+                             Same DataTrigger-on-Background pattern as PreviewPaneToggle: a fill
+                             rather than an accent foreground, since this strip isn't covered by the
+                             theme contrast test suite. -->
+                        <Button x:Name="DrivesViewModeToggle" DockPanel.Dock="Right"
+                                Margin="0,4,8,0" VerticalAlignment="Center"
+                                Width="21" Height="21"
+                                ToolTip="Show drives &amp; devices as cards"
+                                Command="{Binding ToggleDrivesViewModeCommand}"
+                                AutomationProperties.AutomationId="DrivesViewModeToggle"
+                                AutomationProperties.Name="Toggle drives view">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+                                    <Setter Property="Padding" Value="4"/>
+                                    <Setter Property="Margin" Value="0,4,8,0"/>
+                                    <Setter Property="MinWidth" Value="0"/>
+                                    <Setter Property="MinHeight" Value="0"/>
+                                    <Setter Property="VerticalAlignment" Value="Center"/>
+                                    <Setter Property="Width" Value="21"/>
+                                    <Setter Property="Height" Value="21"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding DrivesViewMode}" Value="Cards">
+                                            <Setter Property="Background" Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
+                                            <Setter Property="ToolTip" Value="Show drives &amp; devices as a tree"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <Path Style="{StaticResource IconPath}" Width="13" Height="13" Data="{StaticResource Icon.DetailsList}"/>
+                        </Button>
+                    </DockPanel>
                     <Grid>
             <!-- Padding's right edge is the scrollbar gutter SidebarTreeStyle draws the bar into;
                  it must match the ScrollBar style's 12px width. -->
-            <TreeView x:Name="FolderTree" ItemsSource="{Binding Tree.Roots}" BorderThickness="0"
-                      Background="{StaticResource Theme.Surface.Background}" Padding="0,2,12,2"
+            <TreeView x:Name="FolderTree" ItemsSource="{Binding Tree.TreeRoots}" BorderThickness="0"
+                      Background="{StaticResource Theme.Surface.Background}" Padding="0,0,12,0"
                       Style="{StaticResource SidebarTreeStyle}"
                       ItemContainerStyle="{StaticResource FolderTreeItemStyle}"
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                       VirtualizingPanel.IsVirtualizing="False"
+                      Visibility="{Binding DrivesViewMode, Converter={StaticResource EnumEqualsVisibility}, ConverterParameter=Tree}"
                       Loaded="FolderTree_Loaded"
                       MouseDoubleClick="FolderTree_DoubleClick"
                       PreviewMouseWheel="Scroll_PreviewMouseWheel"
@@ -404,56 +437,56 @@
                 <TreeView.ContextMenu>
                     <ContextMenu>
                         <MenuItem x:Name="TreeNewMenuItem" Header="New">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE710;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Add}"/></MenuItem.Icon>
                             <MenuItem Header="Folder" Click="TreeNewFolder_Click">
-                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8B7;"/></MenuItem.Icon>
+                                <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.NewFolder}"/></MenuItem.Icon>
                             </MenuItem>
                             <!-- The configured file types are built here at ContextMenuOpening. -->
                             <Separator x:Name="TreeNewFileTypesSeparator"/>
                             <Separator/>
                             <MenuItem Header="Empty file…" Click="TreeNewEmptyFile_Click">
-                                <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE7C3;"/></MenuItem.Icon>
+                                <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.NewFile}"/></MenuItem.Icon>
                             </MenuItem>
                         </MenuItem>
                         <Separator/>
                         <MenuItem Header="Open in new tab" Click="TreeOpenInNewTab_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8A7;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.OpenInNewTab}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem Header="Open in new pane">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8B0;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.OpenInNewPane}"/></MenuItem.Icon>
                             <MenuItem Header="To the right" Click="TreeOpenInPaneRight_Click"/>
                             <MenuItem Header="Below" Click="TreeOpenInPaneBelow_Click"/>
                         </MenuItem>
                         <Separator/>
                         <MenuItem Header="Open in Terminal" Click="TreeOpenTerminal_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE756;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Terminal}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem Header="Open in VS Code" Click="TreeOpenVSCode_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE943;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.VSCode}"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator/>
                         <MenuItem x:Name="TreeBookmarkMenuItem" Header="Bookmark" Click="TreeBookmark_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE734;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Bookmark}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="TreeDeleteMenuItem" Header="Delete…" Click="TreeDelete_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE74D;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Delete}"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator/>
                         <MenuItem Header="Copy as path" Click="TreeCopyPath_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C8;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Copy}"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator/>
                         <!-- Right-clicking a drive here is the gesture this feature exists for. -->
                         <MenuItem Header="Analyse disk usage…" Click="TreeDiskUsage_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE9A9;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.DiskUsage}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem Header="Find duplicates…" Click="TreeDuplicates_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE8C8;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Duplicates}"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator x:Name="TreeCustomCommandsSeparator" Visibility="Collapsed"/>
                         <Separator/>
                         <MenuItem Header="Properties…" Click="TreeProperties_Click">
-                            <MenuItem.Icon><TextBlock Style="{StaticResource MenuIcon}" Text="&#xE946;"/></MenuItem.Icon>
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Properties}"/></MenuItem.Icon>
                         </MenuItem>
                     </ContextMenu>
                 </TreeView.ContextMenu>
@@ -462,61 +495,235 @@
                         <DockPanel Background="Transparent"
                                    PreviewMouseLeftButtonDown="FolderTreeItem_PreviewMouseDown"
                                    MouseLeftButtonUp="FolderTreeItem_Click">
-                            <Image DockPanel.Dock="Left" Source="{Binding Icon}"
+                            <Image x:Name="RowIcon" DockPanel.Dock="Left" Source="{Binding Icon}"
                                    Width="16" Height="16" Margin="0,0,6,0" VerticalAlignment="Center"
                                    Opacity="{Binding IconOpacity}"/>
                             <!-- Docked right so it keeps its space and the name is what trims.
                                  Dimmed by opacity rather than a muted brush: that way it stays
                                  legible against a selected row, whose foreground it inherits. -->
-                            <TextBlock DockPanel.Dock="Right" Text="{Binding SizeText}"
+                            <TextBlock x:Name="RowSize" DockPanel.Dock="Right" Text="{Binding SizeText}"
                                        Margin="8,0,2,0" VerticalAlignment="Center"
                                        FontSize="10.5" Opacity="0.65"/>
-                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                            <TextBlock x:Name="RowName" Text="{Binding Name}" VerticalAlignment="Center"
                                        TextTrimming="CharacterEllipsis" ToolTip="{Binding FullPath}"/>
                         </DockPanel>
+                        <HierarchicalDataTemplate.Triggers>
+                            <!-- Drive/device roots render larger and bolder than the folders under
+                                 them — same rows, same interaction, just more prominent. -->
+                            <DataTrigger Binding="{Binding Depth}" Value="0">
+                                <Setter TargetName="RowIcon" Property="Width" Value="22"/>
+                                <Setter TargetName="RowIcon" Property="Height" Value="22"/>
+                                <Setter TargetName="RowIcon" Property="Margin" Value="2,0,10,0"/>
+                                <Setter TargetName="RowName" Property="FontWeight" Value="SemiBold"/>
+                                <Setter TargetName="RowSize" Property="FontSize" Value="11"/>
+                                <Setter TargetName="RowSize" Property="Opacity" Value="0.75"/>
+                            </DataTrigger>
+                        </HierarchicalDataTemplate.Triggers>
                     </HierarchicalDataTemplate>
                 </TreeView.ItemTemplate>
             </TreeView>
 
-                        <!-- Sticky header: the currently open directory, pinned to the top of the
-                             tree once its own row scrolls out of view above, so it's always one
-                             click away from collapsing. DataContext (the current node) and
-                             visibility are driven from code-behind on scroll. -->
-                        <!-- Right margin = the tree's scrollbar gutter: it keeps this row's columns
-                             lined up with the rows below and off the bar it would otherwise cover. -->
-                        <Border x:Name="PinnedRow" VerticalAlignment="Top" Visibility="Collapsed"
-                                Margin="0,0,12,0"
-                                Background="{StaticResource Theme.Surface.Background}" BorderBrush="{StaticResource Theme.Border.Default}" BorderThickness="0,0,0,1"
-                                MinHeight="26" SnapsToDevicePixels="True" Cursor="Hand"
-                                MouseLeftButtonUp="PinnedRow_Click"
-                                ToolTip="Collapse the current folder">
-                            <Border.Effect>
-                                <!-- A Color, not a Brush, so it cannot be recoloured in place —
-                                     this is one of the few sites that needs DynamicResource. -->
-                                <DropShadowEffect Color="{DynamicResource Theme.Shadow.Color.Value}"
-                                                  Opacity="{Binding Color, RelativeSource={RelativeSource Self},
-                                                                    Converter={StaticResource ColorAlphaToOpacity}}"
-                                                  BlurRadius="5" ShadowDepth="1" Direction="270"/>
-                            </Border.Effect>
-                            <Grid Margin="{Binding Depth, Converter={StaticResource DepthToIndent}}">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="18"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Path Data="M 0,0 L 4.5,4.5 L 9,0" Stroke="{StaticResource Theme.Tree.ChevronForeground}" StrokeThickness="1.2"
-                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                <DockPanel Grid.Column="1" Margin="0,0,4,0">
-                                    <Image DockPanel.Dock="Left" Source="{Binding Icon}"
-                                           Width="16" Height="16" Margin="0,0,6,0"
-                                           VerticalAlignment="Center" Opacity="{Binding IconOpacity}"/>
-                                    <TextBlock DockPanel.Dock="Right" Text="{Binding SizeText}"
-                                               Margin="8,0,2,0" VerticalAlignment="Center"
-                                               FontSize="10.5" Opacity="0.65"/>
-                                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis"/>
-                                </DockPanel>
-                            </Grid>
+            <!-- Cards mode: same Roots source, one card per drive/device, no nesting — clicking
+                 one opens it per ShellViewModel.OpenDriveOrDevice rather than navigating in place. -->
+            <ItemsControl x:Name="DriveCardList" ItemsSource="{Binding Tree.Roots}"
+                          Background="{StaticResource Theme.Surface.Background}"
+                          Visibility="{Binding DrivesViewMode, Converter={StaticResource EnumEqualsVisibility}, ConverterParameter=Cards}">
+                <ItemsControl.Template>
+                    <ControlTemplate TargetType="ItemsControl">
+                        <Border Background="{TemplateBinding Background}">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                          PreviewMouseWheel="Scroll_PreviewMouseWheel">
+                                <ItemsPresenter/>
+                            </ScrollViewer>
                         </Border>
+                    </ControlTemplate>
+                </ItemsControl.Template>
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <!-- Rectangular tiles flush against each other, divided by a bottom border
+                             rather than each floating in its own margin — no gap, no rounding. -->
+                        <Border Background="{StaticResource Theme.Surface.Raised}"
+                                BorderBrush="{StaticResource Theme.Border.Subtle}" BorderThickness="0,0,0,1"
+                                Padding="12,10" Cursor="Hand"
+                                MouseLeftButtonUp="DriveCard_Click"
+                                ToolTip="{Binding FullPath}">
+                            <DockPanel>
+                                <Image DockPanel.Dock="Left" Source="{Binding Icon}"
+                                       Width="28" Height="28" Margin="0,0,12,0" VerticalAlignment="Center"
+                                       Opacity="{Binding IconOpacity}"/>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <!-- Used-space bar: drives only (UsedFraction is null for a
+                                         portable device, which has no size data at all). -->
+                                    <ProgressBar Height="4" Margin="0,6,0,0" Minimum="0" Maximum="1"
+                                                 Value="{Binding UsedFraction, Mode=OneWay, TargetNullValue=0}"
+                                                 Visibility="{Binding UsedFraction, Converter={StaticResource NullToCollapsed}}"/>
+                                    <TextBlock Text="{Binding SizeText}" Margin="0,4,0,0" FontSize="10.5"
+                                               Opacity="0.65"
+                                               Visibility="{Binding UsedFraction, Converter={StaticResource NullToCollapsed}}"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+                        <!-- Sticky headers for Tree mode: the selected drive/device root (below) and
+                             the currently open directory (above it once both apply), each pinned to
+                             the top of the tree once its own row scrolls out of view, so either is
+                             always one click away from collapsing. DataContext and visibility are
+                             driven from code-behind on scroll — see UpdatePinnedRow/UpdatePinnedRootRow. -->
+                        <!-- Right margin = the tree's scrollbar gutter: it keeps these rows' columns
+                             lined up with the rows below and off the bar they would otherwise cover. -->
+                        <StackPanel VerticalAlignment="Top" Margin="0,0,12,0">
+                            <!-- Identical, deliberately, to the enhanced Depth==0 row above (see the
+                                 remark on that DataTrigger in FolderTreeItemStyle) — same chevron,
+                                 same icon size, same tile background/border, no drop shadow — so a
+                                 drive/device looks the same whether it is pinned here because it
+                                 scrolled off, or sitting in the list normally. -->
+                            <Border x:Name="PinnedRootRow" Visibility="Collapsed"
+                                    BorderBrush="{StaticResource Theme.Border.Subtle}" BorderThickness="0,0,0,1"
+                                    MinHeight="40" SnapsToDevicePixels="True" Cursor="Hand"
+                                    MouseLeftButtonUp="PinnedRootRow_Click"
+                                    ToolTip="{Binding FullPath}">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="{StaticResource Theme.Surface.Raised}"/>
+                                        <Style.Triggers>
+                                            <!-- Matches the real row's hover feedback (FolderTreeItemStyle),
+                                                 so hovering this one feels the same as hovering it in place. -->
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="Background" Value="{StaticResource Theme.List.HoverBackground}"/>
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Grid Margin="{Binding Depth, Converter={StaticResource DepthToIndent}}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="18"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Path Data="M 0,0 L 4.5,4.5 L 9,0" Stroke="{StaticResource Theme.Tree.ChevronForeground}" StrokeThickness="1.2"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <DockPanel Grid.Column="1" Margin="0,0,4,0">
+                                        <Image DockPanel.Dock="Left" Source="{Binding Icon}"
+                                               Width="22" Height="22" Margin="2,0,10,0"
+                                               VerticalAlignment="Center" Opacity="{Binding IconOpacity}"/>
+                                        <TextBlock DockPanel.Dock="Right" Text="{Binding SizeText}"
+                                                   Margin="8,0,2,0" VerticalAlignment="Center"
+                                                   FontSize="11" Opacity="0.75"/>
+                                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                                   FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                    </DockPanel>
+                                </Grid>
+                            </Border>
+                            <!-- Depth-aware: when the pinned "current directory" IS a drive/device
+                                 root (browsing it directly, so PinnedRootRow above is suppressed —
+                                 see UpdatePinnedRootRow), this must switch to the exact same tile
+                                 look, not the compact folder-row look below. Otherwise a drive
+                                 pinned via this row alone (no distinct subfolder open) looked
+                                 shorter and shadowed while one pinned via PinnedRootRow (a
+                                 subfolder open below it) did not. -->
+                            <Border x:Name="PinnedRow" Visibility="Collapsed"
+                                    SnapsToDevicePixels="True" Cursor="Hand"
+                                    MouseLeftButtonUp="PinnedRow_Click">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="{StaticResource Theme.Surface.Background}"/>
+                                        <Setter Property="BorderBrush" Value="{StaticResource Theme.Border.Default}"/>
+                                        <Setter Property="BorderThickness" Value="0,0,0,1"/>
+                                        <Setter Property="MinHeight" Value="26"/>
+                                        <Setter Property="ToolTip" Value="Collapse the current folder"/>
+                                        <Setter Property="Effect">
+                                            <Setter.Value>
+                                                <!-- A Color, not a Brush, so it cannot be recoloured in place —
+                                                     this is one of the few sites that needs DynamicResource. -->
+                                                <DropShadowEffect Color="{DynamicResource Theme.Shadow.Color.Value}"
+                                                                  Opacity="{Binding Color, RelativeSource={RelativeSource Self},
+                                                                                    Converter={StaticResource ColorAlphaToOpacity}}"
+                                                                  BlurRadius="5" ShadowDepth="1" Direction="270"/>
+                                            </Setter.Value>
+                                        </Setter>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Depth}" Value="0">
+                                                <Setter Property="Background" Value="{StaticResource Theme.Surface.Raised}"/>
+                                                <Setter Property="BorderBrush" Value="{StaticResource Theme.Border.Subtle}"/>
+                                                <Setter Property="MinHeight" Value="40"/>
+                                                <Setter Property="Effect" Value="{x:Null}"/>
+                                                <Setter Property="ToolTip" Value="{Binding FullPath}"/>
+                                            </DataTrigger>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding Depth}" Value="0"/>
+                                                    <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsMouseOver}" Value="True"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Background" Value="{StaticResource Theme.List.HoverBackground}"/>
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Grid Margin="{Binding Depth, Converter={StaticResource DepthToIndent}}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="18"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Path Data="M 0,0 L 4.5,4.5 L 9,0" Stroke="{StaticResource Theme.Tree.ChevronForeground}" StrokeThickness="1.2"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <DockPanel Grid.Column="1" Margin="0,0,4,0">
+                                        <Image DockPanel.Dock="Left" Source="{Binding Icon}"
+                                               VerticalAlignment="Center" Opacity="{Binding IconOpacity}">
+                                            <Image.Style>
+                                                <Style TargetType="Image">
+                                                    <Setter Property="Width" Value="16"/>
+                                                    <Setter Property="Height" Value="16"/>
+                                                    <Setter Property="Margin" Value="0,0,6,0"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Depth}" Value="0">
+                                                            <Setter Property="Width" Value="22"/>
+                                                            <Setter Property="Height" Value="22"/>
+                                                            <Setter Property="Margin" Value="2,0,10,0"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Image.Style>
+                                        </Image>
+                                        <TextBlock DockPanel.Dock="Right" Text="{Binding SizeText}"
+                                                   Margin="8,0,2,0" VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="FontSize" Value="10.5"/>
+                                                    <Setter Property="Opacity" Value="0.65"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Depth}" Value="0">
+                                                            <Setter Property="FontSize" Value="11"/>
+                                                            <Setter Property="Opacity" Value="0.75"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Depth}" Value="0">
+                                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </DockPanel>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
                     </Grid>
                 </DockPanel>
             </Grid>

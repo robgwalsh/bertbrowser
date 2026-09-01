@@ -14,7 +14,16 @@ namespace BertBrowser.App.ViewModels;
 /// (phones/cameras) as leaf rows that open in Explorer.</summary>
 public sealed class FolderTreeViewModel
 {
+    /// <summary>Every drive/device, in load order — never reordered. The stable source other
+    /// consumers (the Cards view, hidden-filter application, path lookups) bind or iterate over,
+    /// so a card list stays a fixed overview regardless of what's being browsed.</summary>
     public ObservableCollection<ISidebarNode> Roots { get; } = new();
+
+    /// <summary>Mirrors <see cref="Roots"/> for the tree's own presentation, where
+    /// <see cref="PromoteRoot"/> is allowed to move the browsed drive/device to the top — kept
+    /// separate so that reordering for the tree's "anchor at top" behavior doesn't leak into
+    /// <see cref="Roots"/> and reorder the Cards view underneath it.</summary>
+    public ObservableCollection<ISidebarNode> TreeRoots { get; } = new();
 
     public event Action<string>? DirectorySelected;
 
@@ -60,13 +69,18 @@ public sealed class FolderTreeViewModel
                     ? drive.Name.TrimEnd('\\')
                     : $"{drive.VolumeLabel} ({drive.Name.TrimEnd('\\')})";
                 var node = new DirectoryNodeViewModel(this, drive.RootDirectory.FullName, label);
-                node.SizeBytes = UsedBytes(drive); // set before the node is live; no UI thread needed
+                // Set before the node is live; no UI thread needed.
+                node.SizeBytes = UsedBytes(drive);
+                node.TotalBytes = TotalBytes(drive);
                 return node;
             })
             .ToList());
 
         foreach (var root in roots)
+        {
             Roots.Add(root);
+            TreeRoots.Add(root);
+        }
     }
 
     /// <summary>Enumerates MTP/PTP portable devices off the UI thread and appends them
@@ -75,7 +89,11 @@ public sealed class FolderTreeViewModel
     {
         var devices = await Task.Run(PortableDevices.Enumerate);
         foreach (var device in devices)
-            Roots.Add(new PortableDeviceNodeViewModel(device));
+        {
+            var node = new PortableDeviceNodeViewModel(device);
+            Roots.Add(node);
+            TreeRoots.Add(node);
+        }
     }
 
     internal SubdirectoryPresence ProbeSubdirectories(string path) => _fileSystem.ProbeSubdirectories(path);
@@ -111,14 +129,17 @@ public sealed class FolderTreeViewModel
 
         // Both the DriveInfo reads (which block on network/optical volumes) and the DB query
         // stay off the UI thread.
-        var (used, cache) = await Task.Run(() => (
+        var (used, total, cache) = await Task.Run(() => (
             rootPaths.Select(UsedBytes).ToList(),
+            rootPaths.Select(TotalBytes).ToList(),
             _dirSizes.GetMany(childPaths)));
 
         for (var i = 0; i < roots.Count; i++)
         {
             if (used[i] is { } bytes)
                 roots[i].SizeBytes = bytes;
+            if (total[i] is { } totalBytes)
+                roots[i].TotalBytes = totalBytes;
         }
         ApplySizes(loaded, cache);
     }
@@ -176,6 +197,29 @@ public sealed class FolderTreeViewModel
         try
         {
             return drive.IsReady ? drive.TotalSize - drive.TotalFreeSpace : null;
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>A drive root's total capacity, for the Cards view's used-space bar. Same
+    /// best-effort/never-throw shape as <see cref="UsedBytes(string)"/>.</summary>
+    private static long? TotalBytes(string root)
+    {
+        try
+        {
+            return TotalBytes(new DriveInfo(root));
+        }
+        catch (ArgumentException) { return null; }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
+
+    private static long? TotalBytes(DriveInfo drive)
+    {
+        try
+        {
+            return drive.IsReady ? drive.TotalSize : null;
         }
         catch (IOException) { return null; }
         catch (UnauthorizedAccessException) { return null; }
@@ -347,6 +391,40 @@ public sealed class FolderTreeViewModel
             await RefreshMatchingAsync(child, keys);
     }
 
+    /// <summary>
+    /// Moves the drive/device currently being browsed to the top of <see cref="Roots"/> and
+    /// collapses every other one, so it stays in view without depending on scroll position.
+    /// </summary>
+    /// <remarks>
+    /// <c>Roots.Move</c> raises a <c>Move</c> collection change rather than a remove/insert pair,
+    /// which is what lets the container the tree already built for this node relocate instead of
+    /// being torn down and rebuilt — the same concern <see cref="Sync"/> exists for on the child
+    /// level. Only other <em>drives</em> are collapsed: a portable device has no children to
+    /// collapse, and collapsing it would do nothing but strip its (nonexistent) expander.
+    /// </remarks>
+    private void PromoteRoot(DirectoryNodeViewModel root)
+    {
+        var index = TreeRoots.IndexOf(root);
+        if (index > 0) TreeRoots.Move(index, 0);
+
+        var toCollapse = TreeRoots.OfType<DirectoryNodeViewModel>()
+            .Where(other => !ReferenceEquals(other, root) && other.IsExpanded)
+            .ToList();
+        if (toCollapse.Count == 0) return;
+
+        // Collapsing a sibling that has a selected descendant tears that descendant's container
+        // down on the next layout pass, and WPF answers by reselecting the collapsed root itself
+        // (the same hazard RebuildingAsync guards against for a repopulate). Left unguarded, that
+        // reselection re-announces as a navigation to the sibling, which promotes it right back
+        // and collapses this one in turn — C: and D: trading the top spot forever. The suppression
+        // has to outlive layout, hence the deferral to DispatcherPriority.Loaded.
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        _suppressSelectionEvents++;
+        foreach (var other in toCollapse)
+            other.IsExpanded = false;
+        _ = dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => _suppressSelectionEvents--);
+    }
+
     public async Task<IReadOnlyList<DirectoryNodeViewModel>> RevealPathAsync(string path)
     {
         var targetKey = PathKey.Canonicalize(path);
@@ -365,6 +443,8 @@ public sealed class FolderTreeViewModel
             }
         }
         if (root is null) return Array.Empty<DirectoryNodeViewModel>();
+
+        PromoteRoot(root);
 
         var chain = new List<DirectoryNodeViewModel> { root };
         var node = root;
@@ -452,6 +532,7 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
     /// known" — the row shows nothing rather than a zero it can't stand behind.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SizeText))]
+    [NotifyPropertyChangedFor(nameof(UsedFraction))]
     private long? _sizeBytes;
 
     /// <summary>Some of the subtree was inaccessible when the size was computed; marked with a
@@ -464,6 +545,18 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
         SizeBytes is { } bytes
             ? ByteSizeFormatter.Format(bytes) + (SizeIncomplete ? " *" : "")
             : "";
+
+    /// <summary>A drive root's total capacity; null for a plain folder (used space alone isn't a
+    /// fraction of anything there) and for a drive whose capacity couldn't be read.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UsedFraction))]
+    private long? _totalBytes;
+
+    /// <summary>Used space as a 0..1 fraction of <see cref="TotalBytes"/>, for the Cards view's
+    /// used-space bar. Null — rather than 0 — when either half isn't known, so the bar renders
+    /// empty instead of claiming a drive is unused.</summary>
+    public double? UsedFraction =>
+        SizeBytes is { } used && TotalBytes is { } total && total > 0 ? (double)used / total : null;
 
     private DirectoryNodeViewModel()
     {

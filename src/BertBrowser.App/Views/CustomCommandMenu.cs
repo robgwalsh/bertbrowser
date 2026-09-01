@@ -1,7 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
+using IconPath = System.Windows.Shapes.Path;
 using BertBrowser.App.Services;
-using BertBrowser.Core.Theming;
 
 namespace BertBrowser.App.Views;
 
@@ -32,18 +32,14 @@ internal static class CustomCommandMenu
         var insertAt = menu.Items.IndexOf(anchor) + 1;
         foreach (var definition in applicable)
         {
-            // E8A7 = OpenInNewWindow: reads as "launch externally". EA18 is the shield, so a
-            // command that will ask for administrator rights says so in the menu rather than only
-            // when the prompt appears. Font and colour come from resources rather than literals so
-            // these runtime-built items match the ones declared in XAML and follow a theme change
-            // like everything else.
-            var icon = new TextBlock
-            {
-                Text = definition.RunElevated ? "" : "",
-                FontSize = 16,
-            };
-            icon.SetResourceReference(TextBlock.FontFamilyProperty, "SymbolFont");
-            icon.SetResourceReference(TextBlock.ForegroundProperty, ThemeToken.MenuIconForeground);
+            // A shield when the command will ask for administrator rights, so the menu says so
+            // rather than only the prompt. Style and outline come from resources rather than
+            // literals, so these runtime-built items are the same thing as the ones declared in
+            // XAML and follow a theme change with them. Icon names live in tools/icon/icons.txt.
+            var icon = new IconPath();
+            icon.SetResourceReference(FrameworkElement.StyleProperty, "MenuIconPath");
+            icon.SetResourceReference(
+                IconPath.DataProperty, definition.RunElevated ? "Icon.Shield" : "Icon.CustomCommand");
 
             // "__" so underscores in names render instead of becoming access keys.
             var item = new MenuItem

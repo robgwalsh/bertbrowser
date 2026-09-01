@@ -59,6 +59,7 @@ public partial class MainWindow : ThemedWindow
         _shell.DiskUsageRequested += ShowDiskUsage;
         _shell.DuplicatesRequested += ShowDuplicates;
         _shell.PropertyChanged += Shell_TransferProgressChanged;
+        _shell.PropertyChanged += Shell_DrivesViewModeChanged;
 
         Loaded += async (_, _) => await _shell.InitializeAsync();
         Closing += (_, _) =>
@@ -180,6 +181,16 @@ public partial class MainWindow : ThemedWindow
     {
         if (e.PropertyName != nameof(ShellViewModel.TransferProgress)) return;
         if (_shell.TransferProgress is null) _transferDetails?.Close();
+    }
+
+    /// <summary>Cards view has no scroll-driven sticky headers of its own — hide the tree's when
+    /// switching away from it, so a stale one isn't still showing when the tree comes back later.</summary>
+    private void Shell_DrivesViewModeChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(ShellViewModel.DrivesViewMode)) return;
+        if (_shell.DrivesViewMode != BertBrowser.App.Services.DrivesViewMode.Cards) return;
+        HidePinnedRow();
+        HidePinnedRootRow();
     }
 
     /// <summary>
@@ -487,7 +498,11 @@ public partial class MainWindow : ThemedWindow
         }
     }
 
-    private void FolderTreeScrollChanged(object sender, ScrollChangedEventArgs e) => UpdatePinnedRow();
+    private void FolderTreeScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        UpdatePinnedRow();
+        UpdatePinnedRootRow();
+    }
 
     // A reveal enumerates directories off-thread and reflows the tree, so it must not run once per
     // keystroke of a held-down Ctrl+Tab. The last path wins, one short beat after the churn stops.
@@ -558,6 +573,7 @@ public partial class MainWindow : ThemedWindow
         {
             if (chain.Count > 0) ScrollTreeChainIntoView(chain);
             UpdatePinnedRow();
+            UpdatePinnedRootRow();
         }, DispatcherPriority.Loaded);
     }
 
@@ -646,6 +662,88 @@ public partial class MainWindow : ThemedWindow
         {
             ScrollTreeChainToTop(chain);
             UpdatePinnedRow();
+            UpdatePinnedRootRow();
+        }, DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Shows a second sticky header — a drive/device root itself, in the larger card
+    /// style — for whichever expanded root's subtree currently spans the top of the tree's
+    /// viewport, regardless of whether that root is on the active tab's current-directory chain:
+    /// a drive expanded by hand and scrolled through needs its own header exactly like the one
+    /// being browsed does. Sits above <see cref="PinnedRow"/> so the two stack without overlapping
+    /// when both apply (deep folder, its drive scrolled off too). Collapsed when the found root
+    /// *is* the current directory — <see cref="PinnedRow"/> already covers that row, and showing
+    /// both would just duplicate it.</summary>
+    private void UpdatePinnedRootRow()
+    {
+        var scroller = FindDescendant<ScrollViewer>(FolderTree);
+        if (scroller is null || scroller.ComputedVerticalScrollBarVisibility != Visibility.Visible)
+        {
+            HidePinnedRootRow();
+            return;
+        }
+
+        var root = FindScrolledRoot(scroller);
+        if (root is null || ReferenceEquals(root, _currentDirNode))
+        {
+            HidePinnedRootRow();
+            return;
+        }
+
+        PinnedRootRow.DataContext = root;
+        PinnedRootRow.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Finds whichever top-level, expanded drive/device root's subtree currently spans
+    /// the top of the viewport (scrolled above it, but with some of its own content still visible
+    /// below) — the header that belongs pinned there. Roots are laid out top to bottom with no
+    /// overlap, so at most one ever satisfies this at a given scroll position.</summary>
+    private DirectoryNodeViewModel? FindScrolledRoot(ScrollViewer scroller)
+    {
+        foreach (var candidate in _shell.Tree.TreeRoots.OfType<DirectoryNodeViewModel>())
+        {
+            if (!candidate.IsExpanded) continue;
+
+            var container = ContainerForChain(new[] { candidate });
+            if (container is null) continue;
+
+            double rowTop;
+            try
+            {
+                rowTop = container.TransformToAncestor(scroller).Transform(default).Y;
+            }
+            catch (InvalidOperationException)
+            {
+                continue; // not connected to the visual tree yet
+            }
+
+            var subtreeHeight = container.ActualHeight;
+            if (rowTop < 0 && rowTop + subtreeHeight > 0)
+                return candidate;
+        }
+        return null;
+    }
+
+    private void HidePinnedRootRow()
+    {
+        PinnedRootRow.Visibility = Visibility.Collapsed;
+        PinnedRootRow.DataContext = null;
+    }
+
+    /// <summary>Clicking the pinned drive/device header collapses it (and, transitively, whatever
+    /// is expanded beneath it) and scrolls it back to the top, mirroring <see cref="PinnedRow_Click"/>.</summary>
+    private void PinnedRootRow_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (PinnedRootRow.DataContext is not DirectoryNodeViewModel root) return;
+        root.IsExpanded = false;
+        e.Handled = true;
+        ClearTreeAnchor();
+
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            ScrollTreeChainToTop(new[] { root });
+            UpdatePinnedRow();
+            UpdatePinnedRootRow();
         }, DispatcherPriority.Loaded);
     }
 
@@ -849,6 +947,15 @@ public partial class MainWindow : ThemedWindow
     {
         if (FolderTree.SelectedItem is PortableDeviceNodeViewModel device)
             _shell.OpenPortableDevice(device.Device);
+    }
+
+    /// <summary>Cards view: clicking a drive/device card is the whole point of the click, so it
+    /// opens immediately per <see cref="ShellViewModel.OpenDriveOrDevice"/> rather than merely
+    /// selecting.</summary>
+    private void DriveCard_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: ISidebarNode node })
+            _shell.OpenDriveOrDevice(node);
     }
 
     // The clicked row with its expansion and selection state at mouse-down, captured before

@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Windows;
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using BertBrowser.App.Services;
@@ -139,21 +141,28 @@ public sealed partial class ColumnItemViewModel : ObservableObject
     public ColumnSetting ToSetting() => new(Id, Width);
 }
 
-/// <summary>One row of the navigation list. <see cref="Glyph"/> is a Segoe Fluent Icons codepoint.</summary>
+/// <summary>One row of the navigation list.</summary>
 public sealed class SettingsCategoryViewModel
 {
-    public SettingsCategoryViewModel(SettingsCategory id, string name, string glyph)
+    public SettingsCategoryViewModel(SettingsCategory id, string name, string iconKey)
     {
         Id = id;
         Name = name;
-        Glyph = glyph;
+        IconKey = iconKey;
     }
 
     public SettingsCategory Id { get; }
 
     public string Name { get; }
 
-    public string Glyph { get; }
+    /// <summary>A key from Resources/Icons.xaml, named in tools/icon/icons.txt.</summary>
+    public string IconKey { get; }
+
+    /// <summary>
+    /// The outline to draw, or null outside a running app — the settings list is the one place a
+    /// view model picks an icon, because the category list is built here rather than in XAML.
+    /// </summary>
+    public Geometry? Icon => Application.Current?.TryFindResource(IconKey) as Geometry;
 }
 
 public sealed partial class SettingsViewModel : ObservableObject
@@ -195,6 +204,11 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// <summary>Whether double-clicking an archive walks into it. See <c>AppSettings</c>.</summary>
     [ObservableProperty]
     private bool _enterArchivesOnDoubleClick;
+
+    /// <summary>Whether picking a drive/device in the sidebar's Cards view opens a new panel
+    /// instead of a new tab. See <c>AppSettings.DrivesOpenTarget</c>.</summary>
+    [ObservableProperty]
+    private bool _openDrivesInNewPanel;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ScrollSpeedText))]
@@ -276,12 +290,12 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         Categories = new[]
         {
-            new SettingsCategoryViewModel(SettingsCategory.General, "General", "\uE713"),
-            new SettingsCategoryViewModel(SettingsCategory.Appearance, "Appearance", "\uE790"),
-            new SettingsCategoryViewModel(SettingsCategory.Preview, "Preview", "\uE8A1"),
-            new SettingsCategoryViewModel(SettingsCategory.NewItems, "New items", "\uE710"),
-            new SettingsCategoryViewModel(SettingsCategory.Columns, "Columns", "\uE71D"),
-            new SettingsCategoryViewModel(SettingsCategory.Commands, "Commands", "\uE8A7"),
+            new SettingsCategoryViewModel(SettingsCategory.General, "General", "Icon.Settings"),
+            new SettingsCategoryViewModel(SettingsCategory.Appearance, "Appearance", "Icon.Appearance"),
+            new SettingsCategoryViewModel(SettingsCategory.Preview, "Preview", "Icon.PreviewPane"),
+            new SettingsCategoryViewModel(SettingsCategory.NewItems, "New items", "Icon.Add"),
+            new SettingsCategoryViewModel(SettingsCategory.Columns, "Columns", "Icon.Columns"),
+            new SettingsCategoryViewModel(SettingsCategory.Commands, "Commands", "Icon.CustomCommand"),
         };
         _selectedCategory = Categories[0];
 
@@ -304,6 +318,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         Rebuild(settings.ResolvedFileListColumns, ColumnCatalog.Name);
         ShowHiddenItems = settings.ShowHiddenItems;
         EnterArchivesOnDoubleClick = settings.EnterArchivesOnDoubleClick;
+        OpenDrivesInNewPanel = settings.DrivesOpenTarget == DrivesOpenTarget.NewPanel;
         ScrollSpeed = settings.ScrollSpeedMultiplier;
         ShowPreviewPane = settings.ShowPreviewPane;
         PreviewTextLimitKb = Math.Round(settings.PreviewTextMaxBytes / 1024.0);
@@ -435,64 +450,55 @@ public sealed partial class SettingsViewModel : ObservableObject
     public ObservableCollection<ColumnItemViewModel> Columns { get; }
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(RemoveColumnCommand))]
-    [NotifyCanExecuteChangedFor(nameof(MoveColumnUpCommand))]
-    [NotifyCanExecuteChangedFor(nameof(MoveColumnDownCommand))]
     private ColumnItemViewModel? _selectedColumn;
 
-    /// <summary>What is left to add: everything the catalogue offers that is not already listed.
-    /// Rebuilt after each change rather than filtered live, so the box never offers a duplicate.</summary>
-    public ObservableCollection<ColumnSpec> AvailableColumns { get; } = [];
+    /// <summary>The layout as it stands, for the add popup to open onto and to build edits from.</summary>
+    public IReadOnlyList<ColumnSetting> CurrentColumns() =>
+        Columns.Select(c => c.ToSetting()).ToList();
 
-    [ObservableProperty]
-    private ColumnSpec? _columnToAdd;
+    /// <summary>Takes one column from the add popup. Ids only: the popup offers properties this
+    /// build has never heard of, which is the whole reason a column id is a string.</summary>
+    public void AddColumn(string id) =>
+        Rebuild(ColumnLayoutRules.Toggle(CurrentColumns(), id, on: true), id);
 
+    /// <summary>
+    /// Moves the row at <paramref name="from"/> to <paramref name="to"/> — what a drop reports.
+    /// </summary>
+    /// <remarks>
+    /// The indexes go through <see cref="ColumnLayoutRules.Move"/> rather than being applied to the
+    /// collection, so a row dropped above Name lands second and Name stays first. The list is
+    /// rebuilt from that answer, which is what visually snaps such a drop back.
+    /// </remarks>
+    public void MoveColumn(int from, int to)
+    {
+        if (from < 0 || from >= Columns.Count) return;
+        var moved = Columns[from];
+        Rebuild(ColumnLayoutRules.Move(CurrentColumns(), moved.Id, to), moved.Id);
+    }
+
+    /// <summary>Moves the selected row, for Alt+Up and Alt+Down. The keyboard's half of the drag.</summary>
+    public void NudgeSelectedColumn(int delta)
+    {
+        if (SelectedColumn is not { } selected) return;
+        MoveColumn(Columns.IndexOf(selected), Columns.IndexOf(selected) + delta);
+    }
+
+    /// <summary>Name has no × on its row and is refused here too — the row's button is not the only
+    /// way in, since Delete on the list comes through as well.</summary>
     [RelayCommand]
-    private void AddColumn()
+    private void RemoveColumn(ColumnItemViewModel? column)
     {
-        if (ColumnToAdd is not { } spec) return;
-        Rebuild(ColumnLayoutRules.Toggle(CurrentColumns(), spec.Id, on: true), spec.Id);
+        if (column is not { Removable: true }) return;
+
+        // Select what fell into the removed row's place, so pressing Delete twice removes two
+        // columns rather than removing one and then nothing.
+        var next = Math.Min(Columns.IndexOf(column), Columns.Count - 2);
+        Rebuild(ColumnLayoutRules.Toggle(CurrentColumns(), column.Id, on: false), null);
+        if (next >= 0 && next < Columns.Count) SelectedColumn = Columns[next];
     }
-
-    /// <summary>Greyed rather than silently doing nothing: Name cannot be removed, and a button
-    /// that looks live and then ignores you is worse than one that says so.</summary>
-    private bool CanRemoveColumn() => SelectedColumn is { Removable: true };
-
-    [RelayCommand(CanExecute = nameof(CanRemoveColumn))]
-    private void RemoveColumn()
-    {
-        if (SelectedColumn is not { Removable: true } selected) return;
-        Rebuild(ColumnLayoutRules.Toggle(CurrentColumns(), selected.Id, on: false), null);
-    }
-
-    private bool CanMoveColumn() => SelectedColumn is not null;
-
-    [RelayCommand(CanExecute = nameof(CanMoveColumn))]
-    private void MoveColumnUp() => MoveColumn(-1);
-
-    [RelayCommand(CanExecute = nameof(CanMoveColumn))]
-    private void MoveColumnDown() => MoveColumn(1);
 
     [RelayCommand]
     private void ResetColumns() => Rebuild(ColumnCatalog.Defaults(), ColumnCatalog.Name);
-
-    /// <summary>The columns as they stand, for the "More columns…" picker to open onto.</summary>
-    public IReadOnlyList<ColumnSetting> ColumnsForPicker() => CurrentColumns();
-
-    /// <summary>Takes the picker's answer. The same rule the header menu's picker goes through, so
-    /// the two cannot disagree about what ticking a property means.</summary>
-    public void ApplyPickedColumns(IReadOnlyList<string> chosen) =>
-        Rebuild(ColumnLayoutRules.ApplyPicked(CurrentColumns(), chosen), SelectedColumn?.Id);
-
-    private void MoveColumn(int delta)
-    {
-        if (SelectedColumn is not { } selected) return;
-        var index = Columns.IndexOf(selected);
-        Rebuild(ColumnLayoutRules.Move(CurrentColumns(), selected.Id, index + delta), selected.Id);
-    }
-
-    private IReadOnlyList<ColumnSetting> CurrentColumns() =>
-        Columns.Select(c => c.ToSetting()).ToList();
 
     private void Rebuild(IReadOnlyList<ColumnSetting> settings, string? select)
     {
@@ -503,22 +509,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         SelectedColumn = select is null
             ? Columns.FirstOrDefault()
             : Columns.FirstOrDefault(c => c.Id.Equals(select, StringComparison.OrdinalIgnoreCase));
-
-        RefreshAvailableColumns();
-    }
-
-    private void RefreshAvailableColumns()
-    {
-        var listed = Columns.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        AvailableColumns.Clear();
-
-        foreach (var spec in ColumnCatalog.BuiltIns.Concat(ColumnCatalog.Curated))
-        {
-            // Folder and Match are placed by the list itself and are not anyone's to choose.
-            if (ColumnCatalog.IsInjected(spec.Id) || listed.Contains(spec.Id)) continue;
-            AvailableColumns.Add(spec);
-        }
-        ColumnToAdd = AvailableColumns.FirstOrDefault();
     }
 
     /// <summary>Adds the types Windows knows about that aren't listed yet. Reads the registry and
@@ -615,6 +605,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settings.NewFileTypes = NewFileTypes.Select(t => t.ToTemplate()).ToList();
         _settings.ShowHiddenItems = ShowHiddenItems;
         _settings.EnterArchivesOnDoubleClick = EnterArchivesOnDoubleClick;
+        _settings.DrivesOpenTarget = OpenDrivesInNewPanel ? DrivesOpenTarget.NewPanel : DrivesOpenTarget.NewTab;
         _settings.ScrollSpeedMultiplier = ScrollSpeed;
         _settings.ShowPreviewPane = ShowPreviewPane;
         _settings.PreviewTextMaxBytes = (int)Math.Clamp(PreviewTextLimitKb * 1024, 4096, 64 * 1024 * 1024);

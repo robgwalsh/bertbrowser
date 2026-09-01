@@ -1,8 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
+using IconPath = System.Windows.Shapes.Path;
 using BertBrowser.App.Services;
 using BertBrowser.Core.Services.NewItem;
-using BertBrowser.Core.Theming;
 
 namespace BertBrowser.App.Views;
 
@@ -33,12 +33,12 @@ internal static class NewItemMenu
         var insertAt = newMenu.Items.IndexOf(anchor) + 1;
         foreach (var template in templates)
         {
-            // E7C3 = Page. Font and colour come from resources rather than literals so these
-            // runtime-built items match the ones declared in XAML and follow a theme change like
-            // everything else.
-            var icon = new TextBlock { Text = "", FontSize = 16 };
-            icon.SetResourceReference(TextBlock.FontFamilyProperty, "SymbolFont");
-            icon.SetResourceReference(TextBlock.ForegroundProperty, ThemeToken.MenuIconForeground);
+            // Style and outline come from resources rather than literals, so these runtime-built
+            // items are the same thing as the ones declared in XAML and follow a theme change with
+            // them. Icon names live in tools/icon/icons.txt.
+            var icon = new IconPath();
+            icon.SetResourceReference(FrameworkElement.StyleProperty, "MenuIconPath");
+            icon.SetResourceReference(IconPath.DataProperty, "Icon.NewFile");
 
             // "__" so underscores in names render instead of becoming access keys.
             var item = new MenuItem
