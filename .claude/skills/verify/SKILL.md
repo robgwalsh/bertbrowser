@@ -80,6 +80,10 @@ tree-expand <path> [on|off] toggle a row's chevron without selecting it (default
                             the only way to get two drive/device roots expanded at once
 
 select <name>[, <name>…] | select-all | deselect
+marquee <x0,y0> <x1,y1>      poses the rubber-band selection box over that rectangle (list
+                            coordinates) and leaves it there for a `shot` — like the columns
+                            page's drag line, it is only ever on screen mid-drag and a run posts
+                            no mouse input
 
 newtab [path] | closetab | reopen | tab <n>
 split right|down [path] | closepane | pane <n>

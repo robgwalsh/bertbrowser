@@ -154,35 +154,6 @@
                     </Border>
                 </StackPanel>
 
-                <!--
-                  The preview pane's toggle. Up here rather than in the tab's own row because it
-                  belongs with the other things that act on the active tab (Back, Up, Refresh all
-                  bind through ActiveTab too) — and because the pane it opens is per tab, its
-                  on-state has to be read from ActiveTab as well, not from the setting, which is
-                  only what a *new* tab starts from.
-
-                  On is a filled button rather than the accent Theme.Toolbar.CheckedForeground the
-                  preview-mode segments use: the contrast suite covers that pair against nothing up
-                  here, and a fill carries the state without putting a colour on the caption strip
-                  that no test is holding still.
-                -->
-                <Button x:Name="PreviewPaneToggle" ToolTip="Preview pane (Ctrl+P)"
-                        Command="{Binding ActiveTab.TogglePreviewCommand}"
-                        AutomationProperties.AutomationId="PreviewPaneToggle"
-                        AutomationProperties.Name="Preview pane">
-                    <Button.Style>
-                        <Style TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding ActiveTab.IsPreviewVisible}" Value="True">
-                                    <Setter Property="Background"
-                                            Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Button.Style>
-                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.PreviewPane}"/>
-                </Button>
-
                 <!-- "Show hidden items" lives in the Settings dialog only; it is a preference
                      you set once, not something the caption strip needs a button for. -->
                 <Button Style="{StaticResource ToolbarButton}"

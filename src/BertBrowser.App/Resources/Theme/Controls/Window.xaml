@@ -7,18 +7,18 @@
         <ResourceDictionary Source="Primitives.xaml"/>
     </ResourceDictionary.MergedDictionaries>
 
-    <!-- 46x32 is the shell's own caption-button metric; matching it is what makes the buttons feel
-         native rather than merely present. -->
-    <Style x:Key="CaptionButton" TargetType="Button">
+    <!-- 46x32 is the shell's own caption-button metric; matching its width is what makes the
+         buttons feel native. Height is a few pixels taller to fill the enlarged title bar. -->
+    <Style x:Key="CaptionButton" TargetType="v:TitleBarButton">
         <Setter Property="Width" Value="46"/>
-        <Setter Property="Height" Value="32"/>
+        <Setter Property="Height" Value="38"/>
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{StaticResource Theme.TitleBar.Foreground}"/>
         <Setter Property="IsTabStop" Value="False"/>
         <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Template">
             <Setter.Value>
-                <ControlTemplate TargetType="Button">
+                <ControlTemplate TargetType="v:TitleBarButton">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
                         <!-- The caption buttons draw their own icon rather than borrowing the shared
                              IconContent template: this dictionary is merged before Styles.xaml, and
@@ -50,10 +50,10 @@
       Windows 11 snap-layout flyout. That takes it out of WPF's mouse tracking, so ThemedWindow
       tracks the hover itself and the template reads it back through IsMaximizeHovered.
     -->
-    <Style x:Key="CaptionMaximizeButton" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
+    <Style x:Key="CaptionMaximizeButton" TargetType="v:TitleBarButton" BasedOn="{StaticResource CaptionButton}">
         <Setter Property="Template">
             <Setter.Value>
-                <ControlTemplate TargetType="Button">
+                <ControlTemplate TargetType="v:TitleBarButton">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
                         <!-- This style replaces the base Template wholesale, so it repeats the icon
                              Path rather than inheriting it. -->
@@ -75,10 +75,10 @@
         </Setter>
     </Style>
 
-    <Style x:Key="CaptionCloseButton" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
+    <Style x:Key="CaptionCloseButton" TargetType="v:TitleBarButton" BasedOn="{StaticResource CaptionButton}">
         <Setter Property="Template">
             <Setter.Value>
-                <ControlTemplate TargetType="Button">
+                <ControlTemplate TargetType="v:TitleBarButton">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
                         <!-- Same again: this style replaces the base Template wholesale. -->
                         <Path x:Name="Glyph" Data="{TemplateBinding Content}" Width="10" Height="10"
@@ -114,7 +114,7 @@
                   DWM drawing the shadow and the Windows 11 rounded corners while
                   UseAeroCaptionButtons=False hands the caption to us.
                 -->
-                <shell:WindowChrome CaptionHeight="32"
+                <shell:WindowChrome CaptionHeight="38"
                                     ResizeBorderThickness="6"
                                     CornerRadius="0"
                                     GlassFrameThickness="0,0,0,1"
@@ -127,7 +127,7 @@
                     <Border x:Name="Root" Background="{TemplateBinding Background}"
                             BorderBrush="{StaticResource Theme.TitleBar.Border}" BorderThickness="1">
                         <DockPanel>
-                            <Grid x:Name="TitleBar" DockPanel.Dock="Top" Height="32"
+                            <Grid x:Name="TitleBar" DockPanel.Dock="Top" Height="38"
                                   Background="{StaticResource Theme.TitleBar.Background}">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
@@ -153,21 +153,23 @@
 
                                 <StackPanel Grid.Column="3" Orientation="Horizontal"
                                             WindowChrome.IsHitTestVisibleInChrome="True">
-                                    <Button x:Name="PART_Minimize" Style="{StaticResource CaptionButton}"
+                                    <v:TitleBarButton x:Name="PART_Minimize" Style="{StaticResource CaptionButton}"
                                             Content="{StaticResource Icon.Minimize}" ToolTip="Minimise"
                                             AutomationProperties.Name="Minimise"/>
-                                    <Button x:Name="PART_Maximize" Style="{StaticResource CaptionMaximizeButton}"
+                                    <v:TitleBarButton x:Name="PART_Maximize" Style="{StaticResource CaptionMaximizeButton}"
                                             Content="{StaticResource Icon.Maximize}" ToolTip="Maximise"
                                             AutomationProperties.Name="Maximise"/>
-                                    <Button x:Name="PART_Close" Style="{StaticResource CaptionCloseButton}"
+                                    <v:TitleBarButton x:Name="PART_Close" Style="{StaticResource CaptionCloseButton}"
                                             Content="{StaticResource Icon.Dismiss}" ToolTip="Close"
                                             AutomationProperties.Name="Close"/>
                                 </StackPanel>
                             </Grid>
 
                             <!-- AdornerDecorator so the marquee selection and drag adorners still
-                                 have a layer to draw on inside a templated window. -->
-                            <AdornerDecorator>
+                                 have a layer to draw on inside a templated window. Named so
+                                 ThemedWindow can disable just this — never the TitleBar above it —
+                                 for as long as a dialog it owns is modally up; see ShowDialog(). -->
+                            <AdornerDecorator x:Name="PART_Content">
                                 <ContentPresenter/>
                             </AdornerDecorator>
                         </DockPanel>
@@ -176,8 +178,14 @@
                         <Trigger Property="TitleBarIcon" Value="{x:Null}">
                             <Setter TargetName="TitleIcon" Property="Visibility" Value="Collapsed"/>
                         </Trigger>
+                        <!-- ClampToWorkArea sizes a maximised window to the monitor's work area, but
+                             WindowChrome (unlike the stock chrome) does not compensate for the
+                             window then being positioned as if it still had a resize border outside
+                             that rect — without this margin, exactly ResizeBorderThickness worth of
+                             the window sits off-screen on every edge. -->
                         <Trigger Property="WindowState" Value="Maximized">
                             <Setter TargetName="Root" Property="BorderThickness" Value="0"/>
+                            <Setter TargetName="Root" Property="Padding" Value="6"/>
                             <Setter TargetName="PART_Maximize" Property="Content" Value="{StaticResource Icon.Restore}"/>
                             <Setter TargetName="PART_Maximize" Property="ToolTip" Value="Restore"/>
                         </Trigger>

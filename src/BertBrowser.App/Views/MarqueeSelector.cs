@@ -59,6 +59,20 @@ internal sealed class MarqueeSelector
 
     public static MarqueeSelector Attach(ListView list) => new(list);
 
+    /// <summary>Draws the band over <paramref name="rect"/> (in list coordinates) and leaves it
+    /// there, for the harness — mirrors <see cref="ListReorderDrag.ShowInsertionLine"/>: a run
+    /// posts no mouse input, so this is the only way a capture can reach it. It also earns its keep
+    /// as a regression test: reaching a screenshot at all proves the adorner layer is still found
+    /// and the theme brushes still resolve.</summary>
+    /// <returns>The adorner, or null if the list has no adorner layer to draw on.</returns>
+    internal static Adorner? ShowBand(ListView list, Rect rect)
+    {
+        var selector = new MarqueeSelector(list) { _origin = rect.TopLeft, _cursor = rect.BottomRight };
+        selector.BeginDrag();
+        selector.Update();
+        return selector._adorner;
+    }
+
     private MarqueeSelector(ListView list)
     {
         _list = list;
@@ -76,9 +90,10 @@ internal sealed class MarqueeSelector
     private void OnMouseDown(object sender, MouseButtonEventArgs e)
     {
         _pending = false;
-        if (e.ClickCount > 1 || !IsEmptySpace(e.OriginalSource as DependencyObject)) return;
+        var point = e.GetPosition(_list);
+        if (e.ClickCount > 1 || !IsEmptySpace(point, e.OriginalSource as DependencyObject)) return;
 
-        _origin = _cursor = e.GetPosition(_list);
+        _origin = _cursor = point;
         _additive = (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift)) != 0;
         _pending = true;
         // Deliberately not handled: a press that never turns into a drag must still focus the list.
@@ -324,17 +339,24 @@ internal sealed class MarqueeSelector
         }
     }
 
-    /// <summary>True when the press landed on the list's background rather than on a row, a
-    /// column header, or a scroll bar.</summary>
-    private bool IsEmptySpace(DependencyObject? source)
+    /// <summary>True when the press landed on the list's background rather than on a row's actual
+    /// content, a column header, or a scroll bar. In details mode a row's container is stretched to
+    /// the full width of the list — its background is what a click past the last column actually
+    /// hits — so that strip (there whenever the columns don't fill the pane) counts as empty space
+    /// too, exactly like the gap below the last row, or Explorer would refuse to start a band from
+    /// almost anywhere in a populated list.</summary>
+    private bool IsEmptySpace(Point point, DependencyObject? source)
     {
         for (var d = source; d is not null; d = VisualTreeUtil.ParentOf(d))
         {
-            if (d is ListViewItem or GridViewColumnHeader or ScrollBar or Thumb) return false;
+            if (d is GridViewColumnHeader or ScrollBar or Thumb) return false;
+            if (d is ListViewItem) return _list.View is GridView grid && point.X >= TotalColumnsWidth(grid);
             if (ReferenceEquals(d, _list)) break;
         }
         return true;
     }
+
+    private static double TotalColumnsWidth(GridView grid) => grid.Columns.Sum(c => c.ActualWidth);
 
     private static Panel? FindItemsHost(DependencyObject root)
     {

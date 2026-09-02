@@ -30,6 +30,7 @@ namespace BertBrowser.App.Views;
 /// </remarks>
 public class ThemedWindow : Window
 {
+    private const int WmEnable = 0x000A;
     private const int WmGetMinMaxInfo = 0x0024;
     private const int WmNcHitTest = 0x0084;
     private const int WmNcLButtonDown = 0x00A1;
@@ -39,6 +40,12 @@ public class ThemedWindow : Window
 
     private const int HtMaxButton = 9;
     private const int MonitorDefaultToNearest = 2;
+
+    /// <summary>
+    /// Guards against re-entering the WM_ENABLE handler for the WM_ENABLE(1) our own
+    /// <see cref="EnableWindow"/> call raises synchronously — see <see cref="WndProc"/>.
+    /// </summary>
+    private bool _reenabling;
 
     /// <summary>
     /// True while the pointer is over the maximise button. Tracked by hand because the button is
@@ -74,6 +81,14 @@ public class ThemedWindow : Window
 
     private IThemeService? _theme;
     private Button? _maximizeButton;
+    private UIElement? _content;
+
+    /// <summary>
+    /// How many currently-open owned dialogs have this window blocked — more than one only when
+    /// dialogs are nested (a dialog opening a dialog). Content re-enables once this reaches zero,
+    /// not on the first dialog to close.
+    /// </summary>
+    private int _contentBlockDepth;
 
     public ThemedWindow()
     {
@@ -142,6 +157,8 @@ public class ThemedWindow : Window
         base.OnApplyTemplate();
 
         _maximizeButton = GetTemplateChild("PART_Maximize") as Button;
+        _content = GetTemplateChild("PART_Content") as UIElement;
+        if (_contentBlockDepth > 0 && _content is not null) _content.IsEnabled = false;
 
         Wire("PART_Minimize", () => WindowState = WindowState.Minimized);
         Wire("PART_Maximize", ToggleMaximized);
@@ -178,6 +195,42 @@ public class ThemedWindow : Window
         RefreshTitleBarIcon();
     }
 
+    /// <summary>
+    /// Hides <see cref="Window.ShowDialog()"/> so that owned dialogs still block the owner's
+    /// content, without the owner's title bar going dead along with it. WPF's own modality is
+    /// purely a Win32-level EnableWindow(owner, false) — it never touches the owner's WPF
+    /// <c>IsEnabled</c>, so nothing in the tree actually goes disabled on its own, and
+    /// <see cref="WndProc"/> immediately reverses the Win32 disable anyway (see there) so the
+    /// title bar keeps working. This is what supplies the "modal" half instead: disable this
+    /// window's own content for as long as the dialog it owns is up, restore it when the last
+    /// nested one closes.
+    /// </summary>
+    public new bool? ShowDialog()
+    {
+        var themedOwner = Owner as ThemedWindow;
+        themedOwner?.BeginContentBlock();
+        try
+        {
+            return base.ShowDialog();
+        }
+        finally
+        {
+            themedOwner?.EndContentBlock();
+        }
+    }
+
+    private void BeginContentBlock()
+    {
+        _contentBlockDepth++;
+        if (_content is not null) _content.IsEnabled = false;
+    }
+
+    private void EndContentBlock()
+    {
+        _contentBlockDepth--;
+        if (_contentBlockDepth == 0 && _content is not null) _content.IsEnabled = true;
+    }
+
     private void Wire(string partName, Action action)
     {
         if (GetTemplateChild(partName) is Button button) button.Click += (_, _) => action();
@@ -204,6 +257,19 @@ public class ThemedWindow : Window
     {
         switch (msg)
         {
+            // A modal child dialog "disables" its owner by calling Win32 EnableWindow(hwnd, false)
+            // on us — that's how WPF's ShowDialog implements modality, on top of cascading
+            // IsEnabled down through the visual tree. The IsEnabled cascade is exactly the block we
+            // want for ordinary content, but it also takes the native window out of non-client
+            // input entirely, so the title bar can no longer be dragged, minimised, or closed. Undo
+            // just the Win32-level disable immediately; PART_Minimize/Maximize/Close are
+            // TitleBarButton, which ignores the IsEnabled cascade, so they keep working too.
+            case WmEnable when wParam == IntPtr.Zero && !_reenabling:
+                _reenabling = true;
+                try { EnableWindow(hwnd, true); }
+                finally { _reenabling = false; }
+                break;
+
             case WmGetMinMaxInfo:
                 ClampToWorkArea(hwnd, lParam);
                 break;
@@ -329,4 +395,8 @@ public class ThemedWindow : Window
     [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW", ExactSpelling = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnableWindow(IntPtr hWnd, [MarshalAs(UnmanagedType.Bool)] bool enable);
 }

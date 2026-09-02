@@ -22,6 +22,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
             <!-- Address bar: same rounded field chrome as the search box. -->
@@ -104,6 +105,32 @@
                     </Grid>
                 </DockPanel>
             </Border>
+
+            <!--
+              The preview pane's toggle, per tab: the pane it opens is per tab, so its on-state
+              reads straight from this tab's own IsPreviewVisible rather than ActiveTab's.
+
+              On is a filled button rather than the accent Theme.Toolbar.CheckedForeground the
+              preview-mode segments use: the contrast suite covers that pair against nothing here,
+              and a fill carries the state without putting a colour that no test is holding still.
+            -->
+            <Button x:Name="PreviewPaneToggle" Grid.Column="2" Margin="6,0,0,0"
+                    ToolTip="Preview pane (Ctrl+P)"
+                    Command="{Binding TogglePreviewCommand}"
+                    AutomationProperties.AutomationId="PreviewPaneToggle"
+                    AutomationProperties.Name="Preview pane">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsPreviewVisible}" Value="True">
+                                <Setter Property="Background"
+                                        Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.PreviewPane}"/>
+            </Button>
         </Grid>
 
         <!-- Activity indicator: search / directory load in progress (fixed height, no layout shift) -->

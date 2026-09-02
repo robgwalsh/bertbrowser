@@ -122,6 +122,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
             // selection
             case "select": Select(rest); break;
+            case "marquee": Marquee(rest); break;
             case "select-all": SelectAll(); break;
             case "deselect": SetSelection([]); break;
 
@@ -183,6 +184,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "state": output.WriteLine("STATE " + State()); break;
             case "session": Session(); break;
             case "probe": Probe(rest); break;
+            case "modal-probe": ModalProbe(rest); break;
             case "rows": output.WriteLine("ROWS " + string.Join(", ", RowNames())); break;
             case "columns": Columns(rest); break;
             case "assert-column": AssertColumn(rest, expected: true); break;
@@ -600,6 +602,20 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     private ListView FileList() =>
         FindNamed<ListView>("FileListView")
         ?? throw new InvalidOperationException("The active tab has no file list.");
+
+    /// <summary>Poses the rubber-band selection rectangle over the active tab's file list. Like
+    /// <c>settings-columns-dragging</c>, the band is only ever on screen mid-drag and a run posts
+    /// no mouse input, so this is the only way a capture reaches it. "x0,y0,x1,y1" is the
+    /// rectangle in list coordinates.</summary>
+    private void Marquee(string rest) => Invoke(() =>
+    {
+        var list = FileList();
+        list.UpdateLayout();
+        var parts = rest.Split(',', StringSplitOptions.TrimEntries).Select(double.Parse).ToArray();
+        var rect = new Rect(new Point(parts[0], parts[1]), new Point(parts[2], parts[3]));
+        if (MarqueeSelector.ShowBand(list, rect) is null)
+            throw new AssertionException("The file list has no adorner layer to draw on.");
+    });
 
     // --- Columns ---
     //
@@ -1938,6 +1954,24 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         output.WriteLine($"SHOT {path}");
         if (options.Verbose)
             output.WriteLine($"# {width}x{height}{(elementName.Length == 0 ? "" : $" of {elementName}")}");
+    }
+
+    /// <summary>TEMP diagnostic: genuinely ShowDialog()s Settings over the main window and shoots
+    /// the main window while it's up, to see disabled-row colours for real.</summary>
+    private void ModalProbe(string rest)
+    {
+        var path = Resolve(Named(rest.Length == 0 ? "modal-probe" : rest, ++_shots));
+        session.Dispatcher.Invoke(() =>
+        {
+            var dialog = new SettingsWindow(SettingsFor(SettingsCategory.General)) { Owner = session.Window };
+            session.Window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle, new Action(() =>
+            {
+                Capture.Save(session.Window, path);
+                dialog.Close();
+            }));
+            dialog.ShowDialog();
+        });
+        output.WriteLine("SHOT " + path);
     }
 
     /// <summary>
