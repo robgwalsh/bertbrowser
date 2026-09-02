@@ -58,7 +58,7 @@ public partial class MainWindow : ThemedWindow
         _shell.GlobalSearchFocusRequested += FocusGlobalSearchBox;
         _shell.DiskUsageRequested += ShowDiskUsage;
         _shell.DuplicatesRequested += ShowDuplicates;
-        _shell.SyncRequested += ShowSyncPreview;
+        _shell.SyncRequested += ShowSyncPreview;
         _shell.PropertyChanged += Shell_TransferProgressChanged;
         _shell.PropertyChanged += Shell_DrivesViewModeChanged;
 
@@ -615,7 +615,13 @@ public partial class MainWindow : ThemedWindow
     /// collapse it. Hides it otherwise.</summary>
     private void UpdatePinnedRow()
     {
-        if (_currentDirNode is null || _currentDirChain.Count == 0)
+        // Cards mode collapses FolderTree, but a collapsed TreeView doesn't necessarily update its
+        // own ScrollViewer's computed properties, so the scroll-visible check below can still pass
+        // and pin a tree row right over the top of a card with the same drive/device. Navigating
+        // within an already-open pane re-runs this (via RevealCurrentDirAsync) independently of
+        // Shell_DrivesViewModeChanged, which only fires once at the moment the mode itself toggles.
+        if (_currentDirNode is null || _currentDirChain.Count == 0 ||
+            _shell.DrivesViewMode != BertBrowser.App.Services.DrivesViewMode.Tree)
         {
             HidePinnedRow();
             return;
@@ -709,6 +715,14 @@ public partial class MainWindow : ThemedWindow
     /// both would just duplicate it.</summary>
     private void UpdatePinnedRootRow()
     {
+        // See the matching guard in UpdatePinnedRow: a collapsed FolderTree doesn't reliably report
+        // its ScrollViewer as not-visible, so this must check the mode directly too.
+        if (_shell.DrivesViewMode != BertBrowser.App.Services.DrivesViewMode.Tree)
+        {
+            HidePinnedRootRow();
+            return;
+        }
+
         var scroller = FindDescendant<ScrollViewer>(FolderTree);
         if (scroller is null || scroller.ComputedVerticalScrollBarVisibility != Visibility.Visible)
         {
