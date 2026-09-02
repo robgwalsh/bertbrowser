@@ -5,11 +5,39 @@
         <ResourceDictionary Source="Primitives.xaml"/>
     </ResourceDictionary.MergedDictionaries>
 
+    <!--
+      Both styles below replace the default Template rather than just setting Background: the stock
+      one wraps its content in Microsoft.Windows.Themes.ListBoxChrome (ListView) or paints a literal
+      #FFFFFFFF (plain ListBox), and either way a disabled control's chrome draws that hardcoded
+      look from its own internal OnRender rather than reading the Background property at all — no
+      Theme.* token, DynamicResource override or TemplateBinding reaches it. That is invisible until
+      something is genuinely IsEnabled=false behind it (a real modal dialog's owner — see
+      ThemedWindow.ShowDialog), at which point every row goes flat light-grey no matter the theme.
+    -->
     <Style TargetType="ListView">
         <Setter Property="Background" Value="{StaticResource Theme.List.Background}"/>
         <Setter Property="Foreground" Value="{StaticResource Theme.Text.Primary}"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListView">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            SnapsToDevicePixels="True">
+                        <!-- This exact DynamicResource is what makes a GridView's column headers
+                             appear at all: it is the key WPF's own GridView registers for its
+                             header-row-presenting ScrollViewer style. Nothing else here is
+                             GridView-specific — this line alone is load-bearing. -->
+                        <ScrollViewer Padding="{TemplateBinding Padding}" Focusable="False"
+                                      Style="{DynamicResource {x:Static GridView.GridViewScrollViewerStyleKey}}">
+                            <ItemsPresenter SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                        </ScrollViewer>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style TargetType="ListBox">
@@ -18,6 +46,20 @@
         <Setter Property="BorderBrush" Value="{StaticResource Theme.Border.Default}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBox">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            SnapsToDevicePixels="True">
+                        <ScrollViewer Padding="{TemplateBinding Padding}" Focusable="False">
+                            <ItemsPresenter SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                        </ScrollViewer>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style TargetType="ListBoxItem">

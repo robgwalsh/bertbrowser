@@ -19,6 +19,12 @@ namespace BertBrowser.App.Views;
 /// </summary>
 internal sealed class MarqueeSelector
 {
+    // TEMPORARY diagnostic logging for the "no box drawn" bug report. Remove once resolved.
+    private static readonly string LogPath = System.IO.Path.Combine(
+        Environment.GetEnvironmentVariable("TEMP") ?? ".", "marquee-debug.log");
+    private static void Log(string message) =>
+        System.IO.File.AppendAllText(LogPath, $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
+
     private const double AutoScrollMargin = 20;
 
     /// <summary>How far past the viewport the anchor is placed once it has scrolled out of the
@@ -82,7 +88,11 @@ internal sealed class MarqueeSelector
         list.PreviewMouseLeftButtonDown += OnMouseDown;
         list.PreviewMouseMove += OnMouseMove;
         list.PreviewMouseLeftButtonUp += OnMouseUp;
-        list.LostMouseCapture += (_, _) => { if (IsDragging) EndDrag(); };
+        list.LostMouseCapture += (_, _) =>
+        {
+            Log($"LostMouseCapture fired. IsDragging={IsDragging}");
+            if (IsDragging) EndDrag();
+        };
     }
 
     // --- Mouse handling ---
@@ -91,7 +101,9 @@ internal sealed class MarqueeSelector
     {
         _pending = false;
         var point = e.GetPosition(_list);
-        if (e.ClickCount > 1 || !IsEmptySpace(point, e.OriginalSource as DependencyObject)) return;
+        var empty = IsEmptySpace(point, e.OriginalSource as DependencyObject);
+        Log($"OnMouseDown point={point} source={e.OriginalSource?.GetType().Name} clickCount={e.ClickCount} empty={empty}");
+        if (e.ClickCount > 1 || !empty) return;
 
         _origin = _cursor = point;
         _additive = (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift)) != 0;
@@ -104,6 +116,7 @@ internal sealed class MarqueeSelector
         if (!_pending) return;
         if (e.LeftButton != MouseButtonState.Pressed)
         {
+            Log($"OnMouseMove button released, IsDragging={IsDragging}");
             if (IsDragging) EndDrag(); else _pending = false;
             return;
         }
@@ -114,7 +127,9 @@ internal sealed class MarqueeSelector
             if (Math.Abs(_cursor.X - _origin.X) < SystemParameters.MinimumHorizontalDragDistance &&
                 Math.Abs(_cursor.Y - _origin.Y) < SystemParameters.MinimumVerticalDragDistance)
                 return;
+            Log($"OnMouseMove threshold crossed, calling BeginDrag. origin={_origin} cursor={_cursor}");
             BeginDrag();
+            Log($"After BeginDrag: adorner={(_adorner is null ? "null" : "created")}");
         }
 
         Update();
@@ -143,24 +158,31 @@ internal sealed class MarqueeSelector
     {
         IsDragging = true;
         _itemsHost = FindItemsHost(_list);
-        _scroller = VisualTreeUtil.FindDescendant<ScrollViewer>(_list);
-        _viewport = VisualTreeUtil.FindDescendant<ScrollContentPresenter>(_list);
+        // A GridView's ScrollViewer wraps its header row in a ScrollContentPresenter of its own
+        // (so the header tracks horizontal scroll without scrolling vertically) — a top-down search
+        // from the list finds that one first, not the one actually hosting the rows. Walking up
+        // from the items host instead can't land on the wrong one.
+        _viewport = _itemsHost is null ? null : VisualTreeUtil.FindAncestor<ScrollContentPresenter>(_itemsHost);
+        _scroller = _viewport is null ? null : VisualTreeUtil.FindAncestor<ScrollViewer>(_viewport);
         _originHorizontalOffset = _scroller?.HorizontalOffset ?? 0;
         _initialSelection = _list.SelectedItems.Cast<object>().ToArray();
         _hits.Clear();
         CaptureAnchor();
 
-        _list.CaptureMouse();
-        if (AdornerLayer.GetAdornerLayer(_list) is { } layer)
+        var captured = _list.CaptureMouse();
+        var layer = AdornerLayer.GetAdornerLayer(_list);
+        Log($"BeginDrag captured={captured} layer={(layer is null ? "null" : "found")} itemsHost={(_itemsHost is null ? "null" : "found")} viewport={(_viewport is null ? "null" : _viewport.RenderSize.ToString())} anchorIndex={_anchorIndex}");
+        if (layer is { } l)
         {
             _adorner = new MarqueeAdorner(_list);
-            layer.Add(_adorner);
+            l.Add(_adorner);
         }
         _autoScroll.Start();
     }
 
     private void EndDrag()
     {
+        Log($"EndDrag called. StackTrace follows.\n{Environment.StackTrace}");
         IsDragging = false;
         _pending = false;
         _autoScroll.Stop();
@@ -222,7 +244,9 @@ internal sealed class MarqueeSelector
         }
 
         SyncSelection();
-        _adorner?.SetRect(Rect.Intersect(rect, ViewportRect()));
+        var clipped = Rect.Intersect(rect, ViewportRect());
+        Log($"Update rect={rect} viewport={ViewportRect()} clipped={clipped} adorner={(_adorner is null ? "null" : "set")} hits={_hits.Count}");
+        _adorner?.SetRect(clipped);
     }
 
     /// <summary>The drag origin in current list coordinates: tracked through the anchor row while

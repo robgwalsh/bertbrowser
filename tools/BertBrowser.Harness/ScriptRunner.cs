@@ -184,7 +184,6 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "state": output.WriteLine("STATE " + State()); break;
             case "session": Session(); break;
             case "probe": Probe(rest); break;
-            case "modal-probe": ModalProbe(rest); break;
             case "rows": output.WriteLine("ROWS " + string.Join(", ", RowNames())); break;
             case "columns": Columns(rest); break;
             case "assert-column": AssertColumn(rest, expected: true); break;
@@ -1954,24 +1953,6 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         output.WriteLine($"SHOT {path}");
         if (options.Verbose)
             output.WriteLine($"# {width}x{height}{(elementName.Length == 0 ? "" : $" of {elementName}")}");
-    }
-
-    /// <summary>TEMP diagnostic: genuinely ShowDialog()s Settings over the main window and shoots
-    /// the main window while it's up, to see disabled-row colours for real.</summary>
-    private void ModalProbe(string rest)
-    {
-        var path = Resolve(Named(rest.Length == 0 ? "modal-probe" : rest, ++_shots));
-        session.Dispatcher.Invoke(() =>
-        {
-            var dialog = new SettingsWindow(SettingsFor(SettingsCategory.General)) { Owner = session.Window };
-            session.Window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle, new Action(() =>
-            {
-                Capture.Save(session.Window, path);
-                dialog.Close();
-            }));
-            dialog.ShowDialog();
-        });
-        output.WriteLine("SHOT " + path);
     }
 
     /// <summary>
