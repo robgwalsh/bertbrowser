@@ -1,6 +1,7 @@
 using BertBrowser.Core.Services.Transfer;
 using SharpCompress.Common;
 using SharpCompress.Writers;
+using SharpCompress.Writers.Zip;
 
 namespace BertBrowser.Core.Services.Archives;
 
@@ -129,19 +130,22 @@ public sealed class ArchiveCreator
     /// One place the option types are chosen, because they genuinely differ per format and a switch
     /// inside the dialog would drift from the writer.
     /// </summary>
-    private static WriterOptions OptionsFor(ArchiveWriteFormat format, CompressionLevel level) =>
-        new(format switch
+    internal static WriterOptions OptionsFor(ArchiveWriteFormat format, CompressionLevel level) => format switch
+    {
+        // Store is the right answer for a folder of JPEGs, and worth offering rather than spending
+        // minutes of CPU to save nothing. Normal and Maximum are deflate's default and best levels;
+        // for a while both mapped to plain Deflate and produced byte-identical archives.
+        ArchiveWriteFormat.Zip => level switch
         {
-            // Store is the right answer for a folder of JPEGs, and worth offering rather than
-            // spending minutes of CPU to save nothing.
-            ArchiveWriteFormat.Zip => level == CompressionLevel.Store
-                ? CompressionType.None
-                : CompressionType.Deflate,
-            ArchiveWriteFormat.Tar => CompressionType.None,
-            ArchiveWriteFormat.TarGz => CompressionType.GZip,
-            ArchiveWriteFormat.TarBz2 => CompressionType.BZip2,
-            _ => CompressionType.Deflate,
-        });
+            CompressionLevel.Store => new ZipWriterOptions(CompressionType.None),
+            CompressionLevel.Maximum => new ZipWriterOptions(CompressionType.Deflate) { CompressionLevel = 9 },
+            _ => new ZipWriterOptions(CompressionType.Deflate) { CompressionLevel = 6 },
+        },
+        ArchiveWriteFormat.Tar => new WriterOptions(CompressionType.None),
+        ArchiveWriteFormat.TarGz => new WriterOptions(CompressionType.GZip),
+        ArchiveWriteFormat.TarBz2 => new WriterOptions(CompressionType.BZip2),
+        _ => new WriterOptions(CompressionType.Deflate),
+    };
 
     private static void TryDelete(string path)
     {

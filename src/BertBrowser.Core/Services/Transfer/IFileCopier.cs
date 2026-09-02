@@ -127,18 +127,23 @@ public sealed class FileSystemFileCopier : IFileCopier
     }
 
     /// <summary>
-    /// Prefixes a long path with <c>\?\</c>. The .NET file APIs do this for us; the raw Win32
+    /// Prefixes a long path with <c>\\?\</c>. The .NET file APIs do this for us; the raw Win32
     /// calls do not, so without it a copy into a deep tree fails at MAX_PATH with a message about
     /// the filename being too long. The prefix turns off path normalization, which is safe here
     /// because every path reaching this class is already fully qualified.
     /// </summary>
+    /// <remarks>
+    /// The prefix is two backslashes, a question mark and a backslash. It was written with one
+    /// backslash for a while, which made every long copy fail with "filename syntax is incorrect"
+    /// and no short one — <c>TheRealCopier_CopiesIntoAPathLongerThanMaxPath</c> pins it.
+    /// </remarks>
     private static string Extended(string path)
     {
-        if (path.Length < 260 || path.StartsWith(@"\?\", StringComparison.Ordinal))
+        if (path.Length < 260 || path.StartsWith(@"\\?\", StringComparison.Ordinal))
             return path;
         if (path.StartsWith(@"\\", StringComparison.Ordinal))
-            return @"\?\UNC\" + path[2..];
-        return Path.IsPathFullyQualified(path) ? @"\?\" + path : path;
+            return @"\\?\UNC\" + path[2..];
+        return Path.IsPathFullyQualified(path) ? @"\\?\" + path : path;
     }
 
     /// <summary>

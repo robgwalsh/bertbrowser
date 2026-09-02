@@ -58,7 +58,7 @@ you where and what to watch for.
 | Move/copy/drag-drop/paste | `Core/Services/Transfer/*` (`TransferPlanner`, `TransferExecutor`, `IFileCopier`) |
 | Rename (incl. advanced/tokens) | `Core/Services/Rename/*` (`RenamePattern`, `RenamePlanner`, `RenameExecutor`, `RenameRule`) |
 | Create new item / ShellNew | `Core/Services/NewItem/*`, `Interop/ShellNewRegistry` |
-| Delete / Recycle Bin | `Core/Services/Delete/*`, `Interop/ShellRecycleBin` |
+| Delete / Recycle Bin | `Core/Services/Delete/*` (incl. `ShellRecycleBin`) |
 | Disk usage | `Core/Services/DiskUsage/*`, `Views/DiskUsageWindow`, `TreemapLayout` |
 | Duplicate finder | `Core/Services/Duplicates/*` |
 | Compare / sync two folders | `Core/Services/Compare/*`, `ViewModels/CompareSessionViewModel` |
@@ -66,7 +66,7 @@ you where and what to watch for.
 | Content search (`content:`) | `Core/Services/Search/ContentTerm.cs`, `Core/Services/Search/ContentReader.cs` |
 | Elevated MFT indexer | `src/BertBrowser.Indexer`, `Core/Services/MftIndexClient` |
 | Elevated file-op retry | `src/BertBrowser.Elevator`, `Core/Services/Elevation/*`, `Core/Ipc/ElevationProtocol.cs` |
-| Launching other programs | `Core/Services/ProcessLauncher.cs`, `Core/Services/ExecutablePath.cs`, `Core/Services/VSCodePath.cs`, `Interop/RunAsVerbRegistry` |
+| Launching other programs | `App/Services/ProcessLauncher.cs`, `Core/Services/ExecutablePath.cs`, `Core/Services/VSCodePath.cs`, `Interop/RunAsVerbRegistry` |
 | Startup / CLI / single instance | `Core/Cli/CommandLine.cs`, `Core/Cli/NavigationRequest.cs`, `Services/SingleInstance.cs`, `Core/Ipc/InstanceEndpoint.cs` |
 | Default folder handler (shell) | `Core/Services/ShellIntegration/*`, `App/Interop/FolderHandlerRegistry` |
 | Preview pane (incl. hex/raw) | `Core/Services/Preview/*` (`PreviewClassifier`, `TextPreviewReader`, `HexPreviewReader`, `SyntaxTokenizer`) |

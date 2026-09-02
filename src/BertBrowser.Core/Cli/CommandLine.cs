@@ -113,7 +113,7 @@ public static class CommandLine
             // it look like the flag was ignored.
             if (modeChosen && mode != chosen)
             {
-                errors.Add("Choose either --new-tab or --new-window, not both.");
+                errors.Add("Choose either --new-tab or --new-pane, not both.");
                 return;
             }
             mode = chosen;

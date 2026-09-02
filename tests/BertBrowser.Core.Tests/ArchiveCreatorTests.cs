@@ -59,6 +59,49 @@ public class ArchiveCreatorTests : IDisposable
         Assert.Equal("hello", Encoding.UTF8.GetString(bytes!));
     }
 
+    /// <summary>
+    /// The three words in the dialog have to mean three things. Store and Deflate were the only two
+    /// the writer ever saw for a while, so Normal and Maximum produced byte-identical archives.
+    /// </summary>
+    [Fact]
+    public void MaximumAsksTheDeflaterForMoreThanNormalDoes()
+    {
+        var normal = ArchiveCreator.OptionsFor(ArchiveWriteFormat.Zip, CompressionLevel.Normal);
+        var maximum = ArchiveCreator.OptionsFor(ArchiveWriteFormat.Zip, CompressionLevel.Maximum);
+
+        Assert.Equal(SharpCompress.Common.CompressionType.Deflate, normal.CompressionType);
+        Assert.Equal(SharpCompress.Common.CompressionType.Deflate, maximum.CompressionType);
+        Assert.Equal(9, maximum.CompressionLevel); // deflate's best
+        Assert.True(maximum.CompressionLevel > normal.CompressionLevel,
+            "Maximum has to try harder than Normal, or the dialog is offering a distinction that does not exist.");
+    }
+
+    /// <summary>The same thing measured: on compressible data, Maximum is never larger than Normal, and Store is larger than both.</summary>
+    [Fact]
+    public void MaximumIsNoLargerThanNormalAndStoreIsLargerThanBoth()
+    {
+        var rng = new Random(7);
+        var words = new[] { "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta" };
+        var text = new StringBuilder();
+        for (var i = 0; i < 60_000; i++) text.Append(words[rng.Next(words.Length)]).Append(rng.Next(100)).Append(' ');
+        Make("stuff/corpus.txt", text.ToString());
+        var sources = ArchiveSourceWalk.Collect([Path.Combine(_root, "stuff")], includeHidden: true);
+
+        long SizeAt(CompressionLevel level, string name)
+        {
+            var target = Path.Combine(_root, name);
+            _creator.Create(target, ArchiveWriteFormat.Zip, level, sources);
+            return new FileInfo(target).Length;
+        }
+
+        var store = SizeAt(CompressionLevel.Store, "store.zip");
+        var normal = SizeAt(CompressionLevel.Normal, "normal.zip");
+        var maximum = SizeAt(CompressionLevel.Maximum, "maximum.zip");
+
+        Assert.True(normal < store);
+        Assert.True(maximum <= normal);
+    }
+
     /// <summary>A stored zip is still readable — it is the right answer for already-compressed data.</summary>
     [Fact]
     public void StoreProducesAReadableArchive()

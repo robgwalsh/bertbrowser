@@ -685,6 +685,45 @@ public sealed class TransferExecutorTests : IDisposable
         Assert.True(File.Exists(source));
     }
 
+    /// <summary>
+    /// The raw Win32 copy needs the <c>\\?\</c> prefix past MAX_PATH; the .NET APIs that make the
+    /// folders do not. A malformed prefix fails every long copy, and only long ones, so a suite of
+    /// short temp paths never notices.
+    /// </summary>
+    [Fact]
+    public void TheRealCopier_CopiesIntoAPathLongerThanMaxPath()
+    {
+        var source = File_("deep", "src", "a.txt");
+        var destination = DeepPath("a.txt");
+
+        new FileSystemFileCopier().Copy(source, destination, null, default);
+
+        AssertContent(destination, "deep");
+    }
+
+    [Fact]
+    public void TheRealCopier_MovesIntoAPathLongerThanMaxPath()
+    {
+        var source = File_("deep", "src", "b.txt");
+        var destination = DeepPath("b.txt");
+
+        new FileSystemFileCopier().Move(source, destination, null, default);
+
+        AssertContent(destination, "deep");
+        Assert.False(File.Exists(source));
+    }
+
+    /// <summary>A destination whose full path is well past 260 characters, with its folders made.</summary>
+    private string DeepPath(string name)
+    {
+        var dir = _root;
+        while (dir.Length < 300) dir = Path.Combine(dir, new string('d', 40));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, name);
+        Assert.True(path.Length > 260, "the fixture has to be past MAX_PATH to prove anything.");
+        return path;
+    }
+
     [Fact]
     public void TheRealCopier_RefusesToOverwrite()
     {

@@ -2265,7 +2265,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         return $"{written}.";
     }
 
-    /// <summary>Reverses the last move, rename or delete — whichever the undo slot holds.</summary>
+    /// <summary>Reverses the last move, rename, delete, archive edit or sync — whichever the undo slot holds.</summary>
     [RelayCommand(CanExecute = nameof(CanUndo))]
     private async Task UndoAsync()
     {

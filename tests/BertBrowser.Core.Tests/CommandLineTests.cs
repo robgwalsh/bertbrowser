@@ -120,6 +120,17 @@ public sealed class CommandLineTests
         Assert.Single(Parse("--new-tab", "--new-pane", @"C:\Dir").Errors);
     }
 
+    /// <summary>The error names the two flags that actually exist; this app splits panes, it does
+    /// not open windows.</summary>
+    [Fact]
+    public void TheContradictionError_NamesTheRealFlags()
+    {
+        var error = Assert.Single(Parse("--new-tab", "--new-pane", @"C:\Dir").Errors);
+
+        Assert.Contains("--new-pane", error);
+        Assert.DoesNotContain("--new-window", error);
+    }
+
     [Fact]
     public void RepeatingTheSameFlag_IsNotAContradiction()
     {
