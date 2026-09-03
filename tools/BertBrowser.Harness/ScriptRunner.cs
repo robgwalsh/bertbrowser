@@ -166,6 +166,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "duplicates": Duplicates(rest); break;
             case "duplicates-keep": DuplicatesKeep(rest); break;
             case "duplicates-remove": DuplicatesRemove(); break;
+            case "changes-seed": ChangesSeed(); break;
 
             // browse settings
             case "hidden": Hidden(rest); break;
@@ -2076,7 +2077,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             session.Services.GetRequiredService<AppSettings>(),
             session.Services.GetRequiredService<IThemeService>(),
             session.Services.GetRequiredService<IShellNewCatalog>(),
-            session.Services.GetRequiredService<IFolderHandlerService>());
+            session.Services.GetRequiredService<IFolderHandlerService>(),
+            session.Services.GetRequiredService<ChangeLogRepository>());
         vm.SelectedCategory = vm.Categories.First(c => c.Id == category);
         return vm;
     }
@@ -2143,6 +2145,12 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         "disk-usage" => DiskUsageWindowFor(),
 
+        // With the run's default settings this photographs the "recording is off" banner — the
+        // state that matters most, since it is the default. After 'changes-seed' it shows rows.
+        "changes" => ChangesWindowFor(),
+
+        "settings-history" => new SettingsWindow(SettingsFor(SettingsCategory.History)),
+
         // Needs a 'compare' first, for the reason 'duplicates' does: the dialog shows what that
         // comparison found rather than starting one of its own while a capture waits on it.
         "sync-preview" => SyncPreviewDialog.Create(SyncPreviewFor()),
@@ -2187,8 +2195,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         _ => throw new FormatException(
             $"'{kind}' is not a dialog. Try: new-folder, new-file, rename, rename-advanced, " +
             "delete, delete-permanent, message, warning, properties, settings, theme-editor, " +
-            "disk-usage, duplicates, transfer, extract, compress, archive-password, " +
-            "settings-columns, columns."),
+            "disk-usage, duplicates, changes, transfer, extract, compress, archive-password, " +
+            "settings-columns, settings-history, columns."),
     };
 
     /// <summary>
@@ -2212,6 +2220,83 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         var window = DiskUsageWindow.Create(vm, (_, _) => { });
         window.Load(session.Tab.CurrentPath);
         return window;
+    }
+
+    /// <summary>
+    /// The change timeline on the folder being shown.
+    /// </summary>
+    /// <remarks>
+    /// A harness run has no journal tail — it is unelevated — so the only rows it can show are the
+    /// ones <c>changes-seed</c> wrote through the same repository the real helper writes through.
+    /// The banner it carries is honest for a run: nothing is indexed here.
+    /// </remarks>
+    private Window ChangesWindowFor()
+    {
+        var vm = new ChangeTimelineViewModel(
+            session.Services.GetRequiredService<BertBrowser.Core.Data.ChangeLogRepository>(),
+            session.Services.GetRequiredService<IMftIndexService>(),
+            session.Services.GetRequiredService<AppSettings>());
+
+        // Revealing would navigate the window behind this one; opening settings would block.
+        var window = ChangeTimelineWindow.Create(vm, (_, _) => { }, () => { });
+        window.Load(session.Tab.CurrentPath);
+        return window;
+    }
+
+    /// <summary>
+    /// Writes a dozen recorded changes under the sandbox, through the repository the index helper
+    /// writes through, and turns the run's recording setting on so the window will show them.
+    /// </summary>
+    /// <remarks>
+    /// Posed rather than provoked: a run cannot elevate, so nothing here tails a journal. What the
+    /// fixture exercises is everything after the record — coalescing (the log written five times
+    /// is one row, ×5), a rename with its old name, a hidden entry, a row too old for the hour
+    /// preset, and one past retention that <c>Prune</c> drops before the window ever sees it.
+    /// </remarks>
+    private void ChangesSeed()
+    {
+        // The run's settings file is the sandbox's own (BERTBROWSER_DATA_DIR), so this leaks nowhere.
+        session.Services.GetRequiredService<AppSettings>().RecordFileChanges = true;
+
+        var repo = session.Services.GetRequiredService<BertBrowser.Core.Data.ChangeLogRepository>();
+        var root = _sandbox.Root;
+        var now = DateTime.UtcNow;
+
+        BertBrowser.Core.Services.Changes.ChangeEvent Ev(string relative, BertBrowser.Core.Services.Changes.ChangeKind kind,
+            TimeSpan ago, bool isDir = false, bool hidden = false, string? renamedFrom = null)
+        {
+            var path = Path.Combine(root, relative);
+            return new(BertBrowser.Core.Paths.PathKey.Canonicalize(path), path, isDir, hidden, kind,
+                renamedFrom is null ? null : Path.Combine(root, renamedFrom), now - ago);
+        }
+
+        var created = BertBrowser.Core.Services.Changes.ChangeKind.Created;
+        var modified = BertBrowser.Core.Services.Changes.ChangeKind.Modified;
+        var deleted = BertBrowser.Core.Services.Changes.ChangeKind.Deleted;
+        var renamed = BertBrowser.Core.Services.Changes.ChangeKind.Renamed;
+
+        repo.Record(
+        [
+            Ev(@"Old\stale.txt", created, TimeSpan.FromHours(30)),           // past retention: pruned
+            Ev(@"Docs\readme.txt", created, TimeSpan.FromHours(5)),          // outside "last hour"
+            Ev(@"Setup\setup.tmp", created, TimeSpan.FromMinutes(2)),
+            Ev(@"Setup\setup.tmp", created, TimeSpan.FromSeconds(110)),      // folds: ×2
+            Ev(@"App\app.exe.config", modified, TimeSpan.FromSeconds(90)),
+            Ev(@"Setup\setup.tmp", deleted, TimeSpan.FromSeconds(60)),
+            Ev(@"Downloads\installer.msi", renamed, TimeSpan.FromSeconds(45), renamedFrom: @"Downloads\installer.part"),
+            Ev(@"App\plugins", created, TimeSpan.FromSeconds(40), isDir: true),
+            Ev(@".cache\index", created, TimeSpan.FromSeconds(30), hidden: true),
+            Ev(@"App\app.exe", modified, TimeSpan.FromSeconds(20)),
+            Ev(@"Logs\app.log", modified, TimeSpan.FromSeconds(15)),
+            Ev(@"Logs\app.log", modified, TimeSpan.FromSeconds(14)),
+            Ev(@"Logs\app.log", modified, TimeSpan.FromSeconds(13)),
+            Ev(@"Logs\app.log", modified, TimeSpan.FromSeconds(12)),
+            Ev(@"Logs\app.log", modified, TimeSpan.FromSeconds(11)),        // one row, ×5
+            Ev(@"App\old-plugin.dll", deleted, TimeSpan.FromSeconds(5)),
+        ]);
+        repo.Prune(now, TimeSpan.FromHours(24));
+
+        output.WriteLine($"CHANGES {repo.Count()}");
     }
 
     /// <summary>The New dialog as the menu opens it, suggested name and all.</summary>

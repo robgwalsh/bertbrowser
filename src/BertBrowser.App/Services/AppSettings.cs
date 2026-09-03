@@ -1,4 +1,5 @@
 using System.Text.Json;
+using BertBrowser.Core.Services.Changes;
 
 namespace BertBrowser.App.Services;
 
@@ -103,6 +104,37 @@ public sealed class AppSettings
     /// magnitudes; this is what a session starts from and what changing it writes back.
     /// </remarks>
     public long DuplicateMinSizeBytes { get; set; } = 1024 * 1024;
+
+    /// <summary>
+    /// Whether the index helper keeps a log of file changes for the "What changed" window.
+    /// </summary>
+    /// <remarks>
+    /// <b>Off by default, and deliberately.</b> A record of every file created, changed, deleted or
+    /// renamed on every drive is sensitive, and it lives in a plain SQLite file in the profile
+    /// folder. Nothing is written until the user turns this on, and turning it off deletes what
+    /// was kept. It has its own settings page for the same reason.
+    /// </remarks>
+    public bool RecordFileChanges { get; set; }
+
+    /// <summary>How long recorded changes are kept, in hours — one of
+    /// <see cref="ChangeLogPolicy.RetentionOptions"/>.</summary>
+    public int FileChangeRetentionHours { get; set; } = ChangeLogPolicy.DefaultRetentionHours;
+
+    /// <summary>The "Mark now" timestamp the change timeline's "since the mark" range counts from;
+    /// null until pressed. Kept across sessions so an installer that needs a reboot can still be
+    /// looked at afterwards.</summary>
+    public DateTime? ChangeTimelineMarkUtc { get; set; }
+
+    /// <summary>The two settings above as the one value the index service takes. A stored retention
+    /// that is no longer on the menu falls back to the default rather than throwing at startup.</summary>
+    public ChangeLogPolicy EffectiveChangeLogPolicy()
+    {
+        if (!RecordFileChanges) return ChangeLogPolicy.Off;
+        var hours = ChangeLogPolicy.IsAcceptableHours(FileChangeRetentionHours) && FileChangeRetentionHours > 0
+            ? FileChangeRetentionHours
+            : ChangeLogPolicy.DefaultRetentionHours;
+        return ChangeLogPolicy.FromHours(hours);
+    }
 
     /// <summary>Whether the duplicate finder leaves Windows and Program Files out.</summary>
     /// <remarks>

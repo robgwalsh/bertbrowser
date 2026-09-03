@@ -94,3 +94,7 @@ Compare           | Arrow Swap              | arrow_swap              | 20
 
 # Widening the preview pane to fit whatever it is currently showing.
 FitWidth          | Arrow Autofit Width     | arrow_autofit_width     | 20
+
+# What changed on this volume recently: the change timeline, its toolbar button and its
+# settings page. A clock with an arrow -- "history" -- rather than a list or a journal glyph.
+Changes           | History                 | history                 | 20

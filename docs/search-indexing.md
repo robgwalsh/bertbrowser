@@ -398,6 +398,34 @@ the feature outright**: that path writes every row with `size_bytes = 0`, so eve
 with every other. The shortlist counts sized rows as it walks and reports `NoSizeData` rather than
 reading a whole disk to discover nothing.
 
+### The change timeline
+
+The tail can also write down what it applies. `ChangeRecorder` (one per volume, owned by the tail
+thread) buffers each resolved create / modify / delete / rename as a `ChangeEvent` and flushes it
+into `fs_change` once per drained batch — `Data/Migrations/006_change_log.sql`. The "What changed"
+window (Ctrl+Shift+H) reads that table; nothing ever reads the journal on demand, and a record's
+path is only resolvable from the resident directory map at the moment it arrives, so this is the
+only time it could be written.
+
+- **Off by default.** A log of every file change on every drive is sensitive. `ChangeLogPolicy`
+  is pushed from the app to the helper as the one verb that carries a value (`IndexVerb.Record`:
+  retention hours from a fixed menu, `0` for off — an integer, never a path), on every session and
+  on every change. Turning it off wipes the table: the app does, and the recorder does once more
+  for the batch it had buffered.
+- **Coalesced at write time.** Same path, same kind, within 60 s → `count + 1` and a new
+  `last_utc`, seeking the most recent such row on `(path_key, kind, last_utc)`. A log written five
+  hundred times a minute is one row a minute.
+- **Pruned by the writer**, every 60 s: rows past the policy's retention, then anything past
+  500,000 rows. The view also clamps its range to the retention, so a row not yet pruned is not
+  shown past the promise the settings page made.
+- **The query is a range scan** on `last_utc` that also supplies the `ORDER BY … DESC`, pinned
+  with `INDEXED BY` because given a scope the planner prefers the path index and then sorts.
+  `ChangeLogRepositoryTests.Query_NeedsNoSorter` runs `EXPLAIN QUERY PLAN` to hold it there.
+- **It never records itself.** Every write to `bertbrowser.db` is a journal record; the data
+  directory is excluded at the recorder, and a flush with nothing buffered opens no connection.
+- **It never takes the index down.** A `SqliteException` in the recorder disables it for the
+  session; `RunVolume` would otherwise end that volume's tail silently.
+
 ## The fallback path
 
 Not everything is a fixed NTFS volume. For roots the MFT indexer does not cover, `SearchService`

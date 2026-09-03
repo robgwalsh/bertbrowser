@@ -5,17 +5,18 @@ namespace BertBrowser.Core.Services.Mft;
 
 /// <summary>
 /// The elevated process's half: runs a real <see cref="IMftIndexService"/> and reports it down the
-/// pipe, taking four verbs and nothing else.
+/// pipe, taking five verbs and nothing else.
 /// </summary>
 /// <remarks>
 /// <para>
 /// What this will accept is the security surface of the index design. It is
-/// <see cref="IndexVerb.Hello"/>, <see cref="IndexVerb.Start"/>, <see cref="IndexVerb.Shutdown"/>
-/// and <see cref="IndexVerb.Ping"/> — none of which names a file, a folder or a program. Adding a
-/// verb that does would undo the point of the split, however convenient it looked at the time, and
-/// the arrival of a second elevated helper changes nothing about that: this process is long-lived
-/// and starts itself at launch, which is precisely why it may not be told where to point. See
-/// <c>IndexProtocol</c> for the argument in full.
+/// <see cref="IndexVerb.Hello"/>, <see cref="IndexVerb.Start"/>, <see cref="IndexVerb.Shutdown"/>,
+/// <see cref="IndexVerb.Ping"/> and <see cref="IndexVerb.Record"/> — none of which names a file, a
+/// folder or a program. <see cref="IndexVerb.Record"/> carries one integer from a fixed menu and
+/// nothing else. Adding a verb that takes a path would undo the point of the split, however
+/// convenient it looked at the time, and the arrival of a second elevated helper changes nothing
+/// about that: this process is long-lived and starts itself at launch, which is precisely why it
+/// may not be told where to point. See <c>IndexProtocol</c> for the argument in full.
 /// </para>
 /// <para>
 /// <b>Losing the pipe is how this process learns to exit.</b> The kernel breaks it when the app
@@ -77,6 +78,12 @@ public sealed class MftIndexHost
 
                     case IndexVerb.Ping:
                         Send(new IndexMessage(IndexVerb.Pong));
+                        break;
+
+                    case IndexVerb.Record:
+                        // TryParse admitted only the menu, so this cannot throw.
+                        _index.ChangeLog = Services.Changes.ChangeLogPolicy.FromHours(
+                            int.Parse(message.Argument, System.Globalization.CultureInfo.InvariantCulture));
                         break;
 
                     case IndexVerb.Shutdown:

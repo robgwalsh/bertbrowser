@@ -34,6 +34,9 @@ public enum IndexVerb
 
     /// <summary>The answer to <see cref="Ping"/>.</summary>
     Pong,
+
+    /// <summary>App → helper: record file changes for this many hours, 0 for not at all.</summary>
+    Record,
 }
 
 /// <summary>One message: a verb and at most one argument.</summary>
@@ -47,12 +50,20 @@ public readonly record struct IndexMessage(IndexVerb Verb, string Argument = "")
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The elevated end accepts four verbs and never a path.</b> <see cref="IndexVerb.Hello"/>,
-/// <see cref="IndexVerb.Start"/>, <see cref="IndexVerb.Shutdown"/> and <see cref="IndexVerb.Ping"/>
-/// are the whole of what a medium-integrity process can ask an administrator-token process to do,
-/// and none of them names a file. That is the property worth protecting: a later "re-index this
-/// folder" verb would put an attacker-chosen path on the elevated surface, and there is no version
-/// of that which is worth the convenience.
+/// <b>The elevated end accepts five verbs and never a path.</b> <see cref="IndexVerb.Hello"/>,
+/// <see cref="IndexVerb.Start"/>, <see cref="IndexVerb.Shutdown"/>, <see cref="IndexVerb.Ping"/> and
+/// <see cref="IndexVerb.Record"/> are the whole of what a medium-integrity process can ask an
+/// administrator-token process to do, and none of them names a file. That is the property worth
+/// protecting: a later "re-index this folder" verb would put an attacker-chosen path on the
+/// elevated surface, and there is no version of that which is worth the convenience.
+/// </para>
+/// <para>
+/// <see cref="IndexVerb.Record"/> is the one that carries a value, and it is admissible for a
+/// narrow reason: the value is one integer from a fixed menu (<c>ChangeLogPolicy.RetentionOptions</c>,
+/// or 0), it switches a feature on or off and bounds how long its rows live, and it points the
+/// process at nothing. A peer that can send it can make the helper keep a log the user did not ask
+/// for — which is why the app sends the setting on every session rather than trusting the helper
+/// to remember it, and why the helper's default is off.
 /// </para>
 /// <para>
 /// <b>The rule survives the arrival of a second elevated helper, and it is worth being clear why.</b>
@@ -132,9 +143,21 @@ public static class IndexProtocol
         IndexVerb.Building or IndexVerb.Idle => IsAcceptableDrive(argument),
         IndexVerb.Complete => IsAcceptableRootKey(argument),
         IndexVerb.Fatal => IsAcceptableStatus(argument),
+        IndexVerb.Record => IsAcceptableRetention(argument),
         // Ready, Start, Shutdown, Ping and Pong say everything by arriving.
         _ => argument.Length == 0,
     };
+
+    /// <summary>
+    /// Exactly the retention menu, written the one way an integer is written: "24", never " 24",
+    /// "024" or "24h". Whatever <c>int.TryParse</c> would forgive, the elevated end does not.
+    /// </summary>
+    public static bool IsAcceptableRetention(string? candidate) =>
+        candidate is not null
+        && int.TryParse(candidate, System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out var hours)
+        && hours.ToString(System.Globalization.CultureInfo.InvariantCulture).Equals(candidate, StringComparison.Ordinal)
+        && Services.Changes.ChangeLogPolicy.IsAcceptableHours(hours);
 
     /// <summary>A bare drive letter — "C", not "C:" and not a path.</summary>
     public static bool IsAcceptableDrive(string? candidate) =>

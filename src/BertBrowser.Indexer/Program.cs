@@ -2,6 +2,8 @@ using System.IO.Pipes;
 using System.Security.Principal;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Ipc;
+using BertBrowser.Core.Paths;
+using BertBrowser.Core.Services.Changes;
 using BertBrowser.Core.Services.Mft;
 
 namespace BertBrowser.Indexer;
@@ -12,9 +14,10 @@ namespace BertBrowser.Indexer;
 /// </summary>
 /// <remarks>
 /// <para>
-/// It is started by the app, connects back to a pipe the app is listening on, and takes four verbs
-/// — hello, start, shutdown, ping. It never receives a path, never launches anything, and never
-/// draws a window. Everything it produces goes into the database the app already created.
+/// It is started by the app, connects back to a pipe the app is listening on, and takes five verbs
+/// — hello, start, shutdown, ping, and record (one integer: how long to keep a change log, 0 for
+/// not at all). It never receives a path, never launches anything, and never draws a window.
+/// Everything it produces goes into the database the app already created.
 /// </para>
 /// <para>
 /// It exits when the app does. See <see cref="PipeOwner"/> for the two mechanisms and why
@@ -86,7 +89,12 @@ internal static class Program
 
         // Never Migrate(): the schema belongs to the app, which has already applied it.
         var db = new Db(dbPath, create: false);
-        using var index = new MftIndexService(new FsIndexRepository(db), new DirSizeRepository(db));
+        // The change log's writer lives here too, because the records come from the same tail.
+        // Off until the app says otherwise (IndexVerb.Record), and it never records its own
+        // database's growth — the data directory is what the exclusion is.
+        var changes = new ChangeRecorderOptions(
+            new ChangeLogRepository(db), PathKey.Canonicalize(options.DataDirectory));
+        using var index = new MftIndexService(new FsIndexRepository(db), new DirSizeRepository(db), changes);
 
         using var lifetime = new CancellationTokenSource();
         PipeOwner.WatchForExit(options.ParentProcessId, () =>

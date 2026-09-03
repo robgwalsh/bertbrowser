@@ -1,6 +1,7 @@
 using System.Text;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Interop;
+using BertBrowser.Core.Services.Changes;
 
 namespace BertBrowser.Core.Services.Mft;
 
@@ -51,6 +52,14 @@ public interface IMftIndexService : IDisposable
 
     /// <summary>Tries again after a failure. A no-op unless <see cref="CanRetry"/>.</summary>
     void Retry();
+
+    /// <summary>
+    /// What the USN tail writes down beyond the index: nothing (the default) or a change log kept
+    /// for the policy's retention. Setting it is fire-and-forget — the out-of-process client
+    /// relays it to the helper, and the helper's own default is off, so a helper that never hears
+    /// otherwise records nothing.
+    /// </summary>
+    ChangeLogPolicy ChangeLog { get; set; }
 }
 
 /// <summary>
@@ -67,15 +76,30 @@ public sealed class MftIndexService : IMftIndexService
     private readonly List<Thread> _threads = new();
     private readonly List<MftVolumeIndexer> _indexers = new();
     private readonly MftIndexState _state = new();
+    private readonly ChangeRecorderOptions? _changes;
+    private readonly object _policyGate = new();
+    private ChangeLogPolicy _changeLog;
     private int _started;
 
     public event Action<string>? IndexRefreshed;
     public event Action? StatusChanged;
 
-    public MftIndexService(FsIndexRepository repository, DirSizeRepository dirSizeRepository)
+    /// <param name="changes">Where the tail may write a change log, or null for a host that has
+    /// none to offer. Whether it actually writes is <see cref="ChangeLog"/>, off until set.</param>
+    public MftIndexService(FsIndexRepository repository, DirSizeRepository dirSizeRepository,
+        ChangeRecorderOptions? changes = null)
     {
         _repository = repository;
         _dirSizeRepository = dirSizeRepository;
+        _changes = changes;
+    }
+
+    /// <summary>Read by each volume's recorder once per flush, so a change takes effect on the
+    /// next poll. A struct behind a lock rather than a volatile: it is two fields, not one word.</summary>
+    public ChangeLogPolicy ChangeLog
+    {
+        get { lock (_policyGate) return _changeLog; }
+        set { lock (_policyGate) _changeLog = value; }
     }
 
     public bool AnyIndexed => _state.AnyIndexed;
@@ -100,7 +124,10 @@ public sealed class MftIndexService : IMftIndexService
 
         foreach (var drive in EnumerateNtfsVolumes())
         {
-            var indexer = new MftVolumeIndexer(_repository, _dirSizeRepository, drive);
+            var recorder = _changes is null
+                ? null
+                : new ChangeRecorder(_changes.Repository, _changes.ExcludedRootKey, () => ChangeLog);
+            var indexer = new MftVolumeIndexer(_repository, _dirSizeRepository, drive, recorder);
             _indexers.Add(indexer);
 
             var thread = new Thread(() => RunVolume(indexer, drive))

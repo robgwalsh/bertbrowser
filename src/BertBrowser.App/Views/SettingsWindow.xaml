@@ -188,6 +188,63 @@
                 </StackPanel>
 
                 <!--
+                  History: the change timeline's switch. Its own page rather than a line on General
+                  because what it records is sensitive enough to deserve the explanation beside it,
+                  and off by default for the same reason.
+                -->
+                <StackPanel AutomationProperties.AutomationId="SettingsHistoryPage">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedCategory.Id}"
+                                             Value="{x:Static vm:SettingsCategory.History}">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <TextBlock Text="History" Style="{StaticResource PageHeading}"/>
+
+                    <CheckBox Content="Record file changes" IsChecked="{Binding RecordFileChanges}"
+                              AutomationProperties.AutomationId="RecordFileChanges"/>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Keeps a log of every file created, changed, deleted or renamed on every indexed drive, so the &quot;What changed&quot; window (Ctrl+Shift+H) can show what an installer or a build just did. The log lives in BertBrowser's own database in your profile folder, readable by anything that can read your files — which is why it is off unless you turn it on. Turning it off deletes what was kept."/>
+
+                    <DockPanel Margin="0,4,0,0" IsEnabled="{Binding RecordFileChanges}">
+                        <TextBlock Text="Keep changes for" VerticalAlignment="Center"/>
+                        <!-- ItemTemplate rather than DisplayMemberPath, for the reason spelled out
+                             on the theme picker. -->
+                        <ComboBox DockPanel.Dock="Right" MinWidth="110" HorizontalAlignment="Right"
+                                  ItemsSource="{Binding RetentionOptions}"
+                                  SelectedValue="{Binding FileChangeRetentionHours, Mode=TwoWay}"
+                                  SelectedValuePath="Hours"
+                                  AutomationProperties.Name="Keep changes for">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate><TextBlock Text="{Binding Label}"/></DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Older changes are dropped as new ones arrive. Whatever you pick, the log never grows past half a million rows."/>
+
+                    <Separator Margin="0,4,0,14"/>
+
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="Clear history now" Padding="12,4"
+                                Command="{Binding ClearHistoryCommand}"
+                                IsEnabled="{Binding CanClearHistory}"
+                                AutomationProperties.AutomationId="ClearHistory"/>
+                        <TextBlock Text="{Binding RecordedCountText}" VerticalAlignment="Center"
+                                   Foreground="{StaticResource Theme.Text.Secondary}"
+                                   AutomationProperties.AutomationId="RecordedCount"/>
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Deletes the log straight away, whether or not you press Save."/>
+                </StackPanel>
+
+                <!--
                   Appearance sits outside the dialog's Save/Cancel contract on purpose: a theme you
                   cannot see until you press Save is not a theme you can choose. Picking one applies
                   and persists immediately, which is why the note below says so.

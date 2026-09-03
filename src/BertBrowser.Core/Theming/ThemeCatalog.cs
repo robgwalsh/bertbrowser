@@ -80,6 +80,11 @@ public static class ThemeCatalog
             [T.CompareDiffers] = "#28A06AA8",
             [T.CompareUnknown] = "#24808080",
 
+            [T.ChangeCreated] = "#262E9E7A",
+            [T.ChangeModified] = "#282F7FD8",
+            [T.ChangeDeleted] = "#2AD9534F",
+            [T.ChangeRenamed] = "#2AB8860B",
+
             [T.TreeChevronForeground] = "#C5C5C5",
             [T.TreeChevronHoverForeground] = "#E7E7E7",
 
@@ -230,6 +235,11 @@ public static class ThemeCatalog
             [T.CompareOlder] = "#3CB8860B",
             [T.CompareDiffers] = "#388B5CB8",
             [T.CompareUnknown] = "#30909090",
+
+            [T.ChangeCreated] = "#382E9E6B",
+            [T.ChangeModified] = "#380F6CBD",
+            [T.ChangeDeleted] = "#3CD9534F",
+            [T.ChangeRenamed] = "#3CB8860B",
 
             [T.TreeChevronForeground] = "#6E6E6E",
             [T.TreeChevronHoverForeground] = "#007ACC",

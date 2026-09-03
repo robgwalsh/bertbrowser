@@ -26,6 +26,7 @@ public sealed class NullMftIndexService : IMftIndexService
     public string StatusText => "";
     public bool CanRetry => false;
     public void Retry() { }
+    public Changes.ChangeLogPolicy ChangeLog { get; set; }
     public event Action<string>? IndexRefreshed { add { } remove { } }
     public event Action? StatusChanged { add { } remove { } }
     public void Dispose() { }

@@ -4,6 +4,7 @@ using BertBrowser.Core.Data;
 using BertBrowser.Core.Interop;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
+using BertBrowser.Core.Services.Changes;
 using Microsoft.Win32.SafeHandles;
 
 namespace BertBrowser.Core.Services.Mft;
@@ -30,6 +31,7 @@ internal sealed class MftVolumeIndexer : IDisposable
 
     private readonly FsIndexRepository _repository;
     private readonly DirSizeRepository _dirSizeRepository;
+    private readonly ChangeRecorder? _recorder;
     private readonly string _driveRoot; // "C:\"
     private readonly string _rootKey;   // canonical "C:\"
 
@@ -49,10 +51,14 @@ internal sealed class MftVolumeIndexer : IDisposable
     public string RootKey => _rootKey;
     public string DriveRoot => _driveRoot;
 
-    public MftVolumeIndexer(FsIndexRepository repository, DirSizeRepository dirSizeRepository, string driveLetter)
+    /// <param name="recorder">Where the tail notes each change it applies, for the change
+    /// timeline; null records nothing. It sees exactly the records the index acts on.</param>
+    public MftVolumeIndexer(FsIndexRepository repository, DirSizeRepository dirSizeRepository, string driveLetter,
+        ChangeRecorder? recorder = null)
     {
         _repository = repository;
         _dirSizeRepository = dirSizeRepository;
+        _recorder = recorder;
         _driveRoot = driveLetter + @":\";
         _rootKey = _driveRoot.ToUpperInvariant();
     }
@@ -349,10 +355,16 @@ internal sealed class MftVolumeIndexer : IDisposable
             {
                 Apply(UsnRecordParser.Parse(buffer, sizeof(long), bytes));
                 _nextUsn = next;
+                // One transaction per drained batch. The batch is what the journal handed over, so
+                // this is already the natural unit — and a flush of nothing touches nothing.
+                _recorder?.Flush();
             }
             else
             {
                 _nextUsn = next;
+                // Idle polls flush too, so a policy that changed to "off" wipes promptly rather
+                // than on the next file write; with nothing buffered it costs no I/O.
+                _recorder?.Flush();
                 if (ct.WaitHandle.WaitOne(TailPollInterval))
                     return;
             }
@@ -387,8 +399,11 @@ internal sealed class MftVolumeIndexer : IDisposable
 
     private void ApplyDelete(UsnRecord rec)
     {
-        if (!TryResolvePath(rec, out _, out var key))
+        if (!TryResolvePath(rec, out var display, out var key))
             return;
+        // Before the index write and the map removal, while the parent can still answer for the
+        // hidden bit a deleted directory's row carried.
+        Note(rec, display, key, ChangeKind.Deleted, oldDisplayPath: null, EffectiveHidden(rec));
         _repository.DeleteSubtree(key);
         if (rec.IsDirectory)
             RemoveDirSubtree(NtfsLayout.RecordNumber(rec.FileReferenceNumber), key);
@@ -403,6 +418,7 @@ internal sealed class MftVolumeIndexer : IDisposable
         if (_pendingRenames.Remove(NtfsLayout.RecordNumber(rec.FileReferenceNumber), out var oldPath))
         {
             var oldKey = oldPath.ToUpperInvariant();
+            Note(rec, newDisplay, newKey, ChangeKind.Renamed, oldPath, EffectiveHidden(rec));
             _repository.Rename(oldKey, newKey, rec.Name, crawlGen);
             if (rec.IsDirectory)
                 RewriteDirSubtree(oldKey, newKey, newDisplay, rec);
@@ -419,13 +435,31 @@ internal sealed class MftVolumeIndexer : IDisposable
         if (!TryResolvePath(rec, out var display, out var key))
             return;
 
-        var hidden = ParentHidden(NtfsLayout.RecordNumber(rec.ParentFileReferenceNumber)) || rec.IsHidden;
+        var hidden = EffectiveHidden(rec);
+        // Reached both directly and from an unpaired rename; Classify draws the same line Apply
+        // does, so a move-in from nowhere the map knew is "created" on both sides.
+        Note(rec, display, key, ChangeLogRules.Classify(rec.Reason, hadOldName: false), oldDisplayPath: null, hidden);
         var (size, modified) = StatBestEffort(display, rec.IsDirectory);
         var crawlGen = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         _repository.UpsertEntries(new[] { new FsEntryRow(key, rec.Name, rec.IsDirectory, size, modified, hidden) }, crawlGen);
 
         if (rec.IsDirectory)
             _dirs[NtfsLayout.RecordNumber(rec.FileReferenceNumber)] = (display, hidden);
+    }
+
+    /// <summary>The entry's own Hidden bit OR'd down from its parent — what <c>fs_entry.hidden</c>
+    /// stores, and what the change log stores beside it so the two can never disagree.</summary>
+    private bool EffectiveHidden(in UsnRecord rec) =>
+        ParentHidden(NtfsLayout.RecordNumber(rec.ParentFileReferenceNumber)) || rec.IsHidden;
+
+    /// <summary>Hands one applied change to the recorder.</summary>
+    private void Note(in UsnRecord rec, string display, string key, ChangeKind kind, string? oldDisplayPath, bool hidden)
+    {
+        if (_recorder is null) return;
+        // The record's own stamp, so a batch drained late is dated when it happened. A journal
+        // record always carries one; the fallback is for the parser's unknown, not for real use.
+        var utc = rec.TimestampUtc == DateTime.MinValue ? DateTime.UtcNow : rec.TimestampUtc;
+        _recorder.Add(new ChangeEvent(key, display, rec.IsDirectory, hidden, kind, oldDisplayPath, utc));
     }
 
     /// <summary>Resolves the display path (and canonical key) of a change record from its
@@ -487,7 +521,7 @@ internal sealed class MftVolumeIndexer : IDisposable
     /// the linear scan over the (small) directory map is acceptable.</summary>
     private void RewriteDirSubtree(string oldKey, string newKey, string newDisplay, UsnRecord rec)
     {
-        var hidden = ParentHidden(NtfsLayout.RecordNumber(rec.ParentFileReferenceNumber)) || rec.IsHidden;
+        var hidden = EffectiveHidden(rec);
         _dirs[NtfsLayout.RecordNumber(rec.FileReferenceNumber)] = (newDisplay, hidden);
 
         var (lo, hi) = PathKey.PrefixBounds(oldKey);

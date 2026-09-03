@@ -33,6 +33,7 @@ public class IndexProtocolTests
     [InlineData(IndexVerb.Idle, "D")]
     [InlineData(IndexVerb.Complete, @"C:\")]
     [InlineData(IndexVerb.Fatal, "The database schema is newer than this helper.")]
+    [InlineData(IndexVerb.Record, "24")]
     public void EveryVerbRoundTrips(IndexVerb verb, string argument)
     {
         var message = new IndexMessage(verb, argument);
@@ -99,6 +100,39 @@ public class IndexProtocolTests
     {
         var line = "IDX\tFatal\t" + new string('a', NavigationRequest.MaxLineLength);
 
+        Rejects(line);
+    }
+
+    /// <summary>
+    /// The one verb the app may send that carries a value: the change-log retention in hours, 0
+    /// for off. Exactly the settings menu and nothing else — this is the elevated end's surface.
+    /// </summary>
+    [Theory]
+    [InlineData("0")]
+    [InlineData("1")]
+    [InlineData("6")]
+    [InlineData("24")]
+    [InlineData("168")]
+    public void AcceptsARecordWithARetentionOnTheMenu(string hours)
+    {
+        var message = Parse($"IDX\tRecord\t{hours}");
+
+        Assert.Equal(IndexVerb.Record, message.Verb);
+        Assert.Equal(hours, message.Argument);
+    }
+
+    [Theory]
+    [InlineData("IDX\tRecord")]
+    [InlineData("IDX\tRecord\t")]
+    [InlineData("IDX\tRecord\t2")]
+    [InlineData("IDX\tRecord\t25")]
+    [InlineData("IDX\tRecord\t-1")]
+    [InlineData("IDX\tRecord\t024")]
+    [InlineData("IDX\tRecord\t 24")]
+    [InlineData("IDX\tRecord\t24h")]
+    [InlineData("IDX\tRecord\tC:\\")]
+    public void RejectsARecordOffTheMenu(string line)
+    {
         Rejects(line);
     }
 

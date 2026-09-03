@@ -30,6 +30,9 @@ public partial class MainWindow : ThemedWindow
     /// <summary>The modeless duplicates window while one is open, re-pointed rather than stacked.</summary>
     private DuplicatesWindow? _duplicates;
 
+    /// <summary>The modeless change timeline while one is open, re-pointed rather than stacked.</summary>
+    private ChangeTimelineWindow? _changes;
+
     private TransferProgressWindow? _transferDetails;
 
     public MainWindow(ShellViewModel shell, BertBrowser.App.Services.AppSettings settings)
@@ -58,6 +61,7 @@ public partial class MainWindow : ThemedWindow
         _shell.GlobalSearchFocusRequested += FocusGlobalSearchBox;
         _shell.DiskUsageRequested += ShowDiskUsage;
         _shell.DuplicatesRequested += ShowDuplicates;
+        _shell.ChangesRequested += ShowChanges;
         _shell.SyncRequested += ShowSyncPreview;
         _shell.PropertyChanged += Shell_TransferProgressChanged;
         _shell.PropertyChanged += Shell_DrivesViewModeChanged;
@@ -136,13 +140,21 @@ public partial class MainWindow : ThemedWindow
 
     // --- Toolbar / dialogs ---
 
-    private void Settings_Click(object sender, RoutedEventArgs e)
+    private void Settings_Click(object sender, RoutedEventArgs e) => ShowSettings(null);
+
+    /// <summary>The one construction site for the settings dialog; <paramref name="page"/> opens
+    /// it on a page other than General, which is how the change timeline points at its switch.</summary>
+    private void ShowSettings(SettingsCategory? page)
     {
         var vm = new SettingsViewModel(
             _settings,
             App.Services.GetRequiredService<IThemeService>(),
             App.Services.GetRequiredService<BertBrowser.App.Services.IShellNewCatalog>(),
-            App.Services.GetRequiredService<BertBrowser.App.Services.IFolderHandlerService>());
+            App.Services.GetRequiredService<BertBrowser.App.Services.IFolderHandlerService>(),
+            App.Services.GetRequiredService<BertBrowser.Core.Data.ChangeLogRepository>());
+        if (page is { } category)
+            vm.ShowCategory(category);
+
         if (new SettingsWindow(vm) { Owner = this }.ShowDialog() == true)
         {
             // Push a "Show hidden items" change made in the dialog through the shell; its setter
@@ -153,6 +165,7 @@ public partial class MainWindow : ThemedWindow
             // Reaches every tab that has not arranged its own columns. Without this the Columns page
             // would appear to do nothing until a new tab was opened.
             _shell.ApplyColumnDefaults();
+            App.ApplyChangeLogPolicy(_settings);
         }
     }
 
@@ -345,6 +358,37 @@ public partial class MainWindow : ThemedWindow
     {
         if (_treeContextNode is { } node)
             _shell.OpenDuplicates(node.FullPath);
+    }
+
+    /// <summary>
+    /// The one construction site for the change timeline, reached only through
+    /// <see cref="ShellViewModel.OpenChanges"/> — the toolbar, both context menus and Ctrl+Shift+H
+    /// all arrive here. Modeless and re-used, like the disk-usage view.
+    /// </summary>
+    private void ShowChanges(string? path)
+    {
+        if (_changes is { IsLoaded: true })
+        {
+            _changes.Load(path);
+            _changes.Activate();
+            return;
+        }
+
+        var vm = new ChangeTimelineViewModel(
+            App.Services.GetRequiredService<BertBrowser.Core.Data.ChangeLogRepository>(),
+            App.Services.GetRequiredService<IMftIndexService>(),
+            _settings);
+
+        _changes = new ChangeTimelineWindow(vm, RevealFromDiskUsage, () => ShowSettings(SettingsCategory.History)) { Owner = this };
+        _changes.Closed += (_, _) => _changes = null;
+        _changes.Show();
+        _changes.Load(path);
+    }
+
+    private void TreeChanges_Click(object sender, RoutedEventArgs e)
+    {
+        if (_treeContextNode is { } node)
+            _shell.OpenChanges(node.FullPath);
     }
 
     /// <summary>Acting on what the analysis says: a folder opens in a new tab, a file opens its

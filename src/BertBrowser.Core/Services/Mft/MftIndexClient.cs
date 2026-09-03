@@ -1,5 +1,6 @@
 using BertBrowser.Core.Cli;
 using BertBrowser.Core.Ipc;
+using BertBrowser.Core.Services.Changes;
 
 namespace BertBrowser.Core.Services.Mft;
 
@@ -40,12 +41,21 @@ public sealed class MftIndexClient : IMftIndexService
     private readonly MftIndexState _state = new();
     private readonly object _gate = new();
 
+    /// <summary>
+    /// Serialises writes to the pipe. Until <see cref="ChangeLog"/> every line left from the one
+    /// worker thread; its setter sends from whichever thread changed the setting, and two lines
+    /// interleaved on the wire — say a <c>Record</c> through the middle of <c>Start</c> — would
+    /// parse as nothing, and the helper would silently never index.
+    /// </summary>
+    private readonly object _sendGate = new();
+
     private CancellationTokenSource? _session;
     private Thread? _worker;
     private Stream? _stream;
     private string? _failure;
     private bool _canRetry;
     private bool _disposed;
+    private ChangeLogPolicy _changeLog;
 
     public MftIndexClient(IIndexHostLauncher launcher, IIndexTransportFactory transports)
     {
@@ -81,6 +91,28 @@ public sealed class MftIndexClient : IMftIndexService
     {
         get { lock (_gate) return _canRetry; }
     }
+
+    /// <summary>
+    /// Relayed to the helper the moment it is set, if one is up, and again after every Start —
+    /// see <see cref="Converse"/>. The helper is never trusted to remember it across sessions.
+    /// </summary>
+    public ChangeLogPolicy ChangeLog
+    {
+        get { lock (_gate) return _changeLog; }
+        set
+        {
+            Stream? stream;
+            lock (_gate)
+            {
+                _changeLog = value;
+                stream = _stream;
+            }
+            if (stream is not null) Send(stream, RecordMessage(value));
+        }
+    }
+
+    private static IndexMessage RecordMessage(ChangeLogPolicy policy) =>
+        new(IndexVerb.Record, policy.ToHours().ToString(System.Globalization.CultureInfo.InvariantCulture));
 
     public void Start()
     {
@@ -196,6 +228,9 @@ public sealed class MftIndexClient : IMftIndexService
                 case IndexVerb.Ready when !started:
                     started = true;
                     Send(stream, new IndexMessage(IndexVerb.Start));
+                    // Every session, even when it is the default: a retried helper is a fresh
+                    // process whose own default is off, and the user's setting may not be.
+                    Send(stream, RecordMessage(ChangeLog));
                     break;
 
                 case IndexVerb.Building:
@@ -230,11 +265,12 @@ public sealed class MftIndexClient : IMftIndexService
         _launcher.WaitForExit(processId, ShutdownTimeout);
     }
 
-    private static void Send(Stream stream, IndexMessage message)
+    private void Send(Stream stream, IndexMessage message)
     {
         try
         {
-            LineChannel.WriteLine(stream, IndexProtocol.Format(message));
+            lock (_sendGate)
+                LineChannel.WriteLine(stream, IndexProtocol.Format(message));
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {

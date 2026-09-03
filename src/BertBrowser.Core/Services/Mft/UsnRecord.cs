@@ -5,14 +5,17 @@ namespace BertBrowser.Core.Services.Mft;
 /// <summary>
 /// One parsed USN_RECORD_V2 — the shape both the initial MFT enumeration
 /// (FSCTL_ENUM_USN_DATA) and the live journal tail (FSCTL_READ_USN_JOURNAL) return.
-/// <see cref="Reason"/> is only meaningful for journal records; enumeration leaves it 0.
+/// <see cref="Reason"/>, <see cref="Usn"/> and <see cref="TimestampUtc"/> are only meaningful for
+/// journal records; enumeration leaves them 0 / <see cref="DateTime.MinValue"/>.
 /// </summary>
 internal readonly record struct UsnRecord(
     ulong FileReferenceNumber,
     ulong ParentFileReferenceNumber,
     uint Reason,
     FileAttributes Attributes,
-    string Name)
+    string Name,
+    long Usn = 0,
+    DateTime TimestampUtc = default)
 {
     public bool IsDirectory => (Attributes & FileAttributes.Directory) != 0;
     public bool IsHidden => (Attributes & FileAttributes.Hidden) != 0;
@@ -32,6 +35,8 @@ internal static class UsnRecordParser
     private const int MajorVersionOffset = 4;
     private const int FileReferenceNumberOffset = 8;
     private const int ParentFileReferenceNumberOffset = 16;
+    private const int UsnOffset = 24;
+    private const int TimeStampOffset = 32;
     private const int ReasonOffset = 40;
     private const int FileAttributesOffset = 52;
     private const int FileNameLengthOffset = 56;
@@ -59,6 +64,8 @@ internal static class UsnRecordParser
             {
                 var frn = BinaryPrimitives.ReadUInt64LittleEndian(span[FileReferenceNumberOffset..]);
                 var parentFrn = BinaryPrimitives.ReadUInt64LittleEndian(span[ParentFileReferenceNumberOffset..]);
+                var usn = BinaryPrimitives.ReadInt64LittleEndian(span[UsnOffset..]);
+                var stamp = FileTimeToUtc(BinaryPrimitives.ReadInt64LittleEndian(span[TimeStampOffset..]));
                 var reason = BinaryPrimitives.ReadUInt32LittleEndian(span[ReasonOffset..]);
                 var attrs = (FileAttributes)BinaryPrimitives.ReadUInt32LittleEndian(span[FileAttributesOffset..]);
                 var nameLength = BinaryPrimitives.ReadUInt16LittleEndian(span[FileNameLengthOffset..]);
@@ -68,11 +75,24 @@ internal static class UsnRecordParser
                 {
                     var name = System.Text.Encoding.Unicode.GetString(
                         span.Slice(nameOffset, nameLength));
-                    yield return new UsnRecord(frn, parentFrn, reason, attrs, name);
+                    yield return new UsnRecord(frn, parentFrn, reason, attrs, name, usn, stamp);
                 }
             }
 
             offset += recordLength;
+        }
+    }
+
+    /// <summary>The same guard <c>MftReader</c> applies: an unset FILETIME is unknown, not 1601.</summary>
+    private static DateTime FileTimeToUtc(long fileTime)
+    {
+        try
+        {
+            return fileTime <= 0 ? DateTime.MinValue : DateTime.FromFileTimeUtc(fileTime);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return DateTime.MinValue;
         }
     }
 }

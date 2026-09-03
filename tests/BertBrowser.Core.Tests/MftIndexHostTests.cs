@@ -1,4 +1,5 @@
 using BertBrowser.Core.Ipc;
+using BertBrowser.Core.Services.Changes;
 using BertBrowser.Core.Services.Mft;
 using Xunit;
 
@@ -62,6 +63,25 @@ public class MftIndexHostTests
         app.Send(IndexVerb.Start);
 
         Eventually(() => index.Starts == 1, "Start should start the indexer");
+        app.Close();
+        thread.Join(Patience);
+    }
+
+    [Fact]
+    public void AppliesTheRecordingPolicyItIsSent()
+    {
+        var index = new ControllableIndexService();
+        var (thread, app) = Hosted(index);
+        app.Receive();
+        app.Receive();
+        Assert.False(index.ChangeLog.Enabled);
+
+        app.Send(IndexVerb.Record, "24");
+        Eventually(() => index.ChangeLog == ChangeLogPolicy.FromHours(24), "Record 24 should turn recording on for a day");
+
+        app.Send(IndexVerb.Record, "0");
+        Eventually(() => !index.ChangeLog.Enabled, "Record 0 should turn recording off");
+
         app.Close();
         thread.Join(Patience);
     }

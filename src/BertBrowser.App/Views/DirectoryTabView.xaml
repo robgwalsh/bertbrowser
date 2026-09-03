@@ -263,6 +263,12 @@
                                   InputGestureText="Ctrl+Shift+U" Click="ContextDuplicates_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Duplicates}"/></MenuItem.Icon>
                         </MenuItem>
+                        <!-- Folders only, like the two above: a file's own history is its folder's
+                             history filtered, and the window filters. -->
+                        <MenuItem x:Name="ChangesMenuItem" Header="What changed here…"
+                                  InputGestureText="Ctrl+Shift+H" Click="ContextChanges_Click">
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Changes}"/></MenuItem.Icon>
+                        </MenuItem>
                         <!-- Nothing to do with the selection: it compares the folder this pane is
                              showing against the one beside it, which is why it takes no items and
                              is only disabled when there is no second pane. -->

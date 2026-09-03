@@ -1,0 +1,16 @@
+# The change timeline ("What changed", Ctrl+Shift+H) and its settings page.
+#
+# A run is unelevated, so no journal is tailed: the first shot is the state every fresh install
+# has — recording off, the banner saying so with its Settings button — and the rest show rows the
+# seed wrote through the same repository the index helper writes through.
+tree .
+refresh
+dialog changes 01-recording-off
+dialog settings-history 02-settings
+changes-seed
+dialog changes 03-seeded
+theme light-plus
+dialog changes 04-seeded-light
+theme dark-plus
+assert-not-launched
+state

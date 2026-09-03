@@ -862,6 +862,8 @@ public partial class DirectoryTabView : UserControl
         // Duplicates reads whole files by path, which an entry does not have. Disk usage does not:
         // every size inside a container is already exact, so it stays on — see the Archives section.
         DuplicatesMenuItem.IsEnabled = DiskUsageMenuItem.IsEnabled && !inArchive;
+        // The change log is keyed by real paths, and an entry inside a container has none.
+        ChangesMenuItem.IsEnabled = DuplicatesMenuItem.IsEnabled;
 
         // Not keyed on the selection at all, and never disabled: it compares the two panes, so what
         // it needs is that there be two, and pressing it is how you find that out — a greyed row
@@ -1046,6 +1048,15 @@ public partial class DirectoryTabView : UserControl
             : Tab.CurrentPath;
 
         _shell.OpenDiskUsage(target is { Length: > 0 } ? target : null);
+    }
+
+    private void ContextChanges_Click(object sender, RoutedEventArgs e)
+    {
+        var target = FileListView.SelectedItem is FileItemViewModel { IsDirectory: true } item
+            ? item.FullPath
+            : Tab.CurrentPath;
+
+        _shell.OpenChanges(target is { Length: > 0 } ? target : null);
     }
 
     /// <summary>A selected folder, or — with nothing selected — the folder being shown.</summary>

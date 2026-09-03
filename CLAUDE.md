@@ -65,6 +65,7 @@ you where and what to watch for.
 | Search query language | `Core/Services/Search/*`, `docs/search-indexing.md` |
 | Content search (`content:`) | `Core/Services/Search/ContentTerm.cs`, `Core/Services/Search/ContentReader.cs` |
 | Elevated MFT indexer | `src/BertBrowser.Indexer`, `Core/Services/MftIndexClient` |
+| Change timeline ("What changed") | `Core/Services/Changes/*` (`ChangeLogRules`, `ChangeRecorder`, `ChangeLogPolicy`), `Core/Data/ChangeLogRepository`, `Views/ChangeTimelineWindow`, the History page of `SettingsWindow` |
 | Elevated file-op retry | `src/BertBrowser.Elevator`, `Core/Services/Elevation/*`, `Core/Ipc/ElevationProtocol.cs` |
 | Launching other programs | `App/Services/ProcessLauncher.cs`, `Core/Services/ExecutablePath.cs`, `Core/Services/VSCodePath.cs`, `Interop/RunAsVerbRegistry` |
 | Startup / CLI / single instance | `Core/Cli/CommandLine.cs`, `Core/Cli/NavigationRequest.cs`, `Services/SingleInstance.cs`, `Core/Ipc/InstanceEndpoint.cs` |
@@ -88,6 +89,13 @@ you where and what to watch for.
 - **Virtual (in-archive) paths must never reach a `PathKey`-keyed table.** `C:\x\a.zip\src` is a real
   Windows path syntactically, so it *would* land inside `PrefixBounds(C:\x)` — bookmarks, search and
   disk-usage each explicitly refuse a virtual root.
+- **The change log (`fs_change`) is off by default and written only by the index helper's USN
+  tail**, under a `ChangeLogPolicy` the app pushes over the pipe (`IndexVerb.Record`, one integer,
+  never a path). Nothing reads the journal on demand; recording starts once a volume's build
+  completes; rows carry the *record's* timestamp. The recorder must exclude the data directory and
+  an empty flush must never touch the DB, or every DB write logs itself for ever. Turning the
+  setting off wipes the table on both sides. Any feature that keeps history follows the same rule:
+  off until the user turns it on, on its own Settings page, with a way to clear it.
 - **One `Process.Start` in the whole app**, in `ProcessLauncher`. A second call site is a bug.
 - **The app is `asInvoker`.** Only the two elevated helper exes (Indexer, Elevator) touch an
   administrator token. Don't reintroduce `requireAdministrator` on the app to fix an access-denied

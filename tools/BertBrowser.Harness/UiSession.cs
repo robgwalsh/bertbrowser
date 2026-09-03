@@ -143,7 +143,12 @@ internal sealed class UiSession : IDisposable
                 return options.Index
                     ? new MftIndexService(
                         provider.GetRequiredService<FsIndexRepository>(),
-                        provider.GetRequiredService<DirSizeRepository>())
+                        provider.GetRequiredService<DirSizeRepository>(),
+                        // The same exclusion the real helper gets: a run's data directory is the
+                        // sandbox's, so a recording run would otherwise log its own database.
+                        new BertBrowser.Core.Services.Changes.ChangeRecorderOptions(
+                            provider.GetRequiredService<ChangeLogRepository>(),
+                            BertBrowser.Core.Paths.PathKey.Canonicalize(AppPaths.DataDir)))
                     : new NullMftIndexService();
             });
 

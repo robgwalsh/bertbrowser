@@ -5,7 +5,9 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using BertBrowser.App.Services;
 using BertBrowser.App.Theming;
+using BertBrowser.Core.Data;
 using BertBrowser.Core.Models;
+using BertBrowser.Core.Services.Changes;
 using BertBrowser.Core.Services.Columns;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
@@ -102,9 +104,22 @@ public enum SettingsCategory
     General,
     Appearance,
     Preview,
+    History,
     NewItems,
     Columns,
     Commands,
+}
+
+/// <summary>One choice on the History page's "keep for" list.</summary>
+public sealed record RetentionOption(int Hours, string Label)
+{
+    public static string LabelFor(int hours) => hours switch
+    {
+        1 => "1 hour",
+        < 24 => $"{hours} hours",
+        24 => "24 hours",
+        _ => $"{hours / 24} days",
+    };
 }
 
 /// <summary>An editable row of the default column list.</summary>
@@ -248,6 +263,59 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public string ContentSearchLimitText => $"{ContentSearchLimitKb:0} KB";
 
+    // --- History (the change timeline) ---
+
+    private readonly ChangeLogRepository? _changeLog;
+
+    /// <summary>Whether the index helper records file changes at all. Off by default; see
+    /// <c>AppSettings.RecordFileChanges</c> for why, and why this has a page of its own.</summary>
+    [ObservableProperty]
+    private bool _recordFileChanges;
+
+    /// <summary>How long recorded changes are kept — one of <see cref="RetentionOptions"/>.</summary>
+    [ObservableProperty]
+    private int _fileChangeRetentionHours;
+
+    public IReadOnlyList<RetentionOption> RetentionOptions { get; } =
+        ChangeLogPolicy.RetentionOptions.Select(h => new RetentionOption(h, RetentionOption.LabelFor(h))).ToList();
+
+    /// <summary>"12,408 changes recorded" — what the switch is a switch over. Blank without a
+    /// repository, which is only a construction site that did not pass one.</summary>
+    [ObservableProperty]
+    private string _recordedCountText = "";
+
+    public bool CanClearHistory => _changeLog is not null;
+
+    /// <summary>
+    /// Deletes every recorded change, immediately.
+    /// </summary>
+    /// <remarks>
+    /// Outside the Save/Cancel contract, like the theme picker and for a related reason: this is
+    /// an action, not a preference, and a "clear" that Cancel could undo would not be one. The
+    /// page says so beside the button.
+    /// </remarks>
+    [RelayCommand]
+    private async Task ClearHistory()
+    {
+        if (_changeLog is null) return;
+        await Task.Run(_changeLog.Clear);
+        await RefreshRecordedCountAsync();
+    }
+
+    private async Task RefreshRecordedCountAsync()
+    {
+        if (_changeLog is null) return;
+        try
+        {
+            var count = await Task.Run(_changeLog.Count);
+            RecordedCountText = count == 1 ? "1 change recorded" : $"{count:N0} changes recorded";
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException)
+        {
+            RecordedCountText = "";
+        }
+    }
+
     /// <summary>
     /// Theme selection and editing. Unlike everything else here it applies live rather than on
     /// Save — see the note in the dialog.
@@ -286,13 +354,15 @@ public sealed partial class SettingsViewModel : ObservableObject
         AppSettings settings,
         IThemeService theme,
         IShellNewCatalog? shellNew = null,
-        IFolderHandlerService? folderHandler = null)
+        IFolderHandlerService? folderHandler = null,
+        ChangeLogRepository? changeLog = null)
     {
         Categories = new[]
         {
             new SettingsCategoryViewModel(SettingsCategory.General, "General", "Icon.Settings"),
             new SettingsCategoryViewModel(SettingsCategory.Appearance, "Appearance", "Icon.Appearance"),
             new SettingsCategoryViewModel(SettingsCategory.Preview, "Preview", "Icon.PreviewPane"),
+            new SettingsCategoryViewModel(SettingsCategory.History, "History", "Icon.Changes"),
             new SettingsCategoryViewModel(SettingsCategory.NewItems, "New items", "Icon.Add"),
             new SettingsCategoryViewModel(SettingsCategory.Columns, "Columns", "Icon.Columns"),
             new SettingsCategoryViewModel(SettingsCategory.Commands, "Commands", "Icon.CustomCommand"),
@@ -323,6 +393,14 @@ public sealed partial class SettingsViewModel : ObservableObject
         ShowPreviewPane = settings.ShowPreviewPane;
         PreviewTextLimitKb = Math.Round(settings.PreviewTextMaxBytes / 1024.0);
         ContentSearchLimitKb = Math.Round(settings.SearchContentMaxBytes / 1024.0);
+        _changeLog = changeLog;
+        RecordFileChanges = settings.RecordFileChanges;
+        // A stored value off the menu would leave the box showing nothing; the policy the app runs
+        // falls back the same way (AppSettings.ChangeLogPolicy).
+        FileChangeRetentionHours = ChangeLogPolicy.IsAcceptableHours(settings.FileChangeRetentionHours) && settings.FileChangeRetentionHours > 0
+            ? settings.FileChangeRetentionHours
+            : ChangeLogPolicy.DefaultRetentionHours;
+        _ = RefreshRecordedCountAsync();
 
         TileAspect = AspectRatio.Parse(settings.TileAspectRatio);
         TileAspectOptions = AspectRatio.Presets.Contains(TileAspect)
@@ -610,6 +688,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settings.ShowPreviewPane = ShowPreviewPane;
         _settings.PreviewTextMaxBytes = (int)Math.Clamp(PreviewTextLimitKb * 1024, 4096, 64 * 1024 * 1024);
         _settings.SearchContentMaxBytes = (int)Math.Clamp(ContentSearchLimitKb * 1024, 4096, 64 * 1024 * 1024);
+        _settings.RecordFileChanges = RecordFileChanges;
+        _settings.FileChangeRetentionHours = FileChangeRetentionHours;
         _settings.TileAspectRatio = TileAspect.ToString();
         // Always a list once this dialog has been saved, never null: from here on the user has
         // configured their columns, and the "never configured" state has nothing left to say.

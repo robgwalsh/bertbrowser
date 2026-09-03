@@ -10,7 +10,8 @@ public sealed class UsnRecordParserTests
     private const int NameOffset = 60;
 
     /// <summary>Builds one USN_RECORD_V2 with the given fields, 8-byte aligned like the OS.</summary>
-    private static byte[] Record(ulong frn, ulong parentFrn, uint reason, uint attributes, string name, ushort major = 2)
+    private static byte[] Record(ulong frn, ulong parentFrn, uint reason, uint attributes, string name, ushort major = 2,
+        long usn = 0, long fileTime = 0)
     {
         var nameBytes = Encoding.Unicode.GetBytes(name);
         var length = (NameOffset + nameBytes.Length + 7) & ~7; // round up to 8
@@ -20,6 +21,8 @@ public sealed class UsnRecordParserTests
         BinaryPrimitives.WriteUInt16LittleEndian(span[4..], major);          // MajorVersion
         BinaryPrimitives.WriteUInt64LittleEndian(span[8..], frn);
         BinaryPrimitives.WriteUInt64LittleEndian(span[16..], parentFrn);
+        BinaryPrimitives.WriteInt64LittleEndian(span[24..], usn);
+        BinaryPrimitives.WriteInt64LittleEndian(span[32..], fileTime);
         BinaryPrimitives.WriteUInt32LittleEndian(span[40..], reason);
         BinaryPrimitives.WriteUInt32LittleEndian(span[52..], attributes);
         BinaryPrimitives.WriteUInt16LittleEndian(span[56..], (ushort)nameBytes.Length);
@@ -81,5 +84,29 @@ public sealed class UsnRecordParserTests
         var buffer = WithCursor(Record(1, 5, 0, 0, "skip.me", major: 3));
 
         Assert.Empty(UsnRecordParser.Parse(buffer, 8, buffer.Length));
+    }
+
+    [Fact]
+    public void Parse_ReadsUsnAndTimestamp()
+    {
+        var stamp = new DateTime(2026, 9, 2, 10, 30, 0, DateTimeKind.Utc);
+        var buffer = WithCursor(Record(1, 5, 0, 0, "a.txt", usn: 0x1234_5678, fileTime: stamp.ToFileTimeUtc()));
+
+        var rec = Assert.Single(UsnRecordParser.Parse(buffer, 8, buffer.Length));
+
+        Assert.Equal(0x1234_5678L, rec.Usn);
+        Assert.Equal(stamp, rec.TimestampUtc);
+        Assert.Equal(DateTimeKind.Utc, rec.TimestampUtc.Kind);
+    }
+
+    [Fact]
+    public void Parse_ZeroTimestampIsMinValue()
+    {
+        // FSCTL_ENUM_USN_DATA leaves the field 0; it must not become 1601-01-01.
+        var buffer = WithCursor(Record(1, 5, 0, 0, "a.txt"));
+
+        var rec = Assert.Single(UsnRecordParser.Parse(buffer, 8, buffer.Length));
+
+        Assert.Equal(DateTime.MinValue, rec.TimestampUtc);
     }
 }

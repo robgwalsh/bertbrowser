@@ -1,4 +1,5 @@
 using BertBrowser.Core.Ipc;
+using BertBrowser.Core.Services.Changes;
 using BertBrowser.Core.Services.Mft;
 using Xunit;
 
@@ -59,6 +60,44 @@ public class MftIndexClientTests : IDisposable
 
         Assert.Equal(1, launcher.Launches);
         helper.Close();
+    }
+
+    /// <summary>
+    /// The helper starts with recording off and learns otherwise only from the app: once after
+    /// Start on every session — a retried helper must not come up recording when the user turned
+    /// it off — and again whenever the setting changes.
+    /// </summary>
+    [Fact]
+    public void TellsTheHelperTheRecordingPolicyAfterStartAndOnEveryChange()
+    {
+        var (client, helper) = Connected(out _);
+
+        var initial = helper.ReceiveOneOf(IndexVerb.Record)!.Value;
+        Assert.Equal("0", initial.Argument);
+
+        client.ChangeLog = ChangeLogPolicy.FromHours(6);
+
+        var changed = helper.ReceiveOneOf(IndexVerb.Record)!.Value;
+        Assert.Equal("6", changed.Argument);
+        Assert.Equal(ChangeLogPolicy.FromHours(6), client.ChangeLog);
+    }
+
+    [Fact]
+    public void SendsTheStoredPolicyToAHelperThatConnectsLater()
+    {
+        var (appEnd, helperEnd) = DuplexPair.Create();
+        var launcher = new FakeIndexHostLauncher(IndexHostLaunchResult.Started(4242));
+        var client = Client(launcher, new FakeIndexTransportFactory(() => appEnd));
+        var helper = new ProtocolPeer(helperEnd);
+        client.ChangeLog = ChangeLogPolicy.FromHours(168); // set before there is anyone to tell
+
+        client.Start();
+        helper.Receive();
+        helper.Send(IndexVerb.Hello, IndexProtocol.ProtocolVersion.ToString());
+        helper.Send(IndexVerb.Ready);
+
+        Assert.Equal(IndexVerb.Start, helper.ReceiveOneOf(IndexVerb.Start)!.Value.Verb);
+        Assert.Equal("168", helper.ReceiveOneOf(IndexVerb.Record)!.Value.Argument);
     }
 
     [Fact]

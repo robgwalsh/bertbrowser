@@ -250,6 +250,7 @@ public sealed class FolderCompareAgreementTests : IDisposable
         public string StatusText => "";
         public bool CanRetry => false;
         public void Retry() { }
+        public BertBrowser.Core.Services.Changes.ChangeLogPolicy ChangeLog { get; set; }
         public event Action<string>? IndexRefreshed { add { } remove { } }
         public event Action? StatusChanged { add { } remove { } }
         public void Dispose() { }

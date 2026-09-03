@@ -184,6 +184,25 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private void FindDuplicates() =>
         OpenDuplicates(ActiveTab.CurrentPath is { Length: > 0 } path ? path : null);
 
+    /// <summary>
+    /// Raised with the folder whose recent changes to show, or null for "This PC". Shaped like
+    /// <see cref="DiskUsageRequested"/>, for the same reason.
+    /// </summary>
+    public event Action<string?>? ChangesRequested;
+
+    /// <summary>Opens the change timeline on <paramref name="path"/>, or on every indexed drive
+    /// when it is null. A path inside an archive opens on the archive's folder — see
+    /// <c>ChangeLogRules.ScopeFor</c> — so the toolbar and Ctrl+Shift+H arms, which take the tab's
+    /// path as it is, cannot ask about a place the log has no rows for.</summary>
+    public void OpenChanges(string? path) =>
+        ChangesRequested?.Invoke(BertBrowser.Core.Services.Changes.ChangeLogRules.ScopeFor(path, File.Exists));
+
+    /// <summary>The Ctrl+Shift+H arm: what changed in whatever the active tab is showing. A tab
+    /// with no path yet falls back to the whole PC rather than refusing.</summary>
+    [RelayCommand]
+    private void ShowChanges() =>
+        OpenChanges(ActiveTab.CurrentPath is { Length: > 0 } path ? path : null);
+
     // --- Comparing two panes ---
 
     /// <summary>The comparison currently running, or null. One at a time: it decorates two file

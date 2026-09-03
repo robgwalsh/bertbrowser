@@ -66,6 +66,12 @@ public static class ThemeToken
     public const string CompareDiffers = "Theme.Compare.Differs";
     public const string CompareUnknown = "Theme.Compare.Unknown";
 
+    // Row tints in the change timeline, translucent for the reason the compare tints are.
+    public const string ChangeCreated = "Theme.Change.Created";
+    public const string ChangeModified = "Theme.Change.Modified";
+    public const string ChangeDeleted = "Theme.Change.Deleted";
+    public const string ChangeRenamed = "Theme.Change.Renamed";
+
     // Folder tree
     public const string TreeChevronForeground = "Theme.Tree.ChevronForeground";
     public const string TreeChevronHoverForeground = "Theme.Tree.ChevronHoverForeground";
@@ -183,6 +189,7 @@ public static class ThemeToken
     private const string GroupAccent = "Accent";
     private const string GroupLists = "Lists";
     private const string GroupCompare = "Folder compare";
+    private const string GroupChanges = "Change timeline";
     private const string GroupTree = "Folder tree";
     private const string GroupTabs = "Tabs";
     private const string GroupTitleBar = "Title bar";
@@ -245,6 +252,11 @@ public static class ThemeToken
         new(CompareOlder, GroupCompare, "Older here", "", false),
         new(CompareDiffers, GroupCompare, "Differs", "Both sides have it and neither is newer.", false),
         new(CompareUnknown, GroupCompare, "Could not be compared", "Never treated as a match, and never synced.", false),
+
+        new(ChangeCreated, GroupChanges, "Created", "Alpha matters: these tint a row in the \"What changed\" window rather than paint it.", false),
+        new(ChangeModified, GroupChanges, "Modified", "", false),
+        new(ChangeDeleted, GroupChanges, "Deleted", "", false),
+        new(ChangeRenamed, GroupChanges, "Renamed", "", false),
 
         new(TreeChevronForeground, GroupTree, "Expander chevron", "", false),
         new(TreeChevronHoverForeground, GroupTree, "Expander chevron hover", "", false),

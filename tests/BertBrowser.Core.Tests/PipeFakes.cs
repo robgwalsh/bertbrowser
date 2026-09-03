@@ -198,6 +198,7 @@ internal sealed class ControllableIndexService : IMftIndexService
     public string StatusText => _state.FormatStatus();
     public bool CanRetry => false;
     public void Retry() { }
+    public BertBrowser.Core.Services.Changes.ChangeLogPolicy ChangeLog { get; set; }
 
     public void Start()
     {

@@ -111,6 +111,7 @@ public partial class App : Application
         // search and nothing else — SearchService falls back to its crawl, and the status bar
         // offers a retry.
         Services.GetRequiredService<IMftIndexService>().Start();
+        ApplyChangeLogPolicy(Services.GetRequiredService<AppSettings>());
 
         _ = Task.Run(() => Services.GetRequiredService<IUpdateService>().CheckAndStageUpdateAsync());
 
@@ -120,6 +121,22 @@ public partial class App : Application
         // pending undo.
         _ = Task.Run(() => BertBrowser.Core.Services.Delete.DeleteExecutor
             .PurgeAbandonedStaging(TimeSpan.FromDays(1)));
+    }
+
+    /// <summary>
+    /// Tells the index helper whether to record file changes, and wipes the log when the answer
+    /// is no. Called at startup and after the settings dialog saves.
+    /// </summary>
+    /// <remarks>
+    /// The wipe is the app's, not only the helper's: rows left by an earlier session that later
+    /// turned the feature off must not survive, and the helper may not be running at all. The
+    /// helper wipes too, once, for the batch it had buffered when the verb arrived.
+    /// </remarks>
+    public static void ApplyChangeLogPolicy(AppSettings settings)
+    {
+        Services.GetRequiredService<IMftIndexService>().ChangeLog = settings.EffectiveChangeLogPolicy();
+        if (!settings.RecordFileChanges)
+            _ = Task.Run(() => Services.GetRequiredService<ChangeLogRepository>().Clear());
     }
 
     /// <summary>
@@ -143,6 +160,7 @@ public partial class App : Application
         services.AddSingleton(new Db(AppPaths.DbPath));
         services.AddSingleton<DirSizeRepository>();
         services.AddSingleton<FsIndexRepository>();
+        services.AddSingleton<ChangeLogRepository>();
         services.AddSingleton<BookmarkRepository>();
         // The archive layer is a decorator, which is why the five callers of IFileSystemService —
         // the file list, its merge diff, the disk-usage breakdown and the folder tree — needed no

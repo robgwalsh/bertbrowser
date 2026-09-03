@@ -138,6 +138,12 @@ duplicates-keep <strategy>  tick every copy but one: newest, oldest or shallowes
 duplicates-remove           delete the ticked copies through PlanDelete/DeleteAsync, so they land
                             in the Recycle Bin and `undo` puts them back
 
+changes-seed                write a dozen recorded file changes under the sandbox through the same
+                            repository the index helper writes through (coalesced ×N rows, a rename
+                            with its old name, a hidden entry, one too old for the hour, one past
+                            retention), and turn the run's recording setting on. A run is
+                            unelevated, so this is the only way `dialog changes` shows rows
+
 hidden on|off | thumbnails <0..1> | sort <column-id> | theme <id>
                             (sort takes any catalogue id: Name, Size, Type, Modified, Created,
                             Accessed, Extension, or a canonical name such as
@@ -157,10 +163,14 @@ preview-mode auto|raw|hex   the pane's view override; sticky across selections, 
 shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, rename-advanced,
                             delete, delete-permanent, message, warning, properties, settings,
-                            theme-editor, disk-usage, duplicates, sync-preview,
+                            theme-editor, disk-usage, duplicates, changes, sync-preview,
                             sync-preview-running, search-syntax, extract, compress,
-                            archive-password, elevation, settings-columns, columns,
-                            settings-columns-dragging
+                            archive-password, elevation, settings-columns, settings-history,
+                            columns, settings-columns-dragging
+                            (changes is the "What changed" window: with a run's default settings
+                            it shows the recording-off banner — the state every fresh install
+                            has — and after `changes-seed` it shows rows. settings-history is
+                            the page with its switch)
                             (both sync ones need a `compare` first, like `dialog duplicates`: they
                             show what that comparison found rather than starting one of their own.
                             sync-preview-running is the same window once Sync has been pressed —
