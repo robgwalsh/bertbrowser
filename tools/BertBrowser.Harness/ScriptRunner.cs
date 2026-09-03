@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using BertBrowser.App.Services;
@@ -171,6 +172,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "thumbnails": Thumbnails(rest); break;
             case "preview": Preview(rest); break;
             case "preview-mode": PreviewViewMode(rest); break;
+            case "preview-fit-width": PreviewFitWidth(); break;
             case "preview-fixture": PreviewFixture(rest); break;
             case "content-fixture": ContentFixture(rest); break;
             case "sort": Sort(rest); break;
@@ -1866,6 +1868,16 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         session.Settle(quietMs: 400);
     }
 
+    /// <summary>Presses the preview pane's fit-width button, the way a click would — there is no
+    /// generic click command, and this is the only gesture that button has.</summary>
+    private void PreviewFitWidth()
+    {
+        var button = FindNamed<Button>("FitWidthButton")
+            ?? throw new InvalidOperationException("FitWidthButton is not in the visual tree.");
+        Invoke(() => button.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)));
+        session.Settle();
+    }
+
     /// <summary>Scrolls the sidebar's folder tree to a vertical offset, in pixels — the only way
     /// to exercise its scroll-driven sticky headers (<c>PinnedRow</c>/<c>PinnedRootRow</c>) from a
     /// script, since nothing here synthesises real mouse-wheel input.</summary>
@@ -2296,6 +2308,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             ("previewTitle", Quote(tab.Preview.Title)),
             ("previewMessage", Quote(tab.Preview.Message ?? "")),
             ("previewFooter", Quote(tab.Preview.TextFooter)),
+            ("previewPaneWidth", (FindNamed<FrameworkElement>("PreviewPane")?.ActualWidth ?? 0)
+                .ToString("0.#", CultureInfo.InvariantCulture)),
             ("previewMetadata", Text(tab.Preview.Metadata.Count)),
             ("canUndo", Bool(shell.CanUndo)),
             ("undo", Quote(shell.UndoDescription)),

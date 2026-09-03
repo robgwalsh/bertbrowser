@@ -91,3 +91,6 @@ Duplicates        | Document Multiple       | document_multiple       | 20
 # Comparing this pane with the one beside it. "Arrow swap" rather than a scales or a diff glyph:
 # what the command actually offers is moving files from one side to the other.
 Compare           | Arrow Swap              | arrow_swap              | 20
+
+# Widening the preview pane to fit whatever it is currently showing.
+FitWidth          | Arrow Autofit Width     | arrow_autofit_width     | 20

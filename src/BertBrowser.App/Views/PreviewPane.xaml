@@ -43,17 +43,32 @@
 
     <DockPanel>
         <!-- Header: the name, then type / size / modified, and the dimensions once an image
-             has actually been decoded. -->
+             has actually been decoded. The fit-width button sits beside it rather than in the
+             action strip below: it acts on the pane's own column width, not on what the body
+             shows, so it belongs with the chrome that is always there. -->
         <Border DockPanel.Dock="Top" BorderThickness="0,0,0,1"
                 BorderBrush="{StaticResource Theme.Border.Subtle}" Padding="8,6">
-            <StackPanel>
-                <TextBlock Text="{Binding Title}" FontWeight="SemiBold"
-                           TextTrimming="CharacterEllipsis"
-                           ToolTip="{Binding Title}"/>
-                <TextBlock Text="{Binding SubTitle}" FontSize="11"
-                           Foreground="{StaticResource Theme.Text.Secondary}"
-                           TextTrimming="CharacterEllipsis"/>
-            </StackPanel>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding Title}"/>
+                    <TextBlock Text="{Binding SubTitle}" FontSize="11"
+                               Foreground="{StaticResource Theme.Text.Secondary}"
+                               TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+                <Button x:Name="FitWidthButton" Grid.Column="1" Style="{StaticResource ToolbarButton}"
+                        VerticalAlignment="Top" Margin="6,0,0,0"
+                        Click="FitWidth_Click"
+                        AutomationProperties.AutomationId="FitWidthButton"
+                        ToolTip="Expand the pane to fit its contents">
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.FitWidth}"/>
+                </Button>
+            </Grid>
         </Border>
 
         <!-- Per-kind actions. Only the ones that apply to what is showing are visible. -->

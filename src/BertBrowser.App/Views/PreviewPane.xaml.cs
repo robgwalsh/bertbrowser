@@ -5,6 +5,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Services.Preview;
@@ -51,6 +52,60 @@ public partial class PreviewPane : UserControl
         HookCheckerboard();
         HookGutterScrolling();
     }
+
+    /// <summary>Raised when the fit-width button is pressed. The pane's own column belongs to
+    /// <c>DirectoryTabView</c> — <c>ColumnDefinition.Width</c> is not bindable, the same reason
+    /// its width is already assigned from that view's code-behind — so this only asks; it does
+    /// not resize anything itself.</summary>
+    public event EventHandler? FitWidthRequested;
+
+    private void FitWidth_Click(object sender, RoutedEventArgs e) => FitWidthRequested?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>
+    /// How wide the pane would need to be to show what it currently holds with no horizontal
+    /// scrollbar. Only text, a hex dump and an image have a natural width beyond "whatever it is
+    /// now" — everything else (archive listing, font specimen, media transport) already lays out
+    /// to fit, so their own current width is the honest answer.
+    /// </summary>
+    public double MeasureDesiredWidth()
+    {
+        if (_model is null) return ActualWidth;
+        return _model.Kind switch
+        {
+            PreviewKind.Text or PreviewKind.Hex => MeasureTextWidth(),
+            PreviewKind.Image or PreviewKind.Document => MeasureImageWidth(),
+            _ => ActualWidth,
+        };
+    }
+
+    /// <summary>Widest rendered line, plus the gutter and the padding the document itself
+    /// carries. Measures every line rather than sampling: the pane already builds one paragraph
+    /// per line in <see cref="Rebuild"/>, so this is no bigger an ask than the render it follows.</summary>
+    private double MeasureTextWidth()
+    {
+        var lines = _model?.Lines ?? [];
+        if (lines.Count == 0) return ActualWidth;
+
+        var typeface = new Typeface(Monospace, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+        var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        var widest = 0.0;
+        foreach (var line in lines)
+        {
+            if (line.Text.Length == 0) continue;
+            var formatted = new FormattedText(
+                line.Text, System.Globalization.CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                typeface, 12, Brushes.Black, dpi);
+            if (formatted.WidthIncludingTrailingWhitespace > widest) widest = formatted.WidthIncludingTrailingWhitespace;
+        }
+
+        var gutterWidth = _model?.ShowLineNumbers == true ? Gutter.ActualWidth + 1 : 0;
+        return widest + gutterWidth + 12 /* PagePadding */ + SystemParameters.VerticalScrollBarWidth + 8;
+    }
+
+    /// <summary>The image's own size — <see cref="BitmapSource.Width"/> is already in
+    /// device-independent pixels, so no DPI conversion is needed.</summary>
+    private double MeasureImageWidth() =>
+        PreviewImage.Source is BitmapSource bitmap ? bitmap.Width + 16 : ActualWidth;
 
     private void OnUnloaded(object sender, RoutedEventArgs e) => _mediaTick.Stop();
 

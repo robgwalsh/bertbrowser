@@ -165,7 +165,7 @@
           widths are assigned from code-behind — ColumnDefinition.Width is not bindable, which is
           the same reason PaneLayoutHost is built in code. The precedent is UpdateRelPathColumn.
         -->
-        <Grid>
+        <Grid x:Name="PreviewLayoutGrid">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" MinWidth="120"/>
                 <ColumnDefinition x:Name="PreviewSplitterColumn" Width="0"/>

@@ -51,6 +51,7 @@ public partial class DirectoryTabView : UserControl
         Tab.PropertyChanged += Tab_PropertyChanged;
         Tab.RevealFileRequested += OnRevealFileRequested;
         Tab.FileList.ColumnsChanged += FileList_ColumnsChanged;
+        PreviewPane.FitWidthRequested += PreviewPane_FitWidthRequested;
         Tab.FileList.RealizedRows = RealizedRows;
         DetailsView.Columns.CollectionChanged += Columns_CollectionChanged;
         // Bubbles from PART_HeaderGripper in the GridViewColumnHeader template.
@@ -69,6 +70,7 @@ public partial class DirectoryTabView : UserControl
         Tab.PropertyChanged -= Tab_PropertyChanged;
         Tab.RevealFileRequested -= OnRevealFileRequested;
         Tab.FileList.ColumnsChanged -= FileList_ColumnsChanged;
+        PreviewPane.FitWidthRequested -= PreviewPane_FitWidthRequested;
         DetailsView.Columns.CollectionChanged -= Columns_CollectionChanged;
         FileListView.RemoveHandler(Thumb.DragCompletedEvent, new DragCompletedEventHandler(Header_DragCompleted));
         PreviewPane.Detach();
@@ -122,6 +124,23 @@ public partial class DirectoryTabView : UserControl
         // on completion, not on every pixel of the drag.
         if (PreviewColumn.ActualWidth > 0)
             _settings.PreviewPaneWidth = PreviewColumn.ActualWidth;
+    }
+
+    /// <summary>Widens the pane to fit what it is showing, or as close as the tab has room for.
+    /// "Available" is the tab's own width minus the list's minimum (120, set on its column in
+    /// XAML) and the splitter — never the whole window, since the list must keep somewhere to
+    /// stand even when the preview asks for everything.</summary>
+    private void PreviewPane_FitWidthRequested(object? sender, EventArgs e)
+    {
+        if (!Tab.IsPreviewVisible) return;
+
+        var desired = PreviewPane.MeasureDesiredWidth();
+        var available = Math.Max(PreviewColumn.ActualWidth,
+            PreviewLayoutGrid.ActualWidth - 120 - PreviewSplitter.ActualWidth);
+        var target = Math.Clamp(desired <= available ? desired : available * 0.9, 180, 1200);
+
+        PreviewColumn.Width = new GridLength(target);
+        _settings.PreviewPaneWidth = target;
     }
 
     public void FocusList() =>
