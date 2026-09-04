@@ -17,6 +17,7 @@ using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
+using BertBrowser.Core.Services.SavedSearches;
 using BertBrowser.Core.Services.Transfer;
 
 namespace BertBrowser.App.ViewModels;
@@ -90,6 +91,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
     public FolderTreeViewModel Tree { get; }
     public BookmarksViewModel Bookmarks { get; }
+    public SavedSearchesViewModel SavedSearches { get; }
 
     /// <summary>How the open panes divide the window. Rebuilt by the view whenever
     /// <see cref="LayoutChanged"/> fires — never on plain navigation.</summary>
@@ -309,6 +311,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         IFileSystemService fileSystem,
         ISearchService searchService,
         IBookmarkService bookmarkService,
+        ISavedSearchService savedSearchService,
         IMftIndexService mftIndex,
         DirSizeRepository dirSizes,
         TransferPlanner transferPlanner,
@@ -368,6 +371,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
         Tree = new FolderTreeViewModel(fileSystem, dirSizes);
         Bookmarks = new BookmarksViewModel(bookmarkService);
+        SavedSearches = new SavedSearchesViewModel(savedSearchService);
 
         _activePane = new PaneViewModel(_factory, this);
         _activePane.AddTab("");
@@ -399,6 +403,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     {
         Bookmarks.SetShowHidden(ShowHiddenItems);
         await Bookmarks.LoadAsync();
+        await SavedSearches.LoadAsync();
 
         // Before the drives load: the setting decides what each node's expander probe reports.
         Tree.SetShowHidden(ShowHiddenItems);
@@ -912,6 +917,61 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         SetStatus(anyMissing
             ? $"Bookmarked {entries.Count} item(s)"
             : $"Removed {entries.Count} bookmark(s)");
+    }
+
+    // --- Saved searches ---
+
+    /// <summary>Runs a saved search in the active tab, or a new one beside it.</summary>
+    /// <remarks>
+    /// Navigate first, then type: <c>SetPathAndLoadAsync</c> clears the search boxes before it
+    /// loads, so the other order would lose the query. <c>NavigateToAsync</c> reports a missing
+    /// folder in the status line and returns without throwing, which is why the existence check is
+    /// made here — the text must never land in a tab that did not move. A new tab is opened empty
+    /// and navigated here, not through <c>AddTab(path)</c>, whose own navigation is not awaited.
+    /// </remarks>
+    public async Task RunSavedSearchAsync(SavedSearchItemViewModel? item, bool inNewTab = false)
+    {
+        if (item is null) return;
+        if (SavedSearchRules.Plan(item.Model, ActiveTab.CurrentPath) is not { } run)
+        {
+            SetStatus("Open a folder first, then run the search.");
+            return;
+        }
+        if (!Directory.Exists(run.NavigateTo) && !ArchivePath.LooksVirtual(run.NavigateTo))
+        {
+            SetStatus($"Folder not found: {run.NavigateTo}");
+            return;
+        }
+
+        var tab = inNewTab ? ActivePane.AddTab("", activate: true) : ActiveTab;
+        await tab.NavigateToAsync(run.NavigateTo);
+
+        // Setting a box to the text it already holds raises no change, so running the same saved
+        // search twice in a row refreshes instead of doing nothing.
+        var current = run.Global ? tab.GlobalSearchText : tab.SearchText;
+        if (current == run.Text)
+            await tab.RefreshViewAsync();
+        else if (run.Global)
+            tab.GlobalSearchText = run.Text;
+        else
+            tab.SearchText = run.Text;
+    }
+
+    /// <summary>Stores a search the dialog validated; <paramref name="previousName"/> is the row
+    /// being edited, or null for a new one.</summary>
+    public async Task SaveSearchAsync(BertBrowser.Core.Models.SavedSearch search, string? previousName)
+    {
+        if (await SavedSearches.SaveAsync(search, previousName))
+            SetStatus($"Saved search \"{search.Name}\"");
+        else
+            SetStatus($"There is already a saved search called \"{search.Name}\"");
+    }
+
+    public async Task RemoveSavedSearchAsync(SavedSearchItemViewModel? item)
+    {
+        if (item is null) return;
+        await SavedSearches.RemoveAsync(item);
+        SetStatus($"Removed saved search \"{item.Name}\"");
     }
 
     // --- Background index callbacks ---

@@ -317,15 +317,73 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Left sidebar: drives/devices (top, fills rest) + bookmarks (below, only as tall as needed) -->
+            <!-- Left sidebar: drives/devices (top, fills rest) + saved searches + bookmarks (below, only as tall as needed) -->
             <Grid Grid.Column="0" Background="{StaticResource Theme.Surface.Background}">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <!-- Bookmarks (below the drive list; sized to content) -->
+                <!-- Saved searches (between the drives and the bookmarks; sized to content).
+                     A click runs one in the active tab; the menu has the rest. -->
                 <DockPanel Grid.Row="1">
+                    <Border DockPanel.Dock="Top" BorderBrush="{StaticResource Theme.Border.Subtle}" BorderThickness="0,1,0,0">
+                        <TextBlock Text="SAVED SEARCHES" Style="{StaticResource SidebarHeader}"/>
+                    </Border>
+                    <TextBlock DockPanel.Dock="Top" Margin="10,0,10,8" Foreground="{StaticResource Theme.Text.Muted}" FontSize="11"
+                               TextWrapping="Wrap" Text="Save a search from the search box to keep it here."
+                               AutomationProperties.AutomationId="SavedSearchEmptyText"
+                               Visibility="{Binding SavedSearches.HasItems, Converter={StaticResource InverseBoolToVisibility}}"/>
+                    <ScrollViewer MaxHeight="200" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Visibility="{Binding SavedSearches.HasItems, Converter={StaticResource BoolToVisibility}}">
+                        <ItemsControl ItemsSource="{Binding SavedSearches.Items}" Margin="0,0,0,6"
+                                      AutomationProperties.AutomationId="SavedSearchList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border x:Name="SsRow" Background="Transparent" Padding="10,4"
+                                            MouseUp="SavedSearchRow_MouseUp"
+                                            ToolTip="{Binding ToolTip}">
+                                        <Border.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Run" Click="SavedSearchRun_Click">
+                                                    <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Search}"/></MenuItem.Icon>
+                                                </MenuItem>
+                                                <MenuItem Header="Run in new tab" Click="SavedSearchRunInNewTab_Click">
+                                                    <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.OpenInNewTab}"/></MenuItem.Icon>
+                                                </MenuItem>
+                                                <Separator/>
+                                                <MenuItem Header="Delete" Click="SavedSearchDelete_Click">
+                                                    <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Delete}"/></MenuItem.Icon>
+                                                </MenuItem>
+                                            </ContextMenu>
+                                        </Border.ContextMenu>
+                                        <DockPanel>
+                                            <Path DockPanel.Dock="Left" Style="{StaticResource IconPath}"
+                                                  Data="{StaticResource Icon.Search}" Width="13" Height="13" Margin="1,0,8,0"
+                                                  VerticalAlignment="Center" Fill="{StaticResource Theme.Text.Secondary}"/>
+                                            <TextBlock DockPanel.Dock="Right" Text="{Binding ScopeText}" Margin="8,0,0,0"
+                                                       VerticalAlignment="Center" FontSize="11" MaxWidth="90"
+                                                       Foreground="{StaticResource Theme.Text.Muted}"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </DockPanel>
+                                    </Border>
+                                    <DataTemplate.Triggers>
+                                        <Trigger SourceName="SsRow" Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="SsRow" Property="Background" Value="{StaticResource Theme.List.HoverBackground}"/>
+                                        </Trigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+
+                <!-- Bookmarks (below the saved searches; sized to content) -->
+                <DockPanel Grid.Row="2">
                     <Border DockPanel.Dock="Top" BorderBrush="{StaticResource Theme.Border.Subtle}" BorderThickness="0,1,0,0">
                         <TextBlock Text="BOOKMARKS" Style="{StaticResource SidebarHeader}"/>
                     </Border>
