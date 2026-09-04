@@ -130,6 +130,14 @@
                                     Style="{StaticResource GlobalSearchClearButton}">
                                 <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Dismiss}" Width="12" Height="12"/>
                             </Button>
+                            <!-- Keep this search under a name; shown and hidden with the ✕. -->
+                            <Button DockPanel.Dock="Right" ToolTip="Save this search…"
+                                    Click="SaveGlobalSearch_Click"
+                                    AutomationProperties.AutomationId="SaveGlobalSearchButton"
+                                    AutomationProperties.Name="Save this search"
+                                    Style="{StaticResource GlobalSearchClearButton}">
+                                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Save}" Width="12" Height="12"/>
+                            </Button>
                             <Grid>
                                 <TextBox x:Name="GlobalSearchBox" BorderThickness="0" Background="Transparent"
                                          VerticalContentAlignment="Center"
@@ -354,6 +362,9 @@
                                                     <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.OpenInNewTab}"/></MenuItem.Icon>
                                                 </MenuItem>
                                                 <Separator/>
+                                                <MenuItem Header="Edit…" Click="SavedSearchEdit_Click">
+                                                    <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Rename}"/></MenuItem.Icon>
+                                                </MenuItem>
                                                 <MenuItem Header="Delete" Click="SavedSearchDelete_Click">
                                                     <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Delete}"/></MenuItem.Icon>
                                                 </MenuItem>

@@ -1,0 +1,48 @@
+<v:ThemedWindow x:Class="BertBrowser.App.Views.SavedSearchDialog"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:v="clr-namespace:BertBrowser.App.Views"
+                Title="Save search" Width="480" SizeToContent="Height" MinHeight="200"
+                ResizeMode="NoResize"
+                WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+                Background="{StaticResource Theme.Surface.Background}"
+                TextElement.Foreground="{StaticResource Theme.Text.Primary}">
+    <DockPanel Margin="16">
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="Cancel" MinWidth="88" Margin="0,0,8,0" IsCancel="True"/>
+            <Button x:Name="OkButton" Content="Save" MinWidth="88" IsDefault="True"
+                    Style="{StaticResource PrimaryButton}" Click="Ok_Click"/>
+        </StackPanel>
+
+        <StackPanel>
+            <TextBlock Text="Name" Margin="0,0,0,6"/>
+            <TextBox x:Name="NameBox" TextChanged="Field_TextChanged"
+                     AutomationProperties.AutomationId="SavedSearchName"/>
+
+            <TextBlock Text="Search for" Margin="0,12,0,6"/>
+            <TextBox x:Name="QueryBox" TextChanged="Field_TextChanged"
+                     AutomationProperties.AutomationId="SavedSearchQuery"
+                     ToolTip="Filters: ext: size: dm: path: is: re: in: content:, plus OR and !"/>
+
+            <TextBlock Text="Search in" Margin="0,12,0,6"/>
+            <RadioButton x:Name="ScopeCurrent" Content="Whichever folder is open when it runs"
+                         Margin="0,2" Checked="Scope_Checked"/>
+            <RadioButton x:Name="ScopeFolder" Margin="0,2" Checked="Scope_Checked">
+                <!-- The pinned folder reads as part of the option, not a label beside it, so a
+                     long path trims rather than pushing the dialog wider. -->
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Always in " VerticalAlignment="Center"/>
+                    <TextBlock x:Name="FolderText" VerticalAlignment="Center" MaxWidth="330"
+                               TextTrimming="CharacterEllipsis"
+                               Foreground="{StaticResource Theme.Text.Secondary}"/>
+                </StackPanel>
+            </RadioButton>
+            <RadioButton x:Name="ScopePc" Content="This PC" Margin="0,2" Checked="Scope_Checked"/>
+
+            <TextBlock x:Name="ProblemText" Margin="0,10,0,0" TextWrapping="Wrap"
+                       Foreground="{StaticResource Theme.Error.Foreground}"
+                       Visibility="Collapsed"/>
+        </StackPanel>
+    </DockPanel>
+</v:ThemedWindow>

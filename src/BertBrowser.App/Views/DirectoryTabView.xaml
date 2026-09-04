@@ -78,6 +78,15 @@
                             Style="{StaticResource SearchClearButton}">
                         <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Dismiss}" Width="12" Height="12"/>
                     </Button>
+                    <!-- Keep this search under a name. Same style as the ✕, so it appears and
+                         disappears with it. -->
+                    <Button DockPanel.Dock="Right" ToolTip="Save this search…"
+                            Click="SaveSearch_Click"
+                            AutomationProperties.AutomationId="SaveSearchButton"
+                            AutomationProperties.Name="Save this search"
+                            Style="{StaticResource SearchClearButton}">
+                        <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Save}" Width="12" Height="12"/>
+                    </Button>
                     <Grid>
                         <!-- These ids repeat once per open tab now. Only the visible tab of each
                              pane is in the automation tree (the rest are Collapsed), so a single
