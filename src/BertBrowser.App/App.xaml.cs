@@ -162,6 +162,7 @@ public partial class App : Application
         services.AddSingleton<FsIndexRepository>();
         services.AddSingleton<ChangeLogRepository>();
         services.AddSingleton<BookmarkRepository>();
+        services.AddSingleton<SavedSearchRepository>();
         // The archive layer is a decorator, which is why the five callers of IFileSystemService —
         // the file list, its merge diff, the disk-usage breakdown and the folder tree — needed no
         // changes at all to gain it. The concrete FileSystemService is registered separately so the
@@ -220,6 +221,8 @@ public partial class App : Application
             s.GetRequiredService<BertBrowser.Core.Services.Delete.IRecycleProbe>()));
         services.AddSingleton<BertBrowser.Core.Services.Delete.DeleteSurveyor>();
         services.AddSingleton<IBookmarkService, BookmarkService>();
+        services.AddSingleton<BertBrowser.Core.Services.SavedSearches.ISavedSearchService,
+            BertBrowser.Core.Services.SavedSearches.SavedSearchService>();
         services.AddSingleton<IndexCrawler>();
         services.AddSingleton<IIndexWatcherService, IndexWatcherService>();
         // Not MftIndexService: reading the MFT needs an administrator token, and this process
