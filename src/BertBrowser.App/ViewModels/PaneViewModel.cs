@@ -93,6 +93,16 @@ public sealed partial class PaneViewModel : ObservableObject
         if (ActiveTab is { } tab) AddTab(tab.CurrentPath);
     }
 
+    /// <summary>Puts the tab at <paramref name="from"/> into slot <paramref name="to"/>, as a drag
+    /// along the strip does. The active tab stays active wherever it lands. An index outside the
+    /// strip is ignored rather than thrown, because it only ever comes from a drop.</summary>
+    public void MoveTab(int from, int to)
+    {
+        if (from == to) return;
+        if (from < 0 || from >= Tabs.Count || to < 0 || to >= Tabs.Count) return;
+        Tabs.Move(from, to);
+    }
+
     /// <summary>Closes a tab, or — when it was the only one — the whole pane. Passing null closes
     /// the visible tab, which is what Ctrl+W and the strip's close glyph both mean.</summary>
     [RelayCommand]

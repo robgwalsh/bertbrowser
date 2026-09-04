@@ -67,8 +67,6 @@ public partial class MainWindow : ThemedWindow
         _shell.PropertyChanged += Shell_DrivesViewModeChanged;
 
         Loaded += async (_, _) => await _shell.InitializeAsync();
-        ContentRendered += MainWindow_ContentRendered;
-        DpiChanged += (_, _) => RefreshTextBoxDpiLayout(this);
         Closing += (_, _) =>
         {
             SaveWindowSettings();
@@ -1237,42 +1235,4 @@ public partial class MainWindow : ThemedWindow
             _shell.OpenInVSCode(node.FullPath, isDirectory: true);
     }
 
-    // --- TextBox padding at non-100% display scaling ---
-
-    private bool _settledTextBoxDpiLayout;
-
-    /// <summary>Fires (possibly more than once) once the window has actually painted. WPF's
-    /// per-monitor-DPI TextBox can mis-measure its caret/content inset if that inset was first
-    /// computed before the window settled on its real monitor and scale — the fix below forces every
-    /// TextBox to redo it once we know the settled DPI is in effect. Only the first firing matters:
-    /// later ones mean something else repainted, not that DPI moved (that already has its own
-    /// handler via <see cref="Window.DpiChanged"/>).</summary>
-    private void MainWindow_ContentRendered(object? sender, EventArgs e)
-    {
-        if (_settledTextBoxDpiLayout) return;
-        _settledTextBoxDpiLayout = true;
-        Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => RefreshTextBoxDpiLayout(this));
-    }
-
-    /// <summary>Forces every TextBox under <paramref name="root"/> to throw away and reapply its
-    /// control template. A plain <c>InvalidateMeasure</c>/<c>InvalidateArrange</c> pass is not
-    /// enough: TextBoxView (WPF's internal editing surface) caches its DPI-to-device-pixel
-    /// conversion at template-apply time, not at measure time, so a stale conversion survives an
-    /// ordinary re-layout. Reapplying the template is the only way to make it re-read the DPI the
-    /// window is actually running at right now.</summary>
-    private static void RefreshTextBoxDpiLayout(DependencyObject root)
-    {
-        if (root is TextBox textBox)
-        {
-            var template = textBox.Template;
-            textBox.Template = null;
-            textBox.ApplyTemplate();
-            textBox.Template = template;
-            textBox.ApplyTemplate();
-        }
-
-        var childCount = VisualTreeHelper.GetChildrenCount(root);
-        for (var i = 0; i < childCount; i++)
-            RefreshTextBoxDpiLayout(VisualTreeHelper.GetChild(root, i));
-    }
 }

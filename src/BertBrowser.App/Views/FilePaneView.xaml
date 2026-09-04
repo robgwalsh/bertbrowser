@@ -56,7 +56,9 @@
 
                     <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
                                   PreviewMouseWheel="TabStrip_PreviewMouseWheel">
-                        <ItemsControl ItemsSource="{Binding Tabs}">
+                        <!-- Reorderable by dragging a header: ListReorderDrag is attached in
+                             code-behind, and the drop lands in PaneViewModel.MoveTab. -->
+                        <ItemsControl x:Name="TabStrip" ItemsSource="{Binding Tabs}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <StackPanel Orientation="Horizontal"/>

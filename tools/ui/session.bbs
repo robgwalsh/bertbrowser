@@ -5,10 +5,18 @@
 tree .
 refresh
 
-# An arrangement worth losing: two panes, and three tabs in the first.
+# An arrangement worth losing: two panes, and three tabs in the first — reordered, so the round
+# trip has to keep the order a drag left them in, not the order they were opened in.
 newtab Documents
 newtab Pictures
 assert-tabs 3
+tab-dragging 1
+shot tab-dragging
+movetab 3 1
+tab 1
+assert-path Pictures
+tab 3
+assert-path Documents
 split right Documents
 assert-panes 2
 
@@ -21,9 +29,12 @@ assert-tabs 1
 # The pane that was active is the one still active, and it is showing the folder it was showing.
 assert-path Documents
 
-# Back to the first pane (panes are 1-indexed here): its three tabs came back too.
+# Back to the first pane (panes are 1-indexed here): its three tabs came back too, in the
+# moved order.
 pane 1
 assert-tabs 3
+tab 1
+assert-path Pictures
 
 assert-not-launched
 state

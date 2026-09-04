@@ -38,6 +38,10 @@ public partial class FilePaneView : UserControl
         Pane.Tabs.CollectionChanged += OnTabsChanged;
         Pane.PropertyChanged += OnPanePropertyChanged;
 
+        // Dragging a header along the strip reorders the tabs. The drop reports two indexes and
+        // the view model moves the tab; the strip follows the collection like any other change.
+        ListReorderDrag.Attach(TabStrip, Orientation.Horizontal, Pane.MoveTab);
+
         foreach (var tab in Pane.Tabs)
             AddTabView(tab);
         UpdateVisibleTab();
@@ -71,6 +75,10 @@ public partial class FilePaneView : UserControl
 
     private void OnTabsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        // A move lists the same tab as both old and new, and the view it already has is the one it
+        // must keep: the strip's order is the collection's, and the host below has no order at all.
+        if (e.Action == NotifyCollectionChangedAction.Move) return;
+
         foreach (var tab in e.NewItems?.OfType<DirectoryTabViewModel>() ?? [])
             AddTabView(tab);
 

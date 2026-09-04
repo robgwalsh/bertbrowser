@@ -86,6 +86,12 @@ marquee <x0,y0> <x1,y1>      poses the rubber-band selection box over that recta
                             no mouse input
 
 newtab [path] | closetab | reopen | tab <n>
+movetab <from> <to>         put tab <from> in slot <to> (1-indexed), through the same
+                            PaneViewModel.MoveTab a drop on the strip reports to. The drag is
+                            mouse capture, which a run cannot post; `state`'s tabTitles and
+                            `tab <n>` + `assert-path` check where the tabs ended up
+tab-dragging <gap>          poses the strip's insertion line at a gap (0 is before the first tab)
+                            and leaves it there for a `shot`, like `settings-columns-dragging`
 split right|down [path] | closepane | pane <n>
 
 search <text>               this folder's box, debounce and search waited out

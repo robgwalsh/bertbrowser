@@ -19,7 +19,7 @@ public partial class SettingsWindow : ThemedWindow
 
         // The reorder that replaced the up and down buttons. The drop reports two indexes; what
         // they mean is ColumnLayoutRules' business, not this window's.
-        ListReorderDrag.Attach(ColumnDefaultsList, _vm.MoveColumn);
+        ListReorderDrag.Attach(ColumnDefaultsList, Orientation.Vertical, _vm.MoveColumn);
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
