@@ -98,3 +98,6 @@ FitWidth          | Arrow Autofit Width     | arrow_autofit_width     | 20
 # What changed on this volume recently: the change timeline, its toolbar button and its
 # settings page. A clock with an arrow -- "history" -- rather than a list or a journal glyph.
 Changes           | History                 | history                 | 20
+
+# Keep this search under a name: the button inside both search boxes.
+Save              | Save                    | save                    | 20

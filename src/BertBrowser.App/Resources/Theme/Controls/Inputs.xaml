@@ -122,6 +122,55 @@
         </Setter>
     </Style>
 
+    <!--
+      RadioButton: the CheckBox above with a round box and a dot, and no indeterminate state.
+      The same tokens, so it needs no palette entries of its own.
+    -->
+    <Style TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{StaticResource Theme.Text.Primary}"/>
+        <Setter Property="Background" Value="{StaticResource Theme.CheckBox.Background}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Theme.CheckBox.Border}"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource ThemeFocusVisual}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <StackPanel Orientation="Horizontal" Background="Transparent">
+                        <Border x:Name="Box" Width="16" Height="16" CornerRadius="8"
+                                VerticalAlignment="Center" SnapsToDevicePixels="True"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1">
+                            <Ellipse x:Name="Dot" Visibility="Collapsed"
+                                     Width="8" Height="8"
+                                     Fill="{StaticResource Theme.CheckBox.Glyph}"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ContentPresenter Margin="7,0,0,0" VerticalAlignment="Center"
+                                          RecognizesAccessKey="True"/>
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Dot" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="Box" Property="Background"
+                                    Value="{StaticResource Theme.CheckBox.CheckedBackground}"/>
+                            <Setter TargetName="Box" Property="BorderBrush"
+                                    Value="{StaticResource Theme.CheckBox.CheckedBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Box" Property="BorderBrush"
+                                    Value="{StaticResource Theme.Border.Focus}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{StaticResource Theme.Text.Disabled}"/>
+                            <Setter TargetName="Box" Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="ThemeComboToggle" TargetType="ToggleButton">
         <Setter Property="OverridesDefaultStyle" Value="True"/>
         <Setter Property="IsTabStop" Value="False"/>
