@@ -405,12 +405,22 @@ public partial class DirectoryTabView : UserControl
     /// <see cref="ColumnLayoutRules.CaptureOrder"/>, which drops the injected columns the model must
     /// never learn about and puts Name back at the front.
     /// </remarks>
+    /// <remarks>
+    /// This event is raised from inside <c>GridViewHeaderRowPresenter</c>'s own handling of the
+    /// mouse-up that ends the drag — the framework is still mid-cleanup (releasing capture, tearing
+    /// down the drag adorner) on the same call stack. Writing <c>ColumnLayout</c> synchronously here
+    /// cascades straight into <see cref="ReconcileColumns"/>, which inserts/moves/removes on this
+    /// very <c>Columns</c> collection — a reentrant mutation of the collection the framework is still
+    /// working with, which is what crashed the app on a drag. Posting the write lets that call stack
+    /// unwind first.
+    /// </remarks>
     private void Columns_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (_reconciling || e.Action != NotifyCollectionChangedAction.Move) return;
 
         var live = DetailsView.Columns.Select(FileListColumns.GetId).ToList();
-        Tab.FileList.ColumnLayout = ColumnLayoutRules.CaptureOrder(live, Tab.FileList.ColumnLayout);
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+            Tab.FileList.ColumnLayout = ColumnLayoutRules.CaptureOrder(live, Tab.FileList.ColumnLayout));
     }
 
     /// <summary>
