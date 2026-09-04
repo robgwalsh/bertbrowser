@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using BertBrowser.Core.Services.Archives;
 
 namespace BertBrowser.Core.Layout;
 
@@ -174,4 +175,11 @@ public static class SessionLayoutRules
     /// so anything unusable becomes an even share.</summary>
     private static double SaneWeight(double weight) =>
         double.IsFinite(weight) && weight > 0 ? weight : 1;
+
+    /// <summary>Whether a saved tab's path is still somewhere worth reopening — a real directory,
+    /// or somewhere inside an archive. The one definition <see cref="Prune"/>'s callers share, so
+    /// restoring at launch and restoring a named workspace can't drift apart on what "still
+    /// exists" means.</summary>
+    public static bool PathExists(string path) =>
+        Directory.Exists(path) || ArchivePath.Parse(path, File.Exists) is not null;
 }

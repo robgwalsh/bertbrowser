@@ -332,6 +332,9 @@
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Copy}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="CopyNameMenuItem" Header="Copy name" Click="ContextCopyName_Click"/>
+                        <MenuItem x:Name="ChecksumMenuItem" Header="Checksum…" Click="ContextChecksum_Click">
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Checksum}"/></MenuItem.Icon>
+                        </MenuItem>
                         <Separator/>
                         <MenuItem x:Name="CutMenuItem" Header="Cut" InputGestureText="Ctrl+X" Click="ContextCut_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Cut}"/></MenuItem.Icon>

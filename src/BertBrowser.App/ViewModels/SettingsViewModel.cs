@@ -225,6 +225,16 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _openDrivesInNewPanel;
 
+    /// <summary>Whether startup restores the last arrangement, vs. always opening
+    /// <see cref="StartupDefaultPath"/>. See <c>AppSettings.RestoreLastSession</c>.</summary>
+    [ObservableProperty]
+    private bool _restoreLastSession;
+
+    /// <summary>Where startup opens when <see cref="RestoreLastSession"/> is off. See
+    /// <c>AppSettings.StartupDefaultPath</c>.</summary>
+    [ObservableProperty]
+    private string _startupDefaultPath = "";
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ScrollSpeedText))]
     private double _scrollSpeed;
@@ -389,6 +399,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         ShowHiddenItems = settings.ShowHiddenItems;
         EnterArchivesOnDoubleClick = settings.EnterArchivesOnDoubleClick;
         OpenDrivesInNewPanel = settings.DrivesOpenTarget == DrivesOpenTarget.NewPanel;
+        RestoreLastSession = settings.RestoreLastSession;
+        StartupDefaultPath = settings.StartupDefaultPath ?? "";
         ScrollSpeed = settings.ScrollSpeedMultiplier;
         ShowPreviewPane = settings.ShowPreviewPane;
         PreviewTextLimitKb = Math.Round(settings.PreviewTextMaxBytes / 1024.0);
@@ -684,6 +696,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settings.ShowHiddenItems = ShowHiddenItems;
         _settings.EnterArchivesOnDoubleClick = EnterArchivesOnDoubleClick;
         _settings.DrivesOpenTarget = OpenDrivesInNewPanel ? DrivesOpenTarget.NewPanel : DrivesOpenTarget.NewTab;
+        _settings.RestoreLastSession = RestoreLastSession;
+        _settings.StartupDefaultPath = StartupDefaultPath.Trim() is { Length: > 0 } path ? path : null;
         _settings.ScrollSpeedMultiplier = ScrollSpeed;
         _settings.ShowPreviewPane = ShowPreviewPane;
         _settings.PreviewTextMaxBytes = (int)Math.Clamp(PreviewTextLimitKb * 1024, 4096, 64 * 1024 * 1024);

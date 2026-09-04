@@ -853,6 +853,10 @@ public partial class DirectoryTabView : UserControl
         CopyPathMenuItem.IsEnabled = CopyNameMenuItem.IsEnabled = selection.Count > 0;
         CopyPathMenuItem.Header = selection.Count > 1 ? "Copy as paths" : "Copy as path";
         CopyNameMenuItem.Header = selection.Count > 1 ? "Copy names" : "Copy name";
+
+        // One real file: a checksum answers for a single file's bytes, and an entry inside a
+        // container has no path IFileHasher can open.
+        ChecksumMenuItem.IsEnabled = selection.Count == 1 && !selection[0].IsDirectory && !inArchive;
         PasteMenuItem.IsEnabled = FileClipboard.HasFiles() && !inArchive;
 
         // "Open in new tab/pane" only makes sense for folders.
@@ -1439,6 +1443,12 @@ public partial class DirectoryTabView : UserControl
     {
         var entries = SelectedFileItems().Select(i => (i.FullPath, i.IsDirectory)).ToList();
         _ = _shell.ToggleBookmarksAsync(entries);
+    }
+
+    private void ContextChecksum_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedFileItems() is [{ IsDirectory: false } item])
+            ChecksumPrompt.Show(item.FullPath);
     }
 
     private void ContextProperties_Click(object sender, RoutedEventArgs e)

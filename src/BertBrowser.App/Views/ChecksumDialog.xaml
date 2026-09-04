@@ -1,0 +1,102 @@
+<v:ThemedWindow x:Class="BertBrowser.App.Views.ChecksumDialog"
+        xmlns:v="clr-namespace:BertBrowser.App.Views"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Checksum" Width="480" MinWidth="420" SizeToContent="Height" MinHeight="200"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" ResizeMode="NoResize"
+        Background="{StaticResource Theme.Surface.Background}"
+        TextElement.Foreground="{StaticResource Theme.Text.Primary}">
+    <Window.Resources>
+        <Style x:Key="PropName" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource Theme.Text.Secondary}"/>
+            <Setter Property="Margin" Value="0,3,12,3"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <!-- Read-only borderless TextBox so the digest stays selectable/copyable. -->
+        <Style x:Key="PropValue" TargetType="TextBox">
+            <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+    </Window.Resources>
+
+    <StackPanel Margin="16">
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+            <Image Source="{Binding Icon}" Width="28" Height="28" Margin="0,0,10,0" VerticalAlignment="Center"/>
+            <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold"
+                       VerticalAlignment="Center" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <Border Background="{StaticResource Theme.Warning.Background}" BorderBrush="{StaticResource Theme.Warning.Border}" BorderThickness="1"
+                CornerRadius="3" Padding="8,6" Margin="0,0,0,12"
+                Visibility="{Binding ErrorMessage, Converter={StaticResource NullToCollapsed}}">
+            <TextBlock Text="{Binding ErrorMessage}" TextWrapping="Wrap"/>
+        </Border>
+
+        <ProgressBar IsIndeterminate="True" Height="4" Margin="0,0,0,10"
+                     Visibility="{Binding IsHashing, Converter={StaticResource BoolToVisibility}}"/>
+
+        <Grid>
+            <Grid.Style>
+                <Style TargetType="Grid">
+                    <Setter Property="Visibility" Value="Visible"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsHashing}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Grid.Style>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition/>
+                <RowDefinition Height="12"/>
+                <RowDefinition/>
+                <RowDefinition Height="8"/>
+                <RowDefinition/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="SHA-256:" Style="{StaticResource PropName}"/>
+            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Digest, Mode=OneWay}" Style="{StaticResource PropValue}"/>
+            <Button Grid.Row="0" Grid.Column="2" Content="Copy" Padding="12,3" Margin="8,0,0,0"
+                    Command="{Binding CopyDigestCommand}"/>
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Compare:" Style="{StaticResource PropName}"/>
+            <TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2"
+                     Text="{Binding ExpectedInput, UpdateSourceTrigger=PropertyChanged}"
+                     FontFamily="Consolas" VerticalContentAlignment="Center"
+                     ToolTip="Paste an expected checksum to compare it against the digest above."/>
+
+            <TextBlock Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" FontWeight="SemiBold">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding MatchState}" Value="Match">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Setter Property="Text" Value="✓ Matches"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding MatchState}" Value="Mismatch">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Setter Property="Text" Value="✗ Does not match"/>
+                                <Setter Property="Foreground" Value="{StaticResource Theme.Error.Foreground}"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </Grid>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="Close" Width="80" IsCancel="True"/>
+        </StackPanel>
+    </StackPanel>
+</v:ThemedWindow>

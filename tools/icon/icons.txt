@@ -101,3 +101,6 @@ Changes           | History                 | history                 | 20
 
 # Keep this search under a name: the button inside both search boxes.
 Save              | Save                    | save                    | 20
+
+# The checksum dialog: a file's SHA-256 digest, for verifying a download.
+Checksum          | Number Symbol           | number_symbol           | 20

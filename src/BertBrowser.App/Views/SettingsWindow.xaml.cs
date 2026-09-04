@@ -152,4 +152,15 @@ public partial class SettingsWindow : ThemedWindow
         if (dialog.ShowDialog(this) == true)
             type.TemplatePath = dialog.FileName;
     }
+
+    private void BrowseStartupPath_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Choose a startup folder",
+            InitialDirectory = _vm.StartupDefaultPath,
+        };
+        if (dialog.ShowDialog(this) == true)
+            _vm.StartupDefaultPath = dialog.FolderName;
+    }
 }

@@ -95,6 +95,16 @@
                     <TextBlock Style="{StaticResource Hint}"
                                Text="In the sidebar's card view of DRIVES &amp; DEVICES, clicking a drive or device opens it in a new panel instead of a new tab."/>
 
+                    <CheckBox Content="Restore last session on startup" Margin="0,12,0,0"
+                              IsChecked="{Binding RestoreLastSession}"/>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="When off, the app always opens a single tab at the folder below instead of wherever the panes were left."/>
+
+                    <DockPanel Margin="0,8,0,0" IsEnabled="{Binding RestoreLastSession, Converter={StaticResource InverseBool}}">
+                        <Button DockPanel.Dock="Right" Content="Browse…" Margin="8,0,0,0" Click="BrowseStartupPath_Click"/>
+                        <TextBox Text="{Binding StartupDefaultPath, UpdateSourceTrigger=PropertyChanged}"/>
+                    </DockPanel>
+
                     <DockPanel>
                         <TextBlock Text="Vertical scroll speed" VerticalAlignment="Center"/>
                         <TextBlock DockPanel.Dock="Right" Text="{Binding ScrollSpeedText}" VerticalAlignment="Center"

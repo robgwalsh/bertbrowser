@@ -40,6 +40,17 @@ public sealed class AppSettings
     /// </remarks>
     public BertBrowser.Core.Layout.SessionLayout? Session { get; set; }
 
+    /// <summary>When true (default), startup restores <see cref="Session"/> as it always has.
+    /// When false, startup ignores <see cref="Session"/> and <see cref="LastPath"/> and opens a
+    /// single pane/single tab at <see cref="StartupDefaultPath"/> instead — for someone who always
+    /// wants to start from the same place rather than wherever they left off.</summary>
+    public bool RestoreLastSession { get; set; } = true;
+
+    /// <summary>Where startup opens a single pane/single tab when <see cref="RestoreLastSession"/>
+    /// is false. Null, or a path that no longer exists, falls back to the user profile, the same
+    /// fallback an unusable <see cref="Session"/> already uses.</summary>
+    public string? StartupDefaultPath { get; set; }
+
     /// <summary>When false (default), hidden files/folders are excluded from listings and
     /// search; when true they appear with a dimmed icon, like Explorer.</summary>
     public bool ShowHiddenItems { get; set; }

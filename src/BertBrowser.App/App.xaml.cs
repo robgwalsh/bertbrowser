@@ -74,6 +74,14 @@ public partial class App : Application
             // session's panes over the top of it would bury the thing they asked for.
             shell.StartPath = target.Path;
         }
+        else if (!settings.RestoreLastSession)
+        {
+            // The user chose "always start fresh" over "wherever I left off" in Settings.
+            // StartLayout stays null, so InitializeAsync's own fallback (StartPath, else the user
+            // profile) takes it from here — the same fallback an unusable Session already uses.
+            if (settings.StartupDefaultPath is { } start && Directory.Exists(start))
+                shell.StartPath = start;
+        }
         else
         {
             // Pruned here rather than inside the shell so "is this still a directory?" stays with
@@ -81,9 +89,7 @@ public partial class App : Application
             // accepts somewhere inside an archive too — closing the app in a zip and losing the tab
             // is worse than reopening on a banner if the container has since gone.
             shell.StartLayout = BertBrowser.Core.Layout.SessionLayoutRules.Prune(
-                settings.Session,
-                path => Directory.Exists(path) ||
-                        BertBrowser.Core.Services.Archives.ArchivePath.Parse(path, File.Exists) is not null);
+                settings.Session, BertBrowser.Core.Layout.SessionLayoutRules.PathExists);
 
             if (settings.LastPath is { } last && Directory.Exists(last))
                 shell.StartPath = last;
@@ -163,6 +169,7 @@ public partial class App : Application
         services.AddSingleton<ChangeLogRepository>();
         services.AddSingleton<BookmarkRepository>();
         services.AddSingleton<SavedSearchRepository>();
+        services.AddSingleton<SavedWorkspaceRepository>();
         // The archive layer is a decorator, which is why the five callers of IFileSystemService —
         // the file list, its merge diff, the disk-usage breakdown and the folder tree — needed no
         // changes at all to gain it. The concrete FileSystemService is registered separately so the
@@ -223,6 +230,8 @@ public partial class App : Application
         services.AddSingleton<IBookmarkService, BookmarkService>();
         services.AddSingleton<BertBrowser.Core.Services.SavedSearches.ISavedSearchService,
             BertBrowser.Core.Services.SavedSearches.SavedSearchService>();
+        services.AddSingleton<BertBrowser.Core.Services.SavedWorkspaces.ISavedWorkspaceService,
+            BertBrowser.Core.Services.SavedWorkspaces.SavedWorkspaceService>();
         services.AddSingleton<IndexCrawler>();
         services.AddSingleton<IIndexWatcherService, IndexWatcherService>();
         // Not MftIndexService: reading the MFT needs an administrator token, and this process

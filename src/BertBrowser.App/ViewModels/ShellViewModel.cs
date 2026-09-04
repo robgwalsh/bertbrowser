@@ -18,6 +18,7 @@ using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
 using BertBrowser.Core.Services.SavedSearches;
+using BertBrowser.Core.Services.SavedWorkspaces;
 using BertBrowser.Core.Services.Transfer;
 
 namespace BertBrowser.App.ViewModels;
@@ -92,6 +93,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     public FolderTreeViewModel Tree { get; }
     public BookmarksViewModel Bookmarks { get; }
     public SavedSearchesViewModel SavedSearches { get; }
+    public SavedWorkspacesViewModel SavedWorkspaces { get; }
 
     /// <summary>How the open panes divide the window. Rebuilt by the view whenever
     /// <see cref="LayoutChanged"/> fires — never on plain navigation.</summary>
@@ -312,6 +314,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         ISearchService searchService,
         IBookmarkService bookmarkService,
         ISavedSearchService savedSearchService,
+        ISavedWorkspaceService savedWorkspaceService,
         IMftIndexService mftIndex,
         DirSizeRepository dirSizes,
         TransferPlanner transferPlanner,
@@ -372,6 +375,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         Tree = new FolderTreeViewModel(fileSystem, dirSizes);
         Bookmarks = new BookmarksViewModel(bookmarkService);
         SavedSearches = new SavedSearchesViewModel(savedSearchService);
+        SavedWorkspaces = new SavedWorkspacesViewModel(savedWorkspaceService);
 
         _activePane = new PaneViewModel(_factory, this);
         _activePane.AddTab("");
@@ -404,6 +408,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         Bookmarks.SetShowHidden(ShowHiddenItems);
         await Bookmarks.LoadAsync();
         await SavedSearches.LoadAsync();
+        await SavedWorkspaces.LoadAsync();
 
         // Before the drives load: the setting decides what each node's expander probe reports.
         Tree.SetShowHidden(ShowHiddenItems);
@@ -462,14 +467,16 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         var built = BuildLayout(saved, pending, out var active);
         if (built is null || pending.Count == 0) return null;
 
-        var previous = ActivePane;
+        // None of the panes in the tree being replaced are in the new one — at startup that's
+        // only the single pane the constructor made, but a workspace switch can replace a live,
+        // multi-pane arrangement, and every one of its panes would otherwise leak its tabs'
+        // in-flight work and event subscriptions.
+        var displaced = LayoutTree.Leaves(Layout).Select(l => l.Value).ToList();
 
         Layout = built;
         ActivePane = active ?? LayoutTree.Leaves(built).First().Value;
 
-        // The pane the constructor made is not in the new tree, so it would otherwise leak its
-        // tab's in-flight work and event subscriptions.
-        previous.Dispose();
+        foreach (var pane in displaced) pane.Dispose();
 
         LayoutChanged?.Invoke();
         return pending;
@@ -972,6 +979,50 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         if (item is null) return;
         await SavedSearches.RemoveAsync(item);
         SetStatus($"Removed saved search \"{item.Name}\"");
+    }
+
+    /// <summary>Stores a workspace the dialog validated; <paramref name="previousName"/> is the row
+    /// being edited, or null for a new one.</summary>
+    public async Task SaveWorkspaceAsync(BertBrowser.Core.Models.SavedWorkspace workspace, string? previousName)
+    {
+        if (await SavedWorkspaces.SaveAsync(workspace, previousName))
+            SetStatus($"Saved workspace \"{workspace.Name}\"");
+        else
+            SetStatus($"There is already a workspace called \"{workspace.Name}\"");
+    }
+
+    public async Task RemoveWorkspaceAsync(SavedWorkspaceItemViewModel? item)
+    {
+        if (item is null) return;
+        await SavedWorkspaces.RemoveAsync(item);
+        SetStatus($"Removed workspace \"{item.Name}\"");
+    }
+
+    /// <summary>Replaces the current window's panes/tabs with a saved workspace's arrangement.
+    /// The stored layout is cloned before pruning: <see cref="SessionLayoutRules.Prune"/> mutates
+    /// its input in place, and the source is the item's own cached copy — pruning it directly
+    /// would silently shrink what the sidebar still shows for that workspace.</summary>
+    public async Task<bool> SwitchWorkspaceAsync(SavedWorkspaceItemViewModel? item)
+    {
+        if (item is null) return false;
+
+        var clone = System.Text.Json.JsonSerializer.Deserialize<SessionLayout>(
+            System.Text.Json.JsonSerializer.Serialize(item.Model.Layout));
+        var pruned = clone is null ? null : SessionLayoutRules.Prune(clone, SessionLayoutRules.PathExists);
+        if (pruned is null)
+        {
+            SetStatus($"Nothing in \"{item.Name}\" still exists.");
+            return false;
+        }
+
+        if (!await RestoreSessionAsync(pruned))
+        {
+            SetStatus($"Couldn't switch to \"{item.Name}\".");
+            return false;
+        }
+
+        SetStatus($"Switched to workspace \"{item.Name}\"");
+        return true;
     }
 
     // --- Background index callbacks ---

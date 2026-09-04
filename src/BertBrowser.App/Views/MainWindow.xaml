@@ -86,21 +86,21 @@
                 <!-- "Show hidden items" lives in the Settings dialog only; it is a preference
                      you set once, not something the caption strip needs a button for. -->
                 <Button Style="{StaticResource ToolbarButton}"
-                        ToolTip="Disk usage — what is taking up space (Ctrl+Shift+D)"
+                        ToolTip="Disk usage treemaps (Ctrl+Shift+D)"
                         Command="{Binding AnalyseDiskUsageCommand}"
                         AutomationProperties.Name="Disk usage">
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.DiskUsage}"/>
                 </Button>
 
                 <Button Style="{StaticResource ToolbarButton}"
-                        ToolTip="Duplicates — files you have more than one of (Ctrl+Shift+U)"
+                        ToolTip="Find duplicate files (Ctrl+Shift+U)"
                         Command="{Binding FindDuplicatesCommand}"
                         AutomationProperties.Name="Duplicates">
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Duplicates}"/>
                 </Button>
 
                 <Button Style="{StaticResource ToolbarButton}"
-                        ToolTip="What changed — recent changes on this drive (Ctrl+Shift+H)"
+                        ToolTip="Recent file changes (Ctrl+Shift+H)"
                         Command="{Binding ShowChangesCommand}"
                         AutomationProperties.Name="What changed">
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Changes}"/>
@@ -114,7 +114,7 @@
                 </Button>
 
                 <Button Style="{StaticResource ToolbarButton}"
-                        ToolTip="Settings — appearance and custom context menu commands"
+                        ToolTip="Settings"
                         Click="Settings_Click">
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Settings}"/>
                 </Button>
@@ -324,6 +324,7 @@
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
                 <!-- Saved searches (between the drives and the bookmarks; sized to content).
@@ -386,8 +387,74 @@
                     </ScrollViewer>
                 </DockPanel>
 
-                <!-- Bookmarks (below the saved searches; sized to content) -->
+                <!-- Workspaces (between the saved searches and the bookmarks; sized to content).
+                     A click switches to one, replacing the current panes/tabs; the menu has the
+                     rest. There's no per-tab save equivalent — a workspace is a whole-window
+                     snapshot — so the save trigger sits in the header itself. -->
                 <DockPanel Grid.Row="2">
+                    <Border DockPanel.Dock="Top" BorderBrush="{StaticResource Theme.Border.Subtle}" BorderThickness="0,1,0,0">
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Margin="0,4,8,0" VerticalAlignment="Center"
+                                    Width="21" Height="21" Padding="4"
+                                    Style="{StaticResource ToolbarButton}"
+                                    ToolTip="Save the current layout as a workspace"
+                                    Click="SaveWorkspace_Click"
+                                    AutomationProperties.AutomationId="SaveWorkspace"
+                                    AutomationProperties.Name="Save workspace">
+                                <Path Style="{StaticResource IconPath}" Width="13" Height="13" Data="{StaticResource Icon.Add}"/>
+                            </Button>
+                            <TextBlock Text="WORKSPACES" Style="{StaticResource SidebarHeader}"/>
+                        </DockPanel>
+                    </Border>
+                    <TextBlock DockPanel.Dock="Top" Margin="10,0,10,8" Foreground="{StaticResource Theme.Text.Muted}" FontSize="11"
+                               TextWrapping="Wrap" Text="Save the current panes and tabs here, to switch back to them by name."
+                               AutomationProperties.AutomationId="SavedWorkspaceEmptyText"
+                               Visibility="{Binding SavedWorkspaces.HasItems, Converter={StaticResource InverseBoolToVisibility}}"/>
+                    <ScrollViewer MaxHeight="200" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Visibility="{Binding SavedWorkspaces.HasItems, Converter={StaticResource BoolToVisibility}}">
+                        <ItemsControl ItemsSource="{Binding SavedWorkspaces.Items}" Margin="0,0,0,6"
+                                      AutomationProperties.AutomationId="SavedWorkspaceList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border x:Name="WsRow" Background="Transparent" Padding="10,4"
+                                            MouseUp="WorkspaceRow_MouseUp"
+                                            ToolTip="{Binding ToolTip}">
+                                        <Border.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Switch to" Click="WorkspaceSwitch_Click">
+                                                    <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.SplitRight}"/></MenuItem.Icon>
+                                                </MenuItem>
+                                                <Separator/>
+                                                <MenuItem Header="Rename…" Click="WorkspaceRename_Click">
+                                                    <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Rename}"/></MenuItem.Icon>
+                                                </MenuItem>
+                                                <MenuItem Header="Delete" Click="WorkspaceDelete_Click">
+                                                    <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Delete}"/></MenuItem.Icon>
+                                                </MenuItem>
+                                            </ContextMenu>
+                                        </Border.ContextMenu>
+                                        <DockPanel>
+                                            <Path DockPanel.Dock="Left" Style="{StaticResource IconPath}"
+                                                  Data="{StaticResource Icon.SplitRight}" Width="13" Height="13" Margin="1,0,8,0"
+                                                  VerticalAlignment="Center" Fill="{StaticResource Theme.Text.Secondary}"/>
+                                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </DockPanel>
+                                    </Border>
+                                    <DataTemplate.Triggers>
+                                        <Trigger SourceName="WsRow" Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="WsRow" Property="Background" Value="{StaticResource Theme.List.HoverBackground}"/>
+                                        </Trigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+
+                <!-- Bookmarks (below the saved searches; sized to content) -->
+                <DockPanel Grid.Row="3">
                     <Border DockPanel.Dock="Top" BorderBrush="{StaticResource Theme.Border.Subtle}" BorderThickness="0,1,0,0">
                         <TextBlock Text="BOOKMARKS" Style="{StaticResource SidebarHeader}"/>
                     </Border>

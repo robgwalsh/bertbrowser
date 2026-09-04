@@ -152,6 +152,13 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-saved-search": AssertSavedSearch(rest, expected: true); break;
             case "assert-no-saved-search": AssertSavedSearch(rest, expected: false); break;
 
+            // saved workspaces
+            case "save-workspace": SaveWorkspace(rest); break;
+            case "switch-workspace": SwitchWorkspace(rest); break;
+            case "rename-workspace": RenameWorkspace(rest); break;
+            case "remove-workspace": RemoveWorkspace(rest); break;
+            case "workspaces": output.WriteLine("WORKSPACES " + string.Join(", ", WorkspaceNames())); break;
+
             // acting on the selection
             case "newfolder": NewItem(rest, NewItemKind.Folder); break;
             case "newfile": NewItem(rest, NewItemKind.File); break;
@@ -1176,6 +1183,64 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     private IReadOnlyList<string> SavedSearchNames() =>
         session.Dispatcher.Invoke(() => session.Shell.SavedSearches.Items
             .Select(i => $"{i.Name} ({i.ScopeText})").ToList());
+
+    /// <summary>Saves the current pane/tab arrangement under a name, as the header button's dialog
+    /// does. The dialog is skipped for the reason every other save-* command skips it: seeded the
+    /// same way (<c>CaptureLayout</c>), refused by the same <c>SavedWorkspaceRules.Validate</c> and
+    /// stored through the same <c>SaveWorkspaceAsync</c> — only the window is missing.</summary>
+    private void SaveWorkspace(string rest)
+    {
+        var name = Require(rest, "save-workspace");
+        var layout = session.Dispatcher.Invoke(() => session.Shell.CaptureLayout());
+
+        var problem = Core.Services.SavedWorkspaces.SavedWorkspaceRules.Validate(name, _ => false);
+        if (problem is not null)
+            throw new AssertionException($"The save was refused: {problem}");
+
+        var workspace = new Core.Models.SavedWorkspace(name, layout);
+        Await(() => session.Shell.SaveWorkspaceAsync(workspace, previousName: null));
+    }
+
+    /// <summary>Switches to a saved workspace as a click on its sidebar row does — replaces the
+    /// current panes/tabs and awaits the tabs' navigation, the way 'session' waits out a
+    /// restore.</summary>
+    private void SwitchWorkspace(string rest)
+    {
+        var item = FindWorkspace(Require(rest, "switch-workspace"), "switch-workspace");
+        if (!Await(() => session.Shell.SwitchWorkspaceAsync(item)))
+            throw new AssertionException($"switch-workspace: couldn't switch to '{item.Name}'.");
+    }
+
+    /// <summary>'rename-workspace Old name to New name' — through the same
+    /// <c>SaveWorkspaceAsync(previousName)</c> the dialog's Rename goes through.</summary>
+    private void RenameWorkspace(string rest)
+    {
+        var text = Require(rest, "rename-workspace");
+        var cut = text.IndexOf(" to ", StringComparison.OrdinalIgnoreCase);
+        if (cut <= 0 || cut + 4 >= text.Length)
+            throw new FormatException("rename-workspace takes two names: rename-workspace <old> to <new>.");
+
+        var item = FindWorkspace(text[..cut].Trim(), "rename-workspace");
+        var newName = text[(cut + 4)..].Trim();
+        var renamed = item.Model with { Name = newName };
+        Await(() => session.Shell.SaveWorkspaceAsync(renamed, previousName: item.Name));
+    }
+
+    private void RemoveWorkspace(string rest)
+    {
+        var item = FindWorkspace(Require(rest, "remove-workspace"), "remove-workspace");
+        Await(() => session.Shell.RemoveWorkspaceAsync(item));
+    }
+
+    private IReadOnlyList<string> WorkspaceNames() =>
+        session.Dispatcher.Invoke(() => session.Shell.SavedWorkspaces.Items
+            .Select(i => i.Name).ToList());
+
+    private SavedWorkspaceItemViewModel FindWorkspace(string name, string verb) =>
+        session.Dispatcher.Invoke(() => session.Shell.SavedWorkspaces.Items
+            .FirstOrDefault(i => i.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+        ?? throw new AssertionException(
+            $"{verb}: there is no workspace called '{name}'. Saved: {string.Join(", ", WorkspaceNames())}");
 
     private SavedSearchItemViewModel FindSavedSearch(string name, string verb) =>
         session.Dispatcher.Invoke(() => session.Shell.SavedSearches.Items
@@ -2286,6 +2351,11 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             session.Shell.SavedSearches.SeedFor(session.Tab),
             n => session.Shell.SavedSearches.IsNameTaken(n)),
 
+        // Seeded the way the header button's dialog is: a default name from the current time.
+        "saved-workspace" => SavedWorkspaceDialog.Create(
+            Core.Services.SavedWorkspaces.SavedWorkspaceRules.DefaultName(DateTime.Now),
+            n => session.Shell.SavedWorkspaces.IsNameTaken(n)),
+
         "message" => MessageDialog.Create(
             "The harness built this dialog to photograph it. Nothing went wrong.",
             "Message", MessageDialogKind.Information),
@@ -2293,6 +2363,10 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         "warning" => MessageDialog.Create(
             "The harness built this dialog to photograph it. Nothing went wrong.",
             "Warning", MessageDialogKind.Warning, showCancel: true),
+
+        "checksum" => new ChecksumDialog(new ChecksumViewModel(
+            Selection()[0].FullPath,
+            session.Services.GetRequiredService<IFileHasher>())),
 
         "properties" => new PropertiesDialog(new PropertiesViewModel(
             Selection().Select(i => new PropertiesTarget(i.FullPath, i.IsDirectory)).ToList(),
