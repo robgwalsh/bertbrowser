@@ -75,96 +75,14 @@
     <!--
       The window-wide toolbar lives in the title bar rather than in a strip of its own: the address
       bar, search box, progress and error banner are all per directory now and live inside each
-      pane's DirectoryTabView, so this row held four buttons and a lot of empty space. Navigation
-      acts on the active pane.
+      pane's DirectoryTabView. Back/Forward/Up/Refresh moved into that same per-tab row too — see
+      DirectoryTabView.xaml — since two panes each need their own navigation, not one that silently
+      acts on whichever pane is active. The KeyBindings above still route through ActiveTab.*Command
+      and are unaffected.
     -->
     <v:ThemedWindow.TitleBarContent>
         <DockPanel Margin="12,0,4,0" TextElement.Foreground="{StaticResource Theme.TitleBar.Foreground}">
-            <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                <Button Style="{StaticResource ToolbarButton}" ToolTip="Back (Alt+Left)"
-                        Command="{Binding ActiveTab.BackCommand}">
-                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Back}"/>
-                </Button>
-                <Button Style="{StaticResource ToolbarButton}" ToolTip="Forward (Alt+Right)"
-                        Command="{Binding ActiveTab.ForwardCommand}">
-                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Forward}"/>
-                </Button>
-                <Button Style="{StaticResource ToolbarButton}" ToolTip="Up (Alt+Up)"
-                        Command="{Binding ActiveTab.UpCommand}">
-                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Up}"/>
-                </Button>
-                <Button Style="{StaticResource ToolbarButton}" ToolTip="Refresh (F5)"
-                        Command="{Binding ActiveTab.RefreshCommand}">
-                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Refresh}"/>
-                </Button>
-            </StackPanel>
-
             <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
-                <!--
-                  Whole-PC search. It lives up here, once per window, because the per-tab box below
-                  is folder-local only now — one box, one scope, nothing to choose before typing.
-                  It is always open: it used to fold into a magnifier button, which saved a little
-                  caption strip and cost a click before every search, in the one place a file
-                  browser is most often reached for. The query itself belongs to the active tab,
-                  since that is the list the hits appear in.
-                -->
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,2,0">
-                    <!-- The syntax reference. A button rather than the tooltip alone, because the
-                         filter list outgrew the shape of a tooltip: this one can be scrolled, and
-                         kept open while the query is typed. -->
-                    <Button Style="{StaticResource ToolbarButton}"
-                            Click="SearchSyntax_Click"
-                            AutomationProperties.AutomationId="SearchSyntaxButton"
-                            AutomationProperties.Name="Search syntax"
-                            ToolTip="What you can type here">
-                        <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Properties}"/>
-                    </Button>
-
-                    <Border Style="{StaticResource HeaderFieldBorder}" Width="300">
-                        <DockPanel>
-                            <Path Style="{StaticResource IconPath}" DockPanel.Dock="Left"
-                                       Data="{StaticResource Icon.Search}" Width="13" Height="13" Margin="8,0,6,0"
-                                       VerticalAlignment="Center" Fill="{StaticResource Theme.Text.Secondary}"/>
-                            <Button DockPanel.Dock="Right" ToolTip="Clear search (Esc)"
-                                    Command="{Binding ActiveTab.ClearSearchCommand}"
-                                    Style="{StaticResource GlobalSearchClearButton}">
-                                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Dismiss}" Width="12" Height="12"/>
-                            </Button>
-                            <!-- Keep this search under a name; shown and hidden with the ✕. -->
-                            <Button DockPanel.Dock="Right" ToolTip="Save this search…"
-                                    Click="SaveGlobalSearch_Click"
-                                    AutomationProperties.AutomationId="SaveGlobalSearchButton"
-                                    AutomationProperties.Name="Save this search"
-                                    Style="{StaticResource GlobalSearchClearButton}">
-                                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Save}" Width="12" Height="12"/>
-                            </Button>
-                            <Grid>
-                                <TextBox x:Name="GlobalSearchBox" BorderThickness="0" Background="Transparent"
-                                         VerticalContentAlignment="Center"
-                                         Foreground="{StaticResource Theme.Text.Primary}"
-                                         AutomationProperties.AutomationId="GlobalSearchBox"
-                                         AutomationProperties.Name="Search this PC"
-                                         Text="{Binding ActiveTab.GlobalSearchText, UpdateSourceTrigger=PropertyChanged}"
-                                         KeyDown="GlobalSearchBox_KeyDown"
-                                         ToolTip="Search every indexed drive (Ctrl+Shift+F)"/>
-                                <TextBlock Text="Search this PC" Foreground="{StaticResource Theme.Text.Placeholder}"
-                                           Margin="4,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding ActiveTab.GlobalSearchText}" Value="">
-                                                    <Setter Property="Visibility" Value="Visible"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                            </Grid>
-                        </DockPanel>
-                    </Border>
-                </StackPanel>
-
                 <!-- "Show hidden items" lives in the Settings dialog only; it is a preference
                      you set once, not something the caption strip needs a button for. -->
                 <Button Style="{StaticResource ToolbarButton}"
@@ -202,8 +120,83 @@
                 </Button>
             </StackPanel>
 
-            <!-- Empty filler; the DockPanel's last child would otherwise stretch a button. -->
-            <Border/>
+            <!--
+              Whole-PC search. It lives up here, once per window, because the per-tab box below
+              is folder-local only now — one box, one scope, nothing to choose before typing.
+              It is always open: it used to fold into a magnifier button, which saved a little
+              caption strip and cost a click before every search, in the one place a file
+              browser is most often reached for. The query itself belongs to the active tab,
+              since that is the list the hits appear in. Centered in the title bar's remaining
+              space — the last, undocked child, so DockPanel hands it that whole span and its own
+              HorizontalAlignment centers it rather than stretching it edge to edge.
+            -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Border Style="{StaticResource HeaderFieldBorder}" Width="300">
+                        <DockPanel>
+                            <Path Style="{StaticResource IconPath}" DockPanel.Dock="Left"
+                                       Data="{StaticResource Icon.Search}" Width="13" Height="13" Margin="8,0,6,0"
+                                       VerticalAlignment="Center" Fill="{StaticResource Theme.Text.Secondary}"/>
+                            <Button DockPanel.Dock="Right" ToolTip="Clear search (Esc)"
+                                    Command="{Binding ActiveTab.ClearSearchCommand}"
+                                    Style="{StaticResource GlobalSearchClearButton}">
+                                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Dismiss}" Width="12" Height="12"/>
+                            </Button>
+                            <!-- Keep this search under a name; shown and hidden with the ✕. -->
+                            <Button DockPanel.Dock="Right" ToolTip="Save this search…"
+                                    Click="SaveGlobalSearch_Click"
+                                    AutomationProperties.AutomationId="SaveGlobalSearchButton"
+                                    AutomationProperties.Name="Save this search"
+                                    Style="{StaticResource GlobalSearchClearButton}">
+                                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Save}" Width="12" Height="12"/>
+                            </Button>
+                            <!--
+                              UseLayoutRounding="False" here and on the TextBox/TextBlock below: at
+                              200% (and other non-100%) display scaling, WPF independently snaps each
+                              nested element's Padding/Margin to the device-pixel grid, and the
+                              TextBox's template nests more of them (Border, ScrollViewer,
+                              TextBoxView) than the plain placeholder TextBlock does — so their
+                              rounding errors accumulate differently and the caret/typed text lands a
+                              character past where the placeholder sits. Turning rounding off makes
+                              both use the same exact (unsnapped) DIP math instead.
+                            -->
+                            <Grid UseLayoutRounding="False">
+                                <TextBox x:Name="GlobalSearchBox" BorderThickness="0" Background="Transparent"
+                                         UseLayoutRounding="False" VerticalContentAlignment="Center"
+                                         Foreground="{StaticResource Theme.Text.Primary}"
+                                         AutomationProperties.AutomationId="GlobalSearchBox"
+                                         AutomationProperties.Name="Search this PC"
+                                         Text="{Binding ActiveTab.GlobalSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                         KeyDown="GlobalSearchBox_KeyDown"
+                                         ToolTip="Search every indexed drive (Ctrl+Shift+F)"/>
+                                <TextBlock Text="Search this PC" Foreground="{StaticResource Theme.Text.Placeholder}"
+                                           UseLayoutRounding="False"
+                                           Margin="4,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ActiveTab.GlobalSearchText}" Value="">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
+                        </DockPanel>
+                    </Border>
+
+                <!-- The syntax reference, to the right of the field it explains. A button rather
+                     than the tooltip alone, because the filter list outgrew the shape of a
+                     tooltip: this one can be scrolled, and kept open while the query is typed. -->
+                <Button Style="{StaticResource ToolbarButton}"
+                        Click="SearchSyntax_Click"
+                        AutomationProperties.AutomationId="SearchSyntaxButton"
+                        AutomationProperties.Name="Search syntax"
+                        ToolTip="What you can type here">
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Properties}"/>
+                </Button>
+            </StackPanel>
         </DockPanel>
     </v:ThemedWindow.TitleBarContent>
 

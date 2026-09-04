@@ -20,13 +20,35 @@
              different folders each need their own address bar and their own search box. -->
         <Grid DockPanel.Dock="Top" Margin="4,4,4,0">
             <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
+            <!-- Navigation. Per tab, not per window: two panes each act on their own history and
+                 their own directory, not on whichever pane last had focus. -->
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,4,0">
+                <Button Style="{StaticResource ToolbarButton}" ToolTip="Back (Alt+Left)"
+                        Command="{Binding BackCommand}">
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Back}"/>
+                </Button>
+                <Button Style="{StaticResource ToolbarButton}" ToolTip="Forward (Alt+Right)"
+                        Command="{Binding ForwardCommand}">
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Forward}"/>
+                </Button>
+                <Button Style="{StaticResource ToolbarButton}" ToolTip="Up (Alt+Up)"
+                        Command="{Binding UpCommand}">
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Up}"/>
+                </Button>
+                <Button Style="{StaticResource ToolbarButton}" ToolTip="Refresh (F5)"
+                        Command="{Binding RefreshCommand}">
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Refresh}"/>
+                </Button>
+            </StackPanel>
+
             <!-- Address bar: same rounded field chrome as the search box. -->
-            <Border Style="{StaticResource FieldBorder}" Padding="6,0">
+            <Border Grid.Column="1" Style="{StaticResource FieldBorder}" Padding="6,0">
                 <!-- The click-to-edit handler sits on the Grid, not the ItemsControl: inside a
                      ScrollViewer the crumbs are measured at their natural width, so they don't fill
                      the bar and empty space to their right never reaches them. A breadcrumb Button
@@ -54,8 +76,11 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </ScrollViewer>
+                    <!-- UseLayoutRounding="False": see the header search box in MainWindow.xaml for
+                         why — at 200% (and other non-100%) display scaling, independent per-element
+                         device-pixel snapping puts the caret a character past where it should be. -->
                     <TextBox x:Name="PathBox" Visibility="Collapsed" VerticalAlignment="Center"
-                             BorderThickness="0" Background="Transparent"
+                             BorderThickness="0" Background="Transparent" UseLayoutRounding="False"
                              KeyDown="PathBox_KeyDown" LostFocus="PathBox_LostFocus"/>
                 </Grid>
             </Border>
@@ -63,7 +88,7 @@
             <!-- Local search that doesn't suck: files & folders under the current directory, and
                  nothing else. Whole-PC search is the header's field, so there is no scope toggle
                  here and no mode to read before typing. -->
-            <Border Grid.Column="1" Style="{StaticResource FieldBorder}" Margin="6,0,0,0"
+            <Border Grid.Column="2" Style="{StaticResource FieldBorder}" Margin="6,0,0,0"
                     Width="280" MinWidth="150">
                 <DockPanel>
                     <!-- The glyph carries the syntax help: an unexplained filter language is an
@@ -87,18 +112,22 @@
                             Style="{StaticResource SearchClearButton}">
                         <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Save}" Width="12" Height="12"/>
                     </Button>
-                    <Grid>
+                    <!-- UseLayoutRounding="False": see the header search box in MainWindow.xaml for
+                         why — at 200% (and other non-100%) display scaling, independent per-element
+                         device-pixel snapping puts the caret a character past where it should be. -->
+                    <Grid UseLayoutRounding="False">
                         <!-- These ids repeat once per open tab now. Only the visible tab of each
                              pane is in the automation tree (the rest are Collapsed), so a single
                              pane still exposes exactly one of each. -->
                         <TextBox x:Name="SearchBox" BorderThickness="0" Background="Transparent"
-                                 VerticalContentAlignment="Center"
+                                 UseLayoutRounding="False" VerticalContentAlignment="Center"
                                  AutomationProperties.AutomationId="SearchBox"
                                  AutomationProperties.Name="Search this folder"
                                  Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                                  KeyDown="SearchBox_KeyDown"
                                  ToolTip="Search this folder and everything under it (Ctrl+F). Filters: ext: size: dm: path: is: re: in: content:, plus OR and !"/>
                         <TextBlock Text="Search this folder" Foreground="{StaticResource Theme.Text.Placeholder}" Margin="4,0,0,0"
+                                   UseLayoutRounding="False"
                                    VerticalAlignment="Center" IsHitTestVisible="False">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
@@ -123,7 +152,7 @@
               preview-mode segments use: the contrast suite covers that pair against nothing here,
               and a fill carries the state without putting a colour that no test is holding still.
             -->
-            <Button x:Name="PreviewPaneToggle" Grid.Column="2" Margin="6,0,0,0"
+            <Button x:Name="PreviewPaneToggle" Grid.Column="3" Margin="6,0,0,0"
                     ToolTip="Preview pane (Ctrl+P)"
                     Command="{Binding TogglePreviewCommand}"
                     AutomationProperties.AutomationId="PreviewPaneToggle"
