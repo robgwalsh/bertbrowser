@@ -64,6 +64,7 @@ you where and what to watch for.
 | Compare / sync two folders | `Core/Services/Compare/*`, `ViewModels/CompareSessionViewModel` |
 | Search query language | `Core/Services/Search/*`, `docs/search-indexing.md` |
 | Content search (`content:`) | `Core/Services/Search/ContentTerm.cs`, `Core/Services/Search/ContentReader.cs` |
+| Saved searches | `Core/Services/SavedSearches/*` (`SavedSearchRules`), `Core/Data/SavedSearchRepository`, `ViewModels/SavedSearchesViewModel`, `Views/SavedSearchDialog` |
 | Elevated MFT indexer | `src/BertBrowser.Indexer`, `Core/Services/MftIndexClient` |
 | Change timeline ("What changed") | `Core/Services/Changes/*` (`ChangeLogRules`, `ChangeRecorder`, `ChangeLogPolicy`), `Core/Data/ChangeLogRepository`, `Views/ChangeTimelineWindow`, the History page of `SettingsWindow` |
 | Elevated file-op retry | `src/BertBrowser.Elevator`, `Core/Services/Elevation/*`, `Core/Ipc/ElevationProtocol.cs` |

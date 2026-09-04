@@ -92,6 +92,19 @@ search <text>               this folder's box, debounce and search waited out
 gsearch <text>              the header's whole-PC box (needs --index)
 clear-search
 
+save-search <name> [current|folder|pc]
+                            keep the search on show under a name, as the dialog's Save does —
+                            seeded, validated and stored through the same code, dialog skipped
+                            because a run never clicks. No scope word means the seed's default:
+                            pc from the header box, current from the tab's. Re-saving a taken
+                            name replaces that row
+run-saved <name> [newtab]   run one as a click on its sidebar row does (or its "Run in new tab"),
+                            debounce and search waited out. A pc-scoped one needs --index, like
+                            gsearch
+rename-saved <old> to <new> the edit dialog's rename, through SaveSearchAsync(previousName)
+remove-saved <name>
+saved-searches              the names on the sidebar, each with its scope
+
 newfolder <name>            create a folder in the active tab's directory, through
                             PlanNewItem/CreateNewItemAsync (acts on the folder, not the selection)
 newfile <name>              same for a file; a name ending in a configured type's extension
@@ -164,7 +177,7 @@ shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, rename-advanced,
                             delete, delete-permanent, message, warning, properties, settings,
                             theme-editor, disk-usage, duplicates, changes, sync-preview,
-                            sync-preview-running, search-syntax, extract, compress,
+                            sync-preview-running, search-syntax, saved-search, extract, compress,
                             archive-password, elevation, settings-columns, settings-history,
                             columns, settings-columns-dragging
                             (changes is the "What changed" window: with a run's default settings

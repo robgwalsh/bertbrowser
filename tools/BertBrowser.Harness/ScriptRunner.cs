@@ -141,6 +141,15 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "gsearch": Search(rest, global: true); break;
             case "clear-search": Invoke(() => session.Tab.ClearSearchCommand.Execute(null)); break;
 
+            // saved searches
+            case "save-search": SaveSearch(rest); break;
+            case "run-saved": RunSaved(rest); break;
+            case "rename-saved": RenameSaved(rest); break;
+            case "remove-saved": RemoveSaved(rest); break;
+            case "saved-searches": output.WriteLine("SAVED " + string.Join(", ", SavedSearchNames())); break;
+            case "assert-saved-search": AssertSavedSearch(rest, expected: true); break;
+            case "assert-no-saved-search": AssertSavedSearch(rest, expected: false); break;
+
             // acting on the selection
             case "newfolder": NewItem(rest, NewItemKind.Folder); break;
             case "newfile": NewItem(rest, NewItemKind.File); break;
@@ -1025,6 +1034,115 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         });
 
         session.SettleSearch();
+    }
+
+    // ---- saved searches ---------------------------------------------------------------
+
+    /// <summary>
+    /// Stores the active tab's search under a name, as the dialog's Save does.
+    /// </summary>
+    /// <remarks>
+    /// The dialog is skipped for the reason 'rename' skips its own: <c>ShowDialog</c> would block
+    /// this thread's dispatcher. It is seeded by the same <c>SeedFor</c>, refused by the same
+    /// <c>SavedSearchRules.Validate</c> and stored through the same <c>SaveSearchAsync</c>, so only
+    /// the window is missing — 'dialog saved-search' photographs that. The scope word is optional:
+    /// without one the seed's own default stands (this PC from the header box, wherever-you-are
+    /// from the tab's), which is what pressing Enter in the dialog would do.
+    /// </remarks>
+    private void SaveSearch(string rest)
+    {
+        var (name, scopeWord) = SplitScopeWord(Require(rest, "save-search"));
+        var seed = session.Dispatcher.Invoke(() => session.Shell.SavedSearches.SeedFor(session.Tab));
+
+        var scope = scopeWord switch
+        {
+            "current" => Core.Models.SavedSearchScope.CurrentFolder,
+            "folder" => Core.Models.SavedSearchScope.Folder,
+            "pc" => Core.Models.SavedSearchScope.ThisPc,
+            _ => seed.Scope,
+        };
+        var scopePath = scope == Core.Models.SavedSearchScope.Folder ? seed.Folder : null;
+
+        // A new save may take an existing name — it replaces — so no clash probe here, as in the
+        // dialog for a new search.
+        var problem = Core.Services.SavedSearches.SavedSearchRules.Validate(
+            name, seed.Query, scope, scopePath, _ => false, File.Exists);
+        if (problem is not null)
+            throw new AssertionException($"The save was refused: {problem}");
+
+        var search = new Core.Models.SavedSearch(name, seed.Query.Trim(), scope, scopePath);
+        Await(() => session.Shell.SaveSearchAsync(search, previousName: null));
+    }
+
+    /// <summary>'save-search Big videos folder' — the last word is a scope only when it is one.</summary>
+    private static (string Name, string Scope) SplitScopeWord(string text)
+    {
+        var cut = text.LastIndexOf(' ');
+        if (cut < 0) return (text, "");
+        var last = text[(cut + 1)..].ToLowerInvariant();
+        return last is "current" or "folder" or "pc" ? (text[..cut].TrimEnd(), last) : (text, "");
+    }
+
+    /// <summary>Runs a saved search as a click on its sidebar row does, or as its menu's "Run in
+    /// new tab" does, and waits for the search the way 'search' does. A this-PC one is refused
+    /// without an index for exactly gsearch's reason.</summary>
+    private void RunSaved(string rest)
+    {
+        var text = Require(rest, "run-saved");
+        var newTab = text.EndsWith(" newtab", StringComparison.OrdinalIgnoreCase);
+        var name = newTab ? text[..^" newtab".Length].TrimEnd() : text;
+        var item = FindSavedSearch(name, "run-saved");
+
+        if (item.Model.Scope == Core.Models.SavedSearchScope.ThisPc && !options.Index && !options.IndexDeclined)
+            throw new InvalidOperationException(
+                $"'{item.Name}' searches this PC, which reads the MFT index this run did not build. " +
+                "Start the harness with --index, or run a folder-scoped saved search.");
+
+        Await(() => session.Shell.RunSavedSearchAsync(item, newTab));
+        session.SettleSearch();
+    }
+
+    /// <summary>'rename-saved Old name to New name' — the edit dialog's rename, through the same
+    /// <c>SaveSearchAsync(previousName)</c> the dialog's Save goes through.</summary>
+    private void RenameSaved(string rest)
+    {
+        var text = Require(rest, "rename-saved");
+        var cut = text.IndexOf(" to ", StringComparison.OrdinalIgnoreCase);
+        if (cut <= 0 || cut + 4 >= text.Length)
+            throw new FormatException("rename-saved takes two names: rename-saved <old> to <new>.");
+
+        var item = FindSavedSearch(text[..cut].Trim(), "rename-saved");
+        var newName = text[(cut + 4)..].Trim();
+        var renamed = item.Model with { Name = newName };
+        Await(() => session.Shell.SaveSearchAsync(renamed, previousName: item.Name));
+    }
+
+    private void RemoveSaved(string rest)
+    {
+        var item = FindSavedSearch(Require(rest, "remove-saved"), "remove-saved");
+        Await(() => session.Shell.RemoveSavedSearchAsync(item));
+    }
+
+    private IReadOnlyList<string> SavedSearchNames() =>
+        session.Dispatcher.Invoke(() => session.Shell.SavedSearches.Items
+            .Select(i => $"{i.Name} ({i.ScopeText})").ToList());
+
+    private SavedSearchItemViewModel FindSavedSearch(string name, string verb) =>
+        session.Dispatcher.Invoke(() => session.Shell.SavedSearches.Items
+            .FirstOrDefault(i => i.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+        ?? throw new AssertionException(
+            $"{verb}: there is no saved search called '{name}'. Saved: {string.Join(", ", SavedSearchNames())}");
+
+    private void AssertSavedSearch(string rest, bool expected)
+    {
+        var name = Require(rest, expected ? "assert-saved-search" : "assert-no-saved-search");
+        var present = session.Dispatcher.Invoke(() => session.Shell.SavedSearches.Items
+            .Any(i => i.Name.Equals(name, StringComparison.OrdinalIgnoreCase)));
+
+        if (present != expected)
+            throw new AssertionException(expected
+                ? $"'{name}' is not a saved search. Saved: {string.Join(", ", SavedSearchNames())}"
+                : $"'{name}' is still a saved search.");
     }
 
     // ---- acting on the selection ------------------------------------------------------
@@ -2112,6 +2230,12 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         // constant in Core.
         "search-syntax" => SearchSyntaxDialog.Create(),
 
+        // Seeded from the active tab exactly as the save button seeds it, so 'search x' first
+        // gives it something to show; with no search on it opens on its "type a search" refusal.
+        "saved-search" => SavedSearchDialog.Create(
+            session.Shell.SavedSearches.SeedFor(session.Tab),
+            n => session.Shell.SavedSearches.IsNameTaken(n)),
+
         "message" => MessageDialog.Create(
             "The harness built this dialog to photograph it. Nothing went wrong.",
             "Message", MessageDialogKind.Information),
@@ -2383,6 +2507,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             ("insideArchive", Bool(tab.FileList.IsInsideArchive)),
             ("search", Quote(tab.ActiveSearchText)),
             ("globalSearch", Bool(tab.IsGlobalSearch)),
+            ("savedSearches", Quote(string.Join(", ", shell.SavedSearches.Items.Select(i => i.Name)))),
             ("tabs", Text(shell.ActivePane.Tabs.Count)),
             ("panes", Text(shell.AllPanes.Count())),
             ("hidden", Bool(shell.ShowHiddenItems)),

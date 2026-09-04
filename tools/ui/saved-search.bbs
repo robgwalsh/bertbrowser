@@ -1,0 +1,71 @@
+# Saved searches: store the query on show under a name, run it in place and in a new tab, pin
+# one to a folder and run it from elsewhere, replace one by re-saving its name, rename one, and
+# delete one. The run is unindexed, so a this-PC search is saved and listed but not run — that
+# is gsearch's rule too.
+
+tree .
+refresh
+
+# --- save what the box holds -----------------------------------------------------------
+search report
+assert-flattened
+dialog saved-search
+save-search Reports
+assert-saved-search Reports
+state
+
+# --- run it in place (a template: wherever the tab is) ----------------------------------
+clear-search
+assert-not-flattened
+run-saved Reports
+assert-flattened
+assert-count 3
+assert-status report
+shot saved-sidebar
+
+# --- and in a tab of its own -----------------------------------------------------------
+run-saved Reports newtab
+assert-tabs 2
+assert-flattened
+assert-count 3
+closetab
+assert-tabs 1
+
+# --- pinned: saved inside Documents, run from the root, lands in Documents --------------
+clear-search
+go Documents
+search report
+save-search Docs reports folder
+up
+assert-not-flattened
+run-saved Docs reports
+assert-path Documents
+assert-flattened
+assert-count 2
+
+# --- this PC: stored and listed; running it needs an index ------------------------------
+save-search Everywhere pc
+assert-saved-search Everywhere
+saved-searches
+
+# --- re-saving a taken name replaces the row rather than adding one ----------------------
+clear-search
+search ext:md
+save-search reports
+saved-searches
+run-saved Reports
+assert-count 3
+assert-row draft.md
+assert-no-row notes.txt
+
+# --- rename and delete ------------------------------------------------------------------
+rename-saved Reports to Markdown
+assert-no-saved-search Reports
+assert-saved-search Markdown
+remove-saved Markdown
+assert-no-saved-search Markdown
+remove-saved Docs reports
+remove-saved Everywhere
+shot saved-sidebar-empty
+assert-not-launched
+state
