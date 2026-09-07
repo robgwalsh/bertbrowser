@@ -15,21 +15,32 @@ internal sealed class DecliningIndexHostLauncher : IIndexHostLauncher
 {
     public bool CanElevate => true;
 
-    public IndexHostLaunchResult Launch(string pipeName, int parentProcessId) =>
-        IndexHostLaunchResult.Declined;
+    public IndexHostLaunchResult Launch() => IndexHostLaunchResult.Declined;
 
     public void WaitForExit(int processId, TimeSpan timeout) { }
 }
 
-/// <summary>A transport nobody ever connects to, since nothing was started.</summary>
+/// <summary>
+/// A transport nobody ever connects to.
+/// </summary>
+/// <remarks>
+/// It answers null to the attach look as well as the one after a launch, so a scripted run sees
+/// exactly what a machine with no index helper sees — which is now the banner, and after clicking
+/// through it, the declined prompt.
+/// </remarks>
 internal sealed class NoIndexTransportFactory : IIndexTransportFactory
 {
-    public IIndexTransport Create() => new NoIndexTransport();
+    public bool TryCreate(out IIndexTransport? transport, out string error)
+    {
+        transport = new NoIndexTransport();
+        error = "";
+        return true;
+    }
 
     private sealed class NoIndexTransport : IIndexTransport
     {
         public string Endpoint => "BertBrowser.Index.Harness";
-        public Stream? Accept(int processId, TimeSpan timeout) => null;
+        public Stream? Accept(int? launchedProcessId, TimeSpan timeout) => null;
         public void Dispose() { }
     }
 }

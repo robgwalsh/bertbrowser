@@ -221,6 +221,9 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-match": AssertMatch(rest); break;
             case "stop-search": Invoke(() => session.Tab.StopSearchCommand.Execute(null)); break;
             case "assert-indexing": AssertIndexing(rest); break;
+            case "assert-banner": AssertIndexerBanner(rest); break;
+            case "dismiss-banner": Invoke(() => session.Shell.DismissIndexerBannerCommand.Execute(null)); break;
+            case "start-indexer": StartIndexer(); break;
             case "assert-transfer": AssertTransfer(rest); break;
             case "assert-transfer-indeterminate": AssertTransferIndeterminate(); break;
             case "assert-count": AssertCount(rest); break;
@@ -2311,7 +2314,13 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             session.Services.GetRequiredService<IThemeService>(),
             session.Services.GetRequiredService<IShellNewCatalog>(),
             session.Services.GetRequiredService<IFolderHandlerService>(),
-            session.Services.GetRequiredService<ChangeLogRepository>());
+            session.Services.GetRequiredService<ChangeLogRepository>(),
+            // No auto-start service: registering a sign-in task is a real change to the machine,
+            // and a scripted run must never make one. The page hides that box without it, which is
+            // also what CanChooseAutoStart is for.
+            autoStart: null,
+            session.Services.GetRequiredService<IMftIndexService>());
+        vm.ReadIndexerState();
         vm.SelectedCategory = vm.Categories.First(c => c.Id == category);
         return vm;
     }
@@ -2399,6 +2408,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         "settings-history" => new SettingsWindow(SettingsFor(SettingsCategory.History)),
 
+        "settings-search-index" => new SettingsWindow(SettingsFor(SettingsCategory.SearchIndex)),
+
         // Needs a 'compare' first, for the reason 'duplicates' does: the dialog shows what that
         // comparison found rather than starting one of its own while a capture waits on it.
         "sync-preview" => SyncPreviewDialog.Create(SyncPreviewFor()),
@@ -2444,7 +2455,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             $"'{kind}' is not a dialog. Try: new-folder, new-file, rename, rename-advanced, " +
             "delete, delete-permanent, message, warning, properties, settings, theme-editor, " +
             "disk-usage, duplicates, changes, transfer, extract, compress, archive-password, " +
-            "settings-columns, settings-history, columns."),
+            "settings-columns, settings-history, settings-search-index, columns."),
     };
 
     /// <summary>
@@ -2864,6 +2875,62 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         if (!status.Contains(expected, StringComparison.OrdinalIgnoreCase))
             throw new AssertionException($"expected the index line to contain '{expected}', got '{status}'.");
+    }
+
+    /// <summary>
+    /// The banner offering to start the index helper: its wording, or that it is not there at all.
+    /// </summary>
+    private void AssertIndexerBanner(string rest)
+    {
+        var expected = Require(rest, "assert-banner");
+        var (shown, message, canStart) = session.Dispatcher.Invoke(
+            () => (session.Shell.ShowIndexerBanner, session.Shell.IndexerBannerMessage,
+                   session.Shell.IndexerBannerCanStart));
+
+        switch (expected)
+        {
+            case "none" when shown:
+                throw new AssertionException($"expected no indexer banner; it says '{message}'.");
+            case "none":
+                return;
+            case "start" when !shown || !canStart:
+                throw new AssertionException(
+                    $"expected the banner to offer to start the indexer; shown={shown}, canStart={canStart}.");
+            case "start":
+                return;
+        }
+
+        if (!shown)
+            throw new AssertionException($"expected an indexer banner containing '{expected}'; there is none.");
+
+        if (!message.Contains(expected, StringComparison.OrdinalIgnoreCase))
+            throw new AssertionException($"expected the banner to contain '{expected}', got '{message}'.");
+    }
+
+    /// <summary>
+    /// Clicks the banner's Start button. In a scripted run the launcher behind it starts nothing —
+    /// a UAC prompt takes the secure desktop, which parking the window offscreen cannot work
+    /// around — so what this exercises is everything above the launcher.
+    /// </summary>
+    private void StartIndexer()
+    {
+        var before = session.Dispatcher.Invoke(
+            () => (session.Shell.IndexingStatus, session.Shell.ShowIndexerBanner));
+
+        Invoke(() => session.Shell.StartIndexerCommand.Execute(null));
+
+        // The attempt runs on the client's own worker thread and reports back through the
+        // dispatcher, so pumping the queue once is not enough — settle until something has actually
+        // changed, or the wait runs out and the assertions say what really happened.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            session.Settle(0);
+            var now = session.Dispatcher.Invoke(
+                () => (session.Shell.IndexingStatus, session.Shell.ShowIndexerBanner));
+            if (now != before) return;
+            Thread.Sleep(20);
+        }
     }
 
     private void AssertCount(string rest)

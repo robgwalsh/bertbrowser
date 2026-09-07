@@ -5,11 +5,36 @@ using BertBrowser.Core.Services.Changes;
 
 namespace BertBrowser.Core.Services.Mft;
 
+/// <summary>Whether looking for a helper may also start one.</summary>
+public enum IndexStartMode
+{
+    /// <summary>Attach to a running helper, and if there is none, ask for one — which prompts.</summary>
+    AttachOrLaunch,
+
+    /// <summary>
+    /// Attach to a running helper, and otherwise do nothing at all.
+    /// </summary>
+    /// <remarks>
+    /// What startup uses by default. A prompt nobody asked for, on every launch, is what this whole
+    /// change exists to remove; the banner offers one instead, and the user clicks.
+    /// </remarks>
+    AttachOnly,
+}
+
 public interface IMftIndexService : IDisposable
 {
     /// <summary>Begins indexing every fixed NTFS volume on a background thread each, then
     /// tailing its USN journal. Safe to call once at startup; a no-op if already started.</summary>
     void Start();
+
+    /// <summary>
+    /// As <see cref="Start()"/>, but says whether an absent helper may be started — which raises an
+    /// elevation prompt. Hosts with no separate helper ignore it.
+    /// </summary>
+    void Start(IndexStartMode mode);
+
+    /// <summary>Ends the helper, if there is one to end. A no-op for an in-process indexer.</summary>
+    void Stop();
 
     /// <summary>True once at least one volume's initial enumeration has completed — i.e. a
     /// global search has something to hit.</summary>
@@ -25,6 +50,17 @@ public interface IMftIndexService : IDisposable
     /// same function the in-process indexer does, so the two can never word it differently.
     /// </summary>
     IReadOnlyCollection<string> BuildingDrives { get; }
+
+    /// <summary>
+    /// Every volume root whose index is complete. Exposed for the same reason
+    /// <see cref="BuildingDrives"/> is: the out-of-process host has to replay it to an app that
+    /// attached after those volumes finished, since <see cref="IndexRefreshed"/> has already fired
+    /// for them and will not fire again.
+    /// </summary>
+    IReadOnlyCollection<string> CompletedRoots { get; }
+
+    /// <summary>Whether there is a separate elevated helper, and whether it is running.</summary>
+    IndexerPresence Presence { get; }
 
     /// <summary>True if <paramref name="pathKey"/> sits on a volume whose live MFT index is
     /// complete. Search uses this to treat that root as fresh and skip the crawl fallback.</summary>
@@ -49,6 +85,17 @@ public interface IMftIndexService : IDisposable
     /// prompt, and a prompt nobody asked for that reappears on a timer is worse than no index.
     /// </remarks>
     bool CanRetry { get; }
+
+    /// <summary>
+    /// True when asking for the index could actually achieve something — so a button offering to is
+    /// worth showing.
+    /// </summary>
+    /// <remarks>
+    /// Wider than <see cref="CanRetry"/>, which only ever meant "something went wrong and you may
+    /// try again". A helper that simply is not running yet is not a failure, and is the common case
+    /// now; this covers both, and is what the banner and the tool windows' buttons are gated on.
+    /// </remarks>
+    bool CanStart { get; }
 
     /// <summary>Tries again after a failure. A no-op unless <see cref="CanRetry"/>.</summary>
     void Retry();
@@ -108,14 +155,28 @@ public sealed class MftIndexService : IMftIndexService
 
     public IReadOnlyCollection<string> BuildingDrives => _state.BuildingDrives;
 
+    public IReadOnlyCollection<string> CompletedRoots => _state.CompletedRoots;
+
+    /// <summary>This <em>is</em> the indexer, so there is no helper to be present or absent.</summary>
+    public IndexerPresence Presence => IndexerPresence.NotApplicable;
+
     public string StatusText { get; private set; } = "";
 
     /// <summary>Always false: the in-process indexer needs nothing the user could grant it.</summary>
     public bool CanRetry => false;
 
+    /// <inheritdoc/>
+    public bool CanStart => false;
+
     public bool IsIndexed(string pathKey) => _state.IsIndexed(pathKey);
 
     public void Retry() => Start();
+
+    /// <summary>There is no separate helper to leave running or not, so the mode says nothing here.</summary>
+    public void Start(IndexStartMode mode) => Start();
+
+    /// <summary>Nothing to stop: this indexer ends with the process hosting it.</summary>
+    public void Stop() { }
 
     public void Start()
     {

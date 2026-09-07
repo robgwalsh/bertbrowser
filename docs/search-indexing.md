@@ -144,12 +144,44 @@ the status bar, and `IndexRefreshed` lets an already-open search re-query once a
 
 **This is why there is a separate elevated process.** Opening `\\.\C:` for raw reads needs an
 administrator token, and nothing else in BertBrowser does — so the app itself is `asInvoker` and
-everything described above runs inside `BertBrowser.Indexer.exe`, which the app starts on demand and
-talks to over a named pipe. The app holds an `MftIndexClient` that mirrors what the helper reports,
-so `IsIndexed`, `AnyIndexed` and `StatusText` answer locally and none of the consumers above know
-the difference. If the helper cannot run — a declined prompt, a standard-user account — nothing is
-indexed and every search falls back to the crawler, which is the same path a non-NTFS volume takes.
-See [SECURITY.md](../SECURITY.md) and the "elevated index helper" section of `CLAUDE.md`.
+everything described above runs inside `BertBrowser.Indexer.exe`, which talks to the app over a
+named pipe. The app holds an `MftIndexClient` that mirrors what the helper reports, so `IsIndexed`,
+`AnyIndexed` and `StatusText` answer locally and none of the consumers above know the difference. If
+the helper cannot run — a declined prompt, a standard-user account — nothing is indexed and every
+search falls back to the crawler, which is the same path a non-NTFS volume takes. See the "elevated
+index helper" material in `CLAUDE.md`.
+
+### Lifetime: the helper outlives the app
+
+**Closing BertBrowser ends a session, not the helper.** It keeps indexing and keeps tailing the
+journal, so the next launch attaches to a warm index and costs no prompt and no rebuild. Four
+things follow, and each is load-bearing:
+
+- **The pipe name is well-known per user** (`Core/Ipc/IndexEndpoint`), derived on both sides from
+  the process's own token SID rather than passed as an argument. It used to carry a random nonce,
+  which was right while the helper died with its launcher and wrong the moment a helper had to find
+  the *next* app. Deriving it also means the elevated process can no longer be pointed at a name
+  anybody chose — the app is still the pipe *server*, so nothing ever connects to the helper.
+- **Every session replays what is already known** — `Building` for each drive still going,
+  `Complete` for each finished root — before `Ready`. `IndexRefreshed` fired for those volumes
+  before the new app existed and will never fire again, so nothing else could carry them.
+- **One helper per user**, enforced by a named mutex (`Core/Ipc/IndexerPresenceLock`). Two would
+  tail one volume's journal into one SQLite file while fighting over the pipe, and there are two
+  independent ways to start one. The same mutex is how the app answers "is one running?" without
+  talking to it: `SYNCHRONIZE` is not a write right, so a medium-integrity process may open a
+  high-integrity one's mutex.
+- **Nothing supervises it**, so it stops itself: on `IndexVerb.Shutdown`, at sign-out, or when a
+  30-second self-check sees the database's schema version move, its own executable replaced, or
+  `BertBrowser.exe` gone from beside it. That last set is what an update or an uninstall looks like
+  from in there.
+
+**The app never starts it at launch.** It attaches if one is running and otherwise shows a banner
+offering to — `IndexerBannerRules` decides, and mostly decides to stay quiet. Two settings change
+that: one asks at launch as the app used to, and one registers a scheduled task
+(`IndexerAutoStartTask`) that starts the helper elevated at sign-in, after which the prompt never
+appears again. The task is installed by running the helper with `--register-autostart` behind its
+own elevation prompt, never by a verb on the pipe — a verb would let anything reaching that pipe
+install an elevated-at-sign-in process with no user gesture at all.
 
 ## Maintain: the USN journal
 
@@ -450,8 +482,9 @@ the canonical path.
 ## Costs and limits
 
 - **Admin rights**, for raw volume access. Non-negotiable for the MFT path — but confined to
-  `BertBrowser.Indexer.exe`, so it costs one UAC prompt per session rather than an elevated browser.
-  Declining is survivable: everything falls back to the crawler.
+  `BertBrowser.Indexer.exe`, so it costs one UAC prompt rather than an elevated browser, and the
+  helper outlives the app so that is **one prompt per sign-in**, not per launch — none at all with
+  the sign-in task registered. Declining is survivable: everything falls back to the crawler.
 - **Fixed NTFS volumes only.** Network shares, exFAT/FAT32 removable media and MTP devices go
   through the crawler (or, for MTP, are not searchable at all).
 - **Index size** is one row per file and directory on every fixed volume, in
@@ -467,8 +500,13 @@ the canonical path.
   is unmeasured instead — the same distinction `DiskUsageRules` draws, and for the same reason.
 - **Only modified time is indexed**, not created or accessed; `dc:`/`da:` are refused with a message
   pointing at `dm:`.
-- **A full rebuild runs at every launch.** It is a sequential read, it is off-thread, and searches
-  work against the previous contents while it runs — but it is not free on a very large disk.
+- **A full rebuild runs once per helper, not once per launch.** The helper outlives the app, so
+  reopening BertBrowser attaches to the index it left running and rebuilds nothing. A rebuild
+  happens when a helper starts: at the first launch after signing in, or at sign-in itself with the
+  scheduled task registered — which is worth knowing before turning that on, since it then reads
+  every drive at every sign-in whether or not BertBrowser is ever opened. It is a sequential read,
+  it is off-thread, and searches work against the previous contents while it runs — but it is not
+  free on a very large disk.
 
 ## Where the tests are
 
@@ -490,3 +528,8 @@ the canonical path.
 | `FsIndexRepositoryTests` | Range scans, truncation, ancestor path reconstruction, rename/delete subtree rewrites, the vanish sweep |
 | `SearchServiceTests` | Fresh / stale / unindexed routing and live-scan streaming |
 | `IndexCrawlerTests`, `IndexWatcherApplyTests` | The fallback crawler and watcher apply path |
+| `MftIndexHostTests` | One helper across two sessions: the replay a late-joining app depends on, that a second `Start` does not index twice, and that a lost pipe and a `Shutdown` are told apart |
+| `MftIndexClientTests` | Attaching without prompting, launching only when nothing is listening, that an attach finding nothing says *nothing*, and that `Dispose` leaves the helper running while `Stop` does not |
+| `IndexerBannerRulesTests` | Every case where the banner must stay quiet — a standard user, a failure the status bar owns, a host with no helper at all |
+| `IndexerPresenceLockTests` | The mutex name and DACL, what a SID may be, and a real claim being visible and then not |
+| `IndexerAutoStartTaskTests` | The sign-in task's XML, including the three defaults that would silently break it (`PT0S`, battery, idle) |

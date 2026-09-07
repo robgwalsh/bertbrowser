@@ -132,7 +132,7 @@ public sealed partial class DiskUsageViewModel : ObservableObject, IDisposable
 
     /// <summary>Offered only where a retry could change the answer, and only ever as a button the
     /// user presses: a retry raises a UAC prompt, so nothing here retries on a timer.</summary>
-    public bool CanRetry => Availability == DiskUsageAvailability.NotIndexed && _mftIndex.CanRetry;
+    public bool CanRetry => Availability == DiskUsageAvailability.NotIndexed && _mftIndex.CanStart;
 
     [RelayCommand]
     private Task Refresh() => LoadAsync(RootPath);
@@ -148,7 +148,7 @@ public sealed partial class DiskUsageViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void Retry()
     {
-        _mftIndex.Retry();
+        _mftIndex.Start(IndexStartMode.AttachOrLaunch);
         OnPropertyChanged(nameof(CanRetry));
     }
 

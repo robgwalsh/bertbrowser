@@ -16,15 +16,27 @@ public class MftIndexHostTests
     /// <summary>Runs a host on its own thread against a peer the test drives as the app.</summary>
     private static (Thread Thread, ProtocolPeer App) Hosted(ControllableIndexService index)
     {
+        var (thread, app, _) = HostedSession(new MftIndexHost(index));
+        return (thread, app);
+    }
+
+    /// <summary>
+    /// One session on an existing host, so a test can end a session and open another against the
+    /// same running index — which is what an app closing and reopening looks like from here.
+    /// </summary>
+    private static (Thread Thread, ProtocolPeer App, MftIndexHost Host) HostedSession(MftIndexHost host)
+    {
         var (hostEnd, appEnd) = DuplexPair.Create();
-        var host = new MftIndexHost(index, hostEnd);
-        var thread = new Thread(() => { try { host.Run(); } catch (Exception) { /* asserted via state */ } })
+        var thread = new Thread(() =>
+        {
+            try { host.Run(hostEnd); } catch (Exception) { /* asserted via state */ }
+        })
         {
             IsBackground = true,
             Name = "test index host",
         };
         thread.Start();
-        return (thread, new ProtocolPeer(appEnd));
+        return (thread, new ProtocolPeer(appEnd), host);
     }
 
     private static void Eventually(Func<bool> condition, string because)
@@ -84,6 +96,113 @@ public class MftIndexHostTests
 
         app.Close();
         thread.Join(Patience);
+    }
+
+    /// <summary>
+    /// The point of the helper outliving the app: a second app attaches to an index that finished
+    /// building while nothing was connected, and must be told about it. IndexRefreshed already
+    /// fired for that volume and will never fire again, so only a replay can carry it.
+    /// </summary>
+    [Fact]
+    public void ReplaysWhatItAlreadyKnowsToALateJoiningApp()
+    {
+        var index = new ControllableIndexService();
+        var host = new MftIndexHost(index);
+
+        var (first, app1, _) = HostedSession(host);
+        app1.Receive();
+        app1.Receive();
+        index.BeginBuilding("C");
+        index.FinishBuilding("C", @"C:\");
+        app1.Close();
+        first.Join(Patience);
+
+        // A whole app lifetime later, on a brand new connection.
+        var (second, app2, _) = HostedSession(host);
+
+        Assert.Equal(IndexVerb.Hello, app2.Receive()!.Value.Verb);
+        var complete = app2.Receive()!.Value;
+        Assert.Equal(IndexVerb.Complete, complete.Verb);
+        Assert.Equal(@"C:\", complete.Argument);
+        // Ready comes last, and means "you now know everything I know".
+        Assert.Equal(IndexVerb.Ready, app2.Receive()!.Value.Verb);
+
+        app2.Close();
+        second.Join(Patience);
+    }
+
+    /// <summary>A drive still building when the second app attaches is announced to it too.</summary>
+    [Fact]
+    public void ReplaysDrivesStillBuilding()
+    {
+        var index = new ControllableIndexService();
+        var host = new MftIndexHost(index);
+        index.BeginBuilding("D");
+
+        var (first, app1, _) = HostedSession(host);
+        app1.Close();
+        first.Join(Patience);
+
+        var (second, app2, _) = HostedSession(host);
+        var building = app2.ReceiveOneOf(IndexVerb.Building)!.Value;
+        Assert.Equal("D", building.Argument);
+
+        app2.Close();
+        second.Join(Patience);
+    }
+
+    /// <summary>
+    /// Losing the pipe ends the session, not the index. A second app must not start a second set of
+    /// volume threads over the top of the ones already running.
+    /// </summary>
+    [Fact]
+    public void ASecondSessionDoesNotStartTheIndexAgain()
+    {
+        var index = new ControllableIndexService();
+        var host = new MftIndexHost(index);
+
+        var (first, app1, _) = HostedSession(host);
+        app1.Send(IndexVerb.Start);
+        Eventually(() => index.Starts == 1, "the first app should start indexing");
+        app1.Close();
+        first.Join(Patience);
+
+        var (second, app2, _) = HostedSession(host);
+        app2.Send(IndexVerb.Start);
+        app2.Send(IndexVerb.Ping);
+        Assert.Equal(IndexVerb.Pong, app2.ReceiveOneOf(IndexVerb.Pong)!.Value.Verb);
+
+        Assert.Equal(1, index.Starts);
+
+        app2.Close();
+        second.Join(Patience);
+    }
+
+    /// <summary>Shutdown and a peer that simply vanished are different answers to the caller: one
+    /// ends the process, the other only ends the session.</summary>
+    [Fact]
+    public void TellsTheCallerWhetherItWasAskedToStopOrJustLostTheApp()
+    {
+        var index = new ControllableIndexService();
+        var host = new MftIndexHost(index);
+
+        var (goneEnd, goneApp) = DuplexPair.Create();
+        var goneResult = IndexSessionEnd.Stop;
+        var gone = new Thread(() => goneResult = host.Run(goneEnd)) { IsBackground = true };
+        gone.Start();
+        new ProtocolPeer(goneApp).Close();
+        gone.Join(Patience);
+        Assert.Equal(IndexSessionEnd.PeerGone, goneResult);
+
+        var (stopEnd, stopApp) = DuplexPair.Create();
+        var stopResult = IndexSessionEnd.PeerGone;
+        var stop = new Thread(() => stopResult = host.Run(stopEnd)) { IsBackground = true };
+        stop.Start();
+        var peer = new ProtocolPeer(stopApp);
+        peer.Send(IndexVerb.Shutdown);
+        stop.Join(Patience);
+        Assert.Equal(IndexSessionEnd.Stop, stopResult);
+        peer.Close();
     }
 
     /// <summary>A second Start must not run a second set of volume threads.</summary>

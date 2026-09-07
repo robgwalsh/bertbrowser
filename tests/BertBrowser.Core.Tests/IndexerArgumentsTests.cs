@@ -23,42 +23,66 @@ public class IndexerArgumentsTests
     }
 
     [Fact]
-    public void ParsesAFullCommandLine()
+    public void ParsesTheOrdinaryCommandLine()
     {
-        var options = Parse("--pipe", "BertBrowser.Index.S-1-5-21-1.abc123", "--parent-pid", "4242",
-            "--data-dir", @"C:\Users\Rob\.bertbrowser");
+        var options = Parse("--data-dir", @"C:\Users\Rob\.bertbrowser");
 
-        Assert.Equal("BertBrowser.Index.S-1-5-21-1.abc123", options.PipeName);
-        Assert.Equal(4242, options.ParentProcessId);
+        Assert.Equal(IndexerCommand.Run, options.Command);
         Assert.Equal(@"C:\Users\Rob\.bertbrowser", options.DataDirectory);
+    }
+
+    [Theory]
+    [InlineData("--register-autostart", IndexerCommand.RegisterAutoStart)]
+    [InlineData("--unregister-autostart", IndexerCommand.UnregisterAutoStart)]
+    public void ParsesTheAutoStartCommands(string flag, IndexerCommand expected)
+    {
+        var options = Parse(flag, "--data-dir", @"C:\Data");
+
+        Assert.Equal(expected, options.Command);
+        Assert.Equal(@"C:\Data", options.DataDirectory);
     }
 
     [Fact]
     public void ArgumentOrderDoesNotMatter()
     {
-        var options = Parse("--data-dir", @"C:\Data", "--parent-pid", "7", "--pipe", "BertBrowser.Index.x");
+        var options = Parse("--data-dir", @"C:\Data", "--register-autostart");
 
-        Assert.Equal(7, options.ParentProcessId);
+        Assert.Equal(IndexerCommand.RegisterAutoStart, options.Command);
         Assert.Equal(@"C:\Data", options.DataDirectory);
+    }
+
+    [Fact]
+    public void RefusesToBothRegisterAndUnregister()
+    {
+        Rejects("--register-autostart", "--unregister-autostart", "--data-dir", @"C:\Data");
     }
 
     [Theory]
     [InlineData()]
-    [InlineData("--pipe", "BertBrowser.Index.x")]
-    [InlineData("--pipe", "BertBrowser.Index.x", "--parent-pid", "1")]
-    [InlineData("--parent-pid", "1", "--data-dir", @"C:\Data")]
-    public void RequiresEveryArgument(params string[] args)
+    [InlineData("--register-autostart")]
+    public void RequiresTheDataDirectory(params string[] args)
     {
         Rejects(args);
     }
 
-    [Theory]
-    [InlineData("--pipe")]
-    [InlineData("--parent-pid")]
-    [InlineData("--data-dir")]
-    public void RejectsAFlagWithNoValue(string flag)
+    [Fact]
+    public void RejectsAFlagWithNoValue()
     {
-        Rejects(flag);
+        Rejects("--data-dir");
+    }
+
+    /// <summary>
+    /// <b>The pipe name and the parent process id are gone, not ignored.</b> The helper derives its
+    /// own endpoint and has no parent to watch, so there is nothing for a caller to choose — and an
+    /// argument that parsed but did nothing would read as a check still being made.
+    /// </summary>
+    [Theory]
+    [InlineData("--pipe", "BertBrowser.Index.x")]
+    [InlineData("--parent-pid", "4242")]
+    public void RejectsTheArgumentsItNoLongerTakes(string flag, string value)
+    {
+        var error = Rejects("--data-dir", @"C:\Data", flag, value);
+        Assert.Contains(flag, error, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -72,52 +96,7 @@ public class IndexerArgumentsTests
     [InlineData(@"C:\Windows")]
     public void RejectsAnUnrecognisedArgument(string extra)
     {
-        Rejects("--pipe", "BertBrowser.Index.x", "--parent-pid", "1", "--data-dir", @"C:\Data", extra);
-    }
-
-    [Theory]
-    [InlineData("0")]
-    [InlineData("-1")]
-    [InlineData("nine")]
-    [InlineData("")]
-    public void RejectsAParentProcessIdThatIsNotPositive(string pid)
-    {
-        Rejects("--pipe", "BertBrowser.Index.x", "--parent-pid", pid, "--data-dir", @"C:\Data");
-    }
-
-    [Theory]
-    [InlineData("BertBrowser.Index.S-1-5-21-1.abcdef")]
-    [InlineData("BertBrowser.Index.x")]
-    public void AcceptsAPipeNameThisAppWouldGenerate(string name)
-    {
-        Assert.True(IndexerArguments.IsAcceptablePipeName(name));
-    }
-
-    /// <summary>
-    /// The name becomes a <c>\\.\pipe\</c> path, so a separator in it would name a different object
-    /// than the one intended.
-    /// </summary>
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("Something.Else")]
-    [InlineData(@"BertBrowser.Index.\..\evil")]
-    [InlineData("BertBrowser.Index./evil")]
-    [InlineData("BertBrowser.Index.a:b")]
-    [InlineData("BertBrowser.Index.a*")]
-    [InlineData("BertBrowser.Index.a\u0000b")]
-    [InlineData("bertbrowser.index.x")]
-    public void RejectsAPipeNameItWouldNot(string? name)
-    {
-        Assert.False(IndexerArguments.IsAcceptablePipeName(name));
-    }
-
-    [Fact]
-    public void RejectsAnOverlongPipeName()
-    {
-        var name = "BertBrowser.Index." + new string('a', IndexerArguments.MaxPipeNameLength);
-
-        Assert.False(IndexerArguments.IsAcceptablePipeName(name));
+        Rejects("--data-dir", @"C:\Data", extra);
     }
 
     [Theory]
@@ -127,14 +106,13 @@ public class IndexerArgumentsTests
     [InlineData(@"C:\Data\*")]
     public void RejectsADataDirectoryThatIsNotAnAcceptableAbsolutePath(string dir)
     {
-        Rejects("--pipe", "BertBrowser.Index.x", "--parent-pid", "1", "--data-dir", dir);
+        Rejects("--data-dir", dir);
     }
 
     [Fact]
     public void AcceptsAUncDataDirectory()
     {
-        var options = Parse("--pipe", "BertBrowser.Index.x", "--parent-pid", "1",
-            "--data-dir", @"\\server\share\data");
+        var options = Parse("--data-dir", @"\\server\share\data");
 
         Assert.Equal(@"\\server\share\data", options.DataDirectory);
     }

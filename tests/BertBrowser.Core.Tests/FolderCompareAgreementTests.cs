@@ -243,12 +243,17 @@ public sealed class FolderCompareAgreementTests : IDisposable
     private sealed class AlwaysIndexed : IMftIndexService
     {
         public void Start() { }
+        public void Start(IndexStartMode mode) { }
+        public void Stop() { }
         public bool AnyIndexed => true;
         public bool IsBuilding => false;
         public IReadOnlyCollection<string> BuildingDrives => [];
+        public IReadOnlyCollection<string> CompletedRoots => [];
+        public IndexerPresence Presence => IndexerPresence.NotApplicable;
         public bool IsIndexed(string pathKey) => true;
         public string StatusText => "";
         public bool CanRetry => false;
+        public bool CanStart => false;
         public void Retry() { }
         public BertBrowser.Core.Services.Changes.ChangeLogPolicy ChangeLog { get; set; }
         public event Action<string>? IndexRefreshed { add { } remove { } }

@@ -37,10 +37,10 @@ public sealed class ElevatedIndexHostLauncher : IIndexHostLauncher, IDisposable
     /// <inheritdoc/>
     public bool CanElevate => ElevatedProcess.CanElevate;
 
-    public IndexHostLaunchResult Launch(string pipeName, int parentProcessId)
+    public IndexHostLaunchResult Launch()
     {
         var started = ElevatedProcess.Start(
-            _helperPath, FormatArguments(pipeName, parentProcessId), "the index helper is missing");
+            _helperPath, FormatArguments(), "the index helper is missing");
 
         switch (started.Outcome)
         {
@@ -73,12 +73,16 @@ public sealed class ElevatedIndexHostLauncher : IIndexHostLauncher, IDisposable
     }
 
     /// <summary>
-    /// Quoted, because the data directory can contain spaces — it is under the user's profile.
-    /// Nothing here comes from a file being browsed; the pipe name is generated and the path is
-    /// this app's own.
+    /// The helper is told where the database is, and nothing else.
     /// </summary>
-    private static string FormatArguments(string pipeName, int parentProcessId) =>
-        $"--pipe \"{pipeName}\" --parent-pid {parentProcessId} --data-dir \"{AppPaths.DataDir.TrimEnd('\\')}\"";
+    /// <remarks>
+    /// Quoted, because the data directory can contain spaces — it is under the user's profile.
+    /// Nothing here comes from a file being browsed; the path is this app's own. The pipe name used
+    /// to be here too and is not any more: the helper derives it from its own token, so there is no
+    /// endpoint for a caller to choose.
+    /// </remarks>
+    private static string FormatArguments() =>
+        $"--data-dir \"{AppPaths.DataDir.TrimEnd('\\')}\"";
 
     public void Dispose()
     {

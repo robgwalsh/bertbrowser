@@ -149,7 +149,10 @@ public partial class MainWindow : ThemedWindow
             App.Services.GetRequiredService<IThemeService>(),
             App.Services.GetRequiredService<BertBrowser.App.Services.IShellNewCatalog>(),
             App.Services.GetRequiredService<BertBrowser.App.Services.IFolderHandlerService>(),
-            App.Services.GetRequiredService<BertBrowser.Core.Data.ChangeLogRepository>());
+            App.Services.GetRequiredService<BertBrowser.Core.Data.ChangeLogRepository>(),
+            App.Services.GetRequiredService<BertBrowser.App.Services.Indexing.IndexAutoStartService>(),
+            App.Services.GetRequiredService<BertBrowser.Core.Services.Mft.IMftIndexService>());
+        vm.ReadIndexerState();
         if (page is { } category)
             vm.ShowCategory(category);
 
@@ -164,6 +167,9 @@ public partial class MainWindow : ThemedWindow
             // would appear to do nothing until a new tab was opened.
             _shell.ApplyColumnDefaults();
             App.ApplyChangeLogPolicy(_settings);
+            // "Start the indexer when BertBrowser launches" only matters next launch, and the
+            // sign-in task applied itself the moment its box was ticked. Neither needs re-applying
+            // here — this comment is so nobody adds a line and wonders why it does nothing.
         }
     }
 

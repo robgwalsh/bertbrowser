@@ -1,9 +1,9 @@
-# What the window looks like when there is no search index.
+# What the window looks like with no search index — both halves of it.
 #
-# Run with --index-declined, which puts the real MftIndexClient behind a launcher that starts
-# nothing and reports a declined elevation prompt. Everything below the launcher is genuine, so
-# this is the failure path the app actually takes when someone says no to the UAC dialog — not a
-# picture staged to resemble it.
+# Run with --index-declined, which attaches to nothing and puts the real MftIndexClient behind a
+# launcher that starts nothing and reports a declined elevation prompt. Everything below the
+# launcher is genuine, so this is the path the app actually takes — first the banner nobody has
+# answered yet, then the failure after someone says no to the UAC dialog.
 #
 #   BertBrowser.Harness.exe --script tools/ui/index-degraded.bbs --index-declined
 
@@ -11,12 +11,19 @@ tree .
 refresh
 assert-count 8
 
-# The status bar says why there is no index, and offers to ask again. Nothing retries on a timer:
-# every retry is a UAC prompt.
+# Nothing has been asked for yet, so nothing prompted. The banner is the offer, and the status bar
+# stays quiet: two places describing one situation would read as two problems.
 settle
-assert-indexing "permission declined"
-assert-indexing retry
-shot 01-index-declined
+assert-banner "administrator rights"
+assert-banner start
+assert-indexing no-retry
+shot 01-indexer-banner
+
+# Dismissing means "not now". It is not persisted — the offer comes back next launch, so nobody can
+# permanently lose the only way in.
+dismiss-banner
+assert-banner none
+shot 02-banner-dismissed
 
 # The app is entirely usable without it. Browsing, folder-local search, and everything that does
 # not read the MFT behave exactly as they do with an index.
@@ -25,11 +32,20 @@ assert-flattened
 assert-count 3
 clear-search
 assert-not-flattened
-shot 02-usable-without-index
+shot 03-usable-without-index
+
+# Pressing Start is what raises the prompt — and only then. Declining it is a failure, so now the
+# status bar speaks and offers to ask again; the banner stays out of the way.
+start-indexer
+settle
+assert-indexing "permission declined"
+assert-indexing retry
+assert-banner none
+shot 04-index-declined
 
 # A whole-PC search still answers — SearchService falls back to its crawl — but says the index is
 # off rather than promising a background pass that is not happening.
 gsearch report
 settle
 assert-status "the search index is off"
-shot 03-global-search-degraded
+shot 05-global-search-degraded

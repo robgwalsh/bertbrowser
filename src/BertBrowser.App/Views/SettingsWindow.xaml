@@ -198,6 +198,66 @@
                 </StackPanel>
 
                 <!--
+                  Search index: the elevated helper's switches. Its own page because the helper now
+                  outlives the app — a process still running with an administrator token after the
+                  window closes deserves somewhere that says so, and a way to stop it.
+                -->
+                <StackPanel AutomationProperties.AutomationId="SettingsSearchIndexPage">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedCategory.Id}"
+                                             Value="{x:Static vm:SettingsCategory.SearchIndex}">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <TextBlock Text="Search index" Style="{StaticResource PageHeading}"/>
+
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="Stop" Padding="12,4" Margin="8,0,0,0"
+                                Command="{Binding StopIndexerCommand}"
+                                IsEnabled="{Binding CanStopIndexer}"
+                                AutomationProperties.AutomationId="StopIndexer"/>
+                        <Button DockPanel.Dock="Right" Content="Start" Padding="12,4"
+                                Command="{Binding StartIndexerNowCommand}"
+                                IsEnabled="{Binding CanStartIndexerNow}"
+                                AutomationProperties.AutomationId="StartIndexerNow"/>
+                        <TextBlock VerticalAlignment="Center"
+                                   Foreground="{StaticResource Theme.Text.Secondary}"
+                                   AutomationProperties.AutomationId="IndexerStatus">
+                            <Run Text="Background indexer:"/><Run Text=" "/><Run Text="{Binding IndexerStatusText, Mode=OneWay}"/>
+                        </TextBlock>
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="The indexer reads each drive's master file table so whole-PC search and folder sizes are instant. It needs administrator rights, so it runs as a separate program — and it keeps running after you close BertBrowser, which is why reopening costs no prompt. Stopping it here ends it until you start it again; signing out ends it anyway."/>
+
+                    <Separator Margin="0,4,0,14"/>
+
+                    <CheckBox Content="Start the indexer when BertBrowser launches"
+                              IsChecked="{Binding StartIndexerAtLaunch}"
+                              AutomationProperties.AutomationId="StartIndexerAtLaunch"/>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Off by default. Launching normally attaches to an indexer that is already running and asks for nothing; when there isn't one, a bar at the bottom of the window offers to start it. Turn this on to be asked at launch instead."/>
+
+                    <StackPanel Margin="0,10,0,0" Visibility="{Binding CanChooseAutoStart, Converter={StaticResource BoolToVisibility}}">
+                        <CheckBox Content="Start the indexer automatically when I sign in"
+                                  IsChecked="{Binding StartIndexerAtLogon}"
+                                  AutomationProperties.AutomationId="StartIndexerAtLogon"/>
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="Adds a Windows scheduled task that starts the indexer with administrator rights at sign-in, so you are never prompted again. Ticking or unticking this asks for administrator rights once. Note that it then reads every drive at every sign-in whether or not you open BertBrowser."/>
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Foreground="{StaticResource Theme.Warning.Foreground}"
+                                   Text="{Binding AutoStartWarning}"
+                                   Visibility="{Binding HasAutoStartWarning, Converter={StaticResource BoolToVisibility}}"
+                                   AutomationProperties.AutomationId="AutoStartWarning"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!--
                   History: the change timeline's switch. Its own page rather than a line on General
                   because what it records is sensitive enough to deserve the explanation beside it,
                   and off by default for the same reason.

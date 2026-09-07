@@ -111,13 +111,14 @@ public partial class App : Application
         // touches one belonging to another program. See FolderHandlerRules.ShouldRepair.
         FolderHandlerRegistry.RepairIfStale();
 
-        // Build the global MFT search index in the background. This is what raises the one
-        // elevation prompt the app asks for: reading the MFT needs an administrator token, so it
-        // happens in BertBrowser.Indexer.exe rather than here. Declining costs instant global
-        // search and nothing else — SearchService falls back to its crawl, and the status bar
-        // offers a retry.
-        Services.GetRequiredService<IMftIndexService>().Start();
-        ApplyChangeLogPolicy(Services.GetRequiredService<AppSettings>());
+        // Attach to the index helper if one is already running — it outlives the app, so most
+        // launches find one and cost nothing at all. If there is none, this deliberately raises
+        // *no* elevation prompt: the banner at the bottom of the window offers to start one and the
+        // user clicks, unless they have asked for the prompt up front. Either way, having no index
+        // costs instant whole-PC search and nothing else — SearchService falls back to its crawl.
+        Services.GetRequiredService<IMftIndexService>().Start(
+            settings.StartIndexerAtLaunch ? IndexStartMode.AttachOrLaunch : IndexStartMode.AttachOnly);
+        ApplyChangeLogPolicy(settings);
 
         _ = Task.Run(() => Services.GetRequiredService<IUpdateService>().CheckAndStageUpdateAsync());
 
@@ -239,6 +240,10 @@ public partial class App : Application
         // mirrors what it reports, so everything above this line is unchanged by the split.
         services.AddSingleton<IIndexHostLauncher, ElevatedIndexHostLauncher>();
         services.AddSingleton<IIndexTransportFactory, NamedPipeIndexTransportFactory>();
+        // How the app tells "no helper is running" from "one is running and not answering" without
+        // talking to it — the difference between offering to start one and knowing better.
+        services.AddSingleton<IIndexerPresence, WindowsIndexerPresence>();
+        services.AddSingleton<IndexAutoStartService>();
         services.AddSingleton<IMftIndexService, MftIndexClient>();
         // The other elevated helper: one short-lived process per file operation Windows refused,
         // started only from a click on a shield. Nothing here runs at launch, and nothing retries on

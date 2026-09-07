@@ -23,9 +23,12 @@ namespace BertBrowser.Core.Ipc;
 /// that never asked.
 /// </para>
 /// <para>
-/// <see cref="WaitForExit"/> is the belt to the pipe's braces. Losing the pipe is the primary
-/// signal and covers a crash, since the kernel breaks it however the peer ends; this covers the
-/// exotic case where a duplicated handle keeps the pipe open after the app is gone.
+/// <see cref="WatchForExit"/> is the belt to the pipe's braces <em>for the file-operation
+/// helper</em>, which serves one request for one app and must not outlive it. Losing the pipe is
+/// that helper's primary signal and covers a crash, since the kernel breaks it however the peer
+/// ends; this covers the exotic case where a duplicated handle keeps the pipe open after the app is
+/// gone. <b>The index helper deliberately does not use it</b> — it is meant to outlive every app,
+/// so losing a pipe there ends a session and nothing more.
 /// </para>
 /// </remarks>
 public static class PipeOwner
@@ -51,14 +54,22 @@ public static class PipeOwner
         SafeWaitHandle process, int flags, StringBuilder name, ref int size);
 
     /// <summary>True when <paramref name="pipe"/>'s server end belongs to <paramref name="expectedProcessId"/>.</summary>
-    public static bool OwnsPipe(NamedPipeClientStream pipe, int expectedProcessId)
+    public static bool OwnsPipe(NamedPipeClientStream pipe, int expectedProcessId) =>
+        TryGetServerProcessId(pipe, out var serverProcessId) && serverProcessId == expectedProcessId;
+
+    /// <summary>
+    /// The process id listening on <paramref name="pipe"/>, for a helper that has no expected value
+    /// to compare against and must ask what is there instead.
+    /// </summary>
+    public static bool TryGetServerProcessId(NamedPipeClientStream pipe, out int serverProcessId)
     {
+        serverProcessId = 0;
         try
         {
-            if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle, out var serverProcessId))
-                return false;
+            if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle, out var id)) return false;
 
-            return serverProcessId == (uint)expectedProcessId;
+            serverProcessId = (int)id;
+            return true;
         }
         catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException)
         {
@@ -71,10 +82,11 @@ public static class PipeOwner
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Used by the file-operation helper to check that the process on the other end of its pipe is
-    /// the copy of BertBrowser sitting beside it, and deliberately not by the index helper. A
-    /// high-integrity process may open a medium-integrity one for
-    /// <c>PROCESS_QUERY_LIMITED_INFORMATION</c>, so this direction works where the reverse would not.
+    /// Used by both elevated helpers to check that the process on the other end of the pipe is the
+    /// copy of BertBrowser sitting beside them. A high-integrity process may open a
+    /// medium-integrity one for <c>PROCESS_QUERY_LIMITED_INFORMATION</c>, so this direction works
+    /// where the reverse would not. The index helper did not need it while it could compare against
+    /// the parent that launched it; it has no parent now, so this is what it checks instead.
     /// </para>
     /// <para>
     /// <b>It is a coherence check, not a boundary, and writing it down as one would be the mistake

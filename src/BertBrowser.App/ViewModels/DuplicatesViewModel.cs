@@ -232,7 +232,7 @@ public sealed partial class DuplicatesViewModel : ObservableObject, IDisposable
 
     /// <summary>Offered only where a retry could change the answer, and only ever as a button:
     /// a retry raises a UAC prompt, so nothing here retries on a timer.</summary>
-    public bool CanRetry => Availability == DuplicateScanAvailability.NotIndexed && _mftIndex.CanRetry;
+    public bool CanRetry => Availability == DuplicateScanAvailability.NotIndexed && _mftIndex.CanStart;
 
     // --- commands ---
 
@@ -253,7 +253,7 @@ public sealed partial class DuplicatesViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void Retry()
     {
-        _mftIndex.Retry();
+        _mftIndex.Start(IndexStartMode.AttachOrLaunch);
         OnPropertyChanged(nameof(CanRetry));
     }
 

@@ -66,15 +66,28 @@ public readonly record struct IndexMessage(IndexVerb Verb, string Argument = "")
 /// to remember it, and why the helper's default is off.
 /// </para>
 /// <para>
+/// <b>The helper does keep that policy while no app is connected</b>, which is a change and a
+/// deliberate one: it outlives apps now, and a log that stopped whenever a window closed would have
+/// holes exactly where "what changed while I was away?" is being asked. The default is still off,
+/// and the first app to attach still overwrites it, so nothing is recorded that a session did not
+/// ask for.
+/// </para>
+/// <para>
 /// <b>The rule survives the arrival of a second elevated helper, and it is worth being clear why.</b>
 /// It was never "no elevated process may take a path". It is a rule about <em>this</em> helper, and
-/// it rests on three properties of it: it lives for the whole session, it is started at launch
-/// without anyone asking, and its job — reading a volume — names no file. A path verb here would let
-/// anything reaching this pipe aim an always-on administrator-token process at a chosen file, with
-/// no user gesture in between. <c>BertBrowser.Elevator</c> inverts all three: it lives for one
-/// operation, is started only by a click on a shield in a dialog naming the items, and exists
-/// <em>because</em> it takes paths. What replaces the rule there is one prompt per operation, one
-/// request per process, and a process that exits when the request is done.
+/// it rests on three properties of it: it outlives every app, it can be started at sign-in without
+/// anyone opening the program at all, and its job — reading a volume — names no file. A path verb
+/// here would let anything reaching this pipe aim an always-on administrator-token process at a
+/// chosen file, with no user gesture in between. <c>BertBrowser.Elevator</c> inverts all three: it
+/// lives for one operation, is started only by a click on a shield in a dialog naming the items,
+/// and exists <em>because</em> it takes paths. What replaces the rule there is one prompt per
+/// operation, one request per process, and a process that exits when the request is done.
+/// </para>
+/// <para>
+/// The first of those three got <em>stronger</em> when the helper began outliving apps, so the rule
+/// binds harder than it did rather than less. It is also why the sign-in task is installed by
+/// running the helper with an argument behind its own elevation prompt, and not by a verb here: a
+/// verb would let anything reaching this pipe install an elevated-at-sign-in process silently.
 /// </para>
 /// <para>
 /// Everything in the other direction is a state push, not a reply. The app mirrors what arrives
@@ -92,12 +105,27 @@ public readonly record struct IndexMessage(IndexVerb Verb, string Argument = "")
 public static class IndexProtocol
 {
     /// <summary>
-    /// Bumped whenever the meaning of a verb changes. Both ends ship in the same package and are
-    /// launched by path, so a mismatch should be impossible — but a half-applied update leaves a
-    /// stale executable behind, and refusing to talk to it is much better than mirroring state from
-    /// something that means something else by it.
+    /// Bumped whenever the meaning of a verb changes.
     /// </summary>
-    public const int ProtocolVersion = 1;
+    /// <remarks>
+    /// <para>
+    /// Both ends ship in the same package, so a mismatch used to be nearly impossible — a
+    /// half-applied update leaving a stale executable behind, and refusing to talk to it is much
+    /// better than mirroring state from something that means something else by it.
+    /// </para>
+    /// <para>
+    /// <b>It matters far more now that the helper outlives the app.</b> A helper from the previous
+    /// build carries on running across an update and keeps holding the well-known endpoint, so a
+    /// version that both ends can compare is the only thing that lets the new app recognise it and
+    /// ask it to go.
+    /// </para>
+    /// <para>
+    /// Version 2: end-of-stream ends a <em>session</em> rather than the helper, <see cref="IndexVerb.Shutdown"/>
+    /// became the only way an app ends one, a session opens by replaying what is already known, and
+    /// <see cref="IndexVerb.Record"/> is remembered between sessions.
+    /// </para>
+    /// </remarks>
+    public const int ProtocolVersion = 2;
 
     /// <summary>A status line long enough to be useful and short enough not to be a payload.</summary>
     public const int MaxStatusLength = 200;

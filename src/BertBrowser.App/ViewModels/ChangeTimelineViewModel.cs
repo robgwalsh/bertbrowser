@@ -153,7 +153,7 @@ public sealed partial class ChangeTimelineViewModel : ObservableObject, IDisposa
     };
 
     /// <summary>A retry is a UAC prompt, so it is a button and never a timer.</summary>
-    public bool CanRetry => Availability == ChangeTimelineAvailability.IndexerUnavailable && _mftIndex.CanRetry;
+    public bool CanRetry => Availability == ChangeTimelineAvailability.IndexerUnavailable && _mftIndex.CanStart;
 
     public bool CanOpenSettings => Availability == ChangeTimelineAvailability.RecordingOff;
 
@@ -197,7 +197,7 @@ public sealed partial class ChangeTimelineViewModel : ObservableObject, IDisposa
     [RelayCommand]
     private void Retry()
     {
-        _mftIndex.Retry();
+        _mftIndex.Start(IndexStartMode.AttachOrLaunch);
         OnPropertyChanged(nameof(CanRetry));
     }
 
@@ -286,7 +286,11 @@ public sealed partial class ChangeTimelineViewModel : ObservableObject, IDisposa
             anyIndexed: _mftIndex.AnyIndexed,
             scopeIndexed: scopeIndexed,
             isBuilding: _mftIndex.IsBuilding,
-            indexerRunning: !_mftIndex.CanRetry);
+            // Asked directly, rather than inferred from "nothing to retry" as it used to be.
+            // NotApplicable — the in-process indexer, or a harness run — counts as running: those
+            // hosts index without a helper, and reporting one missing would be a lie about why
+            // there is nothing to show.
+            indexerRunning: _mftIndex.Presence != IndexerPresence.NotRunning);
     }
 
     private IReadOnlySet<ChangeKind> Kinds()

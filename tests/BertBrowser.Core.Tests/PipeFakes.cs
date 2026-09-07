@@ -145,37 +145,83 @@ internal sealed class FakeIndexHostLauncher : IIndexHostLauncher
     public int Launches { get; private set; }
     public bool CanElevate { get; init; } = true;
 
-    public IndexHostLaunchResult Launch(string pipeName, int parentProcessId)
+    public IndexHostLaunchResult Launch()
     {
         Launches++;
-        _onLaunch?.Invoke(pipeName);
+        _onLaunch?.Invoke("");
         return _result;
     }
 
     public void WaitForExit(int processId, TimeSpan timeout) { }
 }
 
-/// <summary>Hands the client one end of an already-connected pair.</summary>
+/// <summary>
+/// Hands the client one end of an already-connected pair.
+/// </summary>
+/// <remarks>
+/// The delegate is told whether this is the <em>attach</em> look (no launched process id) or the
+/// one after a launch, so a test can make a helper appear only in the case it is about — which is
+/// the whole difference between "attached to one that was running" and "started one".
+/// </remarks>
 internal sealed class FakeIndexTransportFactory : IIndexTransportFactory
 {
-    private readonly Func<Stream?> _accept;
+    private readonly Func<int?, Stream?> _accept;
+    private readonly string? _error;
+    private FakeIndexTransport? _transport;
 
-    public FakeIndexTransportFactory(Func<Stream?> accept) => _accept = accept;
+    public FakeIndexTransportFactory(Func<Stream?> accept)
+        : this(_ => accept())
+    {
+    }
+
+    public FakeIndexTransportFactory(Func<int?, Stream?> accept) => _accept = accept;
+
+    /// <summary>A factory that cannot make an endpoint — another copy of the app owns it.</summary>
+    private FakeIndexTransportFactory(string error)
+    {
+        _accept = _ => null;
+        _error = error;
+    }
+
+    public static FakeIndexTransportFactory Unavailable(string error) => new(error);
 
     public int Created { get; private set; }
 
-    public IIndexTransport Create()
+    /// <summary>How many times a session looked for an already-running helper.</summary>
+    public int Attaches { get; private set; }
+
+    public bool TryCreate(out IIndexTransport? transport, out string error)
     {
-        Created++;
-        return new FakeIndexTransport(_accept);
+        if (_error is not null)
+        {
+            transport = null;
+            error = _error;
+            return false;
+        }
+
+        if (_transport is null)
+        {
+            Created++;
+            _transport = new FakeIndexTransport(this);
+        }
+
+        transport = _transport;
+        error = "";
+        return true;
     }
 
     private sealed class FakeIndexTransport : IIndexTransport
     {
-        private readonly Func<Stream?> _accept;
-        public FakeIndexTransport(Func<Stream?> accept) => _accept = accept;
+        private readonly FakeIndexTransportFactory _owner;
+        public FakeIndexTransport(FakeIndexTransportFactory owner) => _owner = owner;
         public string Endpoint => "BertBrowser.Index.Test";
-        public Stream? Accept(int processId, TimeSpan timeout) => _accept();
+
+        public Stream? Accept(int? launchedProcessId, TimeSpan timeout)
+        {
+            if (launchedProcessId is null) _owner.Attaches++;
+            return _owner._accept(launchedProcessId);
+        }
+
         public void Dispose() { }
     }
 }
@@ -194,11 +240,17 @@ internal sealed class ControllableIndexService : IMftIndexService
     public bool AnyIndexed => _state.AnyIndexed;
     public bool IsBuilding => _state.IsBuilding;
     public IReadOnlyCollection<string> BuildingDrives => _state.BuildingDrives;
+    public IReadOnlyCollection<string> CompletedRoots => _state.CompletedRoots;
+    public IndexerPresence Presence => IndexerPresence.NotApplicable;
     public bool IsIndexed(string pathKey) => _state.IsIndexed(pathKey);
     public string StatusText => _state.FormatStatus();
     public bool CanRetry => false;
+    public bool CanStart => false;
     public void Retry() { }
+    public void Stop() { }
     public BertBrowser.Core.Services.Changes.ChangeLogPolicy ChangeLog { get; set; }
+
+    public void Start(IndexStartMode mode) => Start();
 
     public void Start()
     {

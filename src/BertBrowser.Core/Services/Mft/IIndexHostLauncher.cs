@@ -23,7 +23,9 @@ public enum IndexHostLaunch
 /// <param name="ProcessId">
 /// The elevated process, when one started. The client compares this against the process that
 /// actually connects to its pipe — the DACL proves the peer is this user, and only this proves it
-/// is the process we started rather than another of the user's own that raced to connect.
+/// is the process we started rather than another of the user's own that raced to connect. It is
+/// available only on this path: a session that attaches to a helper started under some earlier app
+/// has no such id, and checks the peer's integrity level instead.
 /// </param>
 /// <param name="Detail">A short reason for <see cref="IndexHostLaunch.Failed"/>, for the log.</param>
 public readonly record struct IndexHostLaunchResult(
@@ -49,10 +51,14 @@ public readonly record struct IndexHostLaunchResult(
 public interface IIndexHostLauncher
 {
     /// <summary>
-    /// Starts the indexer, telling it which pipe to call back on and which process to expect on the
-    /// other end of it.
+    /// Starts the indexer.
     /// </summary>
-    IndexHostLaunchResult Launch(string pipeName, int parentProcessId);
+    /// <remarks>
+    /// It is told nothing but where the database is. The pipe it calls back on is derived from its
+    /// own token, and it no longer has a parent to watch — so there is no name and no process id to
+    /// pass, and therefore none for anybody to choose. See <c>IndexEndpoint</c>.
+    /// </remarks>
+    IndexHostLaunchResult Launch();
 
     /// <summary>
     /// False when this account could not elevate even if it wanted to. Checked <em>before</em>

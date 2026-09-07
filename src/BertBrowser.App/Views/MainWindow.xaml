@@ -311,6 +311,55 @@
             </StatusBarItem>
         </StatusBar>
 
+        <!-- The offer to start the index helper, when none is running.
+             Declared AFTER the status bar on purpose: a DockPanel gives the first-declared
+             Dock="Bottom" child the true bottom edge, so this sits *above* the accent strip.
+             Swapping the two would bury the status bar under it.
+
+             Neutral surface tokens rather than Theme.Warning.*, also on purpose: nothing is wrong
+             here. The app works, search falls back to a crawl, and this is an offer rather than a
+             problem — colouring it as a warning would make every launch look like a failure.
+
+             Whether it appears at all is IndexerBannerRules, in Core, and ShowIndexerBanner is a
+             plain bool: a binding path through a null intermediate *fails* rather than yielding
+             null, the converter never runs, and Visibility falls back to Visible — see the compare
+             banner below for the strip that taught us that. -->
+        <Border DockPanel.Dock="Bottom" Padding="10,7"
+                Background="{StaticResource Theme.Surface.Raised}"
+                BorderBrush="{StaticResource Theme.Border.Subtle}" BorderThickness="0,1,0,0"
+                Visibility="{Binding ShowIndexerBanner, Converter={StaticResource BoolToVisibility}}"
+                AutomationProperties.AutomationId="IndexerBanner">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Dismiss" Margin="12,0,0,0"
+                        VerticalAlignment="Center"
+                        Style="{StaticResource LinkButton}"
+                        ToolTip="Hide this until the next time BertBrowser starts"
+                        Command="{Binding DismissIndexerBannerCommand}"
+                        AutomationProperties.AutomationId="IndexerBannerDismiss"/>
+                <Button DockPanel.Dock="Right" MinWidth="110" Margin="12,0,0,0"
+                        VerticalAlignment="Center"
+                        ToolTip="Ask for administrator rights so drives can be indexed"
+                        Command="{Binding StartIndexerCommand}"
+                        Visibility="{Binding IndexerBannerCanStart, Converter={StaticResource BoolToVisibility}}"
+                        AutomationProperties.AutomationId="IndexerBannerStart">
+                    <StackPanel Orientation="Horizontal">
+                        <!-- The shield says this raises a UAC prompt, the same as everywhere else
+                             in the app that asks for administrator rights. -->
+                        <Path Style="{StaticResource IconPath}" Width="12" Height="12"
+                              Data="{StaticResource Icon.Shield}" Margin="0,0,6,0"
+                              VerticalAlignment="Center"/>
+                        <TextBlock Text="Start indexer" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+                <Path DockPanel.Dock="Left" Style="{StaticResource IconPath}" Width="14" Height="14"
+                      Data="{StaticResource Icon.Indexing}" Margin="2,0,8,0"
+                      Fill="{StaticResource Theme.Text.Secondary}" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding IndexerBannerMessage}" TextWrapping="Wrap"
+                           VerticalAlignment="Center"
+                           Foreground="{StaticResource Theme.Text.Secondary}"/>
+            </DockPanel>
+        </Border>
+
         <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="260" MinWidth="150"/>

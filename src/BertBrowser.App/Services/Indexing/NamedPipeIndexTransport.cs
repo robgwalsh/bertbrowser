@@ -2,7 +2,6 @@ using System.IO;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
-using System.Security.Cryptography;
 using System.Security.Principal;
 using BertBrowser.Core.Ipc;
 using BertBrowser.Core.Services.Mft;
@@ -18,18 +17,27 @@ namespace BertBrowser.App.Services.Indexing;
 /// by a high-integrity process carries a High mandatory label, and mandatory policy forbids writing
 /// up, so this medium-integrity process could not write to a pipe its own helper had created —
 /// talking to it would mean setting labels by hand. Creating the pipe here makes the helper's
-/// connection a write-<em>down</em>, which is always allowed, and the problem disappears.
+/// connection a write-<em>down</em>, which is always allowed, and the problem disappears. That
+/// argument is why the helper outliving the app did <em>not</em> turn it into a server: an
+/// always-on elevated process that listens is a much larger thing than one that only ever dials out.
 /// </para>
 /// <para>
-/// The name carries a random nonce as well as the user's SID, so a fresh attempt after a failure
-/// never collides with an endpoint the previous one left behind.
+/// <b>The name is well-known rather than nonced, and that is what makes attaching possible.</b> It
+/// used to carry a random nonce so a retry could not land on an endpoint a previous attempt had
+/// left behind. That stopped being the right trade once the helper began outliving apps: a helper
+/// started under a previous app has to find <em>this</em> one, and it cannot guess a nonce. The
+/// server is therefore created once and held for the app's life — while no helper is attached the
+/// pipe must still exist, or a helper started later has nothing to rendezvous with.
 /// </para>
 /// <para>
-/// Two checks on the peer, and they answer different questions. The DACL and the account
-/// comparison establish it is this user; <c>GetNamedPipeClientProcessId</c> establishes it is the
-/// process we launched, rather than another of this user's own that raced for the name. Neither is
-/// a security boundary — nothing between two processes of one user is — but the second is what
-/// stops the elevated helper being adopted by something that never started it.
+/// Three checks on the peer, answering different questions. The DACL and the account comparison
+/// establish it is this user. When we launched the helper ourselves,
+/// <c>GetNamedPipeClientProcessId</c> establishes it is the process we started. When we merely
+/// attached to one that was already running there is no such process id, so
+/// <see cref="PeerIntegrity"/> establishes that whatever connected at least holds an administrator
+/// token — which an ordinary program of this user does not. None of these is a security boundary —
+/// nothing between two processes of one user is — but together they stop the app mistaking
+/// something else for an index helper and mirroring state nothing is maintaining.
 /// </para>
 /// </remarks>
 public sealed class NamedPipeIndexTransport : IIndexTransport
@@ -50,10 +58,22 @@ public sealed class NamedPipeIndexTransport : IIndexTransport
     private const int OutBufferSize = 4 * 1024;
 
     private readonly NamedPipeServerStream _server;
+    private readonly object _gate = new();
+
+    /// <summary>
+    /// The wait in progress, kept across calls.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Accept"/> can time out and be called again — that is the whole shape of "look for
+    /// a helper briefly, and keep listening in case one starts later". Two concurrent
+    /// <c>WaitForConnectionAsync</c> calls on one server throw, so the second attempt has to wait
+    /// the task the first one started rather than begin another.
+    /// </remarks>
+    private Task? _pending;
 
     public NamedPipeIndexTransport()
     {
-        Endpoint = $"BertBrowser.Index.{KeyForCurrentUser()}.{Nonce()}";
+        Endpoint = IndexEndpoint.ForCurrentUser();
 
         var self = WindowsIdentity.GetCurrent().User
             ?? throw new InvalidOperationException("No user SID for the current process.");
@@ -75,28 +95,50 @@ public sealed class NamedPipeIndexTransport : IIndexTransport
 
     public string Endpoint { get; }
 
-    public Stream? Accept(int processId, TimeSpan timeout)
+    public Stream? Accept(int? launchedProcessId, TimeSpan timeout)
     {
         try
         {
-            // WaitForConnection blocks with no deadline of its own, and a helper that never arrives
-            // (a UAC prompt left sitting) must not park this thread for the session.
-            var connection = _server.WaitForConnectionAsync();
-            if (!connection.Wait(timeout)) return null;
+            Task pending;
+            lock (_gate)
+            {
+                // A previous session left the server connected; it has to be let go before it can
+                // wait again. This only ever bites on the second session, which is exactly where a
+                // manual test stops looking.
+                if (_pending is null && _server.IsConnected) _server.Disconnect();
+                pending = _pending ??= _server.WaitForConnectionAsync();
+            }
+
+            if (!pending.Wait(timeout)) return null;
+
+            lock (_gate) _pending = null;
+            if (pending.IsFaulted) return null;
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException
                                       or InvalidOperationException or AggregateException)
         {
+            lock (_gate) _pending = null;
             return null;
         }
 
-        if (!IsOurOwnUser(_server) || !IsTheProcessWeLaunched(_server, processId))
+        if (!IsAcceptablePeer(launchedProcessId))
         {
-            _server.Disconnect();
+            try { _server.Disconnect(); } catch (Exception ex) when (ex is IOException or InvalidOperationException) { }
             return null;
         }
 
-        return _server;
+        // Never the server itself: the caller disposes the stream when a session ends, and the
+        // server has to survive that to host the next one.
+        return new PipeSession(_server);
+    }
+
+    private bool IsAcceptablePeer(int? launchedProcessId)
+    {
+        if (!IsOurOwnUser(_server)) return false;
+
+        return launchedProcessId is { } processId
+            ? IsTheProcessWeLaunched(_server, processId)
+            : PeerIntegrity.ClientIsElevated(_server);
     }
 
     private static bool IsOurOwnUser(NamedPipeServerStream server)
@@ -126,20 +168,6 @@ public sealed class NamedPipeIndexTransport : IIndexTransport
         }
     }
 
-    private static string Nonce() => Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
-
-    private static string KeyForCurrentUser()
-    {
-        try
-        {
-            if (WindowsIdentity.GetCurrent().User is { } sid) return sid.Value;
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or InvalidOperationException)
-        {
-        }
-        return "default";
-    }
-
     public void Dispose() => _server.Dispose();
 
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -147,8 +175,106 @@ public sealed class NamedPipeIndexTransport : IIndexTransport
     private static extern bool GetNamedPipeClientProcessId(SafeHandle pipe, out uint clientProcessId);
 }
 
-/// <summary>Makes a fresh pipe per attempt, so a retry never lands on a stale endpoint.</summary>
-public sealed class NamedPipeIndexTransportFactory : IIndexTransportFactory
+/// <summary>
+/// One session's view of the shared pipe server: disposing it hangs up, and leaves the server
+/// listening for the next helper.
+/// </summary>
+/// <remarks>
+/// The client ends a session by disposing the stream it was given, which used to be the server
+/// itself and used to be right — the pipe was thrown away after every attempt. Now the server has
+/// to outlive every session it hosts, so what the client disposes must be this instead.
+/// </remarks>
+internal sealed class PipeSession : Stream
 {
-    public IIndexTransport Create() => new NamedPipeIndexTransport();
+    private readonly NamedPipeServerStream _server;
+    private bool _closed;
+
+    public PipeSession(NamedPipeServerStream server) => _server = server;
+
+    public override bool CanRead => !_closed && _server.CanRead;
+    public override bool CanSeek => false;
+    public override bool CanWrite => !_closed && _server.CanWrite;
+    public override long Length => throw new NotSupportedException();
+    public override long Position { get => 0; set => throw new NotSupportedException(); }
+    public override void Flush() => _server.Flush();
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override int Read(byte[] buffer, int offset, int count) => _server.Read(buffer, offset, count);
+    public override void Write(byte[] buffer, int offset, int count) => _server.Write(buffer, offset, count);
+
+    protected override void Dispose(bool disposing)
+    {
+        if (!_closed)
+        {
+            _closed = true;
+            // Hang up on this helper without destroying the endpoint the next one needs.
+            try
+            {
+                if (_server.IsConnected) _server.Disconnect();
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException)
+            {
+            }
+        }
+        base.Dispose(disposing);
+    }
+}
+
+/// <summary>
+/// Holds the one endpoint for the app's life.
+/// </summary>
+/// <remarks>
+/// A single instance, not one per attempt: the name is now well-known and
+/// <c>maxNumberOfServerInstances</c> is 1, so a second server would simply fail to be created — and
+/// the endpoint has to stay up between attempts anyway, so a helper started after a failed look can
+/// still find it.
+/// </remarks>
+public sealed class NamedPipeIndexTransportFactory : IIndexTransportFactory, IDisposable
+{
+    private readonly object _gate = new();
+    private NamedPipeIndexTransport? _transport;
+
+    public bool TryCreate(out IIndexTransport? transport, out string error)
+    {
+        lock (_gate)
+        {
+            if (_transport is not null)
+            {
+                transport = _transport;
+                error = "";
+                return true;
+            }
+
+            try
+            {
+                _transport = new NamedPipeIndexTransport();
+                transport = _transport;
+                error = "";
+                return true;
+            }
+            catch (IOException)
+            {
+                // The name is taken, which for a per-user name means another copy of this app owns
+                // the index. Reported rather than thrown: it is an ordinary state, not a bug.
+                transport = null;
+                error = "another copy of BertBrowser is using it";
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                transport = null;
+                error = "another copy of BertBrowser is using it";
+                return false;
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            _transport?.Dispose();
+            _transport = null;
+        }
+    }
 }

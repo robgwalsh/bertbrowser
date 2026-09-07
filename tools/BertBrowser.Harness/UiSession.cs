@@ -223,9 +223,11 @@ internal sealed class UiSession : IDisposable
         // this run was itself started elevated, leaving the crawler to cover the search.
         if (options.IndexDeclined)
         {
-            // Nothing is started; the client reports the declined prompt and the status bar shows
-            // its retry.
-            services.GetRequiredService<IMftIndexService>().Start();
+            // Attach-only, exactly as a real launch does: nothing is started and nothing prompts,
+            // so what a run sees first is the banner offering to fetch a helper. The `start-indexer`
+            // command then takes the second step and gets the declined prompt, so one flag
+            // photographs both halves of the journey rather than only its end.
+            services.GetRequiredService<IMftIndexService>().Start(IndexStartMode.AttachOnly);
         }
         else if (options.Index)
         {

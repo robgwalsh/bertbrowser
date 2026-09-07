@@ -3,6 +3,16 @@ using BertBrowser.Core.Ipc;
 
 namespace BertBrowser.Core.Services.Mft;
 
+/// <summary>How a session ended, and therefore whether the process should carry on.</summary>
+public enum IndexSessionEnd
+{
+    /// <summary>The app went away. Another one may arrive; the index keeps running.</summary>
+    PeerGone,
+
+    /// <summary>An app asked this process to stop, or it cannot continue.</summary>
+    Stop,
+}
+
 /// <summary>
 /// The elevated process's half: runs a real <see cref="IMftIndexService"/> and reports it down the
 /// pipe, taking five verbs and nothing else.
@@ -14,50 +24,78 @@ namespace BertBrowser.Core.Services.Mft;
 /// <see cref="IndexVerb.Ping"/> and <see cref="IndexVerb.Record"/> — none of which names a file, a
 /// folder or a program. <see cref="IndexVerb.Record"/> carries one integer from a fixed menu and
 /// nothing else. Adding a verb that takes a path would undo the point of the split, however
-/// convenient it looked at the time, and the arrival of a second elevated helper changes nothing
-/// about that: this process is long-lived and starts itself at launch, which is precisely why it
-/// may not be told where to point. See <c>IndexProtocol</c> for the argument in full.
+/// convenient it looked at the time.
 /// </para>
 /// <para>
-/// <b>Losing the pipe is how this process learns to exit.</b> The kernel breaks it when the app
-/// ends, crash included, so a read returning null is the primary shutdown signal and needs no
-/// timer. The caller adds a watchdog on the parent's handle for the exotic case where a duplicated
-/// handle keeps the pipe alive; the explicit <see cref="IndexVerb.Shutdown"/> is just the tidy path.
+/// <b>That rule matters more now than it did, not less.</b> This process used to die with the app
+/// that launched it; it now outlives every one of them and can be started at sign-in by a scheduled
+/// task, so there may be no supervising parent at all. An always-on administrator-token process
+/// that could be aimed at a path is a considerably worse thing than one that could.
+/// </para>
+/// <para>
+/// <b>One host, many sessions.</b> Losing the pipe ends the <em>session</em>, not the process: the
+/// index and its USN tail keep running and the next app to start attaches to them. What ends the
+/// process is <see cref="IndexVerb.Shutdown"/>, signing out, or the self-checks in the caller.
+/// </para>
+/// <para>
+/// Because an app can attach long after volumes finished building, every session opens by
+/// <em>replaying</em> what is already known — <see cref="IMftIndexService.IndexRefreshed"/> fired
+/// for those volumes before this app existed and will not fire again.
+/// <see cref="IndexVerb.Ready"/> therefore means "I have told you everything I know", and is sent
+/// last.
 /// </para>
 /// </remarks>
 public sealed class MftIndexHost
 {
     private readonly IMftIndexService _index;
-    private readonly Stream _stream;
     private readonly object _writeGate = new();
     private readonly HashSet<string> _reportedBuilding = new(StringComparer.Ordinal);
 
-    public MftIndexHost(IMftIndexService index, Stream stream)
-    {
-        _index = index;
-        _stream = stream;
-    }
+    /// <summary>
+    /// The stream of the session in progress, or null between sessions.
+    /// </summary>
+    /// <remarks>
+    /// A volume thread's status change can fire at any moment, including while nothing is attached.
+    /// Dropping those is safe precisely because the next session replays the whole picture.
+    /// </remarks>
+    private Stream? _stream;
 
     /// <summary>
-    /// Talks until the app goes away, the app says stop, or indexing cannot continue. Returns when
-    /// the process should exit.
+    /// Whether indexing has been asked for. An instance field, not a local in <see cref="Run"/>: a
+    /// second app's <see cref="IndexVerb.Start"/> must not start a second set of volume threads.
+    /// <see cref="MftIndexService.Start"/> is idempotent on its own too — both, because this one is
+    /// the local guarantee and losing it silently would be hard to notice.
     /// </summary>
-    public void Run(CancellationToken ct = default)
+    private bool _started;
+
+    public MftIndexHost(IMftIndexService index) => _index = index;
+
+    /// <summary>
+    /// Talks over one connection until the app goes away or asks this process to stop.
+    /// </summary>
+    public IndexSessionEnd Run(Stream stream, CancellationToken ct = default)
     {
-        var reader = new LineReader(_stream, NavigationRequest.MaxLineLength);
-        var started = false;
+        var reader = new LineReader(stream, NavigationRequest.MaxLineLength);
+
+        lock (_writeGate)
+        {
+            _stream = stream;
+            // Forget what the previous app was told; this one has heard nothing.
+            _reportedBuilding.Clear();
+        }
 
         _index.IndexRefreshed += OnIndexRefreshed;
         _index.StatusChanged += OnStatusChanged;
         try
         {
             Send(new IndexMessage(IndexVerb.Hello, IndexProtocol.ProtocolVersion.ToString()));
+            Replay();
             Send(new IndexMessage(IndexVerb.Ready));
 
             while (!ct.IsCancellationRequested)
             {
                 var line = reader.ReadLine();
-                if (line is null) return; // The app is gone.
+                if (line is null) return IndexSessionEnd.PeerGone; // The app is gone.
 
                 if (!IndexProtocol.TryParse(line, out var message)) continue;
 
@@ -67,12 +105,12 @@ public sealed class MftIndexHost
                         if (IndexProtocol.VersionOf(message) != IndexProtocol.ProtocolVersion)
                         {
                             Send(new IndexMessage(IndexVerb.Fatal, "Version mismatch."));
-                            return;
+                            return IndexSessionEnd.Stop;
                         }
                         break;
 
-                    case IndexVerb.Start when !started:
-                        started = true;
+                    case IndexVerb.Start when !_started:
+                        _started = true;
                         StartIndexing();
                         break;
 
@@ -87,17 +125,40 @@ public sealed class MftIndexHost
                         break;
 
                     case IndexVerb.Shutdown:
-                        return;
+                        return IndexSessionEnd.Stop;
 
                     // Anything else is the app speaking the helper's half of the protocol back at
                     // it. Ignored rather than answered.
                 }
             }
+
+            return IndexSessionEnd.Stop;
         }
         finally
         {
             _index.IndexRefreshed -= OnIndexRefreshed;
             _index.StatusChanged -= OnStatusChanged;
+            lock (_writeGate) _stream = null;
+        }
+    }
+
+    /// <summary>
+    /// Brings a freshly attached app up to date on everything that happened before it existed.
+    /// </summary>
+    /// <remarks>
+    /// The building set needs no code of its own: <see cref="OnStatusChanged"/> already diffs the
+    /// service's drives against <see cref="_reportedBuilding"/>, which the session just cleared, so
+    /// one call announces all of them and re-seeds the set. A second code path for the same job
+    /// would be one more thing that could word it differently.
+    /// </remarks>
+    private void Replay()
+    {
+        OnStatusChanged();
+
+        foreach (var root in _index.CompletedRoots)
+        {
+            if (IndexProtocol.IsAcceptableRootKey(root))
+                Send(new IndexMessage(IndexVerb.Complete, root));
         }
     }
 
@@ -159,7 +220,11 @@ public sealed class MftIndexHost
         try
         {
             lock (_writeGate)
-                LineChannel.WriteLine(_stream, IndexProtocol.Format(message));
+            {
+                // Between sessions there is nobody to tell, and the next session replays anyway.
+                if (_stream is not { } stream) return;
+                LineChannel.WriteLine(stream, IndexProtocol.Format(message));
+            }
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {

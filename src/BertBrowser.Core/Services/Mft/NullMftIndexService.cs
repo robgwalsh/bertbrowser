@@ -19,12 +19,23 @@ namespace BertBrowser.Core.Services.Mft;
 public sealed class NullMftIndexService : IMftIndexService
 {
     public void Start() { }
+    public void Start(IndexStartMode mode) { }
+    public void Stop() { }
     public bool AnyIndexed => false;
     public bool IsBuilding => false;
     public IReadOnlyCollection<string> BuildingDrives => [];
+    public IReadOnlyCollection<string> CompletedRoots => [];
+
+    /// <summary>
+    /// Not <see cref="IndexerPresence.NotRunning"/>: this host was never going to have a helper, and
+    /// saying one is missing would raise the "start the indexer" banner over every harness run.
+    /// </summary>
+    public IndexerPresence Presence => IndexerPresence.NotApplicable;
+
     public bool IsIndexed(string pathKey) => false;
     public string StatusText => "";
     public bool CanRetry => false;
+    public bool CanStart => false;
     public void Retry() { }
     public Changes.ChangeLogPolicy ChangeLog { get; set; }
     public event Action<string>? IndexRefreshed { add { } remove { } }

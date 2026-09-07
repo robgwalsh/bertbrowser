@@ -122,6 +122,33 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     [ObservableProperty]
     private bool _indexingCanRetry;
 
+    /// <summary>
+    /// The strip at the bottom of the window offering to start the index helper.
+    /// </summary>
+    /// <remarks>
+    /// It replaced an elevation prompt that used to appear on every launch whether or not anyone
+    /// wanted an index. What decides it is <see cref="IndexerBannerRules"/>, in Core, so the cases
+    /// where it must stay quiet are tests rather than something to notice in a screenshot.
+    /// </remarks>
+    [ObservableProperty]
+    private bool _showIndexerBanner;
+
+    [ObservableProperty]
+    private string _indexerBannerMessage = "";
+
+    [ObservableProperty]
+    private bool _indexerBannerCanStart;
+
+    /// <summary>
+    /// Whether the banner has been dismissed for this run.
+    /// </summary>
+    /// <remarks>
+    /// <b>Deliberately a plain field and not an <c>AppSettings</c> property.</b> Dismissing means
+    /// "not now", not "never" — the offer comes back next launch, so nobody can permanently lose the
+    /// only way in and then wonder why whole-PC search is slow. Do not persist it.
+    /// </remarks>
+    private bool _indexerBannerDismissed;
+
     // --- Whole-PC search (header) ---
 
     /// <summary>Whether the header's whole-PC search shows its text field or the square button it
@@ -1048,15 +1075,50 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         {
             IndexingStatus = _mftIndex.StatusText;
             IndexingCanRetry = _mftIndex.CanRetry;
+            RefreshIndexerBanner();
         });
     }
 
+    private void RefreshIndexerBanner()
+    {
+        var banner = IndexerBannerRules.Decide(
+            _mftIndex.Presence, _mftIndex.CanStart, _indexerBannerDismissed, _mftIndex.StatusText);
+
+        ShowIndexerBanner = banner.Show;
+        IndexerBannerMessage = banner.Message;
+        IndexerBannerCanStart = banner.CanStart;
+    }
+
     /// <summary>
-    /// Asks for the search index again after it was declined or lost.
+    /// Asks for the index helper, from the banner.
+    /// </summary>
+    /// <remarks>
+    /// A command rather than anything automatic, for the same reason the status bar's retry is one:
+    /// this raises a UAC prompt, so it happens when someone clicks and at no other time.
+    /// </remarks>
+    [RelayCommand]
+    private void StartIndexer() => _mftIndex.Start(IndexStartMode.AttachOrLaunch);
+
+    /// <summary>Hides the offer for this run only — see <see cref="_indexerBannerDismissed"/>.</summary>
+    [RelayCommand]
+    private void DismissIndexerBanner()
+    {
+        _indexerBannerDismissed = true;
+        RefreshIndexerBanner();
+    }
+
+    /// <summary>
+    /// Asks for the search index again after it was declined or lost — the status bar's link.
     /// </summary>
     /// <remarks>
     /// A command rather than anything automatic, and that is the whole point: every retry raises a
     /// UAC prompt, so it happens when someone clicks and at no other time.
+    /// <para>
+    /// <see cref="IMftIndexService.Retry"/> rather than <see cref="StartIndexer"/>, and the
+    /// difference is real: this link only ever appears while <c>CanRetry</c> — a failure is being
+    /// reported — and retrying tears the failed session down before beginning another. The banner's
+    /// button is the other case, where nothing failed and nothing has been asked for yet.
+    /// </para>
     /// </remarks>
     [RelayCommand]
     private void RetryIndexing() => _mftIndex.Retry();

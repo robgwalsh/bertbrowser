@@ -1,26 +1,42 @@
 namespace BertBrowser.Core.Ipc;
 
+/// <summary>What the index helper was started to do.</summary>
+public enum IndexerCommand
+{
+    /// <summary>Index, and serve apps as they come and go. The ordinary case.</summary>
+    Run,
+
+    /// <summary>Register the sign-in task, then exit.</summary>
+    RegisterAutoStart,
+
+    /// <summary>Remove the sign-in task, then exit.</summary>
+    UnregisterAutoStart,
+}
+
 /// <summary>
-/// The elevated indexer's command line: which pipe to call back on, which process to expect at the
-/// other end of it, and where the database is.
+/// The elevated indexer's command line: what to do, and where the database is.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Pure, like <c>CommandLine</c> is, so every rule here is testable without a process to launch.
 /// </para>
 /// <para>
-/// <b>Nothing here is trusted.</b> These arguments arrive from a process this one does not
-/// control, so the data directory is checked the same way any other inbound path is, and the pipe
-/// name is restricted to the shape this app generates. The parent process id is what the helper
-/// checks the pipe's real owner against — an argument saying "expect process 1234" is worth
-/// nothing on its own, and everything once <c>GetNamedPipeServerProcessId</c> has to agree with it.
+/// <b>It is no longer told which pipe to call back on, and that is the point.</b> The name is
+/// derived from this process's own token (see <see cref="IndexEndpoint"/>), so the one argument
+/// that used to let a caller aim the elevated process at an endpoint of their choosing does not
+/// exist any more — a stronger property than validating it was. The parent process id went with it:
+/// the helper outlives whoever launched it, so there is no parent to expect or to watch.
+/// </para>
+/// <para>
+/// <b>The data directory is still passed and still checked.</b> It is genuinely not derivable here:
+/// it honours an override the UI harness relies on so a scripted run cannot touch the user's real
+/// index, and working it out on this side would make that isolation depend on environment
+/// inheritance across an elevation boundary. So it arrives from a process this one does not control
+/// and is checked the way any other inbound path is.
 /// </para>
 /// </remarks>
-public sealed record IndexerArguments(string PipeName, int ParentProcessId, string DataDirectory)
+public sealed record IndexerArguments(IndexerCommand Command, string DataDirectory)
 {
-    /// <summary>Pipe names this app generates: the prefix, a SID, and a hex nonce.</summary>
-    public const int MaxPipeNameLength = 256;
-
     /// <summary>
     /// Parses, or explains why not. The error is for a log — nobody types this command line.
     /// </summary>
@@ -29,48 +45,44 @@ public sealed record IndexerArguments(string PipeName, int ParentProcessId, stri
         result = null!;
         error = "";
 
-        string? pipe = null, dataDir = null;
-        int? parentPid = null;
+        string? dataDir = null;
+        IndexerCommand? command = null;
 
         for (var i = 0; i < args.Count; i++)
         {
             var value = i + 1 < args.Count ? args[i + 1] : null;
             switch (args[i])
             {
-                case "--pipe" when value is not null:
-                    pipe = value;
-                    i++;
-                    break;
-                case "--parent-pid" when value is not null:
-                    if (!int.TryParse(value, out var pid) || pid <= 0)
-                    {
-                        error = "--parent-pid must be a positive process id.";
-                        return false;
-                    }
-                    parentPid = pid;
-                    i++;
-                    break;
                 case "--data-dir" when value is not null:
                     dataDir = value;
                     i++;
                     break;
+
+                case "--register-autostart":
+                case "--unregister-autostart":
+                    if (command is not null)
+                    {
+                        error = "Only one of --register-autostart and --unregister-autostart may be given.";
+                        return false;
+                    }
+                    command = args[i] == "--register-autostart"
+                        ? IndexerCommand.RegisterAutoStart
+                        : IndexerCommand.UnregisterAutoStart;
+                    break;
+
                 default:
                     // An unrecognised option is an error, never a positional value — the same rule
-                    // the user-facing command line follows, and for the same reason.
+                    // the user-facing command line follows, and for the same reason. --pipe and
+                    // --parent-pid land here now, which is what makes their removal real rather
+                    // than a validator nothing calls.
                     error = $"Unrecognised argument: {args[i]}";
                     return false;
             }
         }
 
-        if (pipe is null || parentPid is null || dataDir is null)
+        if (dataDir is null)
         {
-            error = "Usage: BertBrowser.Indexer --pipe <name> --parent-pid <id> --data-dir <path>";
-            return false;
-        }
-
-        if (!IsAcceptablePipeName(pipe))
-        {
-            error = "The pipe name is not one this app generates.";
+            error = "Usage: BertBrowser.Indexer [--register-autostart|--unregister-autostart] --data-dir <path>";
             return false;
         }
 
@@ -80,26 +92,7 @@ public sealed record IndexerArguments(string PipeName, int ParentProcessId, stri
             return false;
         }
 
-        result = new IndexerArguments(pipe, parentPid.Value, dataDir);
+        result = new IndexerArguments(command ?? IndexerCommand.Run, dataDir);
         return true;
-    }
-
-    /// <summary>
-    /// A pipe name this app would have produced: no path separators, no wildcards, no control
-    /// characters, and bounded. It becomes a <c>\\.\pipe\</c> path, so a separator in it would
-    /// name a different object than the one intended.
-    /// </summary>
-    public static bool IsAcceptablePipeName(string? candidate)
-    {
-        if (string.IsNullOrEmpty(candidate)) return false;
-        if (candidate.Length > MaxPipeNameLength) return false;
-
-        foreach (var c in candidate)
-        {
-            if (char.IsControl(c)) return false;
-            if (c is '\\' or '/' or '*' or '?' or '|' or '<' or '>' or '"' or ':') return false;
-        }
-
-        return candidate.StartsWith("BertBrowser.Index.", StringComparison.Ordinal);
     }
 }

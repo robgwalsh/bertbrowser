@@ -23,7 +23,10 @@ public class MftIndexClientTests : IDisposable
         return client;
     }
 
-    /// <summary>Starts a client already connected to a peer the test drives.</summary>
+    /// <summary>
+    /// Starts a client attached to a helper that was already running — the ordinary case now, and
+    /// the one that costs no prompt.
+    /// </summary>
     private (MftIndexClient Client, ProtocolPeer Helper) Connected(out FakeIndexHostLauncher launcher)
     {
         var (appEnd, helperEnd) = DuplexPair.Create();
@@ -32,6 +35,27 @@ public class MftIndexClientTests : IDisposable
         var helper = new ProtocolPeer(helperEnd);
 
         client.Start();
+        return Greet(client, helper);
+    }
+
+    /// <summary>
+    /// Starts a client that found nothing to attach to and had to launch a helper — the path that
+    /// raises the prompt.
+    /// </summary>
+    private (MftIndexClient Client, ProtocolPeer Helper) Launched(out FakeIndexHostLauncher launcher)
+    {
+        var (appEnd, helperEnd) = DuplexPair.Create();
+        launcher = new FakeIndexHostLauncher(IndexHostLaunchResult.Started(4242));
+        // Nothing answers the attach look; a stream appears only once one has been launched.
+        var client = Client(launcher, new FakeIndexTransportFactory(pid => pid is null ? null : appEnd));
+        var helper = new ProtocolPeer(helperEnd);
+
+        client.Start();
+        return Greet(client, helper);
+    }
+
+    private static (MftIndexClient Client, ProtocolPeer Helper) Greet(MftIndexClient client, ProtocolPeer helper)
+    {
 
         // The client greets first; answer as the helper does so it sends Start.
         Assert.Equal(IndexVerb.Hello, helper.Receive()!.Value.Verb);
@@ -53,13 +77,73 @@ public class MftIndexClientTests : IDisposable
         Assert.Fail(because);
     }
 
+    /// <summary>
+    /// <b>The behaviour this whole change exists for.</b> A helper left running by a previous app is
+    /// picked up without starting anything, so reopening BertBrowser costs no elevation prompt.
+    /// </summary>
     [Fact]
-    public void GreetsWithItsVersionAndStartsTheHelperOnReady()
+    public void AttachesToARunningHelperWithoutPrompting()
     {
-        var (_, helper) = Connected(out var launcher);
+        var (client, helper) = Connected(out var launcher);
+
+        Assert.Equal(0, launcher.Launches);
+        Assert.Equal(IndexerPresence.Running, client.Presence);
+        helper.Close();
+    }
+
+    /// <summary>And when there is nothing to attach to, asking does start one.</summary>
+    [Fact]
+    public void LaunchesOnlyWhenNothingIsAlreadyListening()
+    {
+        var (client, helper) = Launched(out var launcher);
 
         Assert.Equal(1, launcher.Launches);
+        Assert.Equal(IndexerPresence.Running, client.Presence);
         helper.Close();
+    }
+
+    /// <summary>
+    /// Startup's default: look for a helper, and if there is none, say nothing and start nothing.
+    /// </summary>
+    /// <remarks>
+    /// The empty status line is the assertion that matters. The banner is what offers to start one;
+    /// a status bar saying the same thing at the same moment would read as two problems rather than
+    /// one offer.
+    /// </remarks>
+    [Fact]
+    public void AnAttachThatFindsNothingStartsNothingAndSaysNothing()
+    {
+        var launcher = new FakeIndexHostLauncher(IndexHostLaunchResult.Started(1));
+        var transports = new FakeIndexTransportFactory(() => null);
+        var client = Client(launcher, transports);
+
+        client.Start(IndexStartMode.AttachOnly);
+
+        // Waiting on CanStart, not on Presence: Presence begins at NotRunning, so waiting for that
+        // would be satisfied before the session had run at all.
+        Eventually(() => client.CanStart, "the banner needs something to offer");
+        Assert.Equal(IndexerPresence.NotRunning, client.Presence);
+        Assert.Equal(0, launcher.Launches);
+        Assert.Equal("", client.StatusText);
+        Assert.Equal(1, transports.Attaches);
+    }
+
+    /// <summary>
+    /// A second copy of the app cannot have the endpoint, and no prompt would change that — so the
+    /// offer to start one is withdrawn rather than made and disappointed.
+    /// </summary>
+    [Fact]
+    public void ASecondAppIsToldAnotherCopyOwnsTheIndex()
+    {
+        var launcher = new FakeIndexHostLauncher(IndexHostLaunchResult.Started(1));
+        var client = Client(launcher, FakeIndexTransportFactory.Unavailable("another copy of BertBrowser is using it"));
+
+        client.Start(IndexStartMode.AttachOnly);
+
+        Eventually(() => client.StatusText.Length > 0, "it should say why there is no index");
+        Assert.Contains("another copy", client.StatusText, StringComparison.OrdinalIgnoreCase);
+        Assert.False(client.CanStart, "a prompt cannot help, so nothing should offer one");
+        Assert.Equal(0, launcher.Launches);
     }
 
     /// <summary>
@@ -206,7 +290,11 @@ public class MftIndexClientTests : IDisposable
         helper.Send(IndexVerb.Hello, (IndexProtocol.ProtocolVersion + 1).ToString());
 
         Eventually(() => client.CanRetry, "a version mismatch should be reported, not mirrored");
-        Assert.Equal("Search index unavailable.", client.StatusText);
+        Assert.Contains("Search index unavailable", client.StatusText, StringComparison.Ordinal);
+
+        // A helper left over from an older build will not exit on its own while it has an index to
+        // keep, and it is holding the endpoint this build needs. Ask it to go.
+        Assert.Equal(IndexVerb.Shutdown, helper.ReceiveOneOf(IndexVerb.Shutdown)!.Value.Verb);
     }
 
     [Fact]
@@ -349,9 +437,11 @@ public class MftIndexClientTests : IDisposable
     [Fact]
     public void StartingTwiceOnlyLaunchesOnce()
     {
-        var (_, helper) = Connected(out var launcher);
+        var (client, helper) = Launched(out var launcher);
 
         // A second Start must not raise a second prompt.
+        client.Start();
+        Thread.Sleep(50);
         Assert.Equal(1, launcher.Launches);
         helper.Close();
     }
@@ -366,12 +456,34 @@ public class MftIndexClientTests : IDisposable
         Assert.Equal(IndexVerb.Pong, helper.ReceiveOneOf(IndexVerb.Pong)!.Value.Verb);
     }
 
+    /// <summary>
+    /// <b>Closing the app must not end the helper.</b> This used to send Shutdown, and that line
+    /// was what cost a fresh elevation prompt and a full rebuild on every launch. Hanging up is all
+    /// a closing app may do now.
+    /// </summary>
     [Fact]
-    public void DisposeAsksTheHelperToStop()
+    public void DisposeLetsTheHelperKeepRunning()
     {
         var (client, helper) = Connected(out _);
 
         client.Dispose();
+
+        // The session ends — the helper reads end-of-stream — and nothing asked it to stop.
+        var last = helper.Receive();
+        while (last is { } message)
+        {
+            Assert.NotEqual(IndexVerb.Shutdown, message.Verb);
+            last = helper.Receive();
+        }
+    }
+
+    /// <summary>Stopping it is a separate, deliberate act — the Settings button, and nothing else.</summary>
+    [Fact]
+    public void StopAsksTheHelperToExit()
+    {
+        var (client, helper) = Connected(out _);
+
+        client.Stop();
 
         Assert.Equal(IndexVerb.Shutdown, helper.ReceiveOneOf(IndexVerb.Shutdown)!.Value.Verb);
     }

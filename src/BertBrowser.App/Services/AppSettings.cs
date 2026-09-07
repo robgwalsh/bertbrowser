@@ -124,8 +124,28 @@ public sealed class AppSettings
     /// renamed on every drive is sensitive, and it lives in a plain SQLite file in the profile
     /// folder. Nothing is written until the user turns this on, and turning it off deletes what
     /// was kept. It has its own settings page for the same reason.
+    /// <para>
+    /// <b>With this on, recording continues while BertBrowser is closed.</b> The index helper
+    /// outlives the app and keeps the last policy it was pushed, so the timeline has no holes where
+    /// a window happened to be shut — which is the point, since "what changed while I was away?" is
+    /// most of what it is asked. Turning it off still stops and wipes it, on both sides.
+    /// </para>
     /// </remarks>
     public bool RecordFileChanges { get; set; }
+
+    /// <summary>
+    /// Whether launching BertBrowser should start the index helper — and therefore ask for
+    /// administrator rights — when one is not already running.
+    /// </summary>
+    /// <remarks>
+    /// <b>Off by default, which is the opposite of how this used to behave.</b> The helper now
+    /// outlives the app, so the usual launch attaches to one that is already there and costs
+    /// nothing; when there is none, a banner offers to start one rather than a prompt appearing
+    /// over whatever the user was doing. This setting is for people who would rather answer the
+    /// prompt at launch and be done with it. "Never configured" and "off" mean the same thing here,
+    /// so there is nothing for null to say.
+    /// </remarks>
+    public bool StartIndexerAtLaunch { get; set; }
 
     /// <summary>How long recorded changes are kept, in hours — one of
     /// <see cref="ChangeLogPolicy.RetentionOptions"/>.</summary>

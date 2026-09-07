@@ -48,6 +48,38 @@ public sealed class Db
         return conn;
     }
 
+    /// <summary>
+    /// The schema this database is actually at, as the last applied migration's number.
+    /// </summary>
+    /// <remarks>
+    /// Read by the elevated index helper, which never migrates. It now outlives the app that
+    /// started it, so an app that updates and migrates underneath it would leave it writing rows
+    /// against a schema it does not know — it compares this against
+    /// <see cref="ExpectedSchemaVersion"/> and exits rather than carrying on.
+    /// </remarks>
+    public long SchemaVersion
+    {
+        get
+        {
+            using var conn = Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "PRAGMA user_version;";
+            return (long)cmd.ExecuteScalar()!;
+        }
+    }
+
+    /// <summary>The schema version this build's migrations produce.</summary>
+    public static long ExpectedSchemaVersion { get; } =
+        EmbeddedMigrations().Select(m => m.Version).DefaultIfEmpty(0).Max();
+
+    private static IEnumerable<(string Name, long Version)> EmbeddedMigrations()
+    {
+        var assembly = Assembly.GetExecutingAssembly();
+        return assembly.GetManifestResourceNames()
+            .Where(n => n.Contains("Migrations") && n.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
+            .Select(n => (Name: n, Version: ParseVersion(n)));
+    }
+
     public void Migrate()
     {
         using var conn = Open();
@@ -59,14 +91,12 @@ public sealed class Db
             currentVersion = (long)cmd.ExecuteScalar()!;
         }
 
-        var assembly = Assembly.GetExecutingAssembly();
-        var migrations = assembly.GetManifestResourceNames()
-            .Where(n => n.Contains("Migrations") && n.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
-            .Select(n => (Name: n, Version: ParseVersion(n)))
+        var migrations = EmbeddedMigrations()
             .Where(m => m.Version > currentVersion)
             .OrderBy(m => m.Version)
             .ToList();
 
+        var assembly = Assembly.GetExecutingAssembly();
         foreach (var (name, version) in migrations)
         {
             using var stream = assembly.GetManifestResourceStream(name)!;

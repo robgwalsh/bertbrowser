@@ -4,8 +4,10 @@ using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using BertBrowser.App.Services;
+using BertBrowser.App.Services.Indexing;
 using BertBrowser.App.Theming;
 using BertBrowser.Core.Data;
+using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Models;
 using BertBrowser.Core.Services.Changes;
 using BertBrowser.Core.Services.Columns;
@@ -104,6 +106,7 @@ public enum SettingsCategory
     General,
     Appearance,
     Preview,
+    SearchIndex,
     History,
     NewItems,
     Columns,
@@ -360,18 +363,167 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public bool HasFolderHandlerWarning => FolderHandlerWarning.Length > 0;
 
+    // --- Search index ---
+
+    private readonly IndexAutoStartService? _autoStart;
+    private readonly IMftIndexService? _mftIndex;
+    private bool _applyingAutoStart;
+
+    /// <summary>Whether launching the app may raise the elevation prompt itself. Off by default.</summary>
+    [ObservableProperty]
+    private bool _startIndexerAtLaunch;
+
+    /// <summary>
+    /// Whether the helper is registered to start at sign-in. Applied immediately, like the folder
+    /// handler — the scheduled task is the state, so there is nothing here for <c>TrySave</c> to
+    /// write.
+    /// </summary>
+    [ObservableProperty]
+    private bool _startIndexerAtLogon;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAutoStartWarning))]
+    private string _autoStartWarning = "";
+
+    public bool HasAutoStartWarning => AutoStartWarning.Length > 0;
+
+    /// <summary>False when no service was passed — a construction site, or the UI harness.</summary>
+    public bool CanChooseAutoStart => _autoStart is not null;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanStopIndexer))]
+    [NotifyPropertyChangedFor(nameof(CanStartIndexerNow))]
+    private string _indexerStatusText = "";
+
+    /// <summary>
+    /// Stop is only offered when there is a session to send Shutdown down.
+    /// </summary>
+    /// <remarks>
+    /// A helper that is running but not answering cannot be stopped from here — nothing else can
+    /// reach it — so the button is disabled and says so, rather than being pressed and doing
+    /// nothing.
+    /// </remarks>
+    public bool CanStopIndexer => _mftIndex?.Presence == IndexerPresence.Running && !_indexerUnreachable;
+
+    public bool CanStartIndexerNow => _mftIndex?.CanStart == true;
+
+    private bool _indexerUnreachable;
+
+    [RelayCommand]
+    private void StartIndexerNow()
+    {
+        _mftIndex?.Start(IndexStartMode.AttachOrLaunch);
+        ReadIndexerState();
+    }
+
+    [RelayCommand]
+    private void StopIndexer()
+    {
+        _mftIndex?.Stop();
+        ReadIndexerState();
+    }
+
+    /// <summary>What the "Background indexer" line says, read from the service each time.</summary>
+    public void ReadIndexerState()
+    {
+        if (_mftIndex is null)
+        {
+            IndexerStatusText = "";
+            return;
+        }
+
+        // A failure message means a helper we cannot talk to, whether or not one is running.
+        _indexerUnreachable = _mftIndex.StatusText.Contains("not responding", StringComparison.OrdinalIgnoreCase);
+
+        IndexerStatusText = _mftIndex.Presence switch
+        {
+            IndexerPresence.Running when _indexerUnreachable => "Running, but not responding.",
+            IndexerPresence.Running => "Running.",
+            IndexerPresence.NotRunning => "Not running.",
+            _ => "",
+        };
+
+        OnPropertyChanged(nameof(CanStopIndexer));
+        OnPropertyChanged(nameof(CanStartIndexerNow));
+    }
+
+    /// <summary>
+    /// Applies the sign-in task straight away, and puts the box back if it did not happen — a
+    /// declined prompt included. The fence stops the correction re-entering this handler.
+    /// </summary>
+    partial void OnStartIndexerAtLogonChanged(bool value)
+    {
+        if (_autoStart is null || _applyingAutoStart) return;
+
+        if (_autoStart.TrySet(value))
+        {
+            ReadAutoStartState();
+            return;
+        }
+
+        _applyingAutoStart = true;
+        try
+        {
+            StartIndexerAtLogon = !value;
+            AutoStartWarning = value
+                ? "The sign-in task could not be created. Administrator rights are needed to add one."
+                : "The sign-in task could not be removed.";
+        }
+        finally
+        {
+            _applyingAutoStart = false;
+        }
+    }
+
+    /// <summary>
+    /// Seeds the box from the scheduler.
+    /// </summary>
+    /// <remarks>
+    /// <b>An unreadable task shows as off, never on.</b> A ticked box the app could not verify is a
+    /// promise it has not checked it can keep — and the cost of being wrong that way is a user who
+    /// believes the prompt has been abolished and is surprised at the next sign-in.
+    /// </remarks>
+    private void ReadAutoStartState()
+    {
+        if (_autoStart is null) return;
+
+        var state = _autoStart.State();
+
+        _applyingAutoStart = true;
+        try
+        {
+            StartIndexerAtLogon = state == AutoStartState.On;
+        }
+        finally
+        {
+            _applyingAutoStart = false;
+        }
+
+        AutoStartWarning = state switch
+        {
+            AutoStartState.Stale =>
+                "The sign-in task points at an older installation. Tick this again to repair it.",
+            AutoStartState.Unknown =>
+                "Whether a sign-in task exists could not be read.",
+            _ => "",
+        };
+    }
+
     public SettingsViewModel(
         AppSettings settings,
         IThemeService theme,
         IShellNewCatalog? shellNew = null,
         IFolderHandlerService? folderHandler = null,
-        ChangeLogRepository? changeLog = null)
+        ChangeLogRepository? changeLog = null,
+        IndexAutoStartService? autoStart = null,
+        IMftIndexService? mftIndex = null)
     {
         Categories = new[]
         {
             new SettingsCategoryViewModel(SettingsCategory.General, "General", "Icon.Settings"),
             new SettingsCategoryViewModel(SettingsCategory.Appearance, "Appearance", "Icon.Appearance"),
             new SettingsCategoryViewModel(SettingsCategory.Preview, "Preview", "Icon.PreviewPane"),
+            new SettingsCategoryViewModel(SettingsCategory.SearchIndex, "Search index", "Icon.Indexing"),
             new SettingsCategoryViewModel(SettingsCategory.History, "History", "Icon.Changes"),
             new SettingsCategoryViewModel(SettingsCategory.NewItems, "New items", "Icon.Add"),
             new SettingsCategoryViewModel(SettingsCategory.Columns, "Columns", "Icon.Columns"),
@@ -387,6 +539,13 @@ public sealed partial class SettingsViewModel : ObservableObject
         // Read rather than restored: the registry is the state, so a change made outside this app
         // is simply what the box shows next time it opens.
         ReadFolderHandlerState();
+
+        _autoStart = autoStart;
+        _mftIndex = mftIndex;
+        // Same discipline as the folder handler, for the same reason: the scheduled task is the
+        // state, so this reads it rather than trusting anything stored beside it.
+        ReadAutoStartState();
+        StartIndexerAtLaunch = settings.StartIndexerAtLaunch;
 
         // Null means never configured, which is what ships the defaults; an empty list means the
         // user removed them all and must stay empty.
@@ -704,6 +863,9 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settings.SearchContentMaxBytes = (int)Math.Clamp(ContentSearchLimitKb * 1024, 4096, 64 * 1024 * 1024);
         _settings.RecordFileChanges = RecordFileChanges;
         _settings.FileChangeRetentionHours = FileChangeRetentionHours;
+        // The only search-index value that lives in settings. Sign-in auto-start is the scheduled
+        // task itself and was already applied when the box was ticked.
+        _settings.StartIndexerAtLaunch = StartIndexerAtLaunch;
         _settings.TileAspectRatio = TileAspect.ToString();
         // Always a list once this dialog has been saved, never null: from here on the user has
         // configured their columns, and the "never configured" state has nothing left to say.

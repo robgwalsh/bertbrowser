@@ -38,7 +38,7 @@ only exception is the user explicitly asking you to launch it for real.
   `Microsoft.Extensions.DependencyInjection`). Composition root: `App.BuildServices()` in
   `App.xaml.cs` (`App.Services`).
 - `src/BertBrowser.Indexer` — elevated console exe hosting `MftIndexService`, talks to the app over
-  a pipe. One of two elevated helpers.
+  a pipe, and **outlives it** (see the gotcha below). One of two elevated helpers.
 - `src/BertBrowser.Elevator` — elevated console exe for a single retried file operation (move/copy
   /delete/rename/create refused for permissions), started on demand, serves one request, exits.
 - `tests/BertBrowser.Core.Tests` — xUnit; creates real SQLite DBs and directory trees under `%TEMP%`.
@@ -65,7 +65,8 @@ you where and what to watch for.
 | Search query language | `Core/Services/Search/*`, `docs/search-indexing.md` |
 | Content search (`content:`) | `Core/Services/Search/ContentTerm.cs`, `Core/Services/Search/ContentReader.cs` |
 | Saved searches | `Core/Services/SavedSearches/*` (`SavedSearchRules`), `Core/Data/SavedSearchRepository`, `ViewModels/SavedSearchesViewModel`, `Views/SavedSearchDialog` |
-| Elevated MFT indexer | `src/BertBrowser.Indexer`, `Core/Services/MftIndexClient` |
+| Elevated MFT indexer | `src/BertBrowser.Indexer`, `Core/Services/Mft/MftIndexClient`, `Core/Ipc/IndexEndpoint`, `Core/Ipc/IndexerPresenceLock` |
+| Indexer banner / sign-in task | `Core/Services/Mft/IndexerBannerRules`, `IndexerAutoStartTask`, `App/Services/Indexing/IndexAutoStartService` |
 | Change timeline ("What changed") | `Core/Services/Changes/*` (`ChangeLogRules`, `ChangeRecorder`, `ChangeLogPolicy`), `Core/Data/ChangeLogRepository`, `Views/ChangeTimelineWindow`, the History page of `SettingsWindow` |
 | Elevated file-op retry | `src/BertBrowser.Elevator`, `Core/Services/Elevation/*`, `Core/Ipc/ElevationProtocol.cs` |
 | Launching other programs | `App/Services/ProcessLauncher.cs`, `Core/Services/ExecutablePath.cs`, `Core/Services/VSCodePath.cs`, `Interop/RunAsVerbRegistry` |
@@ -90,14 +91,28 @@ you where and what to watch for.
 - **Virtual (in-archive) paths must never reach a `PathKey`-keyed table.** `C:\x\a.zip\src` is a real
   Windows path syntactically, so it *would* land inside `PrefixBounds(C:\x)` — bookmarks, search and
   disk-usage each explicitly refuse a virtual root.
+- **The index helper outlives the app.** Closing a window ends a *session*, not the helper — which
+  is why reopening costs no UAC prompt and no rebuild. Consequences that are easy to undo by
+  accident: `MftIndexClient.Dispose` must **not** send `Shutdown` (only `Stop` may); the pipe name
+  is well-known per user (`IndexEndpoint`) rather than nonced, because a helper started under a
+  previous app has to find the next one; every session **replays** `Building`/`Complete` before
+  `Ready`, since `IndexRefreshed` already fired for volumes finished before this app existed; and
+  one helper per user is enforced by a mutex (`IndexerPresenceLock`) because two would tail one
+  journal into one database. The app never launches one at startup — it attaches, and a banner
+  offers the prompt (`IndexerBannerRules`). Nothing supervises the helper any more, so it stops
+  itself when the app's schema, its own executable, or `BertBrowser.exe` beside it changes.
 - **The change log (`fs_change`) is off by default and written only by the index helper's USN
   tail**, under a `ChangeLogPolicy` the app pushes over the pipe (`IndexVerb.Record`, one integer,
   never a path). Nothing reads the journal on demand; recording starts once a volume's build
   completes; rows carry the *record's* timestamp. The recorder must exclude the data directory and
   an empty flush must never touch the DB, or every DB write logs itself for ever. Turning the
-  setting off wipes the table on both sides. Any feature that keeps history follows the same rule:
-  off until the user turns it on, on its own Settings page, with a way to clear it.
-- **One `Process.Start` in the whole app**, in `ProcessLauncher`. A second call site is a bug.
+  setting off wipes the table on both sides. **Recording continues while the app is closed**, since
+  the helper keeps the last policy pushed — deliberate, so the timeline has no holes, and stated on
+  the settings page. Any feature that keeps history follows the same rule: off until the user turns
+  it on, on its own Settings page, with a way to clear it.
+- **One `Process.Start` in the whole app**, in `ProcessLauncher`. A second call site is a bug. (The
+  rule is about the App; the Indexer registers its sign-in task through Task Scheduler's COM API,
+  which starts no process at all.)
 - **The app is `asInvoker`.** Only the two elevated helper exes (Indexer, Elevator) touch an
   administrator token. Don't reintroduce `requireAdministrator` on the app to fix an access-denied
   error — that's now expected behavior (a folder the app can't read, Explorer can't either).
