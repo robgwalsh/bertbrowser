@@ -56,6 +56,8 @@ you where and what to watch for.
 | Database / migrations | `Core/Data/Db.cs`, `Core/Data/Migrations/NNN_*.sql` |
 | Directory sizes | `Core/Services/MftDirectorySizeBuilder`, `DirSizeRepository`, `docs/search-indexing.md` |
 | Move/copy/drag-drop/paste | `Core/Services/Transfer/*` (`TransferPlanner`, `TransferExecutor`, `IFileCopier`) |
+| Right-drag verb menu | `Core/Services/Transfer/RightDropMenuRules`, `Views/DropPipeline.BuildVerbMenu`, `Views/DragSession` |
+| Shortcuts (`.lnk`) | `Core/Services/Shortcuts/*` (`ShortcutPlanner`, `ShortcutExecutor`, `IShortcutWriter`), `Interop/ShellLink` |
 | Rename (incl. advanced/tokens) | `Core/Services/Rename/*` (`RenamePattern`, `RenamePlanner`, `RenameExecutor`, `RenameRule`) |
 | Create new item / ShellNew | `Core/Services/NewItem/*`, `Interop/ShellNewRegistry` |
 | Delete / Recycle Bin | `Core/Services/Delete/*` (incl. `ShellRecycleBin`) |
@@ -70,7 +72,7 @@ you where and what to watch for.
 | Change timeline ("What changed") | `Core/Services/Changes/*` (`ChangeLogRules`, `ChangeRecorder`, `ChangeLogPolicy`), `Core/Data/ChangeLogRepository`, `Views/ChangeTimelineWindow`, the History page of `SettingsWindow` |
 | Elevated file-op retry | `src/BertBrowser.Elevator`, `Core/Services/Elevation/*`, `Core/Ipc/ElevationProtocol.cs` |
 | Launching other programs | `App/Services/ProcessLauncher.cs`, `Core/Services/ExecutablePath.cs`, `Core/Services/VSCodePath.cs`, `Interop/RunAsVerbRegistry` |
-| Startup / CLI / single instance | `Core/Cli/CommandLine.cs`, `Core/Cli/NavigationRequest.cs`, `Services/SingleInstance.cs`, `Core/Ipc/InstanceEndpoint.cs` |
+| Startup / CLI / single instance | `Core/Cli/CommandLine.cs`, `Core/Cli/NavigationRequest.cs`, `Services/SingleInstance.cs`, `Core/Ipc/InstanceEndpoint.cs`, `Interop/ForegroundWindow`, `Core/Services/Foreground/ForegroundRaiseRules` |
 | Default folder handler (shell) | `Core/Services/ShellIntegration/*`, `App/Interop/FolderHandlerRegistry` |
 | Preview pane (incl. hex/raw) | `Core/Services/Preview/*` (`PreviewClassifier`, `TextPreviewReader`, `HexPreviewReader`, `SyntaxTokenizer`) |
 | Archives (zip/7z/tar/rar) | `Core/Services/Archives/*` (`ArchivePath`, `ArchiveReader`, `ArchiveIndexBuilder`) |
@@ -113,6 +115,13 @@ you where and what to watch for.
 - **One `Process.Start` in the whole app**, in `ProcessLauncher`. A second call site is a bug. (The
   rule is about the App; the Indexer registers its sign-in task through Task Scheduler's COM API,
   which starts no process at all.)
+- **The single-instance hand-off defeats the foreground lock on purpose, so it must ask before
+  using it.** `ForegroundWindow.Raise` only takes the foreground when `ForegroundRaiseRules` says
+  nothing is full screen; otherwise it flashes the taskbar button and does not even un-minimize.
+  The reason it matters is that the hand-off is not a user gesture: the app is the registered
+  handler for `Directory` and `Drive`, so *anything* that shell-opens a folder starts a second copy
+  which grants its foreground rights over — and the running copy landed on top of full-screen video,
+  with no pattern the user could see, because the trigger belonged to another process.
 - **The app is `asInvoker`.** Only the two elevated helper exes (Indexer, Elevator) touch an
   administrator token. Don't reintroduce `requireAdministrator` on the app to fix an access-denied
   error — that's now expected behavior (a folder the app can't read, Explorer can't either).
@@ -121,6 +130,13 @@ you where and what to watch for.
   re-applies the plan's rules against live disk state before writing, and "one item's failure never
   affects the others." Nothing ever does `Directory.Delete(recursive: true)` — use
   `Core/Services/DirectoryRemoval` (handles junctions correctly).
+- **The right-drag verb menu is for our own drags only.** A foreign drop has to report an effect
+  back before `Drop` returns and cannot wait on a menu, so an external right-drag keeps
+  `DropInContract`'s answer (Explorer's own menu would need `TrackPopupMenuEx`). Two consequences
+  that are easy to undo: `DragSession.IsRightButton` is remembered from the *press*, because by the
+  drop the button is generally already up and `KeyStates` would say "left"; and the menu is
+  **posted**, not opened inside `Drop` — `DoDragDrop`'s modal loop still owns the mouse there, so a
+  menu opened under it never sees the click meant to choose from it.
 - **There is one undo slot**, shared across move/rename/delete/archive-edit/sync — five-way, one
   level, whichever operation happened last. `RetireUndoable` is what finally commits staged/held
   data — call it before assuming a Replace or Delete's staging is irreversibly gone. Sync is the

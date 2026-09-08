@@ -23,15 +23,31 @@ internal sealed class DragSession : IDisposable
 {
     private static DragSession? _current;
 
-    private DragSession()
-    {
-    }
+    private DragSession(bool rightButton) => IsRightButton = rightButton;
 
     /// <summary>True once one of this app's own drop targets has taken the drop.</summary>
     public bool HandledInApp { get; private set; }
 
+    /// <summary>
+    /// True when the right button started this drag, which is what makes the drop offer a verb menu
+    /// instead of choosing one from the modifier keys.
+    /// </summary>
+    /// <remarks>
+    /// Remembered from the press rather than read from <c>DragEventArgs.KeyStates</c> at the drop.
+    /// By the time <c>Drop</c> is raised the button that started the gesture is generally already
+    /// up, so the key state would say "no button" and every right-drag would silently behave as a
+    /// left one.
+    /// </remarks>
+    public bool IsRightButton { get; }
+
+    /// <summary>Whether the drag in flight — if there is one — began with the right button. False
+    /// for a drag from another application, which is right: a foreign drop must report an effect
+    /// back synchronously and cannot wait on a menu.</summary>
+    public static bool IsRightButtonDrag => _current is { IsRightButton: true };
+
     /// <summary>Starts a drag. Dispose when <c>DoDragDrop</c> returns.</summary>
-    public static DragSession Begin() => _current = new DragSession();
+    public static DragSession Begin(bool rightButton = false) =>
+        _current = new DragSession(rightButton);
 
     /// <summary>Called by <see cref="DropPipeline"/> the moment it recognises the payload as ours.
     /// A no-op when the drag started in another process, which is exactly right.</summary>

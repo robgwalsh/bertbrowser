@@ -1,4 +1,7 @@
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Threading;
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Services.Archives;
 using BertBrowser.Core.Services.Transfer;
@@ -79,7 +82,9 @@ internal sealed class DropPipeline(ShellViewModel shell, Action<string> report)
         _cachedAllowed = false;
     }
 
-    public async void HandleDrop(DragEventArgs e, string? destination)
+    /// <param name="placementTarget">The control that took the drop, used to place the verb menu a
+    /// right-drag ends with.</param>
+    public void HandleDrop(DragEventArgs e, string? destination, UIElement placementTarget)
     {
         e.Handled = true;
         ClearHighlight();
@@ -89,7 +94,6 @@ internal sealed class DropPipeline(ShellViewModel shell, Action<string> report)
 
         var sources = payload.Paths;
         var decision = DecideFor(payload.Origin, e);
-        var verb = decision.Verb;
 
         if (payload.Origin == DropOrigin.InApp)
         {
@@ -99,6 +103,14 @@ internal sealed class DropPipeline(ShellViewModel shell, Action<string> report)
             // just placed would be deleted from where they came from — which they have already left.
             DragSession.ClaimInApp();
             e.Effects = DragDropEffects.None;
+
+            // Asked here, while the drag still exists: the session ends the moment DoDragDrop
+            // returns, which is before anything posted to the dispatcher runs.
+            if (DragSession.IsRightButtonDrag)
+            {
+                OfferVerbs(sources, destination, placementTarget);
+                return;
+            }
         }
         else
         {
@@ -109,6 +121,113 @@ internal sealed class DropPipeline(ShellViewModel shell, Action<string> report)
                 : DragDropEffects.Copy;
         }
 
+        _ = PerformAsync(sources, destination, decision.Verb);
+    }
+
+    // --- The right-drag verb menu ---
+
+    /// <summary>
+    /// Explorer's right-drag ending: ask, rather than infer a verb from whichever modifier key
+    /// happened to be down.
+    /// </summary>
+    /// <remarks>
+    /// Posted rather than opened here. <c>Drop</c> runs inside <c>DoDragDrop</c>'s modal loop, which
+    /// still owns the mouse — a menu opened under it would come up behind the drag and never see the
+    /// click meant to choose from it. By the time a Background item runs, the loop has unwound.
+    /// </remarks>
+    private void OfferVerbs(string[] sources, string destination, UIElement placementTarget) =>
+        _ = placementTarget.Dispatcher.InvokeAsync(
+            () => ShowVerbMenu(sources, destination, placementTarget),
+            DispatcherPriority.Background);
+
+    private void ShowVerbMenu(string[] sources, string destination, UIElement placementTarget)
+    {
+        var menu = BuildVerbMenu(shell, sources, destination, verb => Run(verb, sources, destination));
+        menu.PlacementTarget = placementTarget;
+        menu.Placement = PlacementMode.MousePoint;
+        menu.IsOpen = true;
+    }
+
+    /// <summary>
+    /// The menu itself, built but not opened — which is also how the UI harness photographs it,
+    /// since a <see cref="ContextMenu"/> is a <c>Popup</c> with its own top-level window and opening
+    /// one would put it on the user's screen.
+    /// </summary>
+    /// <param name="run">What to do with the verb the user picks.</param>
+    internal static ContextMenu BuildVerbMenu(
+        ShellViewModel shell, string[] sources, string destination, Action<RightDropVerb> run)
+    {
+        // Adding to a container is its own operation — TransferPlanner would refuse a destination
+        // that is not a directory on disk — so the copy that means "add to this archive" is offered
+        // on the archive's say-so rather than the planner's.
+        var intoArchive = shell.ArchiveFileFor(destination) is not null;
+
+        var context = new RightDropContext(
+            DestinationIsArchive: intoArchive,
+            SourcesAreVirtual: sources.Any(s => shell.ArchiveFileFor(s) is not null),
+            MoveHasWork: !intoArchive && shell.PlanDrop(sources, destination, TransferVerb.Move).HasWork,
+            CopyHasWork: intoArchive || shell.PlanDrop(sources, destination, TransferVerb.Copy).HasWork,
+            ItemCount: sources.Length);
+
+        var menu = new ContextMenu();
+
+        foreach (var entry in RightDropMenuRules.Build(context))
+        {
+            var verb = entry.Verb;
+            var item = new MenuItem { Header = entry.Label, IsEnabled = entry.Enabled };
+            item.Click += (_, _) => run(verb);
+            menu.Items.Add(item);
+        }
+
+        // No icons, deliberately: Explorer's right-drag menu has none, and a wrong picture is the
+        // one UI mistake nothing catches — here it would sit on the verb that removes the originals.
+        menu.Items.Add(new Separator());
+
+        // Dismissing the menu any other way means the same thing, so this needs no handler.
+        menu.Items.Add(new MenuItem { Header = "Cancel" });
+
+        return menu;
+    }
+
+    private void Run(RightDropVerb verb, string[] sources, string destination)
+    {
+        if (verb == RightDropVerb.Shortcut)
+        {
+            _ = CreateShortcutsAsync(sources, destination);
+            return;
+        }
+
+        _ = PerformAsync(
+            sources,
+            destination,
+            verb == RightDropVerb.Copy ? TransferVerb.Copy : TransferVerb.Move);
+    }
+
+    private async Task CreateShortcutsAsync(string[] sources, string destination)
+    {
+        try
+        {
+            var plan = shell.PlanShortcuts(sources, destination);
+            if (!plan.HasWork)
+            {
+                report(plan.Problems.Count > 0
+                    ? plan.Problems[0].Message
+                    : "No shortcuts could be created here.");
+                return;
+            }
+
+            await shell.CreateShortcutsAsync(plan);
+        }
+        catch (Exception ex)
+        {
+            report($"Could not create shortcuts: {ex.Message}");
+        }
+    }
+
+    /// <summary>Carries out the verb, whether it was inferred from the modifiers or picked off the
+    /// right-drag menu.</summary>
+    private async Task PerformAsync(string[] sources, string destination, TransferVerb verb)
+    {
         try
         {
             // A drop *into a container* is a different operation entirely — the archive is
@@ -149,7 +268,7 @@ internal sealed class DropPipeline(ShellViewModel shell, Action<string> report)
         }
         catch (Exception ex)
         {
-            // An unhandled exception in an async void handler would take the process down.
+            // Nobody awaits this task, so an escaping exception would take the process down.
             report($"Drop failed: {ex.Message}");
         }
     }

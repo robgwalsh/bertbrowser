@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using BertBrowser.App.Interop;
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Services.Transfer;
@@ -33,6 +34,28 @@ internal sealed class FileDragDropController
     private FileItemViewModel? _deferredSelection;
     private bool _dragging;
 
+    /// <summary>Which button is holding <see cref="_dragCandidate"/> open. The move threshold has to
+    /// watch the button that actually started the press, or a right-drag never begins.</summary>
+    private MouseButton _pressedButton;
+
+    private static bool _swallowNextContextMenu;
+
+    /// <summary>
+    /// Whether the context menu about to open is the one a right-drag's button release would
+    /// otherwise produce, and should therefore be swallowed.
+    /// </summary>
+    /// <remarks>
+    /// A static, because the release happens wherever the drag <em>ended</em> — usually another
+    /// pane's list, sometimes the folder tree — and not on the list that set it. One drag exists at
+    /// a time and it belongs to the UI thread, which is what makes that safe.
+    /// </remarks>
+    public static bool ConsumeContextMenuSuppression()
+    {
+        var swallow = _swallowNextContextMenu;
+        _swallowNextContextMenu = false;
+        return swallow;
+    }
+
     public static FileDragDropController Attach(
         ListView list, DirectoryTabViewModel tab, ShellViewModel shell) =>
         new(list, tab, shell);
@@ -49,6 +72,13 @@ internal sealed class FileDragDropController
         list.PreviewMouseLeftButtonDown += OnListMouseDown;
         list.PreviewMouseMove += OnListMouseMove;
         list.PreviewMouseLeftButtonUp += OnListMouseUp;
+
+        // The right button drags too, and ends by asking which verb was meant instead of inferring
+        // one. Selection is not touched here: DirectoryTabView's own right-button handler has
+        // already applied Explorer's rule (inside the selection keeps it, outside narrows to the
+        // row), and it runs first because the XAML handlers are wired before this is attached.
+        list.PreviewMouseRightButtonDown += OnListRightButtonDown;
+        list.PreviewMouseRightButtonUp += OnListMouseUp;
 
         list.AllowDrop = true;
         list.DragOver += OnListDragOver;
@@ -71,6 +101,7 @@ internal sealed class FileDragDropController
 
         _pressOrigin = e.GetPosition(_list);
         _dragCandidate = item;
+        _pressedButton = MouseButton.Left;
 
         // WPF reduces an extended selection to the clicked row on mouse-down, which would leave a
         // single item to drag. Hold that back until mouse-up, when we know it was a click.
@@ -84,10 +115,28 @@ internal sealed class FileDragDropController
         }
     }
 
+    private void OnListRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _dragCandidate = null;
+        _deferredSelection = null;
+        if (e.ClickCount > 1) return;
+
+        if (VisualTreeUtil.FindAncestor<ListViewItem>(e.OriginalSource as DependencyObject)
+                is not { } container ||
+            container.DataContext is not FileItemViewModel item)
+            return;
+
+        _pressOrigin = e.GetPosition(_list);
+        _dragCandidate = item;
+        _pressedButton = MouseButton.Right;
+    }
+
     private void OnListMouseMove(object sender, MouseEventArgs e)
     {
         if (_dragging || _dragCandidate is null) return;
-        if (e.LeftButton != MouseButtonState.Pressed)
+
+        var held = _pressedButton == MouseButton.Right ? e.RightButton : e.LeftButton;
+        if (held != MouseButtonState.Pressed)
         {
             _dragCandidate = null;
             return;
@@ -124,10 +173,12 @@ internal sealed class FileDragDropController
             .ToArray();
         if (paths.Length == 0) return;
 
+        var rightButton = _pressedButton == MouseButton.Right;
+
         _dragging = true;
         _deferredSelection = null; // a drag consumes the deferred click
 
-        using var session = DragSession.Begin();
+        using var session = DragSession.Begin(rightButton);
         try
         {
             var data = new DataObject(DropPipeline.ItemsFormat, paths);
@@ -164,7 +215,26 @@ internal sealed class FileDragDropController
             _dragCandidate = null;
             _pipeline.InvalidateHoverCache();
             _pipeline.ClearHighlight();
+
+            if (rightButton) SuppressContextMenuOnce();
         }
+    }
+
+    /// <summary>
+    /// Stops the button release that ended a right-drag from also opening the ordinary item context
+    /// menu, which would land on top of the verb menu the drop is about to show.
+    /// </summary>
+    /// <remarks>
+    /// Self-clearing. Whether a release consumed inside <c>DoDragDrop</c>'s modal loop still reaches
+    /// WPF as a right-button-up is not ours to decide, so the flag is armed either way and dropped
+    /// again on the next Background turn — after any <c>ContextMenuOpening</c>, which is raised at
+    /// input priority. Left standing it would instead eat the user's next genuine right-click.
+    /// </remarks>
+    private void SuppressContextMenuOnce()
+    {
+        _swallowNextContextMenu = true;
+        _ = _list.Dispatcher.InvokeAsync(
+            () => _swallowNextContextMenu = false, DispatcherPriority.Background);
     }
 
     /// <summary>
@@ -204,7 +274,8 @@ internal sealed class FileDragDropController
     private void OnListDragOver(object sender, DragEventArgs e) =>
         _pipeline.HandleDragOver(e, ListTarget(e), ListHighlight(e));
 
-    private void OnListDrop(object sender, DragEventArgs e) => _pipeline.HandleDrop(e, ListTarget(e));
+    private void OnListDrop(object sender, DragEventArgs e) =>
+        _pipeline.HandleDrop(e, ListTarget(e), (UIElement)sender);
 
     /// <summary>A folder row takes the drop itself; anywhere else means the folder this pane is
     /// browsing — its own, not whichever pane happens to be active. Search results are a flattened

@@ -29,7 +29,7 @@ internal sealed class TreeDropTarget
         _pipeline.HandleDragOver(e, TreeNode(e)?.FullPath, TreeHighlight(e));
 
     private void OnDrop(object sender, DragEventArgs e) =>
-        _pipeline.HandleDrop(e, TreeNode(e)?.FullPath);
+        _pipeline.HandleDrop(e, TreeNode(e)?.FullPath, (UIElement)sender);
 
     private static DirectoryNodeViewModel? TreeNode(DragEventArgs e) =>
         VisualTreeUtil.FindAncestor<TreeViewItem>(e.OriginalSource as DependencyObject)?.DataContext

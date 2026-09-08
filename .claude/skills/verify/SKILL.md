@@ -126,6 +126,10 @@ delete | delete-permanent [names]
                             inside an archive, delete rewrites the container without those entries
                             (and Ctrl+Z puts the whole original back); rename does the same for one
 move|copy [names] to <folder>
+shortcut [names] to <folder> the right-drag menu's third verb: a .lnk per item, named Explorer's
+                            way ("notes.txt - Shortcut.lnk", stepping aside to "(2)"). Goes through
+                            the real IShellLink, which is the point — whether a link this app writes
+                            is one Windows reads back is the one thing a Core test cannot answer
 extract [names] to <folder> pull entries out of the archive on show, through the same planner,
                             executor and progress surface the menu uses
 compress <format> <name>    zip | tar | tar.gz | tar.bz2 — the selection, or the folder on show
@@ -224,6 +228,11 @@ columns default             the header menu's "Set as default for new tabs" — 
 menu columns [name]         PNG of the column header menu's items. They are rendered detached, not
                             opened: a ContextMenu is a Popup with its own top-level window that WPF
                             repositions onto the nearest monitor, i.e. onto the user's screen
+right-drop-menu <names> to <folder> [as <name>]
+                            PNG of the menu a right-drag ends with, built for those sources over
+                            that folder — so the wording and the greying are the real ones. Rendered
+                            detached like `menu`, and nothing is dropped: a run cannot click, and a
+                            script reaches the verbs themselves as move, copy and shortcut
 probe <token> [element]     where a theme token's colour came out: the resolver, the app and
                             window resources, and the element's own Background/Foreground
 

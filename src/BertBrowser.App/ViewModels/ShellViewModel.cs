@@ -19,6 +19,7 @@ using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
 using BertBrowser.Core.Services.SavedSearches;
 using BertBrowser.Core.Services.SavedWorkspaces;
+using BertBrowser.Core.Services.Shortcuts;
 using BertBrowser.Core.Services.Transfer;
 
 namespace BertBrowser.App.ViewModels;
@@ -41,6 +42,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private readonly RenameExecutor _renameExecutor;
     private readonly NewItemPlanner _newItemPlanner;
     private readonly NewItemExecutor _newItemExecutor;
+    private readonly ShortcutPlanner _shortcutPlanner;
+    private readonly ShortcutExecutor _shortcutExecutor;
     private readonly DeletePlanner _deletePlanner;
     private readonly DeleteExecutor _deleteExecutor;
     private readonly DeleteSurveyor _deleteSurveyor;
@@ -366,8 +369,12 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         IElevatedOperationRunner elevation,
         IElevationPrompt elevationPrompt,
         IFolderCompareService folderCompare,
+        ShortcutPlanner shortcutPlanner,
+        ShortcutExecutor shortcutExecutor,
         IUserNotice notice)
     {
+        _shortcutPlanner = shortcutPlanner;
+        _shortcutExecutor = shortcutExecutor;
         _folderCompare = folderCompare;
         _notice = notice;
         _syncRunner = new SyncRunner(transferExecutor, deleteExecutor);
@@ -1378,6 +1385,75 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             IsTransferring = false;
             UndoCommand.NotifyCanExecuteChanged();
         }
+    }
+
+    // --- Shortcuts ---
+
+    /// <summary>What "Create shortcuts here" would write, without writing any of it.</summary>
+    public ShortcutPlan PlanShortcuts(IReadOnlyList<string> sources, string directory) =>
+        _shortcutPlanner.Plan(sources, directory);
+
+    /// <summary>
+    /// Writes the links a right-drag asked for, then reselects them where they landed.
+    /// </summary>
+    /// <remarks>
+    /// No undo record and no <c>RetireUndoable</c>, for the reason <see cref="CreateNewItemAsync"/>
+    /// gives: this only adds files, so the one undo slot stays pointed at whatever move, rename or
+    /// delete came before rather than being spent on links the user can select and delete.
+    /// </remarks>
+    public async Task<ShortcutOutcome> CreateShortcutsAsync(ShortcutPlan plan)
+    {
+        // The same flag every other write takes: it keeps this from racing a paste, and the
+        // harness's quiescence check reads it.
+        if (IsTransferring || !plan.HasWork) return ShortcutOutcome.Empty;
+
+        IsTransferring = true;
+        UndoCommand.NotifyCanExecuteChanged();
+        try
+        {
+            // The writer is shell COM and wants the UI thread's apartment, so this one does not go
+            // through Task.Run — a handful of links is not work worth moving off it anyway.
+            var outcome = _shortcutExecutor.Execute(plan);
+
+            if (outcome.Created.Count > 0)
+            {
+                // Set before the refresh is awaited, so the listing that arrives is the one the
+                // selection belongs to — the rule /select and New both follow.
+                foreach (var tab in TabsShowing(plan.Directory))
+                    tab.PendingSelection = outcome.Created[0];
+            }
+
+            await RefreshTabsShowingAsync([plan.Directory]);
+
+            SetStatus(Describe(plan, outcome));
+            return outcome;
+        }
+        finally
+        {
+            IsTransferring = false;
+            UndoCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>The refusals the planner collected are worth saying too — a drag of five items where
+    /// two were inside an archive should not report a quiet success for three.</summary>
+    private static string Describe(ShortcutPlan plan, ShortcutOutcome outcome)
+    {
+        if (outcome.Created.Count == 0)
+        {
+            return outcome.Failed.Count > 0
+                ? outcome.Failed[0].Message
+                : plan.Problems.Count > 0
+                    ? plan.Problems[0].Message
+                    : "No shortcuts were created.";
+        }
+
+        var noun = outcome.Created.Count == 1 ? "shortcut" : "shortcuts";
+        var refused = outcome.Failed.Count + plan.Problems.Count;
+        return refused == 0
+            ? $"Created {outcome.Created.Count:N0} {noun}"
+            : $"Created {outcome.Created.Count:N0} {noun}; {refused:N0} could not be — " +
+              (outcome.Failed.Count > 0 ? outcome.Failed[0].Message : plan.Problems[0].Message);
     }
 
     private async Task RefreshAfterCreateAsync(NewItemPlan plan)

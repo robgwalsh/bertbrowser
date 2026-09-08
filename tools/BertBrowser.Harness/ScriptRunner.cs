@@ -168,6 +168,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "delete-permanent": Delete(rest, DeleteMode.Permanent); break;
             case "move": Transfer(rest, TransferVerb.Move); break;
             case "copy": Transfer(rest, TransferVerb.Copy); break;
+            case "shortcut": Shortcut(rest); break;
             case "undo": Undo(); break;
             case "progress-demo": ProgressDemo(rest); break;
             case "archive-fixture": ArchiveFixture(rest); break;
@@ -212,6 +213,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-columns": AssertColumns(rest); break;
             case "assert-metadata": AssertMetadata(rest); break;
             case "menu": Menu(rest); break;
+            case "right-drop-menu": RightDropMenu(rest); break;
             case "assert-header-menu": AssertHeaderMenu(rest); break;
 
             // assertions
@@ -812,6 +814,60 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     }
 
     /// <summary>
+    /// Photographs the menu a right-drag ends with: <c>right-drop-menu notes.txt to Documents</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The real <see cref="DropPipeline"/> menu, built for those sources over that folder — so what
+    /// the picture shows is the actual wording and the actual greying, decided by the same
+    /// <c>RightDropMenuRules</c> and the same hover plans a drag would use.
+    /// </para>
+    /// <para>
+    /// Not opened, for the reason <see cref="Menu"/> gives: a <c>ContextMenu</c> is a Popup with its
+    /// own top-level window. <b>Nothing is dropped and no verb runs</b> — a script cannot click, and
+    /// this command is about what the menu offers, not what picking from it does. The verbs
+    /// themselves are already reachable as <c>move</c>, <c>copy</c> and <c>shortcut</c>.
+    /// </para>
+    /// </remarks>
+    private void RightDropMenu(string rest)
+    {
+        var (names, tail) = SplitOn(rest, "to", "right-drop-menu");
+
+        // The destination comes last, so the shot's name cannot simply follow it the way `dialog`'s
+        // does — a folder with a space in it would swallow it. Hence "as", and hence optional.
+        var (destination, name) = (tail, "");
+        var marker = tail.LastIndexOf(" as ", StringComparison.OrdinalIgnoreCase);
+        if (marker >= 0)
+            (destination, name) = (tail[..marker].Trim(), tail[(marker + 4)..].Trim());
+
+        var sources = (names.Length == 0
+                ? Selection().Select(i => i.FullPath)
+                : names.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(n => Row(n).FullPath))
+            .ToArray();
+
+        if (sources.Length == 0)
+            throw new AssertionException("right-drop-menu needs something to drag.");
+
+        var target = _sandbox.Resolve(destination);
+
+        var items = session.Dispatcher.Invoke(() =>
+        {
+            var menu = DropPipeline.BuildVerbMenu(session.Shell, sources, target, _ => { });
+            var loose = menu.Items.OfType<FrameworkElement>().ToList();
+            menu.Items.Clear(); // detach them, so they can be hosted somewhere else
+            return loose;
+        });
+
+        var path = Resolve(Named(name.Length == 0 ? "right-drop-menu" : name, ++_shots));
+        session.Dispatcher.Invoke(() => RenderDetached(items, path));
+
+        if (!Capture.HasContent(path))
+            throw new AssertionException($"{path} is a single flat colour — the menu rendered nothing.");
+        output.WriteLine($"SHOT {path}");
+    }
+
+    /// <summary>
     /// Renders loose menu items straight to a PNG.
     /// </summary>
     /// <remarks>
@@ -821,7 +877,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     /// within. It also needs no <c>VisualBrush</c>, whose cached realisation is the reason
     /// <see cref="Capture"/> renders the whole window and crops instead.
     /// </remarks>
-    private static void RenderDetached(IReadOnlyList<MenuItem> items, string path)
+    private static void RenderDetached(IReadOnlyList<FrameworkElement> items, string path)
     {
         var host = new StackPanel { Width = 300 };
         host.SetResourceReference(Panel.BackgroundProperty, BertBrowser.Core.Theming.ThemeToken.MenuBackground);
@@ -1653,6 +1709,39 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         if (!plan.HasWork) throw new AssertionException($"There was nothing to {verb.ToString().ToLowerInvariant()}.");
 
         Await(() => session.Shell.ExecuteDropAsync(plan, resolutions: null));
+    }
+
+    /// <summary>
+    /// The right-drag menu's third verb: <c>shortcut notes.txt to Documents</c>.
+    /// </summary>
+    /// <remarks>
+    /// Goes through the same planner and executor the menu entry does, and therefore through the
+    /// real <c>ShellLink</c> — which is the point. The <c>.lnk</c> format is the shell's, so the one
+    /// thing a Core test cannot answer is whether a link this app writes is a link Windows reads
+    /// back; <c>assert-exists</c> after this is what covers it.
+    /// </remarks>
+    private void Shortcut(string rest)
+    {
+        var (names, destination) = SplitOn(rest, "to", "shortcut");
+
+        var sources = (names.Length == 0
+                ? Selection().Select(i => i.FullPath)
+                : names.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(n => Row(n).FullPath))
+            .ToList();
+
+        var target = _sandbox.RequireInside(destination, "shortcut");
+        if (!Directory.Exists(target)) throw new AssertionException($"There is no folder at '{target}'.");
+
+        var plan = session.Dispatcher.Invoke(() => session.Shell.PlanShortcuts(sources, target));
+
+        if (plan.Problems is { Count: > 0 } problems)
+            throw new AssertionException(
+                "The shortcuts were refused: " + string.Join("; ", problems.Select(p => p.Message)));
+
+        if (!plan.HasWork) throw new AssertionException("There was nothing to make a shortcut to.");
+
+        Await(() => session.Shell.CreateShortcutsAsync(plan));
     }
 
     /// <summary>

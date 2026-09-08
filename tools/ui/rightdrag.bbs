@@ -1,0 +1,45 @@
+# Right-drag: Explorer's ending to a drag — ask which verb was meant instead of inferring one
+# from whichever modifier key happened to be down.
+#
+# The gesture itself is not here and cannot be: a run posts no mouse input, so there is no way to
+# hold the right button down and move. What is here is everything the gesture leads to — the menu
+# it opens, and the third verb it added.
+
+tree .
+refresh
+
+# The ordinary case: all three verbs live, singular wording for one item.
+right-drop-menu notes.txt to Documents as 01-one-item
+
+# Plural wording, and nothing else changes.
+right-drop-menu notes.txt, report.md to Documents as 02-two-items
+
+# Dropping items into the folder they already live in. Move has nothing to do and is greyed —
+# greyed rather than removed, so the row below it does not slide up under the cursor.
+right-drop-menu notes.txt to . as 03-same-folder
+
+# Into a container. Adding to an archive rewrites it and is always additive, so there is no move;
+# a .lnk stores a path, and an entry inside a container has not got one.
+archive-fixture Archives
+refresh
+right-drop-menu notes.txt to Archives/plain.7z as 04-into-archive
+
+# The verb itself, end to end through the real IShellLink — a file and a folder.
+shortcut notes.txt, Documents to Pictures
+assert-exists "Pictures/notes.txt - Shortcut.lnk"
+assert-exists "Pictures/Documents - Shortcut.lnk"
+assert-status Created
+
+# Explorer's "(2)", the same one a paste and a New File produce. Nothing is overwritten.
+shortcut notes.txt to Pictures
+assert-exists "Pictures/notes.txt - Shortcut (2).lnk"
+
+# Additive, so the undo slot is left pointing at whatever came before rather than spent on links
+# the user can select and delete.
+assert-cannot-undo
+
+go Pictures
+refresh
+shot 05-links
+
+state

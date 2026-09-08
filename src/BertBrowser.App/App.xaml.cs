@@ -208,6 +208,10 @@ public partial class App : Application
             s.GetRequiredService<BertBrowser.Core.Services.Archives.IArchiveReader>()));
         services.AddSingleton<BertBrowser.Core.Services.NewItem.NewItemPlanner>();
         services.AddSingleton<BertBrowser.Core.Services.NewItem.NewItemExecutor>();
+        services.AddSingleton<BertBrowser.Core.Services.Shortcuts.IShortcutWriter, Interop.ShellLink>();
+        services.AddSingleton<BertBrowser.Core.Services.Shortcuts.ShortcutPlanner>();
+        services.AddSingleton(s => new BertBrowser.Core.Services.Shortcuts.ShortcutExecutor(
+            s.GetRequiredService<BertBrowser.Core.Services.Shortcuts.IShortcutWriter>()));
         services.AddSingleton<IShellNewCatalog, ShellNewCatalog>();
         services.AddSingleton<IFolderHandlerService, FolderHandlerService>();
         // One instance serving both roles: it caches per-volume answers, and the planner and the

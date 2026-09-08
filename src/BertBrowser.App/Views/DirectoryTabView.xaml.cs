@@ -833,6 +833,15 @@ public partial class DirectoryTabView : UserControl
     /// user-defined command entries for the selection.</summary>
     private void FileList_ContextMenuOpening(object sender, ContextMenuEventArgs e)
     {
+        // The release that ended a right-drag is not a right-click. Without this the item menu opens
+        // underneath the verb menu the drop is about to show — on the pane the drag landed in, which
+        // is often not the one it started from.
+        if (FileDragDropController.ConsumeContextMenuSuppression())
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (FileListView.ContextMenu is not { } menu) return;
 
         var selection = SelectedFileItems();
