@@ -610,10 +610,20 @@ public sealed partial class FileListViewModel : ObservableObject
 
     /// <summary>Turns an index hit into a list row. Internal because the disk-usage view builds
     /// its "largest files" list from the same shape and must not grow a second version of this.</summary>
+    /// <remarks>
+    /// The attribute mask is the hit's own, not a <c>Hidden</c> bit reconstituted from the boolean
+    /// — which is what this did while the index stored nothing else, and why the Attributes and
+    /// Created columns used to read blank on every search row. A hit that genuinely carries no
+    /// mask (an archive entry, or a scan that does not select the column) still lands at 0, and
+    /// <c>AttributesDisplay</c> renders that as nothing, which is the honest answer. Hidden is
+    /// OR'd back in because the index stores it <em>effectively</em>: a visible file inside a
+    /// hidden folder is a hidden row here, and its own mask does not say so.
+    /// </remarks>
     internal static FileItemViewModel CreateSearchItem(SearchHit hit) =>
         new(new FileEntry(hit.Name, hit.DisplayPath, hit.IsDirectory,
                 hit.IsDirectory ? -1 : hit.SizeBytes, hit.ModifiedUtc,
-                hit.Hidden ? FileAttributes.Hidden : 0),
+                hit.Attributes | (hit.Hidden ? FileAttributes.Hidden : 0),
+                hit.CreatedUtc),
             hit.RelativeDirDisplay,
             hit.Match);
 

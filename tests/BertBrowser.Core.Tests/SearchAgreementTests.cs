@@ -29,28 +29,43 @@ public sealed class SearchAgreementTests : IDisposable
     /// <summary>Fixed, so a failure names the same file every time.</summary>
     private static readonly DateTime Base = new(2026, 6, 15, 12, 0, 0, DateTimeKind.Utc);
 
-    private static readonly (string Path, bool IsDir, long Size, DateTime Modified, bool Hidden)[] Corpus =
+    private const FileAttributes Arc = FileAttributes.Archive;
+    private const FileAttributes Dir = FileAttributes.Directory;
+
+    /// <summary>
+    /// Attributes and creation dates are picked to exercise the shapes that break things, not to
+    /// look plausible: a row with neither (the fallback build, and any row predating the columns),
+    /// a file created long after it was modified (a copy — the case that proves the two dates are
+    /// separate columns), and every attribute bit the grammar accepts appearing at least once.
+    /// </summary>
+    private static readonly (string Path, bool IsDir, long Size, DateTime Modified, bool Hidden,
+        FileAttributes Attributes, DateTime Created)[] Corpus =
     {
-        (@"C:\Corpus\report.txt",                 false, 1024,          Base,                  false),
-        (@"C:\Corpus\report.docx",                false, 2_000_000,     Base.AddDays(-1),      false),
-        (@"C:\Corpus\Report-DRAFT.txt",           false, 10,            Base.AddDays(-40),     false),
-        (@"C:\Corpus\notes.txt",                  false, 0,             Base.AddYears(-2),     false),
-        (@"C:\Corpus\photo.jpg",                  false, 5_000_000,     Base,                  false),
-        (@"C:\Corpus\photo.jpeg",                 false, 4_000_000,     Base,                  false),
-        (@"C:\Corpus\IMG_0042.jpg",               false, 3_000_000,     Base.AddDays(-3),      false),
-        (@"C:\Corpus\IMG_7.png",                  false, 900,           Base,                  false),
-        (@"C:\Corpus\.gitignore",                 false, 40,            Base,                  true),
-        (@"C:\Corpus\a[1].txt",                   false, 12,            Base,                  false),
-        (@"C:\Corpus\a*b.txt",                    false, 13,            Base,                  false),
-        (@"C:\Corpus\Übung-01.pdf",               false, 700_000,       Base,                  false),
-        (@"C:\Corpus\Projects",                   true,  0,             Base,                  false),
-        (@"C:\Corpus\Projects\alpha.txt",         false, 1_048_576,     Base.AddDays(-10),     false),
-        (@"C:\Corpus\Projects\beta.log",          false, 20_000_000,    Base.AddDays(-200),    false),
-        (@"C:\Corpus\Projects\gamma.log",         false, 100,           Base,                  true),
-        (@"C:\Corpus\Projects\report final.txt",  false, 4096,          Base,                  false),
-        (@"C:\Corpus\Archive",                    true,  0,             Base,                  false),
-        (@"C:\Corpus\Archive\report.txt",         false, 512,           Base.AddYears(-3),     false),
-        (@"C:\Corpus\Archive\ghost.bin",          false, 0,             DateTime.MinValue,     false),
+        (@"C:\Corpus\report.txt",                 false, 1024,          Base,                  false, Arc, Base),
+        (@"C:\Corpus\report.docx",                false, 2_000_000,     Base.AddDays(-1),      false, Arc | FileAttributes.ReadOnly, Base.AddDays(-1)),
+        (@"C:\Corpus\Report-DRAFT.txt",           false, 10,            Base.AddDays(-40),     false, Arc, Base.AddDays(-40)),
+        (@"C:\Corpus\notes.txt",                  false, 0,             Base.AddYears(-2),     false, Arc, Base.AddYears(-2)),
+        (@"C:\Corpus\photo.jpg",                  false, 5_000_000,     Base,                  false, Arc | FileAttributes.Compressed, Base),
+        (@"C:\Corpus\photo.jpeg",                 false, 4_000_000,     Base,                  false, Arc, Base),
+        (@"C:\Corpus\IMG_0042.jpg",               false, 3_000_000,     Base.AddDays(-3),      false, Arc, Base.AddDays(-3)),
+        (@"C:\Corpus\IMG_7.png",                  false, 900,           Base,                  false, Arc, Base),
+        (@"C:\Corpus\.gitignore",                 false, 40,            Base,                  true,  Arc | FileAttributes.Hidden, Base),
+        (@"C:\Corpus\a[1].txt",                   false, 12,            Base,                  false, Arc, Base),
+        (@"C:\Corpus\a*b.txt",                    false, 13,            Base,                  false, Arc, Base),
+        (@"C:\Corpus\Übung-01.pdf",               false, 700_000,       Base,                  false, Arc, Base),
+        (@"C:\Corpus\Projects",                   true,  0,             Base,                  false, Dir, Base),
+        // Copied in: modified two years ago, created today. Only a term reading the right column
+        // tells these two apart.
+        (@"C:\Corpus\Projects\alpha.txt",         false, 1_048_576,     Base.AddYears(-2),     false, Arc, Base),
+        (@"C:\Corpus\Projects\beta.log",          false, 20_000_000,    Base.AddDays(-200),    false, Arc | FileAttributes.System, Base.AddDays(-200)),
+        (@"C:\Corpus\Projects\gamma.log",         false, 100,           Base,                  true,  Arc | FileAttributes.Hidden, Base),
+        (@"C:\Corpus\Projects\report final.txt",  false, 4096,          Base,                  false, Arc, Base),
+        (@"C:\Corpus\Projects\Linked",            true,  0,             Base,                  false, Dir | FileAttributes.ReparsePoint, Base),
+        (@"C:\Corpus\Archive",                    true,  0,             Base,                  false, Dir, Base),
+        (@"C:\Corpus\Archive\report.txt",         false, 512,           Base.AddYears(-3),     false, Arc | FileAttributes.ReadOnly, Base.AddYears(-3)),
+        // The fallback build's shape, and the shape of every row written before these columns
+        // existed: no size, no timestamps, no attributes.
+        (@"C:\Corpus\Archive\ghost.bin",          false, 0,             DateTime.MinValue,     false, 0,   DateTime.MinValue),
     };
 
     /// <summary>
@@ -89,7 +104,20 @@ public sealed class SearchAgreementTests : IDisposable
                      "size:>1mb", "size:<1kb", "size:>=1024", "size:<=1024",
                      "size:1kb..2mb", "size:empty", "size:=100",
                      "dm:2026-06", "dm:>2026-06-01", "dm:<2025-01-01", "dm:2024..2026",
+                     "dc:2026-06", "dc:>2026-06-01", "dc:<2025-01-01", "dc:2024..2026",
+                     "dc:2026-06 dm:<2025", "dc:2026 OR dm:2026",
                      "is:dir report", "is:file report", "report is:hidden",
+
+                     // Attributes: each bit alone against a word, the combinations that exercise
+                     // AND/OR/NOT over a mask, and one paired with a date so the two new columns
+                     // are read in the same statement.
+                     "report is:readonly", "log is:system", "report is:archived",
+                     "is:link Linked", "photo is:compressed",
+                     "report !is:readonly", "!is:archived ext:txt",
+                     // Each branch of the OR carries its own word: an attribute never clears the
+                     // two-character floor on its own, so "is:readonly OR is:system" is not a query.
+                     "report is:readonly OR log is:system", "report is:archived is:readonly",
+                     "report is:readonly dc:<2025", "ext:txt is:archived dm:2026-06",
                      "path:projects", "path:archive report",
                      "re:^report", @"re:^img_\d+", "re:log$",
                      "report !draft", "!draft ext:txt", "report !ext:docx",
@@ -119,7 +147,7 @@ public sealed class SearchAgreementTests : IDisposable
         _repo.UpsertEntries(
             Corpus.Select(e => new FsEntryRow(
                 PathKey.Canonicalize(e.Path), Path.GetFileName(e.Path.TrimEnd('\\')),
-                e.IsDir, e.Size, e.Modified, e.Hidden)).ToList(),
+                e.IsDir, e.Size, e.Modified, e.Hidden, e.Attributes, e.Created)).ToList(),
             crawlGen: 1);
     }
 
@@ -131,9 +159,11 @@ public sealed class SearchAgreementTests : IDisposable
     }
 
     private static SearchCandidate Candidate(
-        (string Path, bool IsDir, long Size, DateTime Modified, bool Hidden) e) =>
+        (string Path, bool IsDir, long Size, DateTime Modified, bool Hidden,
+            FileAttributes Attributes, DateTime Created) e) =>
         new(Path.GetFileName(e.Path.TrimEnd('\\')).ToUpperInvariant(),
-            PathKey.Canonicalize(e.Path), e.IsDir, e.Size, e.Modified, e.Hidden);
+            PathKey.Canonicalize(e.Path), e.IsDir, e.Size, e.Modified, e.Hidden,
+            e.Attributes, e.Created);
 
     [Theory]
     [MemberData(nameof(Queries))]

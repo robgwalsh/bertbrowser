@@ -7,12 +7,50 @@ using Microsoft.Data.Sqlite;
 namespace BertBrowser.Core.Data;
 
 /// <summary>
+/// One row read back out of <c>fs_entry</c>, before its display path is reassembled.
+/// </summary>
+/// <remarks>
+/// A named type rather than the tuple this used to be, because it is threaded through five
+/// methods and eight positional fields stop being readable.
+/// <para><see cref="Attributes"/> and <see cref="Created"/> are only selected by the two
+/// <em>search</em> projections, which is where a query can filter on them. The largest-files and
+/// duplicate-shortlist scans leave them at their defaults deliberately: both read most rows on the
+/// disk, neither displays either field, and widening the widest scans in the file to carry columns
+/// nothing reads is exactly the cost the schema's no-secondary-index rule exists to avoid.</para>
+/// </remarks>
+internal readonly record struct EntryRow(
+    string Key,
+    string Name,
+    bool IsDir,
+    long Size,
+    DateTime Modified,
+    bool Hidden,
+    FileAttributes Attributes = 0,
+    DateTime Created = default);
+
+/// <summary>
 /// Persistence for the fs_entry / fs_index_root search index. Like the other
 /// repositories this is synchronous ADO.NET with a pooled connection per method;
 /// SearchService layers Task.Run on top.
 /// </summary>
 public sealed class FsIndexRepository
 {
+    /// <summary>
+    /// Reads a UTC timestamp column, mapping the empty string to <see cref="DateTime.MinValue"/>.
+    /// </summary>
+    /// <remarks>
+    /// <c>created_utc</c>'s migration default is <c>''</c> — chosen because it sorts below the 1601
+    /// floor every date term applies, so a row predating the column satisfies no <c>dc:</c> filter.
+    /// <c>DateTime.Parse("")</c> throws, so it has to be mapped here rather than at the call sites.
+    /// </remarks>
+    private static DateTime ReadUtc(SqliteDataReader reader, int ordinal)
+    {
+        var text = reader.GetString(ordinal);
+        return text.Length == 0
+            ? DateTime.MinValue
+            : DateTime.Parse(text, null, System.Globalization.DateTimeStyles.RoundtripKind);
+    }
+
     private readonly Db _db;
 
     public FsIndexRepository(Db db) => _db = db;
@@ -35,8 +73,9 @@ public sealed class FsIndexRepository
         cmd.Transaction = tx;
         cmd.CommandText =
             """
-            INSERT INTO fs_entry(path_key, name, name_key, is_dir, size_bytes, modified_utc, hidden, crawl_gen)
-            VALUES (@key, @name, @nameKey, @isDir, @size, @modified, @hidden, @gen)
+            INSERT INTO fs_entry(path_key, name, name_key, is_dir, size_bytes, modified_utc, hidden,
+                                 attributes, created_utc, crawl_gen)
+            VALUES (@key, @name, @nameKey, @isDir, @size, @modified, @hidden, @attrs, @created, @gen)
             ON CONFLICT(path_key) DO UPDATE SET
                 name = excluded.name,
                 name_key = excluded.name_key,
@@ -44,6 +83,8 @@ public sealed class FsIndexRepository
                 size_bytes = excluded.size_bytes,
                 modified_utc = excluded.modified_utc,
                 hidden = excluded.hidden,
+                attributes = excluded.attributes,
+                created_utc = excluded.created_utc,
                 crawl_gen = excluded.crawl_gen;
             """;
         var pKey = cmd.Parameters.Add("@key", SqliteType.Text);
@@ -53,6 +94,8 @@ public sealed class FsIndexRepository
         var pSize = cmd.Parameters.Add("@size", SqliteType.Integer);
         var pModified = cmd.Parameters.Add("@modified", SqliteType.Text);
         var pHidden = cmd.Parameters.Add("@hidden", SqliteType.Integer);
+        var pAttrs = cmd.Parameters.Add("@attrs", SqliteType.Integer);
+        var pCreated = cmd.Parameters.Add("@created", SqliteType.Text);
         var pGen = cmd.Parameters.Add("@gen", SqliteType.Integer);
 
         foreach (var row in rows)
@@ -64,6 +107,8 @@ public sealed class FsIndexRepository
             pSize.Value = row.SizeBytes;
             pModified.Value = row.ModifiedUtc.ToString("O");
             pHidden.Value = row.Hidden ? 1 : 0;
+            pAttrs.Value = (long)row.Attributes;
+            pCreated.Value = row.CreatedUtc.ToString("O");
             pGen.Value = crawlGen;
             cmd.ExecuteNonQuery();
         }
@@ -184,14 +229,15 @@ public sealed class FsIndexRepository
         using var conn = _db.Open();
 
         var predicate = query.Compile();
-        var rows = new List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)>();
+        var rows = new List<EntryRow>();
         bool truncated;
         using (var cmd = conn.CreateCommand())
         {
             var hiddenFilter = includeHidden ? "" : "AND hidden = 0 ";
             cmd.CommandText =
                 $"""
-                SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden, name_key
+                SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden, name_key,
+                       attributes, created_utc
                 FROM fs_entry
                 WHERE path_key >= @lo AND path_key < @hi AND ({predicate.Sql}) {hiddenFilter}
                 {Limit(predicate)};
@@ -220,7 +266,9 @@ public sealed class FsIndexRepository
                 row.IsDir,
                 row.Size,
                 row.Modified,
-                row.Hidden));
+                row.Hidden,
+                row.Attributes,
+                row.Created));
         }
         return (hits, truncated);
     }
@@ -357,14 +405,15 @@ public sealed class FsIndexRepository
         using var conn = _db.Open();
 
         var predicate = query.Compile();
-        var rows = new List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)>();
+        var rows = new List<EntryRow>();
         bool truncated;
         using (var cmd = conn.CreateCommand())
         {
             var hiddenFilter = includeHidden ? "" : "AND hidden = 0 ";
             cmd.CommandText =
                 $"""
-                SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden, name_key
+                SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden, name_key,
+                       attributes, created_utc
                 FROM fs_entry
                 WHERE ({predicate.Sql}) {hiddenFilter}
                 {Limit(predicate)};
@@ -387,7 +436,9 @@ public sealed class FsIndexRepository
             var relDir = BuildRelativeDir(row.Key, DriveRootLength, ancestorNames);
             var parentFull = relDir.Length == 0 ? driveRoot : driveRoot + relDir; // driveRoot ends with '\'
             var display = parentFull.EndsWith('\\') ? parentFull + row.Name : parentFull + '\\' + row.Name;
-            hits.Add(new SearchHit(display, parentFull, row.Name, row.IsDir, row.Size, row.Modified, row.Hidden));
+            hits.Add(new SearchHit(
+                display, parentFull, row.Name, row.IsDir, row.Size, row.Modified, row.Hidden,
+                row.Attributes, row.Created));
         }
         return (hits, truncated);
     }
@@ -423,7 +474,7 @@ public sealed class FsIndexRepository
     /// </remarks>
     private static bool ReadMatchingRows(
         SqliteCommand cmd,
-        List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)> rows,
+        List<EntryRow> rows,
         SearchQuery query,
         int cap)
     {
@@ -438,27 +489,32 @@ public sealed class FsIndexRepository
                 reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind);
             var hidden = reader.GetInt32(5) != 0;
             var nameKey = reader.GetString(6);
+            var attributes = (FileAttributes)reader.GetInt64(7);
+            var created = ReadUtc(reader, 8);
 
-            if (!query.Matches(new SearchCandidate(nameKey, key, isDir, size, modified, hidden)))
+            if (!query.Matches(
+                    new SearchCandidate(nameKey, key, isDir, size, modified, hidden, attributes, created)))
                 continue;
 
-            rows.Add((key, name, isDir, size, modified, hidden));
+            rows.Add(new EntryRow(key, name, isDir, size, modified, hidden, attributes, created));
             if (rows.Count > cap)
                 return true;
         }
         return false;
     }
 
-    /// <summary>Reads the six-column entry projection every query in this file selects, in the
-    /// order they all declare it.</summary>
+    /// <summary>Reads the six-column entry projection the non-search queries in this file select,
+    /// in the order they all declare it. <see cref="EntryRow.Attributes"/> and
+    /// <see cref="EntryRow.Created"/> stay at their defaults — see the remarks on
+    /// <see cref="EntryRow"/> for why those scans do not carry them.</summary>
     private static void ReadRows(
         SqliteCommand cmd,
-        List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)> rows)
+        List<EntryRow> rows)
     {
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            rows.Add((
+            rows.Add(new EntryRow(
                 reader.GetString(0),
                 reader.GetString(1),
                 reader.GetInt32(2) != 0,
@@ -495,7 +551,7 @@ public sealed class FsIndexRepository
 
         using var conn = _db.Open();
 
-        var rows = new List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)>();
+        var rows = new List<EntryRow>();
         using (var cmd = conn.CreateCommand())
         {
             var scope = scoped ? "path_key >= @lo AND path_key < @hi AND " : "";
@@ -530,7 +586,7 @@ public sealed class FsIndexRepository
     /// </summary>
     private static Dictionary<string, string> LookupAncestorNames(
         SqliteConnection conn,
-        List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)> rows,
+        List<EntryRow> rows,
         int loLength)
     {
         var keys = new HashSet<string>(StringComparer.Ordinal);
@@ -771,7 +827,7 @@ public sealed class FsIndexRepository
             return new DuplicateShortlist([], filesInScope, sizedFilesInScope);
 
         // --- pass two: the rows at those lengths ---
-        var rows = new List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)>();
+        var rows = new List<EntryRow>();
         using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText =
@@ -798,7 +854,7 @@ public sealed class FsIndexRepository
                 var key = reader.GetString(0);
                 if (exclude is not null && exclude(key)) continue;
 
-                rows.Add((
+                rows.Add(new EntryRow(
                     key,
                     reader.GetString(1),
                     reader.GetInt32(2) != 0,
@@ -819,7 +875,7 @@ public sealed class FsIndexRepository
     /// </summary>
     private static IReadOnlyList<SearchHit> BuildHits(
         SqliteConnection conn,
-        List<(string Key, string Name, bool IsDir, long Size, DateTime Modified, bool Hidden)> rows,
+        List<EntryRow> rows,
         bool scoped,
         string rootDisplay,
         string lo)

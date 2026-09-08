@@ -1,7 +1,7 @@
 namespace BertBrowser.Core.Services.Search;
 
 /// <summary>
-/// One entry a query is judged against. The six fields are exactly what both consumers can
+/// One entry a query is judged against. The eight fields are exactly what both consumers can
 /// supply: <c>FileSystemWalker</c>'s <c>WalkEntry</c> carries every one of them, and
 /// <c>FsIndexRepository</c> selects every one of them from <c>fs_entry</c>.
 /// </summary>
@@ -16,9 +16,14 @@ namespace BertBrowser.Core.Services.Search;
 /// today — there are three construction sites, all feeding a <c>Matches</c> call — and this note is
 /// here so nothing starts.</para>
 /// <para>A row written by <c>MftVolumeIndexer.BuildFromUsnEnum</c> carries
-/// <see cref="SizeBytes"/> 0 and <see cref="ModifiedUtc"/> <see cref="DateTime.MinValue"/> —
-/// that build path records names only. Terms reading those fields must treat such a row as
-/// unmeasured rather than as a genuine zero.</para>
+/// <see cref="SizeBytes"/> 0 and <see cref="ModifiedUtc"/>/<see cref="CreatedUtc"/>
+/// <see cref="DateTime.MinValue"/> — that build path records names and attributes only. Terms
+/// reading those fields must treat such a row as unmeasured rather than as a genuine zero.</para>
+/// <para><strong>The two metadata fields are required rather than defaulted</strong>, so a new
+/// producer cannot forget one and quietly answer every attribute query "no". That is the same
+/// discipline <c>SearchNode</c>'s two abstract members enforce: a compile error, not a silent
+/// difference between the indexed and the live path. The archive scanner is the one site that
+/// genuinely has neither and says so explicitly.</para>
 /// </remarks>
 /// <param name="NameKey">The entry's name, uppercased invariantly.</param>
 /// <param name="PathKey">The entry's full canonical path, uppercased invariantly.</param>
@@ -26,6 +31,12 @@ namespace BertBrowser.Core.Services.Search;
 /// <param name="SizeBytes">Length in bytes; 0 for a directory and for an unmeasured row.</param>
 /// <param name="ModifiedUtc">Last write time in UTC; <see cref="DateTime.MinValue"/> when unknown.</param>
 /// <param name="Hidden">Effective hidden state (the entry's own, or an ancestor's).</param>
+/// <param name="Attributes">
+/// The entry's own Win32 attribute mask, uninherited — unlike <paramref name="Hidden"/>. Zero means
+/// nothing was recorded (an archive entry, or a row predating the attributes column), and reads as
+/// "no" for every attribute term rather than as an answer.
+/// </param>
+/// <param name="CreatedUtc">Creation time in UTC; <see cref="DateTime.MinValue"/> when unknown.</param>
 /// <param name="Content">
 /// The file's decoded text, when it has been read. <strong>Null means "not read yet"</strong> —
 /// which is what every first-pass producer supplies, and what makes a <c>content:</c> term answer
@@ -39,4 +50,6 @@ public readonly record struct SearchCandidate(
     long SizeBytes,
     DateTime ModifiedUtc,
     bool Hidden,
+    FileAttributes Attributes,
+    DateTime CreatedUtc,
     ContentText? Content = null);

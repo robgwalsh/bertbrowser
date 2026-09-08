@@ -1,10 +1,17 @@
 namespace BertBrowser.Core.Services.Mft;
 
 /// <summary>One MFT entry as it lives in the in-memory reference map: its own name,
-/// its parent's file reference number, and the two attribute bits we care about.
+/// its parent's file reference number, and its own attribute mask.
 /// <see cref="OwnHidden"/> is the entry's own Hidden bit; effective (inherited) hidden
 /// is computed by <see cref="MftPathBuilder"/> while walking to the volume root.</summary>
-internal readonly record struct MftNode(string Name, ulong ParentFrn, bool IsDirectory, bool OwnHidden);
+/// <param name="Attributes">The whole mask rather than the one bit path building needs, because
+/// the names-only USN build has no other source for it — <c>fs_entry.attributes</c> comes from
+/// here on that path, which is what makes <c>is:readonly</c> work on a volume with no sizes.</param>
+internal readonly record struct MftNode(
+    string Name, ulong ParentFrn, bool IsDirectory, FileAttributes Attributes)
+{
+    public bool OwnHidden => (Attributes & FileAttributes.Hidden) != 0;
+}
 
 /// <summary>
 /// Reconstructs full paths from the flat FRN→node map that an MFT enumeration produces.

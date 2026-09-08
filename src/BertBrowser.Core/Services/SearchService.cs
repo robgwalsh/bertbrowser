@@ -390,7 +390,8 @@ public sealed class SearchService : ISearchService, IDisposable
         {
             if (!query.Matches(new SearchCandidate(
                     entry.NameKey, entry.PathKey, entry.IsDirectory,
-                    entry.SizeBytes, entry.ModifiedUtc, entry.Hidden)))
+                    entry.SizeBytes, entry.ModifiedUtc, entry.Hidden,
+                    entry.Attributes, entry.CreatedUtc)))
                 return true;
             if (DeleteExecutor.IsHeldPath(entry.DisplayPath))
                 return true; // deleted, just not committed yet
@@ -404,7 +405,8 @@ public sealed class SearchService : ISearchService, IDisposable
             if (relDir == ".") relDir = "";
 
             var hit = new SearchHit(
-                entry.DisplayPath, relDir, entry.Name, entry.IsDirectory, entry.SizeBytes, entry.ModifiedUtc, entry.Hidden);
+                entry.DisplayPath, relDir, entry.Name, entry.IsDirectory, entry.SizeBytes, entry.ModifiedUtc,
+                entry.Hidden, entry.Attributes, entry.CreatedUtc);
             hits.Add(hit);
             batch.Add(hit);
 

@@ -11,7 +11,7 @@ Everything below is the detail behind that.
 
 | Layer | What it does | Code |
 |---|---|---|
-| **Build** | One raw read of each NTFS volume's `$MFT` → every name, parent, size and timestamp on the disk | `Services/Mft/MftReader`, `MftVolumeIndexer` |
+| **Build** | One raw read of each NTFS volume's `$MFT` → every name, parent, size, timestamp and attribute on the disk | `Services/Mft/MftReader`, `MftVolumeIndexer` |
 | **Maintain** | Tail the USN change journal and patch the index as files are created, renamed and deleted | `MftVolumeIndexer.Tail` |
 | **Query** | An indexed range scan over one SQLite table | `Data/FsIndexRepository`, `Services/SearchService` |
 
@@ -32,11 +32,13 @@ CREATE TABLE fs_entry (
     size_bytes   INTEGER NOT NULL DEFAULT 0,
     modified_utc TEXT NOT NULL,
     hidden       INTEGER NOT NULL DEFAULT 0,
+    attributes   INTEGER NOT NULL DEFAULT 0,   -- the entry's own FILE_ATTRIBUTE mask
+    created_utc  TEXT    NOT NULL DEFAULT '',
     crawl_gen    INTEGER NOT NULL
 ) WITHOUT ROWID;
 ```
 
-Four decisions in that schema do most of the work:
+Five decisions in that schema do most of the work:
 
 - **`WITHOUT ROWID` with `path_key` as the primary key** makes the table *itself* the clustered
   B-tree, ordered by path. There is no separate index to hop through and no rowid indirection: a
@@ -51,6 +53,14 @@ Four decisions in that schema do most of the work:
 - **`hidden` is the *effective* flag** — the entry's own Hidden attribute OR'd down from every
   ancestor. Filtering hidden results is then `AND hidden = 0`, with no ancestor lookups at query
   time.
+- **`attributes` is the entry's *own* mask, and that asymmetry with `hidden` is deliberate.** None
+  of the other bits are inherited — a read-only folder does not make its contents read-only — so
+  there is nothing to OR down, and `is:readonly` compiles to `(attributes & 1) != 0`. Both new
+  columns' defaults are chosen so a row written before them reads as *unknown* rather than as an
+  answer: `0` sets no bit, and `''` sorts below the 1601 floor every date term applies, so neither
+  satisfies a filter. Both come free — `$STANDARD_INFORMATION` already holds the mask and all four
+  timestamps, a USN record carries the mask, and `FileSystemEntry` hands the crawler both out of
+  the same `WIN32_FIND_DATA`.
 
 Note what is *not* stored: the display-cased full path. Only the uppercased key and the entry's own
 display name are kept; a hit's real path is reassembled at query time from its ancestors' `name`
@@ -75,8 +85,10 @@ security check. Reading `$MFT` means opening `\\.\C:` and streaming one file.
 4. **Apply the update-sequence fixup** to each record. NTFS stamps a signature word into the last
    two bytes of every sector to detect torn writes; without undoing that, any field straddling a
    sector boundary is garbage.
-5. **Parse the attributes** we care about: `$STANDARD_INFORMATION` for the modified timestamp and
-   the Hidden bit, `$FILE_NAME` for the name and parent reference, `$DATA` for the real size.
+5. **Parse the attributes** we care about: `$STANDARD_INFORMATION` for the modified and created
+   timestamps and the whole `FILE_ATTRIBUTE` mask, `$FILE_NAME` for the name and parent reference,
+   `$DATA` for the real size. The accessed timestamp sits in that same attribute and is
+   deliberately not read — see `da:` below.
 
 Records that are skipped: numbers below 16 (the reserved metafiles — `$MFT`, `$LogFile`, the root's
 `.`), records without the in-use flag (deleted), and extension records, whose attributes belong to a
@@ -222,8 +234,10 @@ honoured, several of them ANDed — and on top of that `Core/Services/Search` ad
 | `ext:jpg;png` | one of these extensions |
 | `size:>100mb` | also `<`, `>=`, `<=`, `=`, `1mb..2mb`, and `empty` |
 | `dm:today` | also `yesterday`, `thisweek`, `last7days`, `2026`, `2026-08`, `>2026-01-01`, `A..B` |
+| `dc:2026-08` | the created date instead, taking exactly the same forms as `dm:` |
 | `path:projects` | a substring of the whole path, not just the name |
 | `is:dir` | also `is:file`, `is:hidden` |
+| `is:readonly` | also `is:system`, `is:archived`, `is:link`, `is:compressed` |
 | `re:^IMG_\d+` | a regular expression over the name |
 | `content:todo` | text *inside* the file — also `content:"a phrase"` |
 | `!tmp`, `NOT tmp` | exclusion |
@@ -239,11 +253,16 @@ Four rules keep this from breaking what people already type:
   findable and no existing query silently changes meaning.
 - **A stray `!`, an unbalanced `)` and an unclosed `(` are all literal or forgiving** rather than
   errors. Quoting is the escape where a name really contains a bracket.
-- **`dc:`/`da:` are refused with a message.** They plainly mean something this index cannot
-  answer, and degrading them to a substring search would return nothing while implying the disk
-  holds no such files. `content:` used to be on that list and is not any more — it is answered by
-  reading the files rather than the index, which is why it is the one filter that still works on a
-  volume the fallback build could only record names for.
+- **`da:` is refused with a message**, and it is now the only key that is. It plainly means
+  something, and degrading it to a substring search would return nothing while implying the disk
+  holds no such files. Two keys have left that list, for different reasons worth telling apart:
+  `content:` is answered by reading the files rather than the index, which is why it is the one
+  filter that still works on a volume the fallback build could only record names for; and `dc:` is
+  simply indexed now. **`da:` will not follow them.** Its refusal is not a statement about this
+  index — the accessed timestamp is right there in `$STANDARD_INFORMATION` — but about Windows,
+  which has shipped with last-access updates disabled (`NtfsDisableLastAccessUpdate`) since
+  Windows 10. The value is readable and frozen, usually at the creation date, so a filter over it
+  would answer confidently and wrongly. Indexing it would be worse than refusing it.
 
 `SearchGrammar.Parse` **never throws** — a bad regular expression, an unreadable size, a half-typed
 `size:>` all come back as text, because this runs on the UI thread on a keystroke. It returns three
@@ -279,27 +298,35 @@ Two consequences fall out of that and are easy to undo by accident:
 A scoped search (`FsIndexRepository.Search`) is one statement:
 
 ```sql
-SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden, name_key
+SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden, name_key, attributes, created_utc
 FROM fs_entry
 WHERE path_key >= @lo AND path_key < @hi AND (<compiled predicate>)
 LIMIT @limit;          -- only when the predicate is exact
 ```
 
+The last two columns are selected by the two *search* projections only. The largest-files and
+duplicate-shortlist scans read most rows on the disk and display neither, so they keep the six-column
+projection — widening the widest scans in the file to carry columns nothing reads is the same cost
+the no-secondary-index rule above exists to avoid.
+
 - **`@lo`/`@hi` come from `PathKey.PrefixBounds`**, a half-open range `[dir\, dir])` — `]` is the
   character immediately after `\` in ASCII, so "everything under this directory" is a pure index
   range scan on the clustered key rather than a `LIKE 'dir%'` full scan.
 - **A name term compiles to `name_key GLOB '*TERM*'`**, with `[` escaped as `[[]` since it opens a
-  character class. `ext:` rides the same scan (`name_key GLOB '?*.JPG'`); `size:`, `dm:`, `is:` and
-  `path:` are comparisons on columns already in the row.
+  character class. `ext:` rides the same scan (`name_key GLOB '?*.JPG'`); `size:`, `dm:`, `dc:`,
+  `is:` and `path:` are comparisons on columns already in the row — an attribute is a mask test,
+  `(attributes & 1) != 0`.
 - **There is no `ORDER BY`.** That is deliberate: with `LIMIT`, SQLite can stop the moment it has
   enough rows, whereas any sort forces the whole matching set to be materialised first. The capped
   page (1,000 hits) is sorted in the caller, where it is cheap.
 - **The limit is `cap + 1`.** If the extra row comes back, the result set was truncated; it is
   dropped and the status bar says "showing first 1,000".
-- **`modified_utc` is TEXT written with `"O"`** — fixed-width and zero-padded — so BINARY collation
-  is already a correct chronological order and a date bound is a plain string comparison. Rows from
-  the fallback build carry `0001-01-01…`, which sorts below the 1601 floor every date term applies,
-  so an unmeasured row satisfies no date filter rather than matching every open-ended one.
+- **`modified_utc` and `created_utc` are TEXT written with `"O"`** — fixed-width and zero-padded —
+  so BINARY collation is already a correct chronological order and a date bound is a plain string
+  comparison. Rows from the fallback build carry `0001-01-01…`, and rows predating the created
+  column carry `''`; both sort below the 1601 floor every date term applies, so an unmeasured row
+  satisfies no date filter rather than matching every open-ended one. (`''` is also why the row
+  reader maps it back to `DateTime.MinValue` itself — `DateTime.Parse("")` throws.)
 
 A whole-PC search (`SearchGlobal`) is the identical query with the range bound removed, so it scans
 every indexed volume.
@@ -494,12 +521,20 @@ the canonical path.
 - **The index holds names only.** `content:` is answered by reading the files themselves, not from
   any stored text — see "Reading the files" below. There is still no content *index*, so a content
   query costs disk rather than a lookup, and is bounded and cancellable accordingly.
-- **`size:` and `dm:` need a fully indexed drive.** The `FSCTL_ENUM_USN_DATA` fallback records names
-  only, so those filters can never match on a volume built that way. A filtered search that comes
-  back empty asks `FsIndexRepository.HasSizeData` before reporting "no results", and says the drive
-  is unmeasured instead — the same distinction `DiskUsageRules` draws, and for the same reason.
-- **Only modified time is indexed**, not created or accessed; `dc:`/`da:` are refused with a message
-  pointing at `dm:`.
+- **`size:`, `dm:` and `dc:` need a fully indexed drive.** The `FSCTL_ENUM_USN_DATA` fallback
+  records names and attributes only, so those filters can never match on a volume built that way. A
+  filtered search that comes back empty asks `FsIndexRepository.HasSizeData` before reporting "no
+  results", and says the drive is unmeasured instead — the same distinction `DiskUsageRules` draws,
+  and for the same reason. **`is:` attributes are the exception**: a USN record carries the whole
+  mask, so they answer on a volume where the other three cannot, which is why `AttributeTerm` sets
+  `NeedsMetadata` false where `SizeTerm` and `DateTerm` set it true.
+- **Modified and created are indexed; accessed is not**, and `da:` is refused with a message —
+  see the fourth compatibility rule above for why that one will not change.
+- **Adding either column costs a rebuild, and gets one for free.** Existing rows keep the
+  migration's defaults and read as *unknown* until their volume is re-read. Bumping the schema
+  version is what arranges that: the running helper's self-check sees `user_version` move and
+  exits, and the next helper start rebuilds every volume from the MFT. Crawler-backed roots fill on
+  their next re-crawl.
 - **A full rebuild runs once per helper, not once per launch.** The helper outlives the app, so
   reopening BertBrowser attaches to the index it left running and rebuilds nothing. A rebuild
   happens when a helper starts: at the first launch after signing in, or at sign-in itself with the
@@ -512,20 +547,20 @@ the canonical path.
 
 | Test | Covers |
 |---|---|
-| `NtfsParsingTests` | Boot-sector geometry, runlist decoding, the sector fixup, FILE-record parsing |
+| `NtfsParsingTests` | Boot-sector geometry, runlist decoding, the sector fixup, FILE-record parsing — including that the whole attribute mask survives and that created is read from `$STANDARD_INFORMATION + 0x00` rather than modified's `+ 0x08` |
 | `UsnRecordParserTests` | Journal record parsing |
 | `MftPathBuilderTests` | Parent-chain resolution, memoization, broken chains, hidden inheritance |
 | `MftDirectorySizeBuilderTests` | Post-order rollup totals |
 | `SearchQueryTests` | What a bare query has always meant: the two-literal-character floor, wildcards, GLOB escaping — plus the compatibility cases the filter syntax could have broken silently (an unrecognised key, lowercase `or`, a trailing `!`) |
-| `SearchGrammarTests` | The filter language: every key, the operators, the refusals, a real catastrophic backtrack |
-| `SearchAgreementTests` | ~45 queries run through **both** SQL and the matcher over one corpus, asserted identical — the test that makes drift impossible — plus the cap, the size-data probe, and that a content query shortlists every candidate its name allows |
+| `SearchGrammarTests` | The filter language: every key and every `is:` value, the operators, the refusals, a real catastrophic backtrack — plus that `dc:` and `dm:` read different columns, that an unrecorded mask or timestamp matches nothing, and that `is:hidden` still reads the *effective* flag rather than the mask |
+| `SearchAgreementTests` | ~60 queries run through **both** SQL and the matcher over one corpus, asserted identical — the test that makes drift impossible — plus the cap, the size-data probe, and that a content query shortlists every candidate its name allows. The corpus deliberately includes a row with no size, timestamps or attributes (the fallback build's shape, and any row predating a column) and a file created long after it was modified |
 | `ContentTermTests` | The three-valued verdict through AND, OR and NOT: the two cases that cost nothing (`content:a OR ext:md`, `is:dir content:x`) and the one that must stay undecided (`!content:x`) |
 | `ContentReaderTests` | Real files: the encoding ladder, the sharing flags that stop a search blocking a rename, the per-file budget, and null-for-failure versus throw-for-cancel |
 | `ContentSnippetTests` | Line numbers, and clipping a very long line *around* the match rather than from the left |
 | `ContentScannerTests` | Which candidates are opened, a cancel giving back a floor, the ceilings, and one unreadable file costing the others nothing |
 | `ContentSearchAgreementTests` | The whole pipeline against an independent `File.ReadAllText` of a real tree, on **both** branches — the analogue of `SearchAgreementTests`, which structurally cannot cover a content term |
 | `SizeTextTests`, `DateShorthandTests` | The literal parsers; the clock is injected, and the units are pinned to `ByteSizeFormatter`'s |
-| `FsIndexRepositoryTests` | Range scans, truncation, ancestor path reconstruction, rename/delete subtree rewrites, the vanish sweep |
+| `FsIndexRepositoryTests` | Range scans, truncation, ancestor path reconstruction, rename/delete subtree rewrites, the vanish sweep, and both new columns' round trip — including a row left at the migration's `''` created date, which must read back as unknown rather than throw |
 | `SearchServiceTests` | Fresh / stale / unindexed routing and live-scan streaming |
 | `IndexCrawlerTests`, `IndexWatcherApplyTests` | The fallback crawler and watcher apply path |
 | `MftIndexHostTests` | One helper across two sessions: the replay a late-joining app depends on, that a second `Start` does not index twice, and that a lost pipe and a `Shutdown` are told apart |

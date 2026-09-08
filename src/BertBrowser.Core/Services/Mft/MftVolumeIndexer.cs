@@ -171,7 +171,7 @@ internal sealed class MftVolumeIndexer : IDisposable
         var dirNodes = new Dictionary<ulong, MftNode>();
         foreach (var rec in records)
             if (rec.IsDirectory)
-                dirNodes[rec.RecordNumber] = new MftNode(rec.Name, rec.ParentRecordNumber, true, rec.Hidden);
+                dirNodes[rec.RecordNumber] = new MftNode(rec.Name, rec.ParentRecordNumber, true, rec.Attributes);
 
         _dirs.Clear();
         foreach (var recno in dirNodes.Keys)
@@ -186,7 +186,9 @@ internal sealed class MftVolumeIndexer : IDisposable
             sizes.Add(rec);
             if (TryResolveRecord(rec, out var key, out var hidden))
             {
-                rows.Add(new FsEntryRow(key, rec.Name, rec.IsDirectory, rec.IsDirectory ? 0 : rec.Size, rec.ModifiedUtc, hidden));
+                rows.Add(new FsEntryRow(
+                    key, rec.Name, rec.IsDirectory, rec.IsDirectory ? 0 : rec.Size, rec.ModifiedUtc,
+                    hidden, rec.Attributes, rec.CreatedUtc));
                 if (rows.Count >= UpsertChunk)
                 {
                     _repository.UpsertEntries(rows, crawlGen);
@@ -262,9 +264,11 @@ internal sealed class MftVolumeIndexer : IDisposable
         return true;
     }
 
-    /// <summary>Fallback build via FSCTL_ENUM_USN_DATA — names only: every row is written with
-    /// size 0 and no timestamp, and <see cref="MftDirectorySizeBuilder"/> is not run, so this path
-    /// fills no dir_size_cache either.</summary>
+    /// <summary>Fallback build via FSCTL_ENUM_USN_DATA — names and attributes only: every row is
+    /// written with size 0 and no timestamps, and <see cref="MftDirectorySizeBuilder"/> is not run,
+    /// so this path fills no dir_size_cache either. Attributes are the exception, and come through
+    /// intact: a USN record carries the whole mask, which is why <c>is:readonly</c> answers on a
+    /// volume where <c>size:</c> and <c>dm:</c> cannot.</summary>
     /// <remarks>
     /// A volume built this way is searchable but <em>unmeasured</em>, and there is no longer any
     /// on-demand scanner to fill the gap in — the post-order DFS that once did was removed when
@@ -287,7 +291,9 @@ internal sealed class MftVolumeIndexer : IDisposable
             if (!MftPathBuilder.TryResolve(map, frn, _driveRoot, _dirs, out var display, out var hidden, NtfsLayout.RootRecordNumber))
                 continue;
 
-            rows.Add(new FsEntryRow(display.ToUpperInvariant(), node.Name, node.IsDirectory, 0, DateTime.MinValue, hidden));
+            rows.Add(new FsEntryRow(
+                display.ToUpperInvariant(), node.Name, node.IsDirectory, 0, DateTime.MinValue,
+                hidden, node.Attributes, DateTime.MinValue));
             if (rows.Count >= UpsertChunk)
             {
                 _repository.UpsertEntries(rows, crawlGen);
@@ -317,7 +323,7 @@ internal sealed class MftVolumeIndexer : IDisposable
 
             foreach (var rec in UsnRecordParser.Parse(buffer, sizeof(ulong), bytes))
                 map[NtfsLayout.RecordNumber(rec.FileReferenceNumber)] =
-                    new MftNode(rec.Name, NtfsLayout.RecordNumber(rec.ParentFileReferenceNumber), rec.IsDirectory, rec.IsHidden);
+                    new MftNode(rec.Name, NtfsLayout.RecordNumber(rec.ParentFileReferenceNumber), rec.IsDirectory, rec.Attributes);
 
             input.StartFileReferenceNumber = BinaryPrimitives.ReadUInt64LittleEndian(buffer);
         }
@@ -439,9 +445,14 @@ internal sealed class MftVolumeIndexer : IDisposable
         // Reached both directly and from an unpaired rename; Classify draws the same line Apply
         // does, so a move-in from nowhere the map knew is "created" on both sides.
         Note(rec, display, key, ChangeLogRules.Classify(rec.Reason, hadOldName: false), oldDisplayPath: null, hidden);
-        var (size, modified) = StatBestEffort(display, rec.IsDirectory);
+        // Attributes come from the record itself — no stat needed for them, and the journal's
+        // answer is the one the index should agree with. Only the timestamps and the length need
+        // disk, and they come out of one FileInfo between them.
+        var (size, modified, created) = StatBestEffort(display, rec.IsDirectory);
         var crawlGen = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        _repository.UpsertEntries(new[] { new FsEntryRow(key, rec.Name, rec.IsDirectory, size, modified, hidden) }, crawlGen);
+        _repository.UpsertEntries(
+            new[] { new FsEntryRow(key, rec.Name, rec.IsDirectory, size, modified, hidden, rec.Attributes, created) },
+            crawlGen);
 
         if (rec.IsDirectory)
             _dirs[NtfsLayout.RecordNumber(rec.FileReferenceNumber)] = (display, hidden);
@@ -490,18 +501,24 @@ internal sealed class MftVolumeIndexer : IDisposable
         parentRecord != NtfsLayout.RootRecordNumber
         && _dirs.TryGetValue(parentRecord, out var parent) && parent.Hidden;
 
-    private static (long Size, DateTime Modified) StatBestEffort(string path, bool isDirectory)
+    /// <summary>One stat, three fields: <see cref="FileSystemInfo"/> caches the find data on its
+    /// first access, so the creation time costs nothing over the length and write time this
+    /// already needed.</summary>
+    private static (long Size, DateTime Modified, DateTime Created) StatBestEffort(string path, bool isDirectory)
     {
         try
         {
             if (isDirectory)
-                return (0, new DirectoryInfo(path).LastWriteTimeUtc);
+            {
+                var dir = new DirectoryInfo(path);
+                return (0, dir.LastWriteTimeUtc, dir.CreationTimeUtc);
+            }
             var info = new FileInfo(path);
-            return (info.Length, info.LastWriteTimeUtc);
+            return (info.Length, info.LastWriteTimeUtc, info.CreationTimeUtc);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            return (0, DateTime.MinValue);
+            return (0, DateTime.MinValue, DateTime.MinValue);
         }
     }
 

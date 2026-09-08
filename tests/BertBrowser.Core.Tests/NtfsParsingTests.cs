@@ -93,6 +93,11 @@ public sealed class NtfsParsingTests
 
     private static readonly DateTime Modified = new(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc);
 
+    /// <summary>Deliberately unlike <see cref="Modified"/>, and written to a different offset in
+    /// the same attribute. Reading created from modified's 0x08 instead of 0x00 is a one-character
+    /// mistake that no other test could see.</summary>
+    private static readonly DateTime Created = new(2015, 11, 12, 13, 14, 15, DateTimeKind.Utc);
+
     [Fact]
     public void ParseFileRecord_ReadsNameParentSizeAndDate()
     {
@@ -131,6 +136,43 @@ public sealed class NtfsParsingTests
         Assert.Equal(0, parsed.Size); // directories carry no $DATA size
     }
 
+    /// <summary>
+    /// The whole <c>$STANDARD_INFORMATION</c> attribute mask reaches the record, not just the
+    /// Hidden bit it used to be reduced to — this is what <c>fs_entry.attributes</c> is filled
+    /// from, and so what <c>is:readonly</c> and friends ultimately answer out of.
+    /// </summary>
+    [Fact]
+    public void ParseFileRecord_KeepsTheWholeAttributeMask()
+    {
+        const uint readOnly = 0x0001, system = 0x0004, archive = 0x0020;
+        var rec = BuildRecord(isDir: false, hidden: true, size: 10,
+            fileNames: new[] { (name: "boot.ini", ns: (byte)1, parent: 5UL) },
+            extraAttrs: readOnly | system | archive);
+
+        Assert.True(MftReader.TryParseFileRecord(rec, 40, 1024, 512, out var parsed));
+        Assert.Equal(
+            FileAttributes.ReadOnly | FileAttributes.System | FileAttributes.Archive | FileAttributes.Hidden,
+            parsed.Attributes);
+        Assert.True(parsed.Hidden); // still readable by name, off the same mask
+    }
+
+    /// <summary>
+    /// Creation time comes from <c>$STANDARD_INFORMATION + 0x00</c>, not modified's <c>+ 0x08</c>.
+    /// The two fixtures differ, so reading the wrong one fails here instead of shipping a
+    /// <c>dc:</c> filter that silently answers <c>dm:</c>'s question.
+    /// </summary>
+    [Fact]
+    public void ParseFileRecord_ReadsCreatedFromItsOwnField()
+    {
+        var rec = BuildRecord(isDir: false, hidden: false, size: 10,
+            fileNames: new[] { (name: "report.txt", ns: (byte)1, parent: 5UL) });
+
+        Assert.True(MftReader.TryParseFileRecord(rec, 40, 1024, 512, out var parsed));
+        Assert.Equal(Created, parsed.CreatedUtc);
+        Assert.Equal(Modified, parsed.ModifiedUtc);
+        Assert.NotEqual(parsed.CreatedUtc, parsed.ModifiedUtc);
+    }
+
     [Fact]
     public void ParseFileRecord_SkipsReservedMetafiles()
     {
@@ -153,7 +195,9 @@ public sealed class NtfsParsingTests
     /// <summary>Assembles a minimal-but-valid FILE record: header + $STANDARD_INFORMATION +
     /// one or more $FILE_NAME + a non-resident $DATA + end marker. USA words are zero (tails
     /// already zero) so the fixup is a harmless no-op over the attributes.</summary>
-    private static byte[] BuildRecord(bool isDir, bool hidden, long size, (string name, byte ns, ulong parent)[] fileNames, bool withData = true)
+    /// <param name="extraAttrs">Further FILE_ATTRIBUTE bits beyond Hidden, for the tests that
+    /// check the whole mask survives rather than being reduced to one flag.</param>
+    private static byte[] BuildRecord(bool isDir, bool hidden, long size, (string name, byte ns, ulong parent)[] fileNames, bool withData = true, uint extraAttrs = 0)
     {
         var rec = new byte[1024];
         Encoding.ASCII.GetBytes("FILE").CopyTo(rec, 0);
@@ -164,7 +208,8 @@ public sealed class NtfsParsingTests
         BinaryPrimitives.WriteUInt16LittleEndian(rec.AsSpan(NtfsLayout.RecFlags), (ushort)flags);
 
         var off = 0x38;
-        off += WriteStdInfo(rec, off, Modified.ToFileTimeUtc(), hidden ? NtfsLayout.FileAttributeHidden : 0);
+        off += WriteStdInfo(rec, off, Modified.ToFileTimeUtc(),
+            (hidden ? NtfsLayout.FileAttributeHidden : 0) | extraAttrs, Created.ToFileTimeUtc());
         foreach (var (name, ns, parent) in fileNames)
             off += WriteFileName(rec, off, parent, name, ns);
         if (!isDir && withData)
@@ -185,11 +230,13 @@ public sealed class NtfsParsingTests
         return len;
     }
 
-    private static int WriteStdInfo(byte[] rec, int off, long modifiedFileTime, uint fileAttrs)
+    private static int WriteStdInfo(
+        byte[] rec, int off, long modifiedFileTime, uint fileAttrs, long createdFileTime)
     {
         const int contentLen = 0x30;
         var len = WriteResidentHeader(rec, off, NtfsLayout.AttrStandardInformation, contentLen);
         var c = off + 0x18;
+        BinaryPrimitives.WriteInt64LittleEndian(rec.AsSpan(c + NtfsLayout.StdInfoCreated), createdFileTime);
         BinaryPrimitives.WriteInt64LittleEndian(rec.AsSpan(c + NtfsLayout.StdInfoModified), modifiedFileTime);
         BinaryPrimitives.WriteUInt32LittleEndian(rec.AsSpan(c + NtfsLayout.StdInfoFileAttributes), fileAttrs);
         return len;

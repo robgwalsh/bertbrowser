@@ -9,10 +9,13 @@ public sealed class MftDirectorySizeBuilderTests
     private const ulong Root = 5;
 
     private static MftFileRecord Dir(ulong rec, ulong parent, string name, bool hidden = false) =>
-        new(rec, parent, name, IsDirectory: true, Hidden: hidden, Size: 0, ModifiedUtc: DateTime.UnixEpoch);
+        new(rec, parent, name, IsDirectory: true,
+            Attributes: FileAttributes.Directory | (hidden ? FileAttributes.Hidden : 0),
+            Size: 0, ModifiedUtc: DateTime.UnixEpoch, CreatedUtc: DateTime.UnixEpoch);
 
     private static MftFileRecord File(ulong rec, ulong parent, string name, long size) =>
-        new(rec, parent, name, IsDirectory: false, Hidden: false, Size: size, ModifiedUtc: DateTime.UnixEpoch);
+        new(rec, parent, name, IsDirectory: false, Attributes: FileAttributes.Archive,
+            Size: size, ModifiedUtc: DateTime.UnixEpoch, CreatedUtc: DateTime.UnixEpoch);
 
     [Fact]
     public void Build_RollsSizesAndCountsUpTheTree()

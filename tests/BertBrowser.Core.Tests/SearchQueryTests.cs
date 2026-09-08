@@ -16,7 +16,8 @@ public sealed class SearchQueryTests
     /// the walker folds on its way to a path key, the index stores name_key folded.</summary>
     private static SearchCandidate File(string name, long size = 0, bool isDir = false) =>
         new(name.ToUpperInvariant(), (@"C:\Data\" + name).ToUpperInvariant(),
-            isDir, size, new DateTime(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc), false);
+            isDir, size, new DateTime(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc), false,
+            FileAttributes.Archive, new DateTime(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc));
 
     [Theory]
     [InlineData(null)]

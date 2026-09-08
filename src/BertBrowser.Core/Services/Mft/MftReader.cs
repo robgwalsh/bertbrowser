@@ -10,14 +10,25 @@ namespace BertBrowser.Core.Services.Mft;
 /// <see cref="Size"/> is -1 for a file whose <c>$DATA</c> lives in extension records (the
 /// base record can't report its size); the caller stats those from disk. Directories are 0.
 /// Keyed by 48-bit MFT record numbers (root = 5).</summary>
+/// <param name="Attributes">The whole <c>$STANDARD_INFORMATION</c> attribute mask, not just the
+/// Hidden bit this used to reduce to. <see cref="Hidden"/> reads it back by name; the rest of the
+/// mask reaches <c>fs_entry.attributes</c>, which is what <c>is:readonly</c> and friends filter on.
+/// It is the entry's <em>own</em> mask — the effective, inherited hidden state is computed by the
+/// caller from the parent chain.</param>
+/// <param name="CreatedUtc">Out of the same attribute as <see cref="ModifiedUtc"/>, four fields
+/// along, so it costs no extra read.</param>
 internal readonly record struct MftFileRecord(
     ulong RecordNumber,
     ulong ParentRecordNumber,
     string Name,
     bool IsDirectory,
-    bool Hidden,
+    FileAttributes Attributes,
     long Size,
-    DateTime ModifiedUtc);
+    DateTime ModifiedUtc,
+    DateTime CreatedUtc)
+{
+    public bool Hidden => (Attributes & FileAttributes.Hidden) != 0;
+}
 
 /// <summary>
 /// Reads the raw NTFS <c>$MFT</c> from a volume handle: parses the boot sector for geometry,
@@ -240,7 +251,8 @@ internal sealed class MftReader
         byte chosenNamespace = 255;
         ulong parentRecord = 0;
         var modified = DateTime.MinValue;
-        var hidden = false;
+        var created = DateTime.MinValue;
+        FileAttributes attributes = 0;
         long size = 0;
         var haveData = false;
 
@@ -261,7 +273,8 @@ internal sealed class MftReader
             {
                 var content = offset + BinaryPrimitives.ReadUInt16LittleEndian(record.Slice(offset + NtfsLayout.AttrResValueOffset));
                 modified = FileTimeToUtc(BinaryPrimitives.ReadInt64LittleEndian(record.Slice(content + NtfsLayout.StdInfoModified)));
-                hidden = (BinaryPrimitives.ReadUInt32LittleEndian(record.Slice(content + NtfsLayout.StdInfoFileAttributes)) & NtfsLayout.FileAttributeHidden) != 0;
+                created = FileTimeToUtc(BinaryPrimitives.ReadInt64LittleEndian(record.Slice(content + NtfsLayout.StdInfoCreated)));
+                attributes = (FileAttributes)BinaryPrimitives.ReadUInt32LittleEndian(record.Slice(content + NtfsLayout.StdInfoFileAttributes));
             }
             else if (type == NtfsLayout.AttrFileName && !nonResident)
             {
@@ -293,7 +306,8 @@ internal sealed class MftReader
         // A file with no unnamed $DATA in its base record has that attribute in extension
         // records (heavy fragmentation) — signal "unknown" with -1 so the caller stats it.
         var fileSize = isDirectory ? 0 : haveData ? Math.Max(0, size) : -1;
-        parsed = new MftFileRecord(recordNumber, parentRecord, name, isDirectory, hidden, fileSize, modified);
+        parsed = new MftFileRecord(
+            recordNumber, parentRecord, name, isDirectory, attributes, fileSize, modified, created);
         return true;
     }
 

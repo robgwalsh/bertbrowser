@@ -62,7 +62,8 @@ public sealed class IndexCrawler
         FileSystemWalker.Walk(root, entry =>
         {
             buffer.Add(new FsEntryRow(
-                entry.PathKey, entry.Name, entry.IsDirectory, entry.SizeBytes, entry.ModifiedUtc, entry.Hidden));
+                entry.PathKey, entry.Name, entry.IsDirectory, entry.SizeBytes, entry.ModifiedUtc,
+                entry.Hidden, entry.Attributes, entry.CreatedUtc));
             if (buffer.Count >= ChunkSize)
             {
                 _repository.UpsertEntries(buffer, crawlGen);

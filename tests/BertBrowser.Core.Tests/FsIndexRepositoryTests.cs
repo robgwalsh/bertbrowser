@@ -28,10 +28,80 @@ public sealed class FsIndexRepositoryTests : IDisposable
     }
 
     /// <summary>Index rows are synthetic — no real filesystem needed for repo tests.</summary>
-    private static FsEntryRow Row(string displayPath, bool isDir = false, long size = 0, bool hidden = false) =>
-        new(PathKey.Canonicalize(displayPath), Path.GetFileName(displayPath), isDir, size, DateTime.UtcNow, hidden);
+    private static FsEntryRow Row(
+        string displayPath, bool isDir = false, long size = 0, bool hidden = false,
+        FileAttributes attributes = 0, DateTime created = default) =>
+        new(PathKey.Canonicalize(displayPath), Path.GetFileName(displayPath), isDir, size,
+            DateTime.UtcNow, hidden, attributes, created);
 
     private static SearchQuery Q(string text) => SearchQuery.Parse(text).Query!;
+
+    // --- attributes and created round-trip ---
+
+    /// <summary>
+    /// Both new columns survive the write and come back on the hit, which is what lets the
+    /// Attributes and Created list columns render on a search row rather than sitting blank.
+    /// </summary>
+    [Fact]
+    public void Search_CarriesAttributesAndCreatedBackOntoTheHit()
+    {
+        var created = new DateTime(2026, 3, 4, 5, 6, 7, DateTimeKind.Utc);
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\report.txt",
+                attributes: FileAttributes.ReadOnly | FileAttributes.Archive, created: created),
+        }, crawlGen: 1);
+
+        var hit = Assert.Single(_repo.Search(@"C:\Data", Q("report"), cap: 100).Hits);
+
+        Assert.Equal(FileAttributes.ReadOnly | FileAttributes.Archive, hit.Attributes);
+        Assert.Equal(created, hit.CreatedUtc);
+    }
+
+    /// <summary>
+    /// A row whose creation time was never recorded stores <see cref="DateTime.MinValue"/>, and a
+    /// row written before the column existed stores the migration's <c>''</c> default. Both have
+    /// to read back as "unknown" — and the empty string is the one that would throw, because
+    /// <c>DateTime.Parse("")</c> does.
+    /// </summary>
+    [Fact]
+    public void Search_ReadsAnUnrecordedCreatedDateWithoutThrowing()
+    {
+        _repo.UpsertEntries(new[] { Row(@"C:\Data\report.txt") }, crawlGen: 1);
+
+        // Exactly what ALTER TABLE ... DEFAULT '' left on every pre-existing row.
+        using (var conn = new Db(_dbPath).Open())
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "UPDATE fs_entry SET created_utc = '';";
+            cmd.ExecuteNonQuery();
+        }
+
+        var hit = Assert.Single(_repo.Search(@"C:\Data", Q("report"), cap: 100).Hits);
+        Assert.Equal(default, hit.CreatedUtc);
+
+        // ...and it satisfies no dc: filter rather than every open-ended one.
+        Assert.Empty(_repo.Search(@"C:\Data", Q("report dc:>2000"), cap: 100).Hits);
+        Assert.Empty(_repo.Search(@"C:\Data", Q("report dc:<2100"), cap: 100).Hits);
+    }
+
+    /// <summary>The attribute filter runs in SQL as a mask test, so a row carrying several bits
+    /// matches a query about any one of them and no others.</summary>
+    [Fact]
+    public void Search_FiltersOnOneAttributeBitOfAMask()
+    {
+        _repo.UpsertEntries(new[]
+        {
+            Row(@"C:\Data\locked.txt", attributes: FileAttributes.ReadOnly | FileAttributes.Archive),
+            Row(@"C:\Data\plain.txt", attributes: FileAttributes.Archive),
+            Row(@"C:\Data\legacy.txt"), // never recorded — 0 must not match anything
+        }, crawlGen: 1);
+
+        Assert.Equal("locked.txt",
+            Assert.Single(_repo.Search(@"C:\Data", Q("txt is:readonly"), cap: 100).Hits).Name);
+        Assert.Equal(2, _repo.Search(@"C:\Data", Q("txt is:archived"), cap: 100).Hits.Count);
+        Assert.Empty(_repo.Search(@"C:\Data", Q("txt is:system"), cap: 100).Hits);
+    }
 
     [Fact]
     public void Search_MatchesSubstringCaseInsensitively()

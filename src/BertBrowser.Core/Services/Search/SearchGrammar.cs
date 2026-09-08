@@ -358,7 +358,10 @@ public static class SearchGrammar
                     return BuildSize(value);
 
                 case SearchSyntax.Modified:
-                    return BuildDate(value);
+                    return BuildDate(DateField.Modified, "dm", value);
+
+                case SearchSyntax.Created:
+                    return BuildDate(DateField.Created, "dc", value);
 
                 case SearchSyntax.Is:
                     return value.ToUpperInvariant() switch
@@ -366,7 +369,17 @@ public static class SearchGrammar
                         "DIR" or "DIRECTORY" or "FOLDER" => new KindTerm(true),
                         "FILE" => new KindTerm(false),
                         "HIDDEN" => new HiddenTerm(),
-                        _ => Fail($"is: doesn't know '{value}' — try is:dir, is:file or is:hidden."),
+                        "READONLY" or "READ-ONLY" or "RO" => new AttributeTerm(FileAttributes.ReadOnly),
+                        "SYSTEM" => new AttributeTerm(FileAttributes.System),
+                        // "archived", not "archive", because in:archives already means "look inside
+                        // zips" and one word cannot mean both. The competitors' spelling is accepted
+                        // so nobody arriving from one is stopped by a vocabulary difference.
+                        "ARCHIVED" or "ARCHIVE" => new AttributeTerm(FileAttributes.Archive),
+                        "LINK" or "JUNCTION" or "SYMLINK" or "REPARSE" =>
+                            new AttributeTerm(FileAttributes.ReparsePoint),
+                        "COMPRESSED" => new AttributeTerm(FileAttributes.Compressed),
+                        _ => Fail($"is: doesn't know '{value}' — try is:dir, is:file, is:hidden, "
+                                  + "is:readonly, is:system, is:archived, is:link or is:compressed."),
                     };
 
                 case SearchSyntax.In:
@@ -428,33 +441,37 @@ public static class SearchGrammar
             };
         }
 
-        private SearchNode? BuildDate(string value)
+        /// <param name="field">Which timestamp the term compares.</param>
+        /// <param name="key">The key as it is spelled to the user, so <c>dc:</c> is not told what
+        /// <c>dm:</c> accepts. Both take exactly the same values — one parser, one set of
+        /// shorthands — and only the name in the message differs.</param>
+        private SearchNode? BuildDate(DateField field, string key, string value)
         {
             var (op, rest) = SplitOperator(value);
             var now = DateTime.Now;
 
             if (rest.Length == 0)
-                return Fail("dm: needs a date, like dm:today or dm:>2026-01-01.");
+                return Fail($"{key}: needs a date, like {key}:today or {key}:>2026-01-01.");
 
             if (rest.Contains("..", StringComparison.Ordinal))
             {
                 var parts = rest.Split("..", 2, StringSplitOptions.None);
                 if (!DateShorthand.TryResolve(parts[0], now, out var fromLo, out _)
                     || !DateShorthand.TryResolve(parts[1], now, out _, out var toHi))
-                    return Fail($"dm: can't read the range '{rest}' — try dm:2026-01-01..2026-06-30.");
-                return new DateTerm(fromLo, toHi);
+                    return Fail($"{key}: can't read the range '{rest}' — try {key}:2026-01-01..2026-06-30.");
+                return new DateTerm(fromLo, toHi, field);
             }
 
             if (!DateShorthand.TryResolve(rest, now, out var lo, out var hi))
-                return Fail($"dm: can't read '{rest}' — try dm:today or dm:2026-08.");
+                return Fail($"{key}: can't read '{rest}' — try {key}:today or {key}:2026-08.");
 
             return op switch
             {
-                ">" => new DateTerm(hi, null),
-                ">=" => new DateTerm(lo, null),
-                "<" => new DateTerm(null, lo),
-                "<=" => new DateTerm(null, hi),
-                _ => new DateTerm(lo, hi),
+                ">" => new DateTerm(hi, null, field),
+                ">=" => new DateTerm(lo, null, field),
+                "<" => new DateTerm(null, lo, field),
+                "<=" => new DateTerm(null, hi, field),
+                _ => new DateTerm(lo, hi, field),
             };
         }
 

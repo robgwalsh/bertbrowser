@@ -9,6 +9,11 @@ namespace BertBrowser.Core.Services;
 /// <param name="NameKey">The name uppercased invariantly. Carried rather than recomputed by
 /// consumers: the walker already folds it on its way to building <paramref name="PathKey"/>, so
 /// it is free here and one allocation per entry saved in the search matcher.</param>
+/// <param name="Attributes">The entry's own attribute mask, uninherited — unlike
+/// <paramref name="Hidden"/>. The walker already reads this to decide hidden and descent, so
+/// keeping the whole mask costs nothing.</param>
+/// <param name="CreatedUtc">Creation time, out of the same find data as
+/// <paramref name="ModifiedUtc"/> — so the column that shows it costs no extra stat.</param>
 internal readonly record struct WalkEntry(
     string DisplayPath,
     string PathKey,
@@ -17,7 +22,9 @@ internal readonly record struct WalkEntry(
     bool IsDirectory,
     long SizeBytes,
     DateTime ModifiedUtc,
-    bool Hidden);
+    bool Hidden,
+    FileAttributes Attributes,
+    DateTime CreatedUtc);
 
 /// <summary>
 /// Iterative pre-order walk of a directory subtree (explicit stack, so deep trees
@@ -67,7 +74,9 @@ internal static class FileSystemWalker
                             isDir,
                             isDir ? 0 : entry.Length,
                             entry.LastWriteTimeUtc.UtcDateTime,
-                            hidden);
+                            hidden,
+                            entry.Attributes,
+                            entry.CreationTimeUtc.UtcDateTime);
                         var descend = isDir && (entry.Attributes & FileAttributes.ReparsePoint) == 0;
                         return (walkEntry, descend);
                     },

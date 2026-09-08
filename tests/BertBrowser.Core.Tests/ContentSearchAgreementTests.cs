@@ -122,6 +122,8 @@ public sealed class ContentSearchAgreementTests : IDisposable
                 SizeBytes: new FileInfo(full).Length,
                 ModifiedUtc: File.GetLastWriteTimeUtc(full),
                 Hidden: false,
+                Attributes: new FileInfo(full).Attributes,
+                CreatedUtc: File.GetCreationTimeUtc(full),
                 Content: new ContentText(text, false));
 
             if (query.Evaluate(candidate) == SearchMatch.Yes)

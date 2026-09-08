@@ -58,9 +58,9 @@ public sealed class SavedSearchRulesTests
     [Fact]
     public void AGrammarProblemIsPassedThroughVerbatim()
     {
-        var expected = BertBrowser.Core.Services.Search.SearchGrammar.Parse("dc:2026").Problem;
+        var expected = BertBrowser.Core.Services.Search.SearchGrammar.Parse("da:2026").Problem;
         Assert.NotNull(expected);
-        Assert.Equal(expected, Validate(query: "dc:2026"));
+        Assert.Equal(expected, Validate(query: "da:2026"));
     }
 
     [Theory]
@@ -108,8 +108,8 @@ public sealed class SavedSearchRulesTests
     public void TheFirstProblemWinsInOrder()
     {
         // Blank name outranks a bad query; a bad query outranks a missing folder.
-        Assert.Contains("name", Validate(name: "", query: "dc:2026", scope: SavedSearchScope.Folder)!, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("folder", Validate(query: "dc:2026", scope: SavedSearchScope.Folder)!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("name", Validate(name: "", query: "da:2026", scope: SavedSearchScope.Folder)!, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("folder", Validate(query: "da:2026", scope: SavedSearchScope.Folder)!, StringComparison.OrdinalIgnoreCase);
     }
 
     // --- DefaultName ---

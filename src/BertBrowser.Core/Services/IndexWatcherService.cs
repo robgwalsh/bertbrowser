@@ -209,7 +209,8 @@ public sealed class IndexWatcherService : IIndexWatcherService
         if (Directory.Exists(change.FullPath))
         {
             var info = new DirectoryInfo(change.FullPath);
-            upserts.Add(new FsEntryRow(key, info.Name, true, 0, info.LastWriteTimeUtc, hidden));
+            upserts.Add(new FsEntryRow(
+                key, info.Name, true, 0, info.LastWriteTimeUtc, hidden, info.Attributes, info.CreationTimeUtc));
 
             // A folder moved into the tree raises a single Created event for the top
             // directory only — index its contents with a bounded mini-crawl, seeding the
@@ -220,7 +221,8 @@ public sealed class IndexWatcherService : IIndexWatcherService
         else if (File.Exists(change.FullPath))
         {
             var info = new FileInfo(change.FullPath);
-            upserts.Add(new FsEntryRow(key, info.Name, false, info.Length, info.LastWriteTimeUtc, hidden));
+            upserts.Add(new FsEntryRow(
+                key, info.Name, false, info.Length, info.LastWriteTimeUtc, hidden, info.Attributes, info.CreationTimeUtc));
         }
         else
         {
@@ -241,7 +243,8 @@ public sealed class IndexWatcherService : IIndexWatcherService
                 return false;
             }
             upserts.Add(new FsEntryRow(
-                entry.PathKey, entry.Name, entry.IsDirectory, entry.SizeBytes, entry.ModifiedUtc, entry.Hidden));
+                entry.PathKey, entry.Name, entry.IsDirectory, entry.SizeBytes, entry.ModifiedUtc,
+                entry.Hidden, entry.Attributes, entry.CreatedUtc));
             if (upserts.Count >= 20_000)
             {
                 _repository.UpsertEntries(upserts, crawlGen);

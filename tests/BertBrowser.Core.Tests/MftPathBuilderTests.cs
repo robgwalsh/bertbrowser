@@ -9,9 +9,9 @@ public sealed class MftPathBuilderTests
 
     private static Dictionary<ulong, MftNode> Tree() => new()
     {
-        [10] = new MftNode("Users", Root, IsDirectory: true, OwnHidden: false),
-        [11] = new MftNode("Rob", 10, IsDirectory: true, OwnHidden: false),
-        [12] = new MftNode("report.txt", 11, IsDirectory: false, OwnHidden: false),
+        [10] = new MftNode("Users", Root, IsDirectory: true, Attributes: 0),
+        [11] = new MftNode("Rob", 10, IsDirectory: true, Attributes: 0),
+        [12] = new MftNode("report.txt", 11, IsDirectory: false, Attributes: 0),
     };
 
     [Fact]
@@ -30,7 +30,7 @@ public sealed class MftPathBuilderTests
     {
         var map = new Dictionary<ulong, MftNode>
         {
-            [20] = new MftNode("pagefile.sys", Root, IsDirectory: false, OwnHidden: true),
+            [20] = new MftNode("pagefile.sys", Root, IsDirectory: false, Attributes: FileAttributes.Hidden),
         };
 
         Assert.True(MftPathBuilder.TryResolve(map, 20, @"C:\", new(), out var path, out var hidden));
@@ -43,7 +43,7 @@ public sealed class MftPathBuilderTests
     public void Resolve_InheritsHiddenFromAncestor()
     {
         var map = Tree();
-        map[11] = map[11] with { OwnHidden = true }; // hide "Rob"
+        map[11] = map[11] with { Attributes = FileAttributes.Hidden }; // hide "Rob"
 
         Assert.True(MftPathBuilder.TryResolve(map, 12, @"C:\", new(), out _, out var hidden));
 
@@ -55,7 +55,7 @@ public sealed class MftPathBuilderTests
     {
         var map = new Dictionary<ulong, MftNode>
         {
-            [12] = new MftNode("orphan.txt", 999 /* missing parent */, IsDirectory: false, OwnHidden: false),
+            [12] = new MftNode("orphan.txt", 999 /* missing parent */, IsDirectory: false, Attributes: 0),
         };
 
         Assert.False(MftPathBuilder.TryResolve(map, 12, @"C:\", new(), out _, out _));

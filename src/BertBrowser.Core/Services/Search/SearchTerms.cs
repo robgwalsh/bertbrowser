@@ -152,7 +152,26 @@ public sealed class SizeTerm : SearchNode
     public override bool NeedsMetadata => true;
 }
 
-/// <summary>A modified-time range, half-open <c>[Lo, Hi)</c> in UTC.</summary>
+/// <summary>Which timestamp a <see cref="DateTerm"/> is about.</summary>
+/// <remarks>
+/// Accessed is deliberately absent. Windows 10 and 11 ship with last-access updates disabled
+/// (<c>NtfsDisableLastAccessUpdate</c>), so the value on disk is frozen for most files — an
+/// <c>da:</c> filter would answer confidently and wrongly. <c>SearchSyntax.Unsupported</c> refuses
+/// the key by name instead, which is the same trade the whole table exists to make.
+/// </remarks>
+public enum DateField
+{
+    Modified,
+    Created,
+}
+
+/// <summary>A timestamp range, half-open <c>[Lo, Hi)</c> in UTC, over one <see cref="DateField"/>.</summary>
+/// <remarks>
+/// One class for both fields rather than two, so <see cref="Matches"/> and <see cref="WriteSql"/>
+/// pick their column and their candidate field from the same <see cref="Field"/>. Two classes could
+/// disagree about one and not the other, which is exactly the drift <c>SearchNode</c>'s two
+/// abstract members exist to prevent.
+/// </remarks>
 public sealed class DateTerm : SearchNode
 {
     /// <summary>
@@ -163,29 +182,40 @@ public sealed class DateTerm : SearchNode
     /// </summary>
     internal static readonly DateTime Epoch = new(1601, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-    public DateTerm(DateTime? lo, DateTime? hi)
+    public DateTerm(DateTime? lo, DateTime? hi, DateField field = DateField.Modified)
     {
         Lo = lo;
         Hi = hi;
+        Field = field;
     }
 
     public DateTime? Lo { get; }
     public DateTime? Hi { get; }
+    public DateField Field { get; }
+
+    /// <summary>The column this term compares, and the only place the mapping is written down.</summary>
+    private string Column => Field == DateField.Created ? "created_utc" : "modified_utc";
+
+    private DateTime Value(in SearchCandidate candidate) =>
+        Field == DateField.Created ? candidate.CreatedUtc : candidate.ModifiedUtc;
 
     public override SearchMatch Matches(in SearchCandidate candidate)
     {
-        if (candidate.ModifiedUtc < Epoch) return SearchMatch.No;
-        if (Lo is { } lo && candidate.ModifiedUtc < lo) return SearchMatch.No;
-        if (Hi is { } hi && candidate.ModifiedUtc >= hi) return SearchMatch.No;
+        var value = Value(candidate);
+        if (value < Epoch) return SearchMatch.No;
+        if (Lo is { } lo && value < lo) return SearchMatch.No;
+        if (Hi is { } hi && value >= hi) return SearchMatch.No;
         return SearchMatch.Yes;
     }
 
     public override void WriteSql(SqlPredicateBuilder builder)
     {
-        // modified_utc is TEXT written with "O" — fixed-width and zero-padded, so BINARY
+        // Both columns are TEXT written with "O" — fixed-width and zero-padded, so BINARY
         // collation is already a correct chronological order and these are string comparisons.
-        builder.Append("(modified_utc >= ").AppendParameter(Format(Lo ?? Epoch));
-        if (Hi is { } hi) builder.Append(" AND modified_utc < ").AppendParameter(Format(hi));
+        // created_utc's migration default is the empty string, which sorts below the 1601 floor
+        // below, so a row predating the column satisfies no filter rather than every open-ended one.
+        builder.Append("(").Append(Column).Append(" >= ").AppendParameter(Format(Lo ?? Epoch));
+        if (Hi is { } hi) builder.Append(" AND ").Append(Column).Append(" < ").AppendParameter(Format(hi));
         builder.Append(")");
     }
 
@@ -236,6 +266,52 @@ public sealed class HiddenTerm : SearchNode
     /// <summary>Search otherwise excludes hidden entries outright, so without this the term
     /// would be filtered away by the caller and read as a broken feature.</summary>
     public override bool WantsHidden => true;
+}
+
+/// <summary>One Win32 attribute bit — <c>is:readonly</c>, <c>is:system</c>, <c>is:archived</c>,
+/// <c>is:link</c>, <c>is:compressed</c>.</summary>
+/// <remarks>
+/// <para><strong>Hidden is not one of these, and the asymmetry is deliberate.</strong>
+/// <c>fs_entry.hidden</c> stores the <em>effective</em> flag — the entry's own bit OR'd down from
+/// every ancestor — so that filtering hidden results out of every query is one column comparison
+/// with no ancestor lookups. <c>attributes</c> is the entry's <em>own</em> mask, because none of
+/// these bits are inherited: a read-only folder does not make its contents read-only, and a query
+/// that pretended otherwise would answer a question nobody asked.</para>
+/// <para><see cref="SearchNode.WantsHidden"/> stays false here, unlike <see cref="HiddenTerm"/>.
+/// That term sets it because search strips hidden rows outright, which would make <c>is:hidden</c>
+/// match nothing at all; <c>is:system</c> is not self-defeating in that way — it simply keeps the
+/// blanket exclusion, which is what every other filter does.</para>
+/// </remarks>
+public sealed class AttributeTerm : SearchNode
+{
+    public AttributeTerm(FileAttributes flag) => Flag = flag;
+
+    public FileAttributes Flag { get; }
+
+    public override SearchMatch Matches(in SearchCandidate candidate) =>
+        Verdict((candidate.Attributes & Flag) != 0);
+
+    public override void WriteSql(SqlPredicateBuilder builder) =>
+        builder.Append("(attributes & ").AppendParameter((long)Flag).Append(") != 0");
+
+    public override bool SqlComplete => true;
+    public override int LiteralChars => 0;
+
+    /// <summary>
+    /// Not specific enough to run on its own, the same answer <see cref="KindTerm"/> and
+    /// <see cref="HiddenTerm"/> give. <c>Archive</c> is set on very nearly every file that has ever
+    /// been written, so "half the disk is not a search result" applies to it literally; and while
+    /// <c>is:readonly</c> alone is arguably narrow enough, a rule that held for some bits and not
+    /// others would be one nobody could predict. Pair it with a word or another filter.
+    /// </summary>
+    public override bool HasFilter => false;
+
+    /// <summary>
+    /// False, unlike <see cref="SizeTerm"/> and <see cref="DateTerm"/>. A USN record carries the
+    /// whole attribute mask, so the names-only fallback build fills this column just as the raw
+    /// <c>$MFT</c> pass does — there is no unmeasured-volume case for it to warn about.
+    /// </summary>
+    public override bool NeedsMetadata => false;
 }
 
 /// <summary>

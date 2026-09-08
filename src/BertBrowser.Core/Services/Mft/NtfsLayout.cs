@@ -45,6 +45,10 @@ internal static class NtfsLayout
     public const uint AttrData = 0x80;
 
     // --- $STANDARD_INFORMATION content ---
+    // The four FILETIMEs run created / modified / MFT-changed / accessed at 0x00, 0x08, 0x10,
+    // 0x18. Accessed is deliberately not read: Windows 10+ ships with last-access updates off
+    // (NtfsDisableLastAccessUpdate), so the value on disk is stale for most files.
+    public const int StdInfoCreated = 0x00;                     // u64 FILETIME
     public const int StdInfoModified = 0x08;                    // u64 FILETIME
     public const int StdInfoFileAttributes = 0x20;             // u32
 
@@ -59,7 +63,9 @@ internal static class NtfsLayout
     // File-name namespaces (higher = more preferred when a record has several names).
     public const byte NamespaceDos = 2;
 
-    // FILE_ATTRIBUTE bits we read.
+    // Named FILE_ATTRIBUTE bits. The reader keeps the whole u32 (it becomes fs_entry.attributes,
+    // which is what is:readonly and friends filter on), so these are for callers that want one
+    // bit by name without reaching for System.IO.FileAttributes.
     public const uint FileAttributeHidden = 0x0002;
     public const uint FileAttributeDirectory = 0x0010;
 

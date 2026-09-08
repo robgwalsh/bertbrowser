@@ -32,6 +32,7 @@ public static class SearchSyntax
     public const string Path = "PATH";
     public const string Size = "SIZE";
     public const string Modified = "DM";
+    public const string Created = "DC";
     public const string Is = "IS";
     public const string Regex = "RE";
     public const string Name = "NAME";
@@ -48,6 +49,9 @@ public static class SearchSyntax
         ["DM"] = Modified,
         ["MODIFIED"] = Modified,
         ["DATEMODIFIED"] = Modified,
+        ["DC"] = Created,
+        ["CREATED"] = Created,
+        ["DATECREATED"] = Created,
         ["IS"] = Is,
         ["RE"] = Regex,
         ["REGEX"] = Regex,
@@ -62,9 +66,17 @@ public static class SearchSyntax
     /// </summary>
     /// <remarks>
     /// These are refused with a message rather than degraded to a name term. Someone typing
-    /// a created-date filter has a specific question; silently searching for the literal text
-    /// "dc:today" answers a different one and returns nothing, which reads as "no such files"
-    /// rather than "no such filter". <c>fs_entry</c> stores modified time only.
+    /// an accessed-date filter has a specific question; silently searching for the literal text
+    /// "da:today" answers a different one and returns nothing, which reads as "no such files"
+    /// rather than "no such filter".
+    ///
+    /// <para><strong><c>da:</c> is refused for a different reason than it used to be, and the new
+    /// one will not go away.</strong> It said "isn't indexed", alongside <c>dc:</c>, which was a
+    /// statement about this index. Created since became a column and <c>dc:</c> works; accessed did
+    /// not, because Windows 10 and 11 ship with last-access updates disabled
+    /// (<c>NtfsDisableLastAccessUpdate</c>). The timestamp is on disk and can be read — it is
+    /// simply frozen, usually at the creation date, so a filter over it would answer confidently
+    /// and wrongly. Indexing it would be worse than refusing it.</para>
     ///
     /// <c>content:</c> used to be listed here and no longer is: it is answered by reading the files
     /// themselves rather than the index, which is why it is the one filter that still works on a
@@ -72,10 +84,8 @@ public static class SearchSyntax
     /// </remarks>
     private static readonly Dictionary<string, string> Unsupported = new(StringComparer.Ordinal)
     {
-        ["DC"] = "created date isn't indexed — only modified is, so use dm:",
-        ["DATECREATED"] = "created date isn't indexed — only modified is, so use dm:",
-        ["DA"] = "accessed date isn't indexed — only modified is, so use dm:",
-        ["DATEACCESSED"] = "accessed date isn't indexed — only modified is, so use dm:",
+        ["DA"] = "Windows stops updating the accessed date by default, so it would answer wrongly — use dm: or dc:",
+        ["DATEACCESSED"] = "Windows stops updating the accessed date by default, so it would answer wrongly — use dm: or dc:",
     };
 
     /// <summary>Resolves a typed key to its canonical form, or null when it is not a key at all.</summary>
@@ -101,8 +111,10 @@ public static class SearchSyntax
             new("ext:jpg;png", "one of these extensions"),
             new("size:>100mb", "also <, >=, <=, =, 1mb..2gb and empty"),
             new("dm:today", "also yesterday, thisweek, last7days, 2026-08"),
+            new("dc:2026-08", "created instead of modified — same forms as dm:"),
             new("path:projects", "somewhere in the folder path, not just the name"),
             new("is:dir", "folders only — also is:file and is:hidden"),
+            new("is:readonly", "also system, archived, link and compressed"),
             new("re:^IMG_\\d+", "a regular expression over the name"),
             new("in:archives", "look inside zips and 7zs too — names, not contents"),
             new("content:todo", "text inside the file — also content:\"a phrase\""),
@@ -117,8 +129,8 @@ public static class SearchSyntax
 
         new("Worth knowing", "Where the answers come from.",
         [
-            new("size: and dm:", "need a drive the indexer read in full"),
-            new("dc: and da:", "aren't indexed — only the modified date is"),
+            new("size:, dm: and dc:", "need a drive the indexer read in full"),
+            new("da:", "is refused — Windows stops updating the accessed date"),
             new("content:", "opens each file, so narrow it with ext: or a folder"),
             new("in:archives", "opens each archive, so it is slower and opt-in"),
         ]),

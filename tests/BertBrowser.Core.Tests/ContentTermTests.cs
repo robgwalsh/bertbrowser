@@ -29,12 +29,13 @@ public sealed class ContentTermTests
     private static SearchCandidate File(string name, string? content = null) =>
         new(name.ToUpperInvariant(), (@"C:\Data\" + name).ToUpperInvariant(),
             IsDirectory: false, SizeBytes: 100, ModifiedUtc: new DateTime(2026, 6, 1),
-            Hidden: false, Content: content is null ? null : new ContentText(content, false));
+            Hidden: false, Attributes: FileAttributes.Archive, CreatedUtc: new DateTime(2026, 6, 1),
+            Content: content is null ? null : new ContentText(content, false));
 
     private static SearchCandidate Dir(string name) =>
         new(name.ToUpperInvariant(), (@"C:\Data\" + name).ToUpperInvariant(),
             IsDirectory: true, SizeBytes: 0, ModifiedUtc: new DateTime(2026, 6, 1),
-            Hidden: false);
+            Hidden: false, Attributes: FileAttributes.Directory, CreatedUtc: new DateTime(2026, 6, 1));
 
     // --- the term itself ---
 

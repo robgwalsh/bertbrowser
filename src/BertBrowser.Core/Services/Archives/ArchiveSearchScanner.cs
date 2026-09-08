@@ -71,8 +71,13 @@ public static class ArchiveSearchScanner
                 node.Modified?.ToUniversalTime() ?? DateTime.MinValue,
                 // Nothing inside an archive is hidden — the listing takes the same view, and for
                 // the same reason: the attribute a container carries means different things
-                // depending on which tool wrote it.
-                Hidden: false);
+                // depending on which tool wrote it. The rest of the mask is absent for that same
+                // reason, so is:readonly and friends answer "no" here rather than guessing from a
+                // Unix mode or a zip's "external attributes" field. A container directory records
+                // one timestamp, and it is the modified one, so there is no creation date either.
+                Hidden: false,
+                Attributes: 0,
+                CreatedUtc: default);
 
             if (!query.Matches(candidate)) continue;
 

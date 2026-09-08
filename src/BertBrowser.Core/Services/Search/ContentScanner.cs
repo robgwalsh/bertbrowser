@@ -174,6 +174,15 @@ public sealed class ContentScanner(IContentReader reader)
             Report: report);
     }
 
+    /// <summary>
+    /// Rebuilds the candidate for the reading pass, now that the file's text is in hand.
+    /// </summary>
+    /// <remarks>
+    /// Every field has to survive the round trip through <see cref="SearchHit"/>, because this is
+    /// the tree's <em>second</em> evaluation and it is the one that decides. Drop the attributes
+    /// here and <c>is:readonly content:todo</c> would shortlist correctly and then let every
+    /// file through on the re-check.
+    /// </remarks>
     private static SearchCandidate Candidate(SearchHit hit, ContentText? content) =>
         new(hit.Name.ToUpperInvariant(),
             PathKey.Canonicalize(hit.DisplayPath),
@@ -181,6 +190,8 @@ public sealed class ContentScanner(IContentReader reader)
             hit.SizeBytes,
             hit.ModifiedUtc,
             hit.Hidden,
+            hit.Attributes,
+            hit.CreatedUtc,
             content);
 
     /// <summary>

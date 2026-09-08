@@ -22,7 +22,7 @@ internal sealed class MftDirectorySizeBuilder
     {
         if (rec.IsDirectory)
         {
-            _dirNodes[rec.RecordNumber] = new MftNode(rec.Name, rec.ParentRecordNumber, true, rec.Hidden);
+            _dirNodes[rec.RecordNumber] = new MftNode(rec.Name, rec.ParentRecordNumber, true, rec.Attributes);
             if (!_childDirs.TryGetValue(rec.ParentRecordNumber, out var kids))
                 _childDirs[rec.ParentRecordNumber] = kids = new List<ulong>();
             kids.Add(rec.RecordNumber);

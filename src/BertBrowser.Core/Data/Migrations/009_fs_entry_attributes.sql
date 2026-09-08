@@ -1,0 +1,27 @@
+-- Records each indexed entry's own Win32 FILE_ATTRIBUTE bitmask and its creation time, so
+-- is:readonly / is:system / is:archived / is:link / is:compressed and dc: can be answered from
+-- the index instead of being refused by name.
+--
+-- Both come free on every write path: $STANDARD_INFORMATION already carries the attribute u32
+-- and all four timestamps, a USN record carries FileAttributes, and FileSystemEntry hands the
+-- crawler both out of the same WIN32_FIND_DATA. Nothing here costs an extra read.
+--
+-- attributes is the entry's *own* mask, unlike `hidden`, which is effective (OR'd down from every
+-- ancestor so a plain "hidden = 0" needs no ancestor lookups). Only hidden is inherited, because
+-- only hidden decides whether Explorer shows the row at all.
+--
+-- The two defaults are chosen so a row written before this migration degrades to "no" rather than
+-- to a wrong answer:
+--   * attributes 0 — no bit set, so every is: attribute term is No.
+--   * created_utc '' — sorts below the 1601 floor DateTerm applies under BINARY collation, so it
+--     satisfies no dc: filter, exactly as the names-only USN build's 0001-01-01 already does for
+--     dm:. Readers must map '' back to DateTime.MinValue; DateTime.Parse("") throws.
+-- Existing rows keep those defaults until their volume is rebuilt. Bumping the schema version is
+-- what makes that happen: the elevated helper's 30-second self-check sees user_version move and
+-- exits, and the next helper start rebuilds every volume from the MFT. Crawler-backed roots
+-- (network shares) fill on their next re-crawl.
+--
+-- No index on either column, for the reason 002 gives for name_key: WITHOUT ROWID means a
+-- secondary index re-carries the whole path_key, doubling the write cost of every build.
+ALTER TABLE fs_entry ADD COLUMN attributes  INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE fs_entry ADD COLUMN created_utc TEXT    NOT NULL DEFAULT '';
