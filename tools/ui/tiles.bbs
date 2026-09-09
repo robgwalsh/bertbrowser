@@ -1,0 +1,65 @@
+# The thumbnail view over a lot of files, which is this app's own scrolling code.
+#
+# The tile panel is a VirtualizingWrapPanel written here rather than a WPF one, because a WrapPanel
+# is not a virtualizing panel: it built a container for every row, and every container asks for a
+# thumbnail the moment it exists. Measured over a flat branch view of a thousand videos, the
+# details list took 3.9 s and the same listing as tiles never finished inside a four-minute
+# watchdog. So what this script is really asserting is that the replacement puts the right things
+# in the right places — the part a stopwatch cannot tell you.
+#
+# Every fourth file is a .txt, which draws as a full-width row instead of a tile. The sort bands
+# media to the end in this view, so the rows all land before the tiles rather than between them —
+# but the panel does not know that, and lays lines out for either. What this fixture does prove is
+# that the two shapes measure differently and the grid still lines up underneath them.
+
+many-fixture 800
+go Many
+flat all
+assert-count 808
+
+# --- Details first, as the baseline: the same rows, the panel WPF supplies ---
+
+assert-realized under 200
+shot 01-details
+
+# --- Tiles ---
+
+thumbnails 0.5
+assert-count 808
+# The whole point: 808 rows, a screenful of containers.
+assert-realized under 200
+shot 02-tiles-top
+
+# --- Scrolled. Nothing here synthesises a wheel, so this drives the ScrollViewer, which is
+#     the same IScrollInfo a wheel would reach. ---
+
+list-scroll 4000
+assert-realized under 200
+shot 03-tiles-scrolled
+
+list-scroll 100000
+assert-realized under 200
+shot 04-tiles-bottom
+
+list-scroll 0
+shot 05-tiles-back-at-top
+
+# --- Revealing a row far down has to bring it into view, which for a virtualized item means
+#     scrolling from the index alone: there is no element yet to bring anywhere. `select` on its
+#     own deliberately does not scroll — clicking a row cannot, since you had to see it first. ---
+
+reveal clip0798.mp4
+assert-selected 1
+shot 06-tiles-revealed
+
+# --- Resizing the tiles re-flows every line, and the panel has to believe the new size ---
+
+thumbnails 1
+assert-count 808
+assert-realized under 200
+shot 07-tiles-large
+
+thumbnails 0
+assert-count 808
+assert-not-launched
+state

@@ -19,7 +19,10 @@ namespace BertBrowser.App.Services;
 /// records a want and returns null — blank, which is what an unread value must look like. The work
 /// happens in one coalesced pass afterwards, and that indirection is the whole design rather than
 /// tidiness: <c>Icon</c> and <c>Thumbnail</c> can afford to start a read from their own getter
-/// because tiles are few and large, while a details list scrolls an order of magnitude faster. A
+/// because tiles are few and large — they now share this class's concurrency bound and keep a
+/// ceiling of their own on how many decoded bitmaps stay alive, since a flat branch view of a media
+/// tree is exactly the case where "few" stops being true — while a details list scrolls an order of
+/// magnitude faster. A
 /// flick through a big folder realizes and discards thousands of containers a second, and starting
 /// a file open for each would leave the disk busy for minutes after the user stopped, every one of
 /// them for a row that is long gone.
@@ -59,7 +62,7 @@ public sealed class ShellMetadataHydrator : IDisposable
     /// <summary>What the list considers on screen. Set by the view, which is the only thing that can
     /// know; without it the pass falls back to everything asked for, which is correct but unbounded
     /// under a fast scroll.</summary>
-    public Func<IReadOnlyCollection<FileItemViewModel>>? RealizedRows { get; set; }
+    public Func<IReadOnlyCollection<FileItemViewModel>?>? RealizedRows { get; set; }
 
     /// <summary>Raised when values have arrived, so the list can lower its busy flag.</summary>
     public event EventHandler? Idle;

@@ -12,6 +12,7 @@ using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Archives;
 using BertBrowser.Core.Services.Columns;
 using BertBrowser.Core.Services.Delete;
+using BertBrowser.Core.Services.FlatView;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
 
@@ -152,6 +153,33 @@ public partial class DirectoryTabView : UserControl
         SearchBox.SelectAll();
     }
 
+    // --- Flat branch view ---
+
+    /// <summary>
+    /// Opens the flat view's shape menu.
+    /// </summary>
+    /// <remarks>
+    /// Opened here rather than declared as the button's own context menu opening on right-click:
+    /// this is a chevron, and a chevron that needs a right-click is a chevron nobody presses.
+    /// </remarks>
+    private void FlatViewMode_Click(object sender, RoutedEventArgs e)
+    {
+        FlatFilesItem.IsChecked = Tab.FlatView != FlatViewMode.All;
+        FlatAllItem.IsChecked = Tab.FlatView == FlatViewMode.All;
+
+        FlatViewModeMenu.PlacementTarget = FlatViewModeButton;
+        FlatViewModeMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        FlatViewModeMenu.IsOpen = true;
+    }
+
+    // Choosing a shape turns the view on with it, rather than only recording a preference for the
+    // next time: the menu hangs off a button that is about looking at this folder now.
+    private void FlatFiles_Click(object sender, RoutedEventArgs e) =>
+        _ = Tab.SetFlatModeAsync(FlatViewMode.Files);
+
+    private void FlatAll_Click(object sender, RoutedEventArgs e) =>
+        _ = Tab.SetFlatModeAsync(FlatViewMode.All);
+
     // --- View mode ---
 
     private bool? _thumbnailViewApplied;
@@ -238,6 +266,18 @@ public partial class DirectoryTabView : UserControl
     /// property a right-click uses, so a capture cannot drift from what the app shows.</summary>
     internal ContextMenu ColumnMenuForHarness => ColumnMenu.Menu;
 
+    /// <summary>The flat view's shape menu, with its check marks already set — the same preparation
+    /// a real click does, so a capture cannot show a state the button never puts on screen.</summary>
+    internal ContextMenu FlatViewMenuForHarness
+    {
+        get
+        {
+            FlatFilesItem.IsChecked = Tab.FlatView != FlatViewMode.All;
+            FlatAllItem.IsChecked = Tab.FlatView == FlatViewMode.All;
+            return FlatViewModeMenu;
+        }
+    }
+
     private ColumnHeaderMenu ColumnMenu => _columnMenu ??= new ColumnHeaderMenu(
         read: () => Tab.FileList.ColumnLayout,
         write: layout => Tab.FileList.ColumnLayout = layout,
@@ -319,16 +359,26 @@ public partial class DirectoryTabView : UserControl
     /// The rows that currently have a container, for the metadata hydrator to narrow its work to.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Read off the virtualizing panel's own children rather than by asking the generator about
     /// every item: on a folder of two hundred thousand rows the second is two hundred thousand
     /// lookups per pass, which is the cost this narrowing exists to avoid paying.
+    /// </para>
+    /// <para>
+    /// <see cref="VirtualizingPanel"/>, not <c>VirtualizingStackPanel</c>: the thumbnail view has a
+    /// panel of its own now, and looking for the details list's panel by its exact type meant this
+    /// answered "nothing is on screen" for every tile ever shown. <b>Null, not empty, when there is
+    /// no panel at all</b> — before the first layout pass the answer is unknown rather than none,
+    /// and a caller that cannot tell the two apart will either open every file in the folder or
+    /// throw away the picture it is looking at.
+    /// </para>
     /// </remarks>
-    private IReadOnlyCollection<FileItemViewModel> RealizedRows()
+    private IReadOnlyCollection<FileItemViewModel>? RealizedRows()
     {
-        var realized = new HashSet<FileItemViewModel>();
-        if (VisualTreeUtil.FindDescendant<VirtualizingStackPanel>(FileListView) is not { } panel)
-            return realized;
+        if (VisualTreeUtil.FindDescendant<VirtualizingPanel>(FileListView) is not { } panel)
+            return null;
 
+        var realized = new HashSet<FileItemViewModel>();
         foreach (var child in panel.Children)
         {
             if (child is FrameworkElement { DataContext: FileItemViewModel row })
@@ -908,9 +958,10 @@ public partial class DirectoryTabView : UserControl
             extractable ? Visibility.Visible : Visibility.Collapsed;
 
         // Compressing reads files by path, so it needs real ones — off inside a container and off
-        // over a flattened search result, where "the folder being shown" is not a folder.
+        // over a search result, where "the folder being shown" is not a folder. A flat branch view
+        // is flattened too but does have one, so it keeps this: IsSearchResult, not IsFlattened.
         CompressMenuItem.IsEnabled =
-            !inArchive && !Tab.FileList.IsFlattened && Tab.CurrentPath.Length > 0;
+            !inArchive && !Tab.FileList.IsSearchResult && Tab.CurrentPath.Length > 0;
         CompressMenuItem.Header = selection.Count > 1
             ? $"Compress {selection.Count:N0} items…"
             : "Compress…";
@@ -955,11 +1006,12 @@ public partial class DirectoryTabView : UserControl
         var allBookmarked = selection.Count > 0 && selection.All(i => _shell.Bookmarks.IsBookmarked(i.FullPath));
         BookmarkMenuItem.Header = allBookmarked ? "Remove bookmark" : "Bookmark";
 
-        // New acts on the folder being shown, so it needs one — and a flattened search result is
-        // not one: creating into the search root would produce an item that may not match the query
-        // and so would not appear, which reads as a failure.
+        // New acts on the folder being shown, so it needs one — and a search result is not one:
+        // creating into the search root would produce an item that may not match the query and so
+        // would not appear, which reads as a failure. That objection is exactly what does not apply
+        // to a flat branch view, where a new child of the root is in the listing by definition.
         NewMenuItem.IsEnabled =
-            !Tab.FileList.IsFlattened && !inArchive && Tab.CurrentPath.Length > 0;
+            !Tab.FileList.IsSearchResult && !inArchive && Tab.CurrentPath.Length > 0;
         NewItemMenu.Rebuild(NewMenuItem, NewFileTypesSeparator, _settings,
             template => _ = CreateInCurrentFolderAsync(NewItemKind.File, template));
 
@@ -979,7 +1031,7 @@ public partial class DirectoryTabView : UserControl
     private async Task CreateInCurrentFolderAsync(
         NewItemKind kind, NewFileTemplate? template = null)
     {
-        if (Tab.FileList.IsFlattened || Tab.CurrentPath.Length == 0) return;
+        if (Tab.FileList.IsSearchResult || Tab.CurrentPath.Length == 0) return;
 
         var directory = Tab.CurrentPath;
         var owner = Window.GetWindow(this);

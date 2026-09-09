@@ -19,6 +19,7 @@ using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.Elevation;
 using BertBrowser.Core.Services.DiskUsage;
 using BertBrowser.Core.Services.Duplicates;
+using BertBrowser.Core.Services.FlatView;
 using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Preview;
@@ -191,14 +192,19 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "hidden": Hidden(rest); break;
             case "thumbnails": Thumbnails(rest); break;
             case "preview": Preview(rest); break;
+            case "flat": Flat(rest); break;
+            case "flat-cap": FlatCap(rest); break;
             case "preview-mode": PreviewViewMode(rest); break;
             case "preview-fit-width": PreviewFitWidth(); break;
             case "preview-fixture": PreviewFixture(rest); break;
             case "content-fixture": ContentFixture(rest); break;
+            case "many-fixture": ManyFixture(rest); break;
             case "sort": Sort(rest); break;
             case "theme": Theme(rest); break;
             case "drives-view": DrivesView(rest); break;
             case "tree-scroll": TreeScroll(rest); break;
+            case "list-scroll": ListScroll(rest); break;
+            case "reveal": Reveal(rest); break;
 
             // capturing and reading back
             case "shot": Shot(rest); break;
@@ -237,6 +243,9 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-panes": AssertPanes(rest); break;
             case "assert-flattened": AssertFlattened(expected: true); break;
             case "assert-not-flattened": AssertFlattened(expected: false); break;
+            case "assert-realized": AssertRealized(rest); break;
+            case "assert-flat": AssertFlat(rest); break;
+            case "assert-not-flat": AssertFlat("off"); break;
             case "assert-inside-archive": AssertInsideArchive(expected: true); break;
             case "assert-not-inside-archive": AssertInsideArchive(expected: false); break;
             case "assert-can-undo": AssertCanUndo(expected: true); break;
@@ -264,6 +273,43 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     {
         var root = _sandbox.Populate(rest.Length == 0 ? "." : rest);
         output.WriteLine($"# tree: {root}");
+    }
+
+    /// <summary>
+    /// Lays down enough files, nested and of both tile shapes, to make virtualization observable:
+    /// <c>many-fixture [count] [dir]</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Its own fixture for the reason <c>preview-fixture</c> gives — adding files to <c>tree</c>
+    /// would move every <c>assert-count</c> in every script — and because this one is about
+    /// <em>quantity</em>. A thumbnail view has to stay cheap over thousands of rows, and no fixture
+    /// small enough to assert exact row names against can show that.
+    /// </para>
+    /// <para>
+    /// Every fourth file is a <c>.txt</c>, which the tile view draws as a full-width row rather than
+    /// a tile. That mix is the case the panel's line arithmetic can get wrong on its own: a row in
+    /// the middle of a run of tiles ends the line early, and a panel that laid tiles out as a plain
+    /// grid would put every tile after it in the wrong place.
+    /// </para>
+    /// </remarks>
+    private void ManyFixture(string rest)
+    {
+        var (countText, dir) = Split(rest);
+        var count = countText.Length == 0 ? 400 : int.Parse(countText, CultureInfo.InvariantCulture);
+        var root = _sandbox.RequireInside(dir.Length == 0 ? "Many" : dir, "many-fixture");
+        Directory.CreateDirectory(root);
+
+        for (var i = 0; i < count; i++)
+        {
+            var sub = Path.Combine(root, $"Batch{i / 100:00}");
+            Directory.CreateDirectory(sub);
+            var name = i % 4 == 3 ? $"note{i:0000}.txt" : $"clip{i:0000}.mp4";
+            Sandbox.Write(Path.Combine(sub, name), 64);
+        }
+
+        Sandbox.Stamp(root);
+        output.WriteLine($"# many fixture: {count} files under {root}");
     }
 
     /// <summary>
@@ -802,7 +848,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         var items = session.Dispatcher.Invoke(() => kind.ToLowerInvariant() switch
         {
             "columns" => ColumnMenuItems(),
-            var other => throw new FormatException($"'{other}' is not a menu. Try: columns."),
+            "flat" => FlatMenuItems(),
+            var other => throw new FormatException($"'{other}' is not a menu. Try: columns, flat."),
         });
 
         var path = Resolve(Named(name.Length == 0 ? $"menu-{kind}" : name, ++_shots));
@@ -914,6 +961,36 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         var items = menu.Items.OfType<MenuItem>().ToList();
         menu.Items.Clear(); // detach them, so they can be hosted somewhere else
+        return items;
+    }
+
+    /// <summary>The large-folder question, worded by the same rule the app words it with.</summary>
+    private MessageDialog FlatLargeDialog()
+    {
+        var estimate = new Core.Models.DirSizeResult(
+            Core.Paths.PathKey.Canonicalize(session.Tab.CurrentPath), SizeBytes: 0,
+            FileCount: 1_642_880, DirCount: 96_411, Incomplete: false, DateTime.UtcNow);
+
+        var decision = FlatViewRules.Decide(
+            session.Tab.CurrentPath, estimate, FlatViewMode.Files,
+            Core.Services.SearchService.MaxFlatEntries);
+
+        return MessageDialog.Create(
+            decision.Message, "Flat view", MessageDialogKind.Warning,
+            showCancel: true, confirmLabel: decision.ConfirmLabel);
+    }
+
+    /// <summary>The flat view's shape menu, detached the way the column menu's items are — a click
+    /// on that chevron is the only way to see it, and a script never clicks.</summary>
+    private List<MenuItem> FlatMenuItems()
+    {
+        var view = FindNamed<FrameworkElement>("FileListView");
+        var tabView = VisualTreeUtil.FindAncestor<DirectoryTabView>(view)
+            ?? throw new AssertionException("The file list is not inside a DirectoryTabView.");
+
+        var menu = tabView.FlatViewMenuForHarness;
+        var items = menu.Items.OfType<MenuItem>().ToList();
+        menu.Items.Clear();
         return items;
     }
 
@@ -2174,6 +2251,50 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         session.Settle(quietMs: 400);
     }
 
+    /// <summary>
+    /// The active tab's flat branch view: <c>off</c>, <c>files</c> or <c>all</c>.
+    /// </summary>
+    /// <remarks>
+    /// Through the view model's own method rather than by assigning the property, so a script takes
+    /// the path the toolbar button, its menu and Ctrl+B all take — including the refresh, which is
+    /// the part that would silently do nothing if it were skipped. The listing raises
+    /// <c>IsLoading</c> before the first await returns, so <c>Settle</c> cannot photograph the
+    /// listing that was there before.
+    /// </remarks>
+    private void Flat(string rest)
+    {
+        var mode = Require(rest, "flat").ToLowerInvariant() switch
+        {
+            "off" or "no" or "false" => FlatViewMode.Off,
+            "files" or "on" or "yes" or "true" => FlatViewMode.Files,
+            "all" or "folders" => FlatViewMode.All,
+            var other => throw new FormatException(
+                $"flat: expected off, files or all, got '{other}'."),
+        };
+
+        Invoke(() => _ = session.Tab.SetFlatModeAsync(mode));
+        session.Settle();
+    }
+
+    /// <summary>
+    /// Lowers how many rows a flat listing shows, so a fixture of a dozen files can reach the
+    /// truncated case.
+    /// </summary>
+    /// <remarks>
+    /// The one place a run reaches past what a person could do, and it is here because the
+    /// alternative is fifty thousand real files. What it exposes is not a shortcut round the
+    /// feature — the listing, the banner and the status line all run exactly as they would at the
+    /// real ceiling. Takes effect on the next <c>flat</c>.
+    /// </remarks>
+    private void FlatCap(string rest)
+    {
+        var text = Require(rest, "flat-cap");
+        if (!int.TryParse(text, out var cap) || cap < 1)
+            throw new FormatException($"flat-cap: expected a positive number, got '{text}'.");
+
+        Invoke(() => session.Tab.FlatEntryCap = cap);
+    }
+
     /// <summary>The pane's Auto / Raw / Hex override. Spelled the way the buttons are, not the way
     /// the enum is — <c>PreviewMode.Text</c> is "raw" on screen.</summary>
     private void PreviewViewMode(string rest)
@@ -2217,6 +2338,80 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         Invoke(() => scroller.ScrollToVerticalOffset(offset));
         session.Settle();
+    }
+
+    /// <summary>
+    /// Scrolls the file list to a vertical offset, in pixels.
+    /// </summary>
+    /// <remarks>
+    /// <c>tree-scroll</c>'s counterpart, and it earns its place for a sharper reason than that one:
+    /// the thumbnail view scrolls through <see cref="VirtualizingWrapPanel"/>, which is this app's
+    /// own <c>IScrollInfo</c>. What is on screen after a scroll is therefore code under test rather
+    /// than something WPF is doing, and nothing here synthesises a mouse wheel.
+    /// </remarks>
+    private void ListScroll(string rest)
+    {
+        var offset = double.Parse(Require(rest, "list-scroll"), CultureInfo.InvariantCulture);
+        var list = FindNamed<ListView>("FileListView")
+            ?? throw new InvalidOperationException("FileListView is not in the visual tree.");
+        var scroller = VisualTreeUtil.FindDescendant<ScrollViewer>(list)
+            ?? throw new InvalidOperationException("FileListView has no ScrollViewer yet.");
+
+        Invoke(() => scroller.ScrollToVerticalOffset(offset));
+        session.Settle();
+    }
+
+    /// <summary>
+    /// Selects a row and scrolls it into view, as opening a bookmarked file does.
+    /// </summary>
+    /// <remarks>
+    /// <c>select</c> deliberately does not scroll — clicking a row cannot, since you had to see it
+    /// to click it — so this is the only way a script reaches <c>ScrollIntoView</c>, which is what
+    /// all three of the app's own reveal paths call. It matters more than it used to: in the
+    /// thumbnail view that lands in <see cref="VirtualizingWrapPanel.BringIndexIntoView"/>, where
+    /// the row being scrolled to has no element yet and the scrolling has to come from the index
+    /// alone.
+    /// </remarks>
+    private void Reveal(string rest)
+    {
+        var row = Row(Require(rest, "reveal"));
+        Invoke(() =>
+        {
+            var list = FileList();
+            list.SelectedItem = row;
+            list.ScrollIntoView(row);
+        });
+        session.Settle();
+    }
+
+    /// <summary>The rows the list has actually built — what a virtualizing panel is for, and the
+    /// only way a script can tell virtualized from merely slow.</summary>
+    private void AssertRealized(string rest)
+    {
+        var (op, tail) = Split(rest);
+        var want = int.Parse(Require(tail, "assert-realized"), CultureInfo.InvariantCulture);
+
+        var actual = session.Dispatcher.Invoke(() =>
+        {
+            var list = FindNamed<ListView>("FileListView");
+            if (list is null) return -1;
+            return VisualTreeUtil.FindDescendant<VirtualizingPanel>(list) is { } panel
+                ? panel.Children.Count
+                : -1;
+        });
+
+        if (actual < 0)
+            throw new AssertionException("the file list has no virtualizing panel — nothing is virtualized.");
+
+        var ok = op.ToLowerInvariant() switch
+        {
+            "under" or "<" => actual < want,
+            "over" or ">" => actual > want,
+            _ => throw new FormatException($"assert-realized: expected 'under' or 'over', got '{op}'."),
+        };
+
+        if (!ok)
+            throw new AssertionException($"expected the list to have {op} {want} realized row(s), got {actual}.");
     }
 
     /// <summary>Switches the "DRIVES &amp; DEVICES" sidebar section between its tree and card
@@ -2461,6 +2656,11 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         "warning" => MessageDialog.Create(
             "The harness built this dialog to photograph it. Nothing went wrong.",
             "Warning", MessageDialogKind.Warning, showCancel: true),
+
+        // The question a flat view asks before listing an enormous folder. Built from the real rule
+        // over a made-up estimate: a sandbox holds a dozen files, so the only way to see the words
+        // is to hand FlatViewRules the row it would have read from dir_size_cache.
+        "flat-large" => FlatLargeDialog(),
 
         "checksum" => new ChecksumDialog(new ChecksumViewModel(
             Selection()[0].FullPath,
@@ -2727,6 +2927,10 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             ("items", Text(tab.FileList.Items.Count)),
             ("selected", Text(tab.SelectedItems.Count)),
             ("flattened", Bool(tab.FileList.IsFlattened)),
+            // Beside it, because the point of the two flags is that they differ: a search sets the
+            // first alone, Ctrl+B sets both.
+            ("flat", Quote(tab.FlatView.ToString())),
+            ("notice", Quote(tab.FileList.NoticeMessage ?? "")),
             ("columns", Quote(string.Join(", ", tab.FileList.ResolvedColumns.Select(c => c.Id)))),
             ("insideArchive", Bool(tab.FileList.IsInsideArchive)),
             ("search", Quote(tab.ActiveSearchText)),
@@ -3088,8 +3292,36 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         if (actual != expected)
             throw new AssertionException(expected
-                ? "the list is a normal directory listing, not a flattened search result."
-                : "the list is still a flattened search result.");
+                ? "the list is a normal directory listing, not a flattened one."
+                : "the list is still flattened.");
+    }
+
+    /// <summary>
+    /// Which flat branch view the tab is in — <c>assert-flat</c> with no argument means "any".
+    /// </summary>
+    /// <remarks>
+    /// Separate from <c>assert-flattened</c> on purpose: that one asks whether the rows come from
+    /// many folders, which a search also makes true. The two differing is the whole reason the tab
+    /// carries both, so a script has to be able to see each of them on its own.
+    /// </remarks>
+    private void AssertFlat(string rest)
+    {
+        var actual = session.Dispatcher.Invoke(() => session.Tab.FlatView);
+        var word = rest.Trim().ToLowerInvariant();
+
+        var ok = word switch
+        {
+            "" or "on" => actual != FlatViewMode.Off,
+            "off" => actual == FlatViewMode.Off,
+            "files" => actual == FlatViewMode.Files,
+            "all" or "folders" => actual == FlatViewMode.All,
+            _ => throw new FormatException(
+                $"assert-flat: expected nothing, off, files or all, got '{word}'."),
+        };
+
+        if (!ok)
+            throw new AssertionException(
+                $"expected the flat view to be {(word.Length == 0 ? "on" : word)}, got {actual}.");
     }
 
     /// <summary>

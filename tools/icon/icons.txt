@@ -37,6 +37,9 @@ OpenInNewTab      | Tab Add                 | tab_add                 | 20
 OpenInNewPane     | Split Horizontal        | split_horizontal        | 20
 PreviewPane       | Panel Right             | panel_right             | 20
 DetailsList       | Apps List               | apps_list               | 20
+# The flat branch view's toggle. A plain flat list of bullets, because that is what the button does
+# to the tree it is pointed at -- a "tree" glyph would name what it replaces rather than what it does.
+FlatView          | Text Bullet List        | text_bullet_list        | 20
 
 # File operations
 Cut               | Cut                     | cut                     | 20

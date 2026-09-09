@@ -288,6 +288,7 @@ public partial class App : Application
         // when the volume is measured and live, a walk otherwise — so it needs both the repository
         // and the MFT service, and no I/O of its own.
         services.AddSingleton<BertBrowser.Core.Services.IUserNotice, Views.UserNotice>();
+        services.AddSingleton<BertBrowser.Core.Services.IUserConfirm, Views.UserConfirm>();
         services.AddSingleton<BertBrowser.Core.Services.Compare.IFolderCompareService>(sp =>
             new BertBrowser.Core.Services.Compare.FolderCompareService(
                 sp.GetRequiredService<FsIndexRepository>(),

@@ -70,6 +70,12 @@
              search or path box. Explorer's Alt+P is handled in code-behind instead, because an
              Alt chord arrives as Key.System with the real key in SystemKey. -->
         <KeyBinding Key="P" Modifiers="Ctrl" Command="{Binding ActiveTab.TogglePreviewCommand}"/>
+
+        <!-- The flat branch view. Ctrl+B is what Directory Opus, XYplorer, Total Commander and
+             Double Commander all bind this to, so it is the one gesture somebody arriving from
+             another file manager already knows. Safe here for the reason Ctrl+P is: B is not a
+             text-editing key, so it cannot be taken away from the search or path box. -->
+        <KeyBinding Key="B" Modifiers="Ctrl" Command="{Binding ActiveTab.ToggleFlatCommand}"/>
     </Window.InputBindings>
 
     <!--

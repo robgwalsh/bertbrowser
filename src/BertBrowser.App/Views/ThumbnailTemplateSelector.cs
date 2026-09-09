@@ -13,5 +13,16 @@ public sealed class ThumbnailTemplateSelector : DataTemplateSelector
     public DataTemplate? RowTemplate { get; set; }
 
     public override DataTemplate? SelectTemplate(object item, DependencyObject container) =>
-        item is FileItemViewModel { IsMedia: true } ? TileTemplate : RowTemplate;
+        IsTile(item) ? TileTemplate : RowTemplate;
+
+    /// <summary>
+    /// Whether an item is drawn as a tile rather than as a full-width row.
+    /// </summary>
+    /// <remarks>
+    /// Public and static because <see cref="VirtualizingWrapPanel"/> has to make the same call: it
+    /// works out where every item goes without building any of them, so if it disagreed with the
+    /// selector about which shape an item is, the grid would be laid out for one thing and filled
+    /// with another.
+    /// </remarks>
+    public static bool IsTile(object? item) => item is FileItemViewModel { IsMedia: true };
 }

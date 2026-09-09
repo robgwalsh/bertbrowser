@@ -63,6 +63,10 @@ tree [dir]                  lay down a throwaway fixture tree (folders, hidden e
 preview-fixture [dir]       files that really are what their extension says (a PNG with alpha, a
                             zip, C# and Markdown), in a Preview folder of their own — `tree`'s
                             photo.jpg is text, which previews as nothing
+many-fixture [n] [dir]      n files (400 by default) across nested folders, every fourth one a .txt
+                            so both tile shapes are present. For the cases only quantity shows:
+                            the thumbnail view has to stay cheap over thousands of rows, and no
+                            fixture small enough to name its rows can prove that
 archive-fixture [dir]       the containers nothing here can write: locked.zip (AES, password
                             hunter2), sealed.7z (encrypted headers, correct-horse) and plain.7z.
                             Base64 in Core so a script and a unit test see the same bytes
@@ -173,6 +177,16 @@ hidden on|off | thumbnails <0..1> | sort <column-id> | theme <id>
                             System.Image.Dimensions. "date" still means Modified.)
 drives-view tree|cards      the "DRIVES & DEVICES" sidebar section's layout — what clicking its
                             header toggle button does
+list-scroll <px>            scrolls the file list to a vertical offset, in pixels. Worth more than
+                            tree-scroll: the thumbnail view scrolls through VirtualizingWrapPanel,
+                            this app's own IScrollInfo, so what is on screen after a scroll is code
+                            under test rather than something WPF is doing
+reveal <name>               select that row *and* scroll it into view, as opening a bookmarked file
+                            does. `select` deliberately does not scroll — clicking a row cannot,
+                            since you had to see it to click it — so this is the only way a script
+                            reaches ScrollIntoView, which in the tile view lands in
+                            BringIndexIntoView, where the row has no element yet and the scrolling
+                            has to come from the index alone
 tree-scroll <px>            scrolls the sidebar's folder tree to a vertical offset, in pixels —
                             the only way to exercise PinnedRow/PinnedRootRow's scroll-driven
                             sticky headers, since nothing here synthesises mouse-wheel input
@@ -182,6 +196,15 @@ preview on|off              the active tab's preview pane, with its debounce and
                             waited out (so assert after this, not straight after a `select`)
 preview-mode auto|raw|hex   the pane's view override; sticky across selections, settled the same
                             way (`raw` is PreviewMode.Text — spelled the way the button is)
+flat off|files|all          the active tab's flat branch view — everything under this folder in one
+                            list, files only or files and folders. Through the same command Ctrl+B
+                            and the toolbar button use, so a script exercises one code path, and
+                            settled. Unlike a search it survives navigation, which is what makes it
+                            a mode; inside an open archive it lists the container's tree instead
+flat-cap <n>                lowers how many rows one flat listing shows, so a fixture of a dozen
+                            files can reach the truncated case and its banner. The one place a run
+                            reaches past what a person could do, and it is here because the
+                            alternative is fifty thousand real files
 
 shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, rename-advanced,
@@ -189,7 +212,7 @@ dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, renam
                             theme-editor, disk-usage, duplicates, changes, sync-preview,
                             sync-preview-running, search-syntax, saved-search, extract, compress,
                             archive-password, elevation, settings-columns, settings-history,
-                            columns, settings-columns-dragging
+                            columns, settings-columns-dragging, flat-large
                             (changes is the "What changed" window: with a run's default settings
                             it shows the recording-off banner — the state every fresh install
                             has — and after `changes-seed` it shows rows. settings-history is
@@ -211,6 +234,9 @@ dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, renam
                             kind uses one.
                             rename-advanced is the rename dialog with its options panel open —
                             the panel is opened by a click, and this never clicks)
+                            (flat-large is the question a flat view asks before listing an enormous
+                            folder, worded by the real FlatViewRules over a made-up dir_size_cache
+                            row: a sandbox holds a dozen files, so it is the only way to see it)
 state                       one JSON line of everything worth asserting on
 session                     save the pane/tab arrangement the way closing the window does,
                             prune it the way a launch does, and reopen it in place — assert on
@@ -225,7 +251,8 @@ columns width <id> <px>
 columns reset               back to the saved default
 columns default             the header menu's "Set as default for new tabs" — what the settings
                             page reads, and the only way to seed it from a script
-menu columns [name]         PNG of the column header menu's items. They are rendered detached, not
+menu columns|flat [name]    PNG of a menu's items — the column header's, or the flat view's shape
+                            menu behind the toolbar chevron. They are rendered detached, not
                             opened: a ContextMenu is a Popup with its own top-level window that WPF
                             repositions onto the nearest monitor, i.e. onto the user's screen
 right-drop-menu <names> to <folder> [as <name>]
@@ -240,6 +267,15 @@ assert-path <substring> | assert-status <substring> | assert-count <n>
 assert-error [substring]     the warning banner above the list; bare = assert there is none
 assert-row <name> | assert-no-row <name> | assert-selected <n>
 assert-tabs <n> | assert-panes <n> | assert-flattened | assert-not-flattened
+assert-realized under|over <n>
+                            how many rows the list has actually built. The only way a script can
+                            tell virtualized from merely fast: a thumbnail view of eight hundred
+                            files must hold a screenful of containers, not eight hundred
+assert-flat [off|files|all] | assert-not-flat
+                            which flat branch view the tab is in; bare `assert-flat` means any.
+                            Distinct from assert-flattened, which asks whether the rows come from
+                            many folders — a search makes that true too, and the two differing is
+                            the whole reason the tab carries both flags
 assert-inside-archive | assert-not-inside-archive
 assert-column <id> | assert-no-column <id>
 assert-columns <id>, <id>, ...            the whole column order, injected ones included

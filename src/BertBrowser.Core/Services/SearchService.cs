@@ -31,6 +31,35 @@ public interface ISearchService
         IProgress<ContentScanProgress>? contentProgress = null);
 
     /// <summary>
+    /// Everything under <paramref name="rootPath"/>, as list rows — what the flat branch view shows.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Not a search, and here rather than in a service of its own because it is the same walk: it
+    /// reuses the streaming batches, the held-path filter and the relative-path rebuild that an
+    /// unindexed search's live scan already does. A separate service would have duplicated all
+    /// three and needed its own wiring through the composition root.
+    /// </para>
+    /// <para>
+    /// <b>It never reads <c>fs_entry</c> and never starts a crawl.</b> The index would answer this
+    /// in milliseconds, and that is the wrong trade for a <em>browse</em> surface: "here is what is
+    /// under this folder" must be true rather than fast, and index rows can be a rebuild behind.
+    /// <c>FolderCompareService.UsesIndex</c> drew the same line first and called falling back to a
+    /// live walk "the harmless direction". An index-backed fast path stays available behind a
+    /// freshness gate of that strength; it is not built. The no-crawl half is the other promise:
+    /// pressing Ctrl+B must not quietly enrol a subtree in the index.
+    /// </para>
+    /// </remarks>
+    /// <param name="includeDirectories">False lists files only — the default the flat view starts
+    /// from, since a folder row is one more thing between you and what you were looking for.</param>
+    /// <param name="cap">How many rows to stop at, reporting <c>Truncated</c>. Passed in rather than
+    /// taken from <see cref="SearchService.MaxFlatEntries"/> here, so a test can reach the truncated
+    /// case without writing fifty thousand files.</param>
+    Task<SearchOutcome> ListSubtreeAsync(
+        string rootPath, bool includeDirectories, int cap, CancellationToken ct,
+        IProgress<IReadOnlyList<SearchHit>>? liveBatches = null, bool includeHidden = false);
+
+    /// <summary>
     /// Whole-PC search across every MFT-indexed volume. Returns null when the query is too
     /// short. Results are served straight from the index; while the MFT build is still in
     /// flight they are partial and <c>RefreshPending</c> is set (the caller re-queries when
@@ -59,6 +88,19 @@ public interface ISearchService
 public sealed class SearchService : ISearchService, IDisposable
 {
     private const int MaxResults = 1000;
+
+    /// <summary>
+    /// How many rows one flat branch view shows.
+    /// </summary>
+    /// <remarks>
+    /// Its own number rather than <see cref="MaxResults"/>, for the reason <c>ArchiveIndex</c>'s
+    /// entry ceiling is not <c>ArchiveListing</c>'s: the two are answering different questions, and
+    /// unifying them makes one of them wrong. A thousand results is plenty for a search, which is a
+    /// question with an answer; a flat view of a photo library is not a question, and stopping it at
+    /// a thousand would read as broken. Fifty thousand rows is the point where the list itself, not
+    /// the walk, becomes the thing you are fighting.
+    /// </remarks>
+    public const int MaxFlatEntries = 50_000;
 
     /// <summary>How many containers one <c>in:archives</c> pass will open.</summary>
     private const int MaxArchivesScanned = 200;
@@ -273,8 +315,11 @@ public sealed class SearchService : ISearchService, IDisposable
         // A content query must not stream the *walk*: those rows are candidates, not results, and
         // most are about to be discarded. Putting them on screen and taking them away again would
         // be worse than a moment of nothing — the reading pass streams what actually matched.
+        // A content query walks for candidates rather than for results, so it stops at the larger
+        // ceiling — the reading pass applies the 1,000-result cap afterwards.
         var outcome = await Task.Run(
-            () => LiveScan(rootPath, query, ct, query.NeedsContent ? null : liveBatches, showHidden),
+            () => LiveScan(rootPath, query, Cap(query), ct,
+                query.NeedsContent ? null : liveBatches, showHidden),
             ct).ConfigureAwait(false);
 
         var extra = await ScanArchivesAsync(query, rootPath, liveBatches, ct).ConfigureAwait(false);
@@ -293,6 +338,30 @@ public sealed class SearchService : ISearchService, IDisposable
             Cancelled = scanned.Cancelled,
             ContentScan = scanned.Report,
         };
+    }
+
+    /// <inheritdoc/>
+    public async Task<SearchOutcome> ListSubtreeAsync(
+        string rootPath, bool includeDirectories, int cap, CancellationToken ct,
+        IProgress<IReadOnlyList<SearchHit>>? liveBatches = null, bool includeHidden = false)
+    {
+        // Refused here rather than trusted to the caller, for the reason SearchAsync gives at
+        // length: a virtual path canonicalizes happily, and one that reached a PathKey-keyed table
+        // would poison every subtree scan over the container's own folder for ever. An archive
+        // interior is listed from its already-loaded ArchiveIndex instead.
+        if (Archives.ArchivePath.Parse(rootPath, File.Exists) is not null)
+            return new SearchOutcome([], Truncated: false, SearchResultSource.LiveScan,
+                RefreshPending: false,
+                Problem: "Listing an archive's contents flat is done from the container itself.");
+
+        var outcome = await Task.Run(
+            () => LiveScan(rootPath, query: null, cap, ct, liveBatches, includeHidden,
+                includeDirectories),
+            ct).ConfigureAwait(false);
+
+        // RefreshPending is LiveScan's answer to "is a crawl going to improve on this?" — and here
+        // none was started, so nothing is coming.
+        return outcome with { Hits = Visible(outcome.Hits), RefreshPending = false };
     }
 
     /// <summary>
@@ -373,13 +442,25 @@ public sealed class SearchService : ISearchService, IDisposable
         }, ct);
     }
 
+    /// <summary>
+    /// Walks a subtree, keeping what <paramref name="query"/> matches.
+    /// </summary>
+    /// <param name="query">
+    /// <b>Null means every entry</b> — the flat branch view, which is a listing rather than a
+    /// search. Deliberately not a query that matches everything: <c>SearchGrammar</c> refuses to
+    /// build one (see <c>SearchNode.LiteralChars</c>/<c>HasFilter</c>), and manufacturing a node to
+    /// get around that would put a permanent member into the <c>Matches</c>/<c>WriteSql</c>
+    /// agreement contract on behalf of a caller that is not asking a question.
+    /// </param>
+    /// <param name="cap">Passed in rather than derived, because the three callers stop at three
+    /// different numbers: results, content candidates, and a flat listing.</param>
+    /// <param name="includeDirectories">False drops folder rows from the result. The walk still
+    /// descends into them — what is emitted and what is recursed into are separate decisions.</param>
     private SearchOutcome LiveScan(
-        string rootPath, SearchQuery query, CancellationToken ct,
-        IProgress<IReadOnlyList<SearchHit>>? liveBatches, bool includeHidden)
+        string rootPath, SearchQuery? query, int cap, CancellationToken ct,
+        IProgress<IReadOnlyList<SearchHit>>? liveBatches, bool includeHidden,
+        bool includeDirectories = true)
     {
-        // A content query walks for candidates rather than for results, so it stops at the larger
-        // ceiling — the reading pass applies the 1,000-result cap afterwards.
-        var cap = Cap(query);
         var rootDisplay = PathKey.NormalizeDisplay(rootPath);
         var hits = new List<SearchHit>();
         var batch = new List<SearchHit>();
@@ -388,7 +469,9 @@ public sealed class SearchService : ISearchService, IDisposable
 
         FileSystemWalker.Walk(rootPath, entry =>
         {
-            if (!query.Matches(new SearchCandidate(
+            if (!includeDirectories && entry.IsDirectory)
+                return true; // not emitted, still descended into
+            if (query is not null && !query.Matches(new SearchCandidate(
                     entry.NameKey, entry.PathKey, entry.IsDirectory,
                     entry.SizeBytes, entry.ModifiedUtc, entry.Hidden,
                     entry.Attributes, entry.CreatedUtc)))

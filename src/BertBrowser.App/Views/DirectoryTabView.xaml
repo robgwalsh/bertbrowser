@@ -145,30 +145,76 @@
             </Border>
 
             <!--
-              The preview pane's toggle, per tab: the pane it opens is per tab, so its on-state
-              reads straight from this tab's own IsPreviewVisible rather than ActiveTab's.
+              The two per-tab view toggles. Both read their on-state from this tab's own property
+              rather than ActiveTab's, because what they turn on belongs to this tab.
 
               On is a filled button rather than the accent Theme.Toolbar.CheckedForeground the
               preview-mode segments use: the contrast suite covers that pair against nothing here,
               and a fill carries the state without putting a colour that no test is holding still.
+
+              Flat comes first because it is about the list, where the preview pane is about the
+              pane beside it. Its chevron is a button of its own rather than a split-button
+              template: the two do different things (toggle, choose a shape), and a control where
+              one half toggles and the other opens a menu is a thing to explain rather than a thing
+              to look at.
             -->
-            <Button x:Name="PreviewPaneToggle" Grid.Column="3" Margin="6,0,0,0"
-                    ToolTip="Preview pane (Ctrl+P)"
-                    Command="{Binding TogglePreviewCommand}"
-                    AutomationProperties.AutomationId="PreviewPaneToggle"
-                    AutomationProperties.Name="Preview pane">
-                <Button.Style>
-                    <Style TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsPreviewVisible}" Value="True">
-                                <Setter Property="Background"
-                                        Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </Button.Style>
-                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.PreviewPane}"/>
-            </Button>
+            <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="6,0,0,0">
+                <Button x:Name="FlatViewToggle"
+                        ToolTip="Flat view — everything under this folder (Ctrl+B)"
+                        Command="{Binding ToggleFlatCommand}"
+                        AutomationProperties.AutomationId="FlatViewToggle"
+                        AutomationProperties.Name="Flat view">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsFlatView}" Value="True">
+                                    <Setter Property="Background"
+                                            Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.FlatView}"/>
+                </Button>
+
+                <Button x:Name="FlatViewModeButton" Style="{StaticResource ToolbarButton}"
+                        Width="14" Padding="0" ToolTip="What a flat view shows"
+                        Click="FlatViewMode_Click"
+                        AutomationProperties.AutomationId="FlatViewModeButton"
+                        AutomationProperties.Name="Flat view options">
+                    <!-- Drawn rather than named, like the folder tree's expander: a chevron is
+                         chrome pointing at the control beside it, not a picture of anything. -->
+                    <Path Data="M 0,0 L 3.5,3.5 L 7,0"
+                          Stroke="{StaticResource Theme.Text.Secondary}" StrokeThickness="1.2"
+                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <Button.ContextMenu>
+                        <ContextMenu x:Name="FlatViewModeMenu">
+                            <MenuItem x:Name="FlatFilesItem" Header="Files only"
+                                      IsCheckable="True" Click="FlatFiles_Click"/>
+                            <MenuItem x:Name="FlatAllItem" Header="Files and folders"
+                                      IsCheckable="True" Click="FlatAll_Click"/>
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
+
+                <Button x:Name="PreviewPaneToggle" Margin="6,0,0,0"
+                        ToolTip="Preview pane (Ctrl+P)"
+                        Command="{Binding TogglePreviewCommand}"
+                        AutomationProperties.AutomationId="PreviewPaneToggle"
+                        AutomationProperties.Name="Preview pane">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsPreviewVisible}" Value="True">
+                                    <Setter Property="Background"
+                                            Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.PreviewPane}"/>
+                </Button>
+            </StackPanel>
         </Grid>
 
         <!-- Activity indicator: search / directory load in progress (fixed height, no layout shift) -->
@@ -176,6 +222,18 @@
             <ProgressBar IsIndeterminate="True" BorderThickness="0"
                          Visibility="{Binding FileList.IsLoading, Converter={StaticResource BoolToVisibility}}"/>
         </Grid>
+
+        <!--
+          Notice banner: something true about the listing that the listing cannot say for itself —
+          today, that a flat view stopped at its ceiling. Separate from the error banner below
+          because it is not a failure: ErrorMessage is what MergeDirectoryAsync reads as "nothing to
+          merge into" and what assert-error fires on, and neither is true here.
+        -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource Theme.Warning.Background}" Padding="8,4"
+                Visibility="{Binding FileList.NoticeMessage, Converter={StaticResource NullToCollapsed}}">
+            <TextBlock x:Name="NoticeBanner" Text="{Binding FileList.NoticeMessage}" TextWrapping="Wrap"
+                       Foreground="{StaticResource Theme.Warning.Foreground}"/>
+        </Border>
 
         <!--
           Error banner. The Unlock button rides in it rather than in a dialog of its own because a

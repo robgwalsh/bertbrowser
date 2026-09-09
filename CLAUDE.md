@@ -81,6 +81,8 @@ you where and what to watch for.
 | Icons | `tools/icon/icons.txt` (the mapping) → `Resources/Icons.xaml` (generated), `IconPath`/`MenuIconPath`/`IconContent` in `Styles.xaml`, `tools/icon/IconSheet` |
 | Columns (file list) | `Core/Services/Columns/*` (`ColumnCatalog`, `ColumnLayoutRules`, `ColumnCandidates`), `Interop/ShellProperties`, `Views/ColumnAddPanel` |
 | Tabs / panes / layout | `App/ViewModels/DirectoryTabViewModel`, `PaneViewModel`, `ShellViewModel`, `Core/Layout/LayoutTree.cs` |
+| Flat branch view (Ctrl+B) | `Core/Services/FlatView/FlatViewRules`, `SearchService.ListSubtreeAsync`, `DirectoryTabViewModel.FlatView`, `FileListViewModel.IsFlatBrowse` |
+| Thumbnail tiles / scrolling | `Views/VirtualizingWrapPanel`, `ThumbnailTemplateSelector`, `ThumbPanel`/`ThumbTileTemplate` in `Styles.xaml`, `tools/ui/tiles.bbs` |
 | UI test harness | `tools/BertBrowser.Harness`, `tools/ui/*.bbs`, `.claude/skills/verify` |
 
 ## Cross-cutting gotchas
@@ -151,6 +153,39 @@ you where and what to watch for.
 - **`SearchNode.Matches` (definition) and `WriteSql` (optimization) must never disagree** — SQL may
   be a superset (re-checked per row) but never a subset. `ContentTerm` extends this to three-valued
   matching (`Yes`/`No`/`NeedsContent`) since content can't be answered from a column.
+- **`IsFlattened` says the rows come from many folders; `IsFlatBrowse` says they still have one
+  home.** A search sets the first alone, Ctrl+B sets both, and which one a guard reads is the whole
+  point. The Folder column, the folders-first sort band, the watcher merge and a folder comparison
+  follow `IsFlattened` — a one-level watcher listing genuinely cannot be merged into a recursive
+  one, so a flat view has no live refresh and F5 re-runs it. New, Compress and a drop on empty space
+  follow the narrower `IsSearchResult`, because a flat browse has a "here" and a whole-PC search does
+  not. Set the flag *before* `BeginFlattened`, since a comparison ends on `IsFlattened` changing and
+  words its message from it. Flat is deliberately **not** cleared by navigation, unlike search: that
+  is what makes it a mode rather than a gesture, and it is what every other Ctrl+B does. It reads the
+  disk and never the index — a browse surface must be true rather than instant, the line
+  `FolderCompareService.UsesIndex` drew first — while the estimate behind the are-you-sure prompt
+  does come from `dir_size_cache`, at one primary-key lookup, because an estimate only decides
+  whether to ask a question.
+- **The thumbnail view's panel must be a virtualizing one, and it is ours.** It was a `WrapPanel`,
+  which is not a `VirtualizingPanel`, so the list built a container for every row — and every
+  container asks for a thumbnail as soon as it is realized. Measured: a flat view of 1,000 videos
+  took 3.9 s as a details list and never finished inside a four-minute watchdog as tiles; the panel
+  alone, with the thumbnail requests taken out, still cost 6 s a thousand rows and grew worse than
+  linearly, because every arriving thumbnail re-measured all of them. `VirtualizingWrapPanel` places
+  items by arithmetic rather than by measuring them, which is why **tiles have to be uniform** —
+  hence the fixed caption height in `ThumbTileTemplate` — and why `ThumbnailTemplateSelector.IsTile`
+  is shared: the panel deciding an item's shape differently from the template would lay the grid out
+  for one thing and fill it with another. `tools/ui/tiles.bbs` is what holds this down.
+- **A thumbnail is a megabyte, and WPF recycles the container rather than the view model.** So a row
+  keeps its decoded bitmap for the listing's whole life, and memory grows with everything ever
+  scrolled past — invisible over a folder of forty photos, ruinous over a flat view of a media tree.
+  Shell calls go through a four-slot gate and retention is trimmed against `RealizedRows` at
+  `Background` priority, both copied from `ShellMetadataHydrator`, which got this right first. That
+  narrowing looks for a `VirtualizingPanel`, not a `VirtualizingStackPanel`: naming the details
+  list's exact panel type made it answer "nothing is on screen" for every tile ever shown, which
+  turned the trim into a loop that released the very rows being looked at. It returns **null, not
+  empty**, when there is no panel — before the first layout pass the answer is unknown rather than
+  none, and the two are not the same question.
 - **Nothing holds a file open** across previews, content search, or duplicate hashing —
   `FileShare.ReadWrite | Delete` everywhere, or this app's own rename/move/delete blocks itself.
   Cloud placeholders (`NotDownloaded`/`Offline`) are refused rather than silently hydrated (also

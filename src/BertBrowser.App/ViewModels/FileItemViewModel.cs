@@ -309,9 +309,35 @@ public sealed partial class FileItemViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Four shell calls in flight at a time, across every list in the window.
+    /// </summary>
+    /// <remarks>
+    /// The number and the reasoning are <c>ShellMetadataHydrator.MaxConcurrentReads</c>'s, and
+    /// static rather than per list for the same reason it gives: there is one shell, and a COM call
+    /// cannot be cancelled once it is in flight. Unbounded — which is what this was — a flick
+    /// through a flat branch view of a media tree starts one shell call per realized tile and
+    /// leaves the shell unable to answer for every application on the machine. The two gates are
+    /// separate so a <c>.lnk</c> stalling on a dead network share cannot spend the thumbnail budget
+    /// as well.
+    /// </remarks>
+    private static readonly SemaphoreSlim IconGate = new(4);
+
+    private static readonly SemaphoreSlim ThumbnailGate = new(4);
+
     private async Task LoadIconAsync()
     {
-        var image = await Task.Run(() => ShellIcons.GetIcon(FullPath, IsDirectory));
+        ImageSource? image;
+        await IconGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            image = await Task.Run(() => ShellIcons.GetIcon(FullPath, IsDirectory));
+        }
+        finally
+        {
+            IconGate.Release();
+        }
+
         _icon = image;
         _iconLoaded = true;
         OnPropertyChanged(nameof(Icon));
@@ -326,6 +352,20 @@ public sealed partial class FileItemViewModel : ObservableObject
     private ImageSource? _thumbnail;
     private bool _thumbnailRequested;
 
+    /// <summary>
+    /// Bumped by every <see cref="ReleaseThumbnail"/>, so a fetch that was already in flight when
+    /// the row was trimmed throws its bitmap away instead of quietly re-holding one the list has
+    /// stopped counting.
+    /// </summary>
+    private int _thumbnailGeneration;
+
+    /// <summary>Told by the list that owns this row when it first asks for a bitmap, so the list
+    /// can keep count of how many are alive. Null for a row in a list that never shows tiles.</summary>
+    internal Action<FileItemViewModel>? ThumbnailRequested { get; set; }
+
+    /// <summary>Whether this row is holding a decoded thumbnail — what the list's trim counts.</summary>
+    internal bool HoldsThumbnail => _thumbnailRequested;
+
     /// <summary>A large Explorer-style thumbnail, loaded lazily off the UI thread the first
     /// time a tile asks for it (only realized tiles do, thanks to virtualization). Shows the
     /// small shell icon until the real thumbnail arrives, then falls back to it on failure.</summary>
@@ -337,16 +377,56 @@ public sealed partial class FileItemViewModel : ObservableObject
             {
                 _thumbnailRequested = true;
                 _thumbnail = Icon; // instant placeholder while the real one loads
+                ThumbnailRequested?.Invoke(this);
                 _ = LoadThumbnailAsync();
             }
             return _thumbnail;
         }
     }
 
+    /// <summary>
+    /// Gives the decoded bitmap back, leaving the small icon in its place.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Called by the list that owns the row, for rows that are no longer on screen. It has to exist
+    /// because WPF virtualization recycles the <em>container</em>, not the view model bound to it:
+    /// a row scrolled past keeps its bitmap for as long as the listing lives, which is invisible
+    /// over a folder and ruinous over a flat branch view of a media tree.
+    /// </para>
+    /// <para>
+    /// The icon, not null: a released tile shows what it showed before its thumbnail arrived,
+    /// rather than flashing empty. Scrolled back into view, the getter simply asks again.
+    /// </para>
+    /// </remarks>
+    internal void ReleaseThumbnail()
+    {
+        if (!_thumbnailRequested) return;
+
+        _thumbnailGeneration++;
+        _thumbnailRequested = false;
+        _thumbnail = Icon;
+        OnPropertyChanged(nameof(Thumbnail));
+    }
+
     private async Task LoadThumbnailAsync()
     {
-        var image = await Task.Run(() => ShellThumbnails.GetThumbnail(FullPath, ThumbnailPixelSize));
-        if (image is null) return; // keep the icon placeholder
+        var generation = _thumbnailGeneration;
+
+        ImageSource? image;
+        await ThumbnailGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            image = await Task.Run(() => ShellThumbnails.GetThumbnail(FullPath, ThumbnailPixelSize));
+        }
+        finally
+        {
+            ThumbnailGate.Release();
+        }
+
+        if (image is null) return;                       // keep the icon placeholder
+        if (generation != _thumbnailGeneration) return;  // trimmed while we were queued behind the gate
+
         _thumbnail = image;
         OnPropertyChanged(nameof(Thumbnail));
     }

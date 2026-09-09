@@ -459,8 +459,19 @@
       its own ApplyViewMode() — a Style/DataTemplate/ItemsPanelTemplate can be shared across
       controls, unlike the GridView and ContextMenu, which stay inline per list.
     -->
+    <!--
+      Virtualizing, and it has to be: a WrapPanel is not a VirtualizingPanel, so this built a
+      container for every row — and every container asks for a thumbnail as soon as it exists. A
+      flat view of a thousand videos never finished inside a four-minute watchdog; the same listing
+      as a details list took under four seconds. See VirtualizingWrapPanel for the measurements.
+
+      The two sizes are the same ones the tile template binds to, so the arithmetic the panel does
+      to place a tile it has not built matches the tile that eventually lands there.
+    -->
     <ItemsPanelTemplate x:Key="ThumbPanel">
-        <WrapPanel Orientation="Horizontal"/>
+        <v:VirtualizingWrapPanel
+            TileWidth="{Binding DataContext.FileList.ThumbnailSize, RelativeSource={RelativeSource AncestorType=ListView}}"
+            TileHeight="{Binding DataContext.FileList.ThumbnailTileHeight, RelativeSource={RelativeSource AncestorType=ListView}}"/>
     </ItemsPanelTemplate>
 
     <DataTemplate x:Key="ThumbTileTemplate">
@@ -475,8 +486,13 @@
                        Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
                        RenderOptions.BitmapScalingMode="HighQuality"/>
             </Border>
+            <!-- A fixed height, not a maximum one: the panel places tiles it has not built yet, so
+                 a tile whose height depended on how long its name happened to be would put the
+                 grid out by however many lines the captions disagreed by. Two lines' worth, which
+                 is what MaxHeight allowed before, so a long name still wraps and then ellipsizes. -->
             <TextBlock Text="{Binding Name}" TextWrapping="Wrap" TextAlignment="Center"
-                       Margin="0,4,0,0" MaxHeight="32" TextTrimming="CharacterEllipsis"/>
+                       Margin="0,4,0,0" Height="32" VerticalAlignment="Top"
+                       TextTrimming="CharacterEllipsis"/>
         </StackPanel>
     </DataTemplate>
 

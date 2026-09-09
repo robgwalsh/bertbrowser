@@ -73,3 +73,29 @@ internal sealed class RecordingUserNotice : IUserNotice
         lock (_said) _said.Add(message);
     }
 }
+
+/// <summary>
+/// An <see cref="IUserConfirm"/> that answers yes and remembers what it was asked.
+/// </summary>
+/// <remarks>
+/// Yes rather than <see cref="DecliningUserConfirm"/>'s no, and it is a deliberate difference from
+/// <see cref="RecordingElevationPrompt"/>'s configurable answer. What a run can be asked here is
+/// whether to flatten an enormous folder, and a sandbox holds a dozen files — so the question does
+/// not come up, and if a script ever makes it come up it wants the listing rather than the refusal.
+/// Recording is still the point: it is what lets a script prove the question was asked at all.
+/// </remarks>
+internal sealed class RecordingUserConfirm : IUserConfirm
+{
+    private readonly List<string> _asked = [];
+
+    internal IReadOnlyList<string> Asked
+    {
+        get { lock (_asked) return [.. _asked]; }
+    }
+
+    public bool Ask(string message, string caption, string confirmLabel)
+    {
+        lock (_asked) _asked.Add(message);
+        return true;
+    }
+}

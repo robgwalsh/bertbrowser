@@ -7,6 +7,7 @@ using BertBrowser.Core.Models;
 using BertBrowser.Core.Paths;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Archives;
+using BertBrowser.Core.Services.FlatView;
 using BertBrowser.Core.Services.Search;
 
 namespace BertBrowser.App.ViewModels;
@@ -31,6 +32,14 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     /// <summary>Asked whether a path is browsable and whether it is inside a container. Never on
     /// the UI thread for anything that opens one — see <see cref="NavigateToAsync"/>.</summary>
     private readonly BertBrowser.Core.Services.Archives.IArchiveBrowser _archives;
+
+    /// <summary>Asked, once, how big a folder is before flattening it. Never for a row's size —
+    /// that is <see cref="FileList"/>'s business, through the same repository.</summary>
+    private readonly DirSizeRepository _dirSizes;
+
+    /// <summary>Asked before listing a subtree the index says is enormous. A seam, so a scripted
+    /// run answers without a modal nothing can dismiss.</summary>
+    private readonly IUserConfirm _confirm;
 
     /// <summary>The cap on results from searching inside a container, matching the index's own.</summary>
     private const int ArchiveSearchLimit = 1000;
@@ -61,6 +70,63 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
 
     [RelayCommand]
     private void TogglePreview() => IsPreviewVisible = !IsPreviewVisible;
+
+    // --- Flat branch view ---
+
+    /// <summary>
+    /// Whether this tab lists one folder or everything under it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Per tab, like the preview pane, and it diverges from that pattern in three ways worth
+    /// naming. There is <b>no global on/off default</b> in <c>AppSettings</c>: a new tab should
+    /// never open flat, so the only thing that travels is which of the two flat shapes you last
+    /// chose (<see cref="AppSettings.FlatViewIncludesFolders"/>). It <b>survives navigation</b> —
+    /// <see cref="ClearSearchState"/> deliberately does not touch it — because that is what a
+    /// branch view is for and what every other file manager's does. And it <b>is</b> written into
+    /// the session, which the preview pane is not, so a tab comes back the way it was left.
+    /// </para>
+    /// <para>
+    /// Assigning it does not itself reload: a session restore sets the mode on a tab that has no
+    /// path yet, and a load kicked from there would race the navigation that is about to happen.
+    /// <see cref="RefreshViewAsync"/> reads it, and the commands below are what ask for a refresh.
+    /// </para>
+    /// </remarks>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsFlatView))]
+    private FlatViewMode _flatView;
+
+    /// <summary>Whether flat is on at all — what the toolbar button's pressed state binds to.</summary>
+    public bool IsFlatView => FlatView != FlatViewMode.Off;
+
+    /// <summary>
+    /// How many rows one flat listing shows.
+    /// </summary>
+    /// <remarks>
+    /// A property rather than the constant used directly, so a scripted run can lower it and reach
+    /// the truncated case over a fixture of a dozen files. Nothing in the app ever assigns it —
+    /// what it guards is a state that otherwise needs fifty thousand real files to photograph.
+    /// </remarks>
+    internal int FlatEntryCap { get; set; } = SearchService.MaxFlatEntries;
+
+    /// <summary>The shape a bare Ctrl+B turns on, remembered across tabs and launches.</summary>
+    private FlatViewMode PreferredFlatMode =>
+        _settings.FlatViewIncludesFolders ? FlatViewMode.All : FlatViewMode.Files;
+
+    [RelayCommand]
+    private async Task ToggleFlatAsync() =>
+        await SetFlatModeAsync(IsFlatView ? FlatViewMode.Off : PreferredFlatMode);
+
+    /// <summary>Switches to a named mode — what the toggle's menu invokes, and what a script drives.</summary>
+    public async Task SetFlatModeAsync(FlatViewMode mode)
+    {
+        if (mode != FlatViewMode.Off)
+            _settings.FlatViewIncludesFolders = mode == FlatViewMode.All;
+
+        if (FlatView == mode) return;
+        FlatView = mode;
+        await RefreshViewAsync();
+    }
 
     /// <summary>Reflects the current "Show hidden items" setting (may change while running).
     /// Read straight from settings rather than pushed down from the shell: the toggle writes the
@@ -178,13 +244,16 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         BertBrowser.Core.Services.Mft.IMftIndexService mftIndex,
         BertBrowser.Core.Services.Archives.IArchiveBrowser archives,
         BertBrowser.Core.Services.Archives.IArchiveReader archiveReader,
-        BertBrowser.Core.Services.Archives.IArchivePasswords archivePasswords)
+        BertBrowser.Core.Services.Archives.IArchivePasswords archivePasswords,
+        IUserConfirm confirm)
     {
         _searchService = searchService;
         _settings = settings;
         _launcher = launcher;
         _mftIndex = mftIndex;
         _archives = archives;
+        _dirSizes = dirSizeRepository;
+        _confirm = confirm;
 
         FileList = new FileListViewModel(fileSystem, dirSizeRepository, settings, archives);
         FileList.PropertyChanged += OnFileListPropertyChanged;
@@ -424,7 +493,11 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
 
     private async Task SetPathAndLoadAsync(string path)
     {
-        ClearSearchState(); // navigating exits search mode, like Explorer
+        // Navigating exits search mode, like Explorer — and deliberately does *not* exit flat view,
+        // unlike it. A search is a question about one folder and is answered; a branch view is how
+        // this tab shows folders, so the next one shows flat too. That is the behaviour every other
+        // file manager's Ctrl+B has, and it is the difference between a mode and a gesture.
+        ClearSearchState();
         CurrentPath = path;
         StartWatching(path); // so anything else changing this folder shows up without an F5
         ApplyDirectoryThumbnailScale(path); // restore this folder's tile/list preference
@@ -447,7 +520,13 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         {
             if (HasActiveSearch)
             {
+                // A live query wins over the mode: a search is already recursive, so running both
+                // would be running the same walk twice for one of the two answers.
                 await RunSearchAsync(ct);
+            }
+            else if (IsFlatView)
+            {
+                await RunFlatListingAsync(ct);
             }
             else
             {
@@ -567,6 +646,98 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         }
     }
 
+    /// <summary>
+    /// Lists everything under this folder — the flat branch view.
+    /// </summary>
+    /// <remarks>
+    /// A much shorter sibling of <see cref="RunSearchCoreAsync"/>, and it shares that method's
+    /// streaming shape rather than its decisions: there is no query to parse, no content pass, no
+    /// index to be stale, and nothing to hydrate — a walk row already carries its size, its times
+    /// and its attributes.
+    /// </remarks>
+    private async Task RunFlatListingAsync(CancellationToken ct)
+    {
+        var mode = FlatView;
+
+        // Asked before anything is cleared, so declining leaves the listing that was on screen
+        // exactly where it was. The estimate is one primary-key lookup in dir_size_cache — the same
+        // number the Size column shows for this folder — and it is only ever an estimate: it decides
+        // whether to ask a question, never what the rows say.
+        var preflight = FlatViewRules.Decide(
+            CurrentPath, _dirSizes.Get(CurrentPath), mode, FlatEntryCap);
+
+        if (preflight.Confirm &&
+            !_confirm.Ask(preflight.Message, "Flat view", preflight.ConfirmLabel))
+        {
+            FlatView = FlatViewMode.Off;
+            return;
+        }
+
+        FileList.BeginFlatBrowse();
+
+        var folder = Path.GetFileName(Path.TrimEndingDirectorySeparator(CurrentPath)) is { Length: > 0 } name
+            ? name
+            : CurrentPath;
+        StatusText = $"Listing everything under {folder}…";
+
+        SearchOutcome outcome;
+        if (_archives.Resolve(CurrentPath) is { } here)
+        {
+            // Free in here: ArchiveIndex is already the whole container as a tree, so this is a walk
+            // over something in memory. It is also the only way to get one — the index holds nothing
+            // about archive contents and must never be asked to.
+            var hits = await Task.Run(() => ArchiveSearchScanner.Search(
+                _archives.ReadArchive(here.ArchiveFile), here.ArchiveFile, here.EntryPath,
+                query: null, FlatEntryCap, ct,
+                includeDirectories: mode == FlatViewMode.All), ct);
+
+            if (ct.IsCancellationRequested) return;
+            FileList.AppendSearchHits(hits);
+            outcome = new SearchOutcome(
+                hits, Truncated: hits.Count >= FlatEntryCap,
+                SearchResultSource.LiveScan, RefreshPending: false);
+        }
+        else
+        {
+            // Progress is constructed on the UI thread, so batches marshal back to it.
+            var progress = new Progress<IReadOnlyList<SearchHit>>(batch =>
+            {
+                if (ct.IsCancellationRequested) return;
+                FileList.AppendSearchHits(batch);
+                StatusText = $"{FileList.Items.Count:N0} item(s) so far under {folder}…";
+            });
+
+            outcome = await _searchService.ListSubtreeAsync(
+                CurrentPath, includeDirectories: mode == FlatViewMode.All, FlatEntryCap,
+                ct, progress, IncludeHidden);
+        }
+
+        if (ct.IsCancellationRequested) return;
+
+        if (outcome.Problem is { } problem)
+        {
+            FileList.ErrorMessage = problem;
+            StatusText = problem;
+            FileList.EndSearch();
+            return;
+        }
+
+        await FileList.CompleteSearchAsync(
+            outcome, $"Nothing under \"{folder}\".", hydrateMetadata: false, ct);
+        if (ct.IsCancellationRequested) return;
+
+        // A banner rather than only a suffix here, because "you are not seeing all of them" is the
+        // one thing a flat view must never leave anyone to assume the other way round.
+        FileList.NoticeMessage = outcome.Truncated
+            ? $"Showing the first {FlatEntryCap:N0} of a larger tree. " +
+              "Open a folder further in, or search to narrow it."
+            : null;
+
+        var what = mode == FlatViewMode.All ? "item(s)" : "file(s)";
+        var truncated = outcome.Truncated ? $" (first {FlatEntryCap:N0})" : "";
+        StatusText = $"{outcome.Hits.Count:N0} {what} under {CurrentPath}{truncated}";
+    }
+
     private async Task RunSearchCoreAsync(CancellationToken ct)
     {
         var queryText = ActiveSearchText;
@@ -684,7 +855,8 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         if (outcome is null || ct.IsCancellationRequested) return;
 
         // Global hits come from MFT rows with no size/timestamp, so hydrate them from disk.
-        await FileList.CompleteSearchAsync(outcome, queryText, hydrateMetadata: global, ct);
+        await FileList.CompleteSearchAsync(
+            outcome, $"No results for '{queryText}'", hydrateMetadata: global, ct);
         if (ct.IsCancellationRequested) return;
 
         var scope = global ? "this PC" : CurrentPath;

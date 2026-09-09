@@ -279,11 +279,12 @@ internal sealed class FileDragDropController
 
     /// <summary>A folder row takes the drop itself; anywhere else means the folder this pane is
     /// browsing — its own, not whichever pane happens to be active. Search results are a flattened
-    /// view of many folders, so they have no single "here".</summary>
+    /// view of many folders, so they have no single "here"; a flat branch view is flattened the same
+    /// way but is still a view <em>of</em> a folder, and drops land in it.</summary>
     private string? ListTarget(DragEventArgs e)
     {
         if (RowItem(e) is { IsDirectory: true } directory) return directory.FullPath;
-        if (_tab.FileList.IsFlattened) return null;
+        if (_tab.FileList.IsSearchResult) return null;
         return _tab.CurrentPath.Length > 0 ? _tab.CurrentPath : null;
     }
 

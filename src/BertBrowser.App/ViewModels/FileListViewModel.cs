@@ -26,8 +26,33 @@ public sealed partial class FileListViewModel : ObservableObject
     [ObservableProperty]
     private bool _isLoading;
 
+    /// <summary>
+    /// The rows come from many folders rather than from one — a search result, or a flat branch
+    /// view. What the Folder column and the sort bands follow.
+    /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSearchResult))]
     private bool _isFlattened;
+
+    /// <summary>
+    /// This flattening is a browse of a real folder, not a search result.
+    /// </summary>
+    /// <remarks>
+    /// Beside <see cref="IsFlattened"/> in the same spirit <see cref="ShowsContentMatches"/> is, and
+    /// for the same kind of reason: one flag cannot answer two questions. A flat branch view is
+    /// flattened — its rows have different parents — but it still has a <em>here</em>, the folder
+    /// the tab is on, which a whole-PC search does not. That is the difference the write verbs care
+    /// about, and it is why they consult <see cref="IsSearchResult"/> rather than the flag above.
+    /// </remarks>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSearchResult))]
+    private bool _isFlatBrowse;
+
+    /// <summary>
+    /// Flattened with no folder to act on — the narrower guard, and the one anything that writes
+    /// "beside what is here" has to ask.
+    /// </summary>
+    public bool IsSearchResult => IsFlattened && !IsFlatBrowse;
 
     // --- Columns ---
 
@@ -96,7 +121,7 @@ public sealed partial class FileListViewModel : ObservableObject
     /// <summary>What the view has actually realized. Supplied by <c>DirectoryTabView</c>, which is
     /// the only thing that can know; without it a fast scroll would queue a file open for every row
     /// that flew past.</summary>
-    public Func<IReadOnlyCollection<FileItemViewModel>>? RealizedRows { get; set; }
+    public Func<IReadOnlyCollection<FileItemViewModel>?>? RealizedRows { get; set; }
 
     internal ShellMetadataHydrator Hydrator
     {
@@ -174,6 +199,20 @@ public sealed partial class FileListViewModel : ObservableObject
     /// <summary>Shown centered in the file panel when a search finishes with no hits.</summary>
     [ObservableProperty]
     private string? _emptyMessage;
+
+    /// <summary>
+    /// Something the listing on screen is not saying for itself — today, that a flat view stopped
+    /// at its ceiling.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not <see cref="ErrorMessage"/>, which is a listing that <em>failed</em>: that
+    /// one is what <c>MergeDirectoryAsync</c> reads as "nothing to merge into" and what the
+    /// harness's <c>assert-error</c> fires on. And deliberately not a suffix on the status line,
+    /// because "you are not seeing all of them" is the one thing a flat view must never let anyone
+    /// assume the other way.
+    /// </remarks>
+    [ObservableProperty]
+    private string? _noticeMessage;
 
     /// <summary>
     /// The id of the column the list is sorted by — a <see cref="ColumnCatalog"/> id, so a shell
@@ -298,14 +337,24 @@ public sealed partial class FileListViewModel : ObservableObject
     public void RestampRows()
     {
         foreach (var item in Items)
-            Stamp(item);
+            Adopt(item);
 
         ApplyRowFilter();
     }
 
-    private FileItemViewModel Stamp(FileItemViewModel item)
+    /// <summary>
+    /// Everything a row takes from the list that owns it: its compare stamp, and the way back for
+    /// thumbnail bookkeeping.
+    /// </summary>
+    /// <remarks>
+    /// It was <c>Stamp</c>, and the contract its comment above states is the reason it is now the
+    /// one place both things happen: it is called on <em>every</em> path that creates or replaces a
+    /// row, so a second hook of the same shape would only be a second thing to forget.
+    /// </remarks>
+    private FileItemViewModel Adopt(FileItemViewModel item)
     {
         item.CompareState = RowState?.Invoke(item) ?? CompareRowState.None;
+        item.ThumbnailRequested = _onThumbnailRequested;
         return item;
     }
 
@@ -339,6 +388,7 @@ public sealed partial class FileListViewModel : ObservableObject
         _dirSizeRepository = dirSizeRepository;
         _settings = settings;
         _archives = archives;
+        _onThumbnailRequested = OnThumbnailRequested;
         _tileAspect = AspectRatio.Parse(settings.TileAspectRatio);
         // The field, not the property: seeding is not customising, and going through the setter
         // would make every new tab claim an arrangement nobody made.
@@ -353,9 +403,12 @@ public sealed partial class FileListViewModel : ObservableObject
         // Cleared here and not only set by a search: this was the one assignment site, so clearing
         // a content: search left the flag true and its Match column on screen over an ordinary
         // directory listing, with nothing in it and nothing that would ever take it away again.
+        // IsFlatBrowse rides along for exactly that reason — one setting site, one clearing site.
         ShowsContentMatches = false;
+        IsFlatBrowse = false;
         ErrorMessage = null;
         EmptyMessage = null;
+        NoticeMessage = null;
         IsArchiveLocked = false;
         try
         {
@@ -489,11 +542,11 @@ public sealed partial class FileListViewModel : ObservableObject
         foreach (var entry in changes.Updated)
         {
             var index = IndexOfKey(PathKey.Canonicalize(entry.FullPath));
-            if (index >= 0) Items[index] = Stamp(new FileItemViewModel(entry));
+            if (index >= 0) Items[index] = Adopt(new FileItemViewModel(entry));
         }
 
         foreach (var entry in changes.Added)
-            Items.Insert(InsertionPointFor(entry), Stamp(new FileItemViewModel(entry)));
+            Items.Insert(InsertionPointFor(entry), Adopt(new FileItemViewModel(entry)));
     }
 
     private int IndexOfKey(string key)
@@ -546,12 +599,32 @@ public sealed partial class FileListViewModel : ObservableObject
     private bool _showsContentMatches;
 
     /// <summary>Search mode: prepares an empty flattened list for streamed hits to append into.</summary>
+    /// <remarks>Which kind of flattening this is gets set <em>first</em>, in both of these, and the
+    /// order is load-bearing: a folder comparison ends on <see cref="IsFlattened"/> changing and
+    /// words its message from this flag, so setting it afterwards would report every Ctrl+B as a
+    /// search.</remarks>
     public void BeginSearch()
+    {
+        IsFlatBrowse = false;
+        BeginFlattened();
+    }
+
+    /// <summary>Flat branch view: the same empty flattened list, but of a folder rather than of a
+    /// query, so the verbs that need a folder stay on.</summary>
+    public void BeginFlatBrowse()
+    {
+        IsFlatBrowse = true;
+        ShowsContentMatches = false;
+        BeginFlattened();
+    }
+
+    private void BeginFlattened()
     {
         IsLoading = true;
         IsFlattened = true;
         ErrorMessage = null;
         EmptyMessage = null;
+        NoticeMessage = null;
         Items = new ObservableCollection<FileItemViewModel>();
     }
 
@@ -575,13 +648,16 @@ public sealed partial class FileListViewModel : ObservableObject
     public void AppendSearchHits(IReadOnlyList<SearchHit> hits)
     {
         foreach (var hit in hits)
-            Items.Add(Stamp(CreateSearchItem(hit)));
+            Items.Add(Adopt(CreateSearchItem(hit)));
     }
 
     /// <summary>Replaces the streamed list with the final sorted outcome and hydrates sizes.
     /// When <paramref name="hydrateMetadata"/> is set (global/MFT results, which carry no size or
     /// timestamp), each hit is stat'd from disk off-thread before sorting and binding.</summary>
-    public async Task CompleteSearchAsync(SearchOutcome outcome, string queryText, bool hydrateMetadata, CancellationToken ct)
+    /// <param name="emptyMessage">What to say if it found nothing. Passed in rather than built from
+    /// a query, because a flat listing has no query to name and "No results for ''" would be the
+    /// wrong sentence twice over.</param>
+    public async Task CompleteSearchAsync(SearchOutcome outcome, string emptyMessage, bool hydrateMetadata, CancellationToken ct)
     {
         try
         {
@@ -596,7 +672,7 @@ public sealed partial class FileListViewModel : ObservableObject
             }, ct);
 
             ReplaceItems(items);
-            EmptyMessage = items.Count == 0 ? $"No results for '{queryText}'" : null;
+            EmptyMessage = items.Count == 0 ? emptyMessage : null;
             await HydrateDirSizesAsync(items, ct);
         }
         catch (OperationCanceledException)
@@ -653,7 +729,9 @@ public sealed partial class FileListViewModel : ObservableObject
     /// <summary>Re-reads cached directory sizes for the current normal-mode listing.</summary>
     public async Task RefreshDirSizesAsync(CancellationToken ct)
     {
-        if (!IsFlattened)
+        // A flat browse showing folder rows wants these as much as a directory listing does; a
+        // search result is the one that has no business re-reading the cache under it.
+        if (!IsSearchResult)
             await HydrateDirSizesAsync(Items.ToList(), ct);
     }
 
@@ -685,7 +763,11 @@ public sealed partial class FileListViewModel : ObservableObject
     private void ReplaceItems(IReadOnlyList<FileItemViewModel> items)
     {
         foreach (var item in items)
-            Stamp(item);
+            Adopt(item);
+
+        // Dropped rather than trimmed: these rows are gone from the listing, so holding them here
+        // would keep both the view models and their bitmaps alive for as long as the tab lives.
+        _thumbnailHolders.Clear();
 
         Items = new ObservableCollection<FileItemViewModel>(items);
         ApplyRowFilter();
@@ -693,6 +775,71 @@ public sealed partial class FileListViewModel : ObservableObject
         // last one had in flight — those reads are for rows that are gone.
         _hydrator?.Reset();
         AttachHydrator();
+    }
+
+    // --- Thumbnail retention ---
+
+    /// <summary>
+    /// How many rows may hold a decoded thumbnail at once.
+    /// </summary>
+    /// <remarks>
+    /// A 512-pixel thumbnail is about a megabyte decoded, and WPF virtualization recycles the
+    /// container rather than the row bound to it — so with no ceiling a listing grows by a megabyte
+    /// for every distinct tile ever scrolled past and gives none of it back. Invisible over a
+    /// folder of forty photos; ruinous over a flat branch view of a media tree, which is the whole
+    /// reason this exists. 400 is several screenfuls at the largest tile size, so scrolling back a
+    /// page never refetches.
+    /// </remarks>
+    private const int MaxRetainedThumbnails = 400;
+
+    /// <summary>Rows holding a bitmap, oldest request first — the order the trim releases in.</summary>
+    private readonly LinkedList<FileItemViewModel> _thumbnailHolders = new();
+
+    /// <summary>Held once rather than built per row: <see cref="Adopt"/> runs on every row of every
+    /// listing, and a flat view has tens of thousands of them.</summary>
+    private readonly Action<FileItemViewModel> _onThumbnailRequested;
+
+    private bool _trimScheduled;
+
+    private void OnThumbnailRequested(FileItemViewModel row)
+    {
+        _thumbnailHolders.AddLast(row);
+
+        if (_thumbnailHolders.Count <= MaxRetainedThumbnails || _trimScheduled) return;
+
+        // Background priority, coalesced to one pass — the hydrator's idiom, and for its reason:
+        // everything realized during this turn of the layout should be counted before anything is
+        // taken away, or a single fast scroll would release rows it is about to ask for again.
+        _trimScheduled = true;
+        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, TrimThumbnails);
+    }
+
+    /// <summary>Releases the oldest bitmaps that are no longer on screen, back down to the cap.</summary>
+    /// <remarks>
+    /// A row still realized keeps its bitmap however old its request is: releasing it would only
+    /// make the very next bind fetch the same file again. With no <see cref="RealizedRows"/> to ask
+    /// — a list the view has not wired up — oldest-first is the honest fallback.
+    /// </remarks>
+    private void TrimThumbnails()
+    {
+        _trimScheduled = false;
+
+        var realized = RealizedRows?.Invoke();
+        var node = _thumbnailHolders.First;
+
+        while (node is not null && _thumbnailHolders.Count > MaxRetainedThumbnails)
+        {
+            var next = node.Next;
+            var row = node.Value;
+
+            if (!row.HoldsThumbnail || realized is null || !realized.Contains(row))
+            {
+                row.ReleaseThumbnail();
+                _thumbnailHolders.Remove(node);
+            }
+
+            node = next;
+        }
     }
 
     /// <summary>

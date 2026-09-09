@@ -57,6 +57,18 @@ clear-search
 search ext:js
 assert-count 2
 clear-search
+
+# And the flat branch view, which in here is free: ArchiveIndex is already the whole container as
+# a tree, so this is a walk over something in memory. util.js is two levels down.
+flat files
+assert-flat files
+assert-row util.js
+assert-no-row src
+flat all
+assert-row src
+flat off
+assert-not-flat
+
 up
 
 # And from outside, in:archives opens the containers under the root and searches their names.

@@ -68,6 +68,17 @@ public sealed class AppSettings
     /// this is the value a new tab starts from, and toggling in any tab writes it.</summary>
     public bool ShowPreviewPane { get; set; }
 
+    /// <summary>
+    /// Which shape a bare Ctrl+B turns the flat branch view on in: files only, or files and folders.
+    /// </summary>
+    /// <remarks>
+    /// Only the shape travels, and that is the deliberate difference from
+    /// <see cref="ShowPreviewPane"/>: whether flat is <em>on</em> is per tab and saved with the
+    /// session, because a new tab opening flat would be a surprise every time, while picking the
+    /// other shape once and having it stick is not.
+    /// </remarks>
+    public bool FlatViewIncludesFolders { get; set; }
+
     /// <summary>Width of the preview pane, in device-independent pixels. Global rather than per
     /// tab on purpose: panes differ in width, so a remembered per-tab width reads as the splitter
     /// moving on its own rather than as the app remembering anything.</summary>

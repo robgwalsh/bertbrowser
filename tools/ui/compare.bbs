@@ -121,6 +121,18 @@ assert-missing right/only-left.txt
 assert-exists right/only-right.txt
 shot compare-after-undo
 
+# --- Flattening a pane ends it ---
+#
+# A comparison pairs two one-level listings by name. A flat branch view is rows from all over the
+# tree, so there is nothing to pair — the same reason a search ends one, and the guard is the same
+# flag. Only the wording branches, so the person is told what they actually just did.
+flat files
+assert-flat files
+assert-no-column CompareStatus
+flat off
+compare
+assert-column CompareStatus
+
 # --- What it refuses, and how it says so ---
 #
 # Exactly two panes, and the button explains itself rather than sitting greyed out. Three panes is

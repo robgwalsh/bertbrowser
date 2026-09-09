@@ -1,0 +1,107 @@
+# The flat branch view, through the real window.
+#
+# What no unit test reaches: that flat is a *mode of the tab* rather than a search. It survives
+# navigation, it loses to a live search and comes back when the search is cleared, it comes back
+# after a session round trip, and the write verbs a search switches off stay on under it — because
+# a flat browse still has a "here" and a search result does not.
+#
+# The fixture's Documents\Archive\old.txt is three levels down, so no one-level listing can ever
+# show it. That is the assertion that cannot pass by accident.
+
+tree .
+refresh
+assert-not-flat
+assert-not-flattened
+assert-count 8
+
+# --- Files only: the default, and the one the media case wants ---
+
+flat files
+assert-flat files
+assert-flattened
+assert-column RelativePath
+assert-row old.txt
+assert-no-row Documents
+assert-count 12
+assert-status under
+shot 01-flat-files
+
+# --- Files and folders: the same walk, emitting what it walked through ---
+
+flat all
+assert-flat all
+assert-row old.txt
+assert-row Documents
+assert-count 16
+shot 02-flat-all
+menu flat
+
+# It has a folder being shown, unlike a search result, so New is live and targets the flat root.
+# That is exactly the objection that makes New off during a search.
+newfolder FlatChild
+assert-row FlatChild
+assert-exists FlatChild
+
+# --- A mode, not a gesture: navigating keeps it ---
+
+go Documents
+assert-flat all
+# still recursive, now from one level down
+assert-row old.txt
+# and scoped to where we are
+assert-no-row notes.txt
+back
+assert-flat all
+assert-row notes.txt
+
+# --- A live search wins; clearing it comes back to the flat listing, not the one-level one ---
+
+search old
+assert-flattened
+assert-row old.txt
+clear-search
+assert-flat all
+assert-row notes.txt
+assert-row old.txt
+
+# --- The headline case: a whole tree of media as tiles at once ---
+
+thumbnails 0.5
+shot 03-flat-thumbnails
+thumbnails 0
+
+# --- Survives the session round trip, the way sort and columns do ---
+
+session
+assert-flat all
+assert-row old.txt
+
+# --- The ceiling. A dozen files cannot reach 50,000, so lower it and take the same path. ---
+#
+# The banner is the point: a status-line suffix is the wrong weight for "you are not seeing all of
+# them", which is the one thing a flat view must never leave anyone to assume the other way round.
+
+flat off
+flat-cap 4
+flat files
+assert-count 4
+assert-status first
+shot 04-flat-truncated
+
+# And the question the real ceiling asks before it ever gets here, worded by the same rule.
+dialog flat-large 05-flat-large-folder
+
+flat off
+flat-cap 50000
+
+# --- Off puts everything back ---
+
+flat off
+assert-not-flat
+assert-not-flattened
+assert-no-column RelativePath
+assert-no-row old.txt
+assert-row notes.txt
+
+assert-not-launched
+state

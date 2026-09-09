@@ -55,6 +55,17 @@ public sealed class SessionTab
 
     public bool SortDescending { get; set; }
 
+    /// <summary>
+    /// Whether this tab was showing a flat branch view, and of what.
+    /// </summary>
+    /// <remarks>
+    /// Saved for the reason the sort order is and the preview pane's visibility is not: it is part
+    /// of how you had arranged this particular tab, rather than a preference every tab shares.
+    /// <see cref="FlatViewMode.Off"/> is both the default and what every settings file written
+    /// before this existed deserialises to, so nothing needs nullability to tell them apart.
+    /// </remarks>
+    public Services.FlatView.FlatViewMode Flat { get; set; }
+
     /// <summary>The columns this tab was showing, when they were arranged here rather than taken
     /// from the saved default. <b>Null means "whatever the default is"</b> and is what an untouched
     /// tab saves — so changing the default still reaches it on the next launch.

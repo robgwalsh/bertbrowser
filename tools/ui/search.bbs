@@ -81,9 +81,20 @@ assert-error
 assert-count 1
 assert-row archive.zip
 
-# A key this index cannot answer says so rather than searching for the literal text.
+# The created date is a column now, so dc: runs rather than being turned down. The fixture is
+# stamped to 2024 but written today, so dm: and dc: disagree about it — which is the whole point of
+# indexing both, and makes this a real assertion rather than two names for one column.
 search dc:today
-assert-error created
+assert-error
+assert-flattened
+assert-row old.txt
+search dm:today
+assert-count 0
+
+# The one key still refused, and it says why: Windows stops updating the accessed date, so an
+# answer from the index would be wrong rather than merely missing.
+search da:today
+assert-error accessed
 
 clear-search
 assert-not-flattened

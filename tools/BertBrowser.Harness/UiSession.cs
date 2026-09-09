@@ -45,10 +45,12 @@ internal sealed class UiSession : IDisposable
         RefusingProcessLauncher launcher,
         ForegroundGuard guard,
         RecordingElevationPrompt elevationPrompt,
-        RecordingUserNotice notice)
+        RecordingUserNotice notice,
+        RecordingUserConfirm confirm)
     {
         ElevationPrompt = elevationPrompt;
         Notice = notice;
+        Confirm = confirm;
         _options = options;
         Window = window;
         Services = services;
@@ -71,6 +73,9 @@ internal sealed class UiSession : IDisposable
 
     /// <summary>What the shell has told the user, in place of the modals it would have opened.</summary>
     public RecordingUserNotice Notice { get; }
+
+    /// <summary>What the run was asked to confirm — today, only flattening an enormous folder.</summary>
+    public RecordingUserConfirm Confirm { get; }
 
     public ShellViewModel Shell => (ShellViewModel)Window.DataContext;
 
@@ -122,6 +127,7 @@ internal sealed class UiSession : IDisposable
         var launcher = new RefusingProcessLauncher();
         var elevationPrompt = new RecordingElevationPrompt();
         var notice = new RecordingUserNotice();
+        var confirm = new RecordingUserConfirm();
         var services = AppShell.BuildServices(s =>
         {
             s.AddSingleton<IProcessLauncher>(launcher);
@@ -161,6 +167,10 @@ internal sealed class UiSession : IDisposable
             // The shell says "comparing needs two panes" in a modal. A run cannot dismiss one, so
             // it gets one that writes the message down for assert-notice to read.
             s.AddSingleton<IUserNotice>(_ => notice);
+
+            // And the question half of the same problem: a flat view over an enormous folder asks
+            // before it lists, in a modal a run can neither see nor dismiss.
+            s.AddSingleton<IUserConfirm>(_ => confirm);
         });
         AppShell.UseServices(services);
 
@@ -214,7 +224,8 @@ internal sealed class UiSession : IDisposable
         window.Activated += (_, _) => Native.RestoreForeground(before.Handle);
         window.Show();
 
-        var session = new UiSession(options, window, services, launcher, guard, elevationPrompt, notice);
+        var session = new UiSession(
+            options, window, services, launcher, guard, elevationPrompt, notice, confirm);
 
         // The MFT indexer is off unless asked for: it reads every NTFS volume's master file table,
         // which is minutes of disk on a machine someone is using. With --index it runs *in this

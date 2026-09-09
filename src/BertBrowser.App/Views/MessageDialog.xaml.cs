@@ -20,9 +20,10 @@ public partial class MessageDialog : ThemedWindow
         string message,
         string caption,
         MessageDialogKind kind = MessageDialogKind.Information,
-        bool showCancel = false)
+        bool showCancel = false,
+        string? confirmLabel = null)
     {
-        var dialog = Create(message, caption, kind, showCancel);
+        var dialog = Create(message, caption, kind, showCancel, confirmLabel);
         if (owner is not null && !ReferenceEquals(owner, dialog)) dialog.Owner = owner;
 
         return dialog.ShowDialog() == true;
@@ -31,16 +32,20 @@ public partial class MessageDialog : ThemedWindow
     /// <summary>The dialog built but not shown, for the UI harness to park offscreen and
     /// photograph. <see cref="Show"/> goes through it too, so a capture cannot drift from what
     /// the app actually puts on screen.</summary>
+    /// <param name="confirmLabel">Overrides "OK". Worth having whenever the question has a subject:
+    /// a button that says what it will do is a choice, where "OK" beside a Cancel is a hurdle.</param>
     internal static MessageDialog Create(
         string message,
         string caption,
         MessageDialogKind kind = MessageDialogKind.Information,
-        bool showCancel = false)
+        bool showCancel = false,
+        string? confirmLabel = null)
     {
         var dialog = new MessageDialog { Title = caption };
 
         dialog.MessageText.Text = message;
         dialog.CancelButton.Visibility = showCancel ? Visibility.Visible : Visibility.Collapsed;
+        if (confirmLabel is { Length: > 0 }) dialog.OkButton.Content = confirmLabel;
 
         var (icon, token) = kind switch
         {

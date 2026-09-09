@@ -283,13 +283,23 @@ public sealed partial class CompareSessionViewModel : ObservableObject, IDisposa
 
     private void OnTabClosing(DirectoryTabViewModel tab) => End("Compare ended — a pane was closed.");
 
-    /// <summary>A search flattens the list into hits from all over the tree, which is not a folder
-    /// listing and cannot be compared against one.</summary>
+    /// <summary>
+    /// A flattened list is rows from all over the tree, which is not a folder listing and cannot be
+    /// paired against one.
+    /// </summary>
+    /// <remarks>
+    /// The guard is on <c>IsFlattened</c> and stays there — a flat branch view cannot be compared
+    /// either, whatever else it can do that a search result cannot. Only the wording branches, and
+    /// it has to: telling someone their comparison ended because "a pane started a search" when
+    /// they pressed Ctrl+B is a small lie about their own gesture.
+    /// </remarks>
     private void OnFileListChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName != nameof(FileListViewModel.IsFlattened)) return;
-        if (sender is FileListViewModel { IsFlattened: true })
-            End("Compare ended — a pane started a search.");
+        if (sender is FileListViewModel { IsFlattened: true } list)
+            End(list.IsFlatBrowse
+                ? "Compare ended — a pane switched to flat view."
+                : "Compare ended — a pane started a search.");
     }
 
     [RelayCommand]

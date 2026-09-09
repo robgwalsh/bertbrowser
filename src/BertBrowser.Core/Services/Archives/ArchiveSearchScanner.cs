@@ -28,13 +28,21 @@ public static class ArchiveSearchScanner
     /// virtual paths.
     /// </summary>
     /// <param name="root">Where the results are reported relative to — the search root.</param>
+    /// <param name="query">
+    /// Null lists every entry instead of matching one, which is what the flat branch view asks for
+    /// inside an open container. It costs nothing here: this walk was always the whole subtree with
+    /// a filter over it, and the container's index is already in memory.
+    /// </param>
+    /// <param name="includeDirectories">False lists files only, as the flat view's default does.
+    /// The walk still descends — what is emitted and what is recursed into are separate.</param>
     public static IReadOnlyList<SearchHit> Search(
         ArchiveIndex index,
         string archiveFile,
         string relativeTo,
-        SearchQuery query,
+        SearchQuery? query,
         int limit,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool includeDirectories = true)
     {
         var hits = new List<SearchHit>();
         if (!index.Ok) return hits;
@@ -45,7 +53,7 @@ public static class ArchiveSearchScanner
         // lets the first pass shortlist. Run the walk anyway and every entry in the container comes
         // back as a hit. The grammar refuses `content: in:archives` before it gets here; this is
         // the guard that does not depend on two callers remembering.
-        if (query.NeedsContent) return hits;
+        if (query?.NeedsContent == true) return hits;
 
         var start = index.Find(relativeTo);
         if (start is null) return hits;
@@ -61,7 +69,15 @@ public static class ArchiveSearchScanner
             if (node.IsDirectory)
                 foreach (var child in node.Children ?? []) stack.Push(child);
 
+            if (!includeDirectories && node.IsDirectory) continue;
+
             var virtualPath = ArchivePath.Compose(archiveFile, node.Path);
+
+            if (query is null)
+            {
+                hits.Add(Hit(virtualPath, node, relativeTo));
+                continue;
+            }
 
             var candidate = new SearchCandidate(
                 node.Name.ToUpperInvariant(),
@@ -81,17 +97,19 @@ public static class ArchiveSearchScanner
 
             if (!query.Matches(candidate)) continue;
 
-            hits.Add(new SearchHit(
-                virtualPath,
-                RelativeDirDisplay(node.Path, relativeTo),
-                node.Name,
-                node.IsDirectory,
-                node.SizeBytes,
-                node.Modified?.ToUniversalTime() ?? default));
+            hits.Add(Hit(virtualPath, node, relativeTo));
         }
 
         return hits;
     }
+
+    private static SearchHit Hit(string virtualPath, ArchiveNode node, string relativeTo) =>
+        new(virtualPath,
+            RelativeDirDisplay(node.Path, relativeTo),
+            node.Name,
+            node.IsDirectory,
+            node.SizeBytes,
+            node.Modified?.ToUniversalTime() ?? default);
 
     /// <summary>The folder an entry sits in, relative to the search root — the Folder column.</summary>
     private static string RelativeDirDisplay(string entryPath, string relativeTo)
