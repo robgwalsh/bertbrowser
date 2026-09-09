@@ -28,8 +28,27 @@ public interface IThemeService
     /// startup, before the first window is created.</summary>
     void Initialize();
 
-    /// <summary>Applies a theme and persists the choice.</summary>
+    /// <summary>Applies a theme and persists the choice. Choosing one by hand is the end of
+    /// following — the pickers that stay visible in follow mode go through
+    /// <see cref="SetSlotTheme"/> instead.</summary>
     void SelectTheme(string themeId);
+
+    /// <summary>Whether the theme is currently tracking the Windows light/dark and high-contrast
+    /// settings. While true, <see cref="Current"/> changes without anyone choosing a theme.</summary>
+    bool IsFollowingSystem { get; }
+
+    /// <summary>The theme the light slot is set to, with the default already filled in.</summary>
+    string LightThemeId { get; }
+
+    /// <summary>The theme the dark slot is set to, with the default already filled in.</summary>
+    string DarkThemeId { get; }
+
+    /// <summary>Starts or stops following, applies the consequence, and persists it.</summary>
+    void SetFollowSystem(bool follow);
+
+    /// <summary>Assigns a theme to the light or dark slot and persists it. Applies it too, but only
+    /// when that slot is the one Windows is currently asking for.</summary>
+    void SetSlotTheme(bool dark, string themeId);
 
     /// <summary>Rescans the user's themes folder.</summary>
     void ReloadAvailableThemes();

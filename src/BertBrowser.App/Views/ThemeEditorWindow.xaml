@@ -23,6 +23,7 @@
             <ComboBox ItemsSource="{Binding Themes}"
                       SelectedItem="{Binding SelectedTheme, Mode=TwoWay}"
                       ItemTemplate="{StaticResource ThemeNameTemplate}"
+                      AutomationProperties.AutomationId="ThemePicker"
                       AutomationProperties.Name="Theme"/>
         </DockPanel>
 

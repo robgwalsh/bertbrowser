@@ -1,0 +1,72 @@
+# Following the Windows light/dark switch.
+#
+# The run poses the OS — nothing here reads the real machine, which is the point: these pictures
+# have to be the same on every developer's PC, and the setting they are about is one that differs
+# from desk to desk. `system-theme` is what Windows is set to and `system-follow` is whether the
+# app cares, deliberately kept apart so a script can pose a switch that is being ignored.
+#
+# Read as a set. The interesting frames are the two transitions: high contrast arriving over a
+# configured pair, and coming back off it to the right side rather than to Dark+.
+
+tree .
+refresh
+select notes.txt
+
+system-follow on
+system-theme dark
+assert-theme dark-plus
+shot 01-follow-dark
+dialog settings-appearance 02-appearance-following
+
+system-theme light
+assert-theme light-plus
+shot 03-follow-light
+
+# A configured pair rather than the two defaults, so a slot being ignored is visible.
+system-slot light solarized-light
+system-slot dark nord
+assert-theme solarized-light
+shot 04-light-slot-solarized
+dialog settings-appearance 05-appearance-slots-set
+
+system-theme dark
+assert-theme nord
+shot 06-dark-slot-nord
+
+# High contrast overrides both slots, live...
+system-theme high-contrast
+assert-theme high-contrast-dark
+shot 07-high-contrast
+dialog settings-appearance 08-appearance-high-contrast
+
+# ...and turning it off lands back on the dark slot, not on Dark+. This is what the two-switch
+# SystemAppearance exists for: the light/dark bit is kept underneath high contrast rather than
+# replaced by it.
+system-theme dark
+assert-theme nord
+shot 09-back-on-nord
+
+# Setting the slot for the mode Windows is *not* in configures without previewing: still Nord.
+system-slot light catppuccin-latte
+assert-theme nord
+
+# Not following: the single picker, the way it has always looked. Unticking keeps what is on
+# screen rather than jumping back to whatever was last selected.
+system-follow off
+assert-theme nord
+assert-following off
+dialog settings-appearance 10-appearance-not-following
+shot 11-not-following
+
+# The OS moving now changes nothing at all.
+system-theme light
+assert-theme nord
+
+# And choosing a theme by hand is itself what stops following — the two pickers are the way to
+# configure one without leaving the mode.
+system-follow on
+assert-theme catppuccin-latte
+theme monokai
+assert-following off
+system-theme dark
+assert-theme monokai

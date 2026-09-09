@@ -43,6 +43,7 @@ MSB3021 because a running BertBrowser locks `bin\Debug`, kill it
 ```powershell
 & $harness --script C:\Source\bertbrowser\tools\ui\smoke.bbs          # the canonical pass
 & $harness --script C:\Source\bertbrowser\tools\ui\themes.bbs         # every built-in theme + dialogs
+& $harness --script C:\Source\bertbrowser\tools\ui\system-theme.bbs   # matching the Windows theme
 & $harness -c "tree .; refresh; shot check" --out $env:TEMP\look      # ad hoc
 
 # The folder tree keeping its selection through a rebuild. Needs a visible sandbox — see the
@@ -191,7 +192,17 @@ changes-seed                write a dozen recorded file changes under the sandbo
                             retention), and turn the run's recording setting on. A run is
                             unelevated, so this is the only way `dialog changes` shows rows
 
+system-theme light|dark|high-contrast
+                            poses what Windows is set to. A run never reads the real machine — it
+                            starts posed dark and pinned, so every existing script and screenshot
+                            is unaffected by the developer's own desktop
+system-follow on|off        the "Match Windows light/dark" checkbox. Kept apart from `system-theme`
+                            on purpose, so a script can pose a switch the app is ignoring
+system-slot light|dark <id> the two slot pickers. Setting the slot for the mode Windows is *not* in
+                            configures without previewing
 hidden on|off | thumbnails <0..1> | sort <column-id> | theme <id>
+                            (`theme` pins one, which is what stops following — the same as choosing
+                            one by hand in Settings)
                             (sort takes any catalogue id: Name, Size, Type, Modified, Created,
                             Accessed, Extension, or a canonical name such as
                             System.Image.Dimensions. "date" still means Modified.)
@@ -231,7 +242,8 @@ dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, renam
                             delete, delete-permanent, message, warning, properties, settings,
                             theme-editor, disk-usage, duplicates, changes, sync-preview,
                             sync-preview-running, search-syntax, saved-search, extract, compress,
-                            archive-password, elevation, settings-columns, settings-history,
+                            archive-password, elevation, settings-columns, settings-appearance,
+                            settings-history,
                             columns, settings-columns-dragging, flat-large, checksum,
                             checksum-verify, compare-files
                             (checksum digests the selection and starts on load, unlike duplicates —
@@ -291,6 +303,9 @@ right-drop-menu <names> to <folder> [as <name>]
 probe <token> [element]     where a theme token's colour came out: the resolver, the app and
                             window resources, and the element's own Background/Foreground
 
+assert-theme <id> | assert-following on|off
+                            which theme resolved, and whether it is tracking Windows. Assert on the
+                            id rather than on pixels — two dark themes differ by a few hex digits
 assert-path <substring> | assert-status <substring> | assert-count <n>
 assert-error [substring]     the warning banner above the list; bare = assert there is none
 assert-row <name> | assert-no-row <name> | assert-selected <n>

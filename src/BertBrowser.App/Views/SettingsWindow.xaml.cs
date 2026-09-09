@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Services.Columns;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Win32;
 
 namespace BertBrowser.App.Views;
@@ -20,7 +21,29 @@ public partial class SettingsWindow : ThemedWindow
         // The reorder that replaced the up and down buttons. The drop reports two indexes; what
         // they mean is ColumnLayoutRules' business, not this window's.
         ListReorderDrag.Attach(ColumnDefaultsList, Orientation.Vertical, _vm.MoveColumn);
+
+        // While "Match Windows light/dark" is on, the theme can change with this page open —
+        // Windows flipping at sunset — and the pickers have to follow it. Subscribed here rather
+        // than in the view model because nothing disposes one of those and IThemeService is a
+        // singleton, so a view-model subscription would leak a graph per Settings open.
+        WatchThemeChanges(_vm.Appearance);
     }
+
+    /// <summary>Keeps an <see cref="AppearanceViewModel"/> in step with theme changes it did not
+    /// cause, for the life of this window. Shared with <see cref="ThemeEditorWindow"/>.</summary>
+    internal static void WatchThemeChanges(Window window, AppearanceViewModel appearance)
+    {
+        // Resolved rather than injected, the route ThemedWindow itself uses for this.
+        if (App.Services?.GetService<Theming.IThemeService>() is not { } theme) return;
+
+        void OnThemeChanged(object? sender, EventArgs e) => appearance.SyncAfterExternalChange();
+
+        theme.ThemeChanged += OnThemeChanged;
+        window.Closed += (_, _) => theme.ThemeChanged -= OnThemeChanged;
+    }
+
+    private void WatchThemeChanges(AppearanceViewModel appearance) =>
+        WatchThemeChanges(this, appearance);
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {

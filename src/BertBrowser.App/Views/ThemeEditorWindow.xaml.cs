@@ -19,6 +19,10 @@ public partial class ThemeEditorWindow : ThemedWindow
         InitializeComponent();
         _vm = vm;
         DataContext = vm;
+
+        // The editor is modeless and can be open for a long time, which makes it the window most
+        // likely to be up when Windows flips at sunset.
+        SettingsWindow.WatchThemeChanges(this, vm);
     }
 
     /// <summary>

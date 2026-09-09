@@ -79,6 +79,7 @@ you where and what to watch for.
 | Preview pane (incl. hex/raw) | `Core/Services/Preview/*` (`PreviewClassifier`, `TextPreviewReader`, `HexPreviewReader`, `SyntaxTokenizer`) |
 | Archives (zip/7z/tar/rar) | `Core/Services/Archives/*` (`ArchivePath`, `ArchiveReader`, `ArchiveIndexBuilder`) |
 | Theming | `Core/Theming/*` (`ThemeCatalog`, `ThemeResolver`), `App/Theming/*` |
+| Matching the Windows theme | `Core/Theming/SystemThemeRules`, `SystemAppearance`, `App/Theming/ISystemAppearance` |
 | App icon | `tools/icon/build-app-icon.ps1` → `src/BertBrowser.App/Assets/app.ico` |
 | Icons | `tools/icon/icons.txt` (the mapping) → `Resources/Icons.xaml` (generated), `IconPath`/`MenuIconPath`/`IconContent` in `Styles.xaml`, `tools/icon/IconSheet` |
 | Columns (file list) | `Core/Services/Columns/*` (`ColumnCatalog`, `ColumnLayoutRules`, `ColumnCandidates`), `Interop/ShellProperties`, `Views/ColumnAddPanel` |
@@ -234,6 +235,17 @@ you where and what to watch for.
   custom command; `E8C8` = Copy *and* Find duplicates).
 - **Theme colors**: no literal colors in XAML/C# — always a `Theme.*` token. `ThemeCatalogTests`
   contrast-checks every built-in; darken a palette's colors if it fails AA.
+- **Matching Windows is the default only because there is no settings file.** `FollowSystemTheme ??
+  !LoadedFromDisk` — not `ThemeId is null`, which every existing user who never opened Settings also
+  has, and flipping all of them on upgrade is exactly the surprise. `Initialize` pins the answer on
+  first run, or launch two finds a file and reads the null as "no". A system-driven switch goes
+  through `ApplyForCurrentState`, never `SelectTheme`, because `SelectTheme` writes `ThemeId` and
+  the OS writing it would convert a following user into a pinned one at sunset; `ThemeId` is left
+  untouched while following so unticking restores it. High contrast wins over both slots and never
+  consults them, and the light/dark bit is kept *underneath* it so turning it off lands back on the
+  right slot. A run poses all of this through `FakeSystemAppearance` and starts pinned, so screenshots
+  do not depend on the developer's own desktop — which the old direct `SystemParameters.HighContrast`
+  read did.
 - **Never `Freeze()` anything holding a theme brush.** The `Theme.*` brushes are shared mutable
   instances — that is how a theme change recolours everything in place — so a `Pen`, `Drawing` or
   `GeometryDrawing` built over one is not freezable and `Freeze()` *throws* rather than merely

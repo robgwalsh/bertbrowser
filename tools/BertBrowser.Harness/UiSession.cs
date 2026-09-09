@@ -46,11 +46,13 @@ internal sealed class UiSession : IDisposable
         ForegroundGuard guard,
         RecordingElevationPrompt elevationPrompt,
         RecordingUserNotice notice,
-        RecordingUserConfirm confirm)
+        RecordingUserConfirm confirm,
+        FakeSystemAppearance appearance)
     {
         ElevationPrompt = elevationPrompt;
         Notice = notice;
         Confirm = confirm;
+        SystemAppearance = appearance;
         _options = options;
         Window = window;
         Services = services;
@@ -76,6 +78,9 @@ internal sealed class UiSession : IDisposable
 
     /// <summary>What the run was asked to confirm — today, only flattening an enormous folder.</summary>
     public RecordingUserConfirm Confirm { get; }
+
+    /// <summary>The Windows light/dark and high-contrast settings this run is posing.</summary>
+    public FakeSystemAppearance SystemAppearance { get; }
 
     public ShellViewModel Shell => (ShellViewModel)Window.DataContext;
 
@@ -128,6 +133,7 @@ internal sealed class UiSession : IDisposable
         var elevationPrompt = new RecordingElevationPrompt();
         var notice = new RecordingUserNotice();
         var confirm = new RecordingUserConfirm();
+        var appearance = new FakeSystemAppearance();
         var services = AppShell.BuildServices(s =>
         {
             s.AddSingleton<IProcessLauncher>(launcher);
@@ -171,6 +177,11 @@ internal sealed class UiSession : IDisposable
             // And the question half of the same problem: a flat view over an enormous folder asks
             // before it lists, in a modal a run can neither see nor dismiss.
             s.AddSingleton<IUserConfirm>(_ => confirm);
+
+            // The real one reads this machine's Windows theme, which would make every screenshot
+            // depend on how the developer taking it has their desktop set up. `system-theme` poses
+            // this instead.
+            s.AddSingleton<ISystemAppearance>(appearance);
         });
         AppShell.UseServices(services);
 
@@ -192,6 +203,14 @@ internal sealed class UiSession : IDisposable
                 "never raise a UAC prompt; register RefusingElevationLauncher instead.");
 
         services.GetRequiredService<Db>().Migrate();
+
+        // A run's sandbox has no settings.json, which under the follow rule means "brand-new
+        // install" and so "match Windows". Every existing script and every existing screenshot
+        // predates that, so a run starts pinned and `system-follow on` is what turns it on. Only
+        // the never-configured case is answered here, so a --keep-state run against a settings.json
+        // that does say still gets what it says.
+        var settings = services.GetRequiredService<AppSettings>();
+        settings.FollowSystemTheme ??= false;
 
         var themes = services.GetRequiredService<IThemeService>();
         themes.Initialize();
@@ -225,7 +244,7 @@ internal sealed class UiSession : IDisposable
         window.Show();
 
         var session = new UiSession(
-            options, window, services, launcher, guard, elevationPrompt, notice, confirm);
+            options, window, services, launcher, guard, elevationPrompt, notice, confirm, appearance);
 
         // The MFT indexer is off unless asked for: it reads every NTFS volume's master file table,
         // which is minutes of disk on a machine someone is using. With --index it runs *in this

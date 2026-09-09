@@ -26,6 +26,7 @@ using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Preview;
 using BertBrowser.Core.Services.Rename;
 using BertBrowser.Core.Services.Transfer;
+using BertBrowser.Core.Theming;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace BertBrowser.Harness;
@@ -207,6 +208,9 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "many-fixture": ManyFixture(rest); break;
             case "sort": Sort(rest); break;
             case "theme": Theme(rest); break;
+            case "system-theme": SystemTheme(rest); break;
+            case "system-follow": SystemFollow(rest); break;
+            case "system-slot": SystemSlot(rest); break;
             case "drives-view": DrivesView(rest); break;
             case "tree-scroll": TreeScroll(rest); break;
             case "list-scroll": ListScroll(rest); break;
@@ -229,6 +233,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-header-menu": AssertHeaderMenu(rest); break;
 
             // assertions
+            case "assert-theme": AssertTheme(rest); break;
+            case "assert-following": AssertFollowing(rest); break;
             case "assert-path": AssertPath(rest); break;
             case "assert-status": AssertStatus(rest); break;
             case "assert-error": AssertError(rest); break;
@@ -2590,6 +2596,90 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         session.Settle();
     }
 
+    /// <summary>
+    /// Poses the Windows light/dark and high-contrast settings — what the OS is set to, and nothing
+    /// about whether the app is following it. <c>system-follow</c> is the other half.
+    /// </summary>
+    /// <remarks>Nothing here reads the real machine: a run must produce the same pictures whatever
+    /// the developer's own desktop is set to. Keeping the two orthogonal is what lets a script pose
+    /// a switch the app is deliberately ignoring, which is most of what there is to check.</remarks>
+    private void SystemTheme(string rest)
+    {
+        var wanted = Require(rest, "system-theme");
+
+        var next = wanted.ToLowerInvariant() switch
+        {
+            "light" => SystemAppearance.Light,
+            "dark" => SystemAppearance.Dark,
+            "high-contrast" => SystemAppearance.HighContrast,
+            var other => throw new AssertionException(
+                $"system-theme wants light, dark or high-contrast, got '{other}'."),
+        };
+
+        Invoke(() => session.SystemAppearance.Set(next));
+        session.Settle();
+    }
+
+    /// <summary>Starts or stops matching Windows, as the Settings checkbox does.</summary>
+    private void SystemFollow(string rest)
+    {
+        var wanted = Require(rest, "system-follow");
+        var follow = wanted.ToLowerInvariant() switch
+        {
+            "on" => true,
+            "off" => false,
+            var other => throw new AssertionException(
+                $"system-follow wants on or off, got '{other}'."),
+        };
+
+        var themes = session.Services.GetRequiredService<IThemeService>();
+        Invoke(() => themes.SetFollowSystem(follow));
+        session.Settle();
+    }
+
+    /// <summary>Whether the app is currently matching Windows.</summary>
+    private void AssertFollowing(string rest)
+    {
+        var expected = !Require(rest, "assert-following").Equals("off", StringComparison.OrdinalIgnoreCase);
+        var actual = session.Dispatcher.Invoke(
+            () => session.Services.GetRequiredService<IThemeService>().IsFollowingSystem);
+
+        if (actual != expected)
+            throw new AssertionException(
+                $"Expected matching Windows to be {(expected ? "on" : "off")}, but it is " +
+                $"{(actual ? "on" : "off")}.");
+    }
+
+    /// <summary>Assigns the light or dark slot, the way the two pickers in Settings do.</summary>
+    private void SystemSlot(string rest)
+    {
+        var (side, id) = Split(Require(rest, "system-slot"));
+
+        var dark = side.Equals("dark", StringComparison.OrdinalIgnoreCase) ? true
+            : side.Equals("light", StringComparison.OrdinalIgnoreCase) ? false
+            : throw new AssertionException($"system-slot wants light or dark, got '{side}'.");
+
+        var themes = session.Services.GetRequiredService<IThemeService>();
+        if (themes.Available.All(t => !t.Id.Equals(id, StringComparison.OrdinalIgnoreCase)))
+            throw new AssertionException(
+                $"There is no theme '{id}'. Available: {string.Join(", ", themes.Available.Select(t => t.Id))}");
+
+        Invoke(() => themes.SetSlotTheme(dark, id));
+        session.Settle();
+    }
+
+    /// <summary>The theme actually in use, by id — so a script asserts on what resolved rather than
+    /// on pixels.</summary>
+    private void AssertTheme(string rest)
+    {
+        var wanted = Require(rest, "assert-theme");
+        var actual = session.Dispatcher.Invoke(
+            () => session.Services.GetRequiredService<IThemeService>().Current.Id);
+
+        if (!actual.Equals(wanted, StringComparison.OrdinalIgnoreCase))
+            throw new AssertionException($"Expected theme '{wanted}', but '{actual}' is in use.");
+    }
+
     // ---- capturing --------------------------------------------------------------------
 
     private void Shot(string rest)
@@ -2820,6 +2910,10 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         // photographed at all.
         "settings-columns" => new SettingsWindow(SettingsFor(SettingsCategory.Columns)),
 
+        // Where "Match Windows light/dark" and the two slot pickers live. Worth its own kind for
+        // the reason the others have one, and because the page looks different in each mode.
+        "settings-appearance" => new SettingsWindow(SettingsFor(SettingsCategory.Appearance)),
+
         "settings-columns-dragging" => ColumnsPageMidDrag(),
 
         "columns" => ColumnAddPanelWindow(),
@@ -2882,7 +2976,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             $"'{kind}' is not a dialog. Try: new-folder, new-file, rename, rename-advanced, " +
             "delete, delete-permanent, message, warning, properties, settings, theme-editor, " +
             "disk-usage, duplicates, changes, transfer, extract, compress, archive-password, " +
-            "settings-columns, settings-history, settings-search-index, columns."),
+            "settings-columns, settings-appearance, settings-history, settings-search-index, columns."),
     };
 
     /// <summary>

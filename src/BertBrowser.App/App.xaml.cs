@@ -163,6 +163,7 @@ public partial class App : Application
         var services = new ServiceCollection();
         services.AddSingleton(AppSettings.Load());
         services.AddSingleton<UserThemeStore>();
+        services.AddSingleton<ISystemAppearance, WindowsSystemAppearance>();
         services.AddSingleton<IThemeService, ThemeService>();
         services.AddSingleton(new Db(AppPaths.DbPath));
         services.AddSingleton<DirSizeRepository>();

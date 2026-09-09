@@ -242,11 +242,44 @@ public sealed class AppSettings
             .Where(t => t.Enabled && t.Extension.Length > 0)
             .ToList();
 
-    /// <summary>Active theme: a built-in id ("dark-plus", "light-plus", …) or one of the user's own
-    /// themes from <see cref="AppPaths.ThemesDir"/>. Null means the user has never picked one, which
-    /// is what lets the first launch honour a Windows high-contrast setting instead of overriding
-    /// it — so this stays nullable rather than defaulting to "dark-plus".</summary>
+    /// <summary>Active theme when <see cref="FollowSystemTheme"/> is off: a built-in id
+    /// ("dark-plus", "light-plus", …) or one of the user's own themes from
+    /// <see cref="AppPaths.ThemesDir"/>. Null means the user has never picked one, which is what
+    /// lets a first launch pick for itself rather than overriding a Windows setting — so this stays
+    /// nullable rather than defaulting to "dark-plus". Left alone while following, so unticking the
+    /// checkbox restores exactly the theme that was in use before it was ticked.</summary>
     public string? ThemeId { get; set; }
+
+    /// <summary>
+    /// Whether the theme follows the Windows light/dark and high-contrast settings, live.
+    /// </summary>
+    /// <remarks>
+    /// Nullable for the reason <see cref="ThemeId"/> is, but with a sharper rule: null means never
+    /// configured, and the answer for null is <see cref="LoadedFromDisk"/> — a brand-new install
+    /// follows, and anyone who already had a settings.json does not. It has to be the file rather
+    /// than <see cref="ThemeId"/>, because someone who has simply never opened Settings also has a
+    /// null <see cref="ThemeId"/>, and flipping all of them on upgrade would be exactly the
+    /// surprise this is nullable to avoid. <c>ThemeService.Initialize</c> writes its answer
+    /// straight back, so this is null exactly once per install.
+    /// </remarks>
+    public bool? FollowSystemTheme { get; set; }
+
+    /// <summary>The theme used while Windows is in light mode and <see cref="FollowSystemTheme"/>
+    /// is on. Null means Light+. Ignored entirely when not following — it is not a second copy of
+    /// <see cref="ThemeId"/> and never overwrites it.</summary>
+    public string? LightThemeId { get; set; }
+
+    /// <summary>As <see cref="LightThemeId"/>, for dark mode. Null means Dark+. High contrast has
+    /// no slot: it always resolves to the accessibility theme, see
+    /// <c>SystemThemeRules</c>.</summary>
+    public string? DarkThemeId { get; set; }
+
+    /// <summary>Whether these settings came from a file rather than from the defaults. Not
+    /// persisted — it is a fact about this load, and the only way to tell a brand-new install from
+    /// a user who has never changed anything. A settings.json too damaged to parse counts as new,
+    /// which is the right answer: every other preference has just been lost too.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool LoadedFromDisk { get; private set; }
 
     /// <summary>Per-token colour tweaks, keyed by theme id and then by token. Kept per theme so
     /// switching away and back doesn't discard the edits made to either one.</summary>
@@ -299,8 +332,12 @@ public sealed class AppSettings
     {
         try
         {
-            if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new AppSettings();
+            if (File.Exists(FilePath) &&
+                JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) is { } loaded)
+            {
+                loaded.LoadedFromDisk = true;
+                return loaded;
+            }
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {

@@ -334,7 +334,14 @@
 
                     <TextBlock Text="Appearance" Style="{StaticResource PageHeading}"/>
 
-                    <DockPanel>
+                    <CheckBox Content="Match Windows light/dark"
+                              IsChecked="{Binding Appearance.FollowSystemTheme}"
+                              AutomationProperties.AutomationId="FollowSystemTheme"/>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Switches theme when Windows does, without a restart. Turning on Windows high contrast switches to High Contrast Dark whatever is picked below, and turning it off comes back here."/>
+
+                    <!-- The single picker: what you get when you are not following. -->
+                    <DockPanel Visibility="{Binding Appearance.FollowSystemTheme, Converter={StaticResource InverseBoolToVisibility}}">
                         <TextBlock Text="Theme" VerticalAlignment="Center" Margin="0,0,12,0"/>
                         <Button DockPanel.Dock="Right" Content="Customise colours…" Margin="8,0,0,0"
                                 Click="CustomiseTheme_Click"
@@ -348,6 +355,43 @@
                                   AutomationProperties.AutomationId="ThemePicker"
                                   AutomationProperties.Name="Theme"/>
                     </DockPanel>
+
+                    <!-- ...and the pair that replaces it while following. -->
+                    <!-- A Grid rather than two DockPanels so both combos share one column and line
+                         up: with the button docked into the first row only, a DockPanel would let
+                         the dark combo run on under it. -->
+                    <Grid Visibility="{Binding Appearance.FollowSystemTheme, Converter={StaticResource BoolToVisibility}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Light theme"
+                                   VerticalAlignment="Center" Margin="0,0,12,0"/>
+                        <ComboBox Grid.Row="0" Grid.Column="1"
+                                  ItemsSource="{Binding Appearance.LightThemes}"
+                                  SelectedItem="{Binding Appearance.SelectedLightTheme, Mode=TwoWay}"
+                                  ItemTemplate="{StaticResource ThemeNameTemplate}"
+                                  AutomationProperties.AutomationId="LightThemePicker"
+                                  AutomationProperties.Name="Light theme"/>
+                        <Button Grid.Row="0" Grid.Column="2" Content="Customise colours…"
+                                Margin="8,0,0,0" Click="CustomiseTheme_Click"
+                                ToolTip="Edit any colour in the theme currently in use and save it as your own"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Dark theme"
+                                   VerticalAlignment="Center" Margin="0,6,12,0"/>
+                        <ComboBox Grid.Row="1" Grid.Column="1" Margin="0,6,0,0"
+                                  ItemsSource="{Binding Appearance.DarkThemes}"
+                                  SelectedItem="{Binding Appearance.SelectedDarkTheme, Mode=TwoWay}"
+                                  ItemTemplate="{StaticResource ThemeNameTemplate}"
+                                  AutomationProperties.AutomationId="DarkThemePicker"
+                                  AutomationProperties.Name="Dark theme"/>
+                    </Grid>
                     <TextBlock TextWrapping="Wrap" Margin="0,0,0,12"
                                Foreground="{StaticResource Theme.Warning.Foreground}"
                                Text="{Binding Appearance.IssueText}"
