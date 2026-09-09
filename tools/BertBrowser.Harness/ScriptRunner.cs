@@ -111,6 +111,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "mkdir": MakeDirectory(rest); break;
             case "write": WriteFile(rest); break;
             case "write-text": WriteTextFile(rest); break;
+            case "write-binary": WriteBinaryFile(rest); break;
             case "checksum-file": WriteChecksumFile(rest); break;
             case "checksum-algorithms": ChecksumAlgorithmsSetting(rest); break;
             case "sandbox": output.WriteLine(_sandbox.Root); break;
@@ -260,6 +261,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-no-duplicate-row": AssertDuplicateRow(rest, expected: false); break;
             case "assert-digest": AssertDigest(rest); break;
             case "assert-verify": AssertVerify(rest); break;
+            case "assert-compare-files": AssertFileCompare(rest); break;
             case "assert-exists": AssertOnDisk(rest, expected: true); break;
             case "assert-missing": AssertOnDisk(rest, expected: false); break;
             case "assert-visible": AssertVisibility(rest, expected: true); break;
@@ -549,6 +551,39 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             Directory.CreateDirectory(directory);
 
         File.WriteAllText(full, string.Join("\n", tail.Split('|')) + "\n");
+    }
+
+    /// <summary>
+    /// <c>write-binary &lt;path&gt; &lt;bytes&gt; [differ-at]</c> — a file that is genuinely not text.
+    /// </summary>
+    /// <remarks>
+    /// Everything else the sandbox writes is text, which is right for hashing and listing and wrong
+    /// for the one case a file comparison has to get right on its own: two binaries, where the
+    /// answer is a hex dump rather than a line diff. A <c>.bin</c> full of repeated ASCII is not a
+    /// binary, and <c>FileComparePlan</c> is correct to say so — so a script that wants the hex path
+    /// has to write real bytes. <c>differ-at</c> flips one byte at that offset, which is what puts
+    /// the first difference somewhere worth scrolling to.
+    /// </remarks>
+    private void WriteBinaryFile(string rest)
+    {
+        var parts = Require(rest, "write-binary").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length is < 2 or > 3)
+            throw new FormatException("write-binary wants <path> <bytes> [differ-at].");
+
+        var full = _sandbox.RequireInside(parts[0], "write-binary");
+        var count = Number(parts[1], "write-binary");
+
+        var bytes = new byte[count];
+        for (var i = 0; i < count; i++) bytes[i] = (byte)((i * 7 + (i / 251)) % 256);
+
+        if (parts.Length == 3)
+        {
+            var at = Number(parts[2], "write-binary");
+            if (at >= 0 && at < count) bytes[at] ^= 0xFF;
+        }
+
+        if (Path.GetDirectoryName(full) is { Length: > 0 } directory) Directory.CreateDirectory(directory);
+        File.WriteAllBytes(full, bytes);
     }
 
     /// <summary>
@@ -2743,6 +2778,11 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         // 'checksum-file' fixture verb writes.
         "checksum-verify" => ChecksumWindowFor(w => w.LoadVerify(Selection()[0].FullPath)),
 
+        // Two files compared by content. Which of the two shapes it takes — a line diff or a hex
+        // dump around the first differing byte — is FileComparePlan's decision over what was
+        // selected, so 'write-text' pairs photograph the first and 'write' pairs the second.
+        "compare-files" => FileCompareWindowFor(),
+
         "properties" => new PropertiesDialog(new PropertiesViewModel(
             Selection().Select(i => new PropertiesTarget(i.FullPath, i.IsDirectory)).ToList(),
             session.Services.GetRequiredService<DirSizeRepository>())),
@@ -2870,6 +2910,49 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
     /// <summary>Kept so <c>assert-digest</c> can read what the last checksum window computed.</summary>
     private ChecksumViewModel? _checksums;
+
+    /// <summary>
+    /// The comparison of the two selected files.
+    /// </summary>
+    /// <remarks>
+    /// Awaited here rather than left to <c>settle</c>: the comparison reads both files off a
+    /// background thread and a capture taken before it lands would photograph "Comparing…".
+    /// </remarks>
+    private Window FileCompareWindowFor()
+    {
+        var selection = Selection();
+        if (selection.Count != 2)
+            throw new AssertionException(
+                $"Comparing two files needs two selected; {selection.Count} are.");
+
+        var vm = new FileCompareViewModel(
+            session.Services.GetRequiredService<IFileContentComparer>(),
+            selection[0].FullPath, selection[1].FullPath);
+
+        var window = FileCompareWindow.Create(vm);
+
+        // Await, not Invoke: the comparison's continuations want the dispatcher, so blocking this
+        // thread on it is a deadlock. Await pumps instead, which is what it is for.
+        Await(vm.CompareAsync);
+
+        _fileCompare = vm;
+        return window;
+    }
+
+    /// <summary>Kept so <c>assert-compare-files</c> can read the verdict off the last comparison.</summary>
+    private FileCompareViewModel? _fileCompare;
+
+    /// <summary><c>assert-compare-files &lt;substring&gt;</c> — the verdict strip's words.</summary>
+    private void AssertFileCompare(string rest)
+    {
+        var expected = Require(rest, "assert-compare-files");
+
+        if (_fileCompare is not { } vm)
+            throw new AssertionException("Nothing has been compared. Run 'dialog compare-files' first.");
+
+        if (!vm.Verdict.Contains(expected, StringComparison.OrdinalIgnoreCase))
+            throw new AssertionException($"The verdict is '{vm.Verdict}', which does not hold '{expected}'.");
+    }
 
     /// <summary>
     /// <c>assert-digest &lt;name&gt; &lt;algorithm&gt; &lt;digest&gt;</c> — what the window actually computed.

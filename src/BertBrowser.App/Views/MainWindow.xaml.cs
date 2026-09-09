@@ -42,6 +42,11 @@ public partial class MainWindow : ThemedWindow
     /// </summary>
     private ChecksumViewModel? _checksumsVm;
 
+    /// <summary>The modeless file-comparison window while one is open, re-pointed rather than stacked.</summary>
+    private FileCompareWindow? _fileCompare;
+
+    private FileCompareViewModel? _fileCompareVm;
+
     private TransferProgressWindow? _transferDetails;
 
     public MainWindow(ShellViewModel shell, BertBrowser.App.Services.AppSettings settings)
@@ -73,6 +78,7 @@ public partial class MainWindow : ThemedWindow
         _shell.ChangesRequested += ShowChanges;
         _shell.ChecksumsRequested += ShowChecksums;
         _shell.ChecksumVerifyRequested += ShowChecksumVerify;
+        _shell.FileCompareRequested += ShowFileCompare;
         _shell.SyncRequested += ShowSyncPreview;
         _shell.PropertyChanged += Shell_TransferProgressChanged;
         _shell.PropertyChanged += Shell_DrivesViewModeChanged;
@@ -331,6 +337,33 @@ public partial class MainWindow : ThemedWindow
         };
         _duplicates.Show();
         _duplicates.Load(path);
+    }
+
+    /// <summary>
+    /// Compares two files by content. A fresh view model each time rather than a re-pointed one: the
+    /// window's whole state is those two paths, and the two comparisons share nothing worth keeping.
+    /// </summary>
+    private void ShowFileCompare(string leftPath, string rightPath)
+    {
+        if (_fileCompare is { IsLoaded: true })
+        {
+            _fileCompare.Close();
+            _fileCompare = null;
+        }
+
+        var vm = new FileCompareViewModel(
+            App.Services.GetRequiredService<BertBrowser.Core.Services.Compare.IFileContentComparer>(),
+            leftPath, rightPath);
+
+        _fileCompareVm = vm;
+        _fileCompare = new FileCompareWindow(vm) { Owner = this };
+        _fileCompare.Closed += (_, _) =>
+        {
+            vm.Dispose();
+            _fileCompare = null;
+            _fileCompareVm = null;
+        };
+        _fileCompare.Show();
     }
 
     private void ShowChecksums(IReadOnlyList<string> paths) => ShowChecksumWindow(w => w.Load(paths));

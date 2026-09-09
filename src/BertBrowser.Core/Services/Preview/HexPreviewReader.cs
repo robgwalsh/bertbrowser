@@ -46,7 +46,13 @@ public static class HexPreviewReader
     /// <summary>The most a dump ever reads, whatever budget it is handed.</summary>
     public static long MaxBytes(int maxRows = DefaultMaxRows) => (long)maxRows * BytesPerRow;
 
-    public static HexPreview Read(Stream stream, long byteBudget, int maxRows = DefaultMaxRows)
+    /// <param name="origin">
+    /// The file offset the stream is already positioned at, so the offsets down the left read as
+    /// where the bytes really are. Zero for a preview, which always starts at the beginning; a file
+    /// comparison seeks to the neighbourhood of the first difference and needs the true numbers,
+    /// and a second dump formatter written to provide them would be the thing worth avoiding.
+    /// </param>
+    public static HexPreview Read(Stream stream, long byteBudget, int maxRows = DefaultMaxRows, long origin = 0)
     {
         if (maxRows <= 0) return new HexPreview([], 0, Truncated: false);
 
@@ -57,19 +63,19 @@ public static class HexPreviewReader
 
         var rows = new List<HexRow>((bytes.Length + BytesPerRow - 1) / BytesPerRow);
         for (var start = 0; start < bytes.Length; start += BytesPerRow)
-            rows.Add(Format(bytes, start));
+            rows.Add(Format(bytes, start, origin));
 
         return new HexPreview(rows, bytes.Length, moreRemains);
     }
 
     /// <summary>One row. A short final row pads both columns rather than ending early, so the ASCII
     /// gutter stays where the rows above put it instead of sliding left on the last line.</summary>
-    private static HexRow Format(byte[] bytes, int start)
+    private static HexRow Format(byte[] bytes, int start, long origin)
     {
         var count = Math.Min(BytesPerRow, bytes.Length - start);
         var row = new StringBuilder(80);
 
-        row.Append(start.ToString("X8"));
+        row.Append((origin + start).ToString("X8"));
         var offsetLength = row.Length;
 
         row.Append("  ");
@@ -105,7 +111,7 @@ public static class HexPreviewReader
             new SyntaxSpan(asciiStart, text.Length - asciiStart, SyntaxClass.String),
         ];
 
-        return new HexRow(start, text, spans);
+        return new HexRow(origin + start, text, spans);
     }
 
     private static (byte[] Bytes, bool MoreRemains) ReadAtMost(Stream stream, int budget)

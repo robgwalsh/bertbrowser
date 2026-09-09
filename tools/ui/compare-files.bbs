@@ -1,0 +1,43 @@
+# Comparing two files by content: the verdict for any pair, a line diff for two text files, and a
+# hex dump around the first differing byte for anything else.
+#
+# Which shape the window takes is FileComparePlan's decision over the pair, not a setting — so the
+# two halves of this script differ only in what they select.
+
+sandbox
+
+# --- two text files that differ in the middle ---
+#
+# write-text rather than write: the sandbox's ordinary fixture fills a file with its own name
+# repeated, so two of them share no line at all and every comparison would be a total rewrite.
+
+write-text before.txt using System;|namespace App;|public class Order|{|    public int Id;|    public string Name;|    public decimal Total;|}
+write-text after.txt using System;|using System.Text;|namespace App;|public class Order|{|    public int Id;|    public string FullName;|    public decimal Total;|}
+refresh
+
+select before.txt, after.txt
+assert-selected 2
+dialog compare-files 01-text-diff
+assert-compare-files Different
+
+# --- two identical files ---
+
+write-text same-a.txt alpha|beta|gamma
+write-text same-b.txt alpha|beta|gamma
+refresh
+
+select same-a.txt, same-b.txt
+dialog compare-files 02-identical
+assert-compare-files Identical
+
+# --- two binaries: the same window, a hex dump around the first difference ---
+
+write-binary left.bin 8192
+write-binary right.bin 8192 5000
+refresh
+
+select left.bin, right.bin
+dialog compare-files 03-binary
+assert-compare-files "first difference at byte"
+
+echo compared as text, as identical, and as bytes

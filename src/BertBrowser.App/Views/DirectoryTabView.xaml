@@ -390,6 +390,10 @@
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Copy}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="CopyNameMenuItem" Header="Copy name" Click="ContextCopyName_Click"/>
+                        <MenuItem x:Name="CompareFilesMenuItem" Header="Compare these two files…"
+                                  Click="ContextCompareFiles_Click">
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.CompareFiles}"/></MenuItem.Icon>
+                        </MenuItem>
                         <MenuItem x:Name="VerifyChecksumsMenuItem" Header="Verify checksums…"
                                   Click="ContextVerifyChecksums_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Checksum}"/></MenuItem.Icon>

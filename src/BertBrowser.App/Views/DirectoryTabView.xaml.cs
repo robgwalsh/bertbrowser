@@ -924,6 +924,11 @@ public partial class DirectoryTabView : UserControl
         // Verifying is a verb about a folder, so it follows the folder verbs' rule rather than the
         // selection's — a checksum file describes what is around it.
         VerifyChecksumsMenuItem.IsEnabled = !inArchive;
+
+        // Exactly two real files. Deliberately not conditional on a folder comparison being under
+        // way: "are these two the same?" is the general question, and the comparison session is only
+        // one of the ways of arriving at it.
+        CompareFilesMenuItem.IsEnabled = selection.Count == 2 && realFiles == 2 && !inArchive;
         PasteMenuItem.IsEnabled = FileClipboard.HasFiles() && !inArchive;
 
         // "Open in new tab/pane" only makes sense for folders.
@@ -1527,6 +1532,12 @@ public partial class DirectoryTabView : UserControl
         }
 
         _shell.OpenChecksums(paths);
+    }
+
+    private void ContextCompareFiles_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedFileItems() is [{ IsDirectory: false } left, { IsDirectory: false } right])
+            _shell.OpenFileCompare(left.FullPath, right.FullPath);
     }
 
     private void ContextVerifyChecksums_Click(object sender, RoutedEventArgs e)

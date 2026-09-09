@@ -236,6 +236,12 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     public void OpenChecksumVerify(string checksumFilePath) =>
         ChecksumVerifyRequested?.Invoke(checksumFilePath);
 
+    /// <summary>Raised with the two files to compare by content.</summary>
+    public event Action<string, string>? FileCompareRequested;
+
+    public void OpenFileCompare(string leftPath, string rightPath) =>
+        FileCompareRequested?.Invoke(leftPath, rightPath);
+
     /// <summary>
     /// Raised with the folder whose recent changes to show, or null for "This PC". Shaped like
     /// <see cref="DiskUsageRequested"/>, for the same reason.

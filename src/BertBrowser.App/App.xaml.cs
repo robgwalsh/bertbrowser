@@ -295,6 +295,10 @@ public partial class App : Application
         // and the MFT service, and no I/O of its own.
         services.AddSingleton<BertBrowser.Core.Services.IUserNotice, Views.UserNotice>();
         services.AddSingleton<BertBrowser.Core.Services.IUserConfirm, Views.UserConfirm>();
+        // Comparing two files by their bytes. Stateless, so one instance serves the compare window
+        // and the folder comparison's "settle this by content" alike.
+        services.AddSingleton<BertBrowser.Core.Services.Compare.IFileContentComparer,
+            BertBrowser.Core.Services.Compare.FileContentComparer>();
         services.AddSingleton<BertBrowser.Core.Services.Compare.IFolderCompareService>(sp =>
             new BertBrowser.Core.Services.Compare.FolderCompareService(
                 sp.GetRequiredService<FsIndexRepository>(),

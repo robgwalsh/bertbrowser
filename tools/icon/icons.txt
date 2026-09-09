@@ -107,3 +107,8 @@ Save              | Save                    | save                    | 20
 
 # The checksum dialog: a file's SHA-256 digest, for verifying a download.
 Checksum          | Number Symbol           | number_symbol           | 20
+
+# Comparing two files by content. Deliberately not Icon.Compare, which already means "compare this
+# pane with the one beside it" — both appear in the file list's menu, and one picture on two verbs
+# is the wrong-picture mistake nothing else catches.
+CompareFiles      | Document Split Hint     | document_split_hint     | 20
