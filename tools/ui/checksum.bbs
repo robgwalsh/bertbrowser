@@ -1,0 +1,64 @@
+# The checksum window: five algorithms in one read, a whole selection at once, the paste box that
+# works out for itself which algorithm it was handed, and the verify half.
+#
+# The digests here are asserted rather than merely photographed. Sandbox.Write fills a file with its
+# own name repeated to length, so the bytes behind every name below are fixed and a digest that
+# changes means the hashing changed — which is the whole point of having this file. A picture of a
+# digest proves only that something was rendered.
+
+sandbox
+write setup.exe 4096
+write data.zip 2048
+write notes.txt 512
+refresh
+
+# --- one file, one algorithm: what the old dialog showed, in the new window ---
+
+select setup.exe
+assert-selected 1
+dialog checksum 01-one-file
+assert-digest setup.exe Sha256 4BC08F40157359D450E1733DB66AA13796D16B765674B38D8C8E98CE58C32DB8
+
+# --- a whole selection ---
+
+select setup.exe, data.zip, notes.txt
+assert-selected 3
+dialog checksum 02-many-files
+assert-digest data.zip Sha256 B72F9DA41AF1B90B01394C1F2B88035653519AE661109F769D1110E016A6DC2C
+assert-digest notes.txt Sha256 864D0C880E9365D5C31AEB2EC75A431035AD2638044A82DECB6AE4FE7D9E6614
+
+# --- verifying against a real checksum file ---
+#
+# Written through the same ChecksumFile.Render the app's Save goes through, so the two halves of the
+# feature are checked against each other rather than against a hand-typed fixture.
+
+checksum-file downloads.sha256 Sha256 setup.exe,data.zip,notes.txt
+
+# One file changed after the checksum file was written, and one listed file taken away: the two
+# failures that matter, beside two that pass.
+write data.zip 3072
+delete notes.txt
+refresh
+
+select downloads.sha256
+dialog checksum-verify 03-verify
+assert-verify setup.exe Ok
+assert-verify data.zip Mismatch
+assert-verify notes.txt Missing
+
+echo checksums and verification both hold
+
+# --- all five at once, which is the point of the one-pass read ---
+#
+# The window is built from the run's settings, so this is how a script reaches a state a person
+# reaches by ticking boxes.
+
+checksum-algorithms Crc32,Md5,Sha1,Sha256,Sha512
+select setup.exe
+dialog checksum 04-all-algorithms
+assert-digest setup.exe Crc32 EDD06FE8
+assert-digest setup.exe Md5 EE517192DB27412E099A58A9AF7C0482
+assert-digest setup.exe Sha1 D7E61EE079B53746F4CFD04A68E07FC6AD48B962
+assert-digest setup.exe Sha512 CA6F4F09B012ED61AA1A65A088371622F86518B85B8F790F84340EDBE25CD01CB2D6F55AD774BEBD733C4F267DEAE33A5F111A885B223D9025B5EFEBE9489318
+
+echo five algorithms, one read

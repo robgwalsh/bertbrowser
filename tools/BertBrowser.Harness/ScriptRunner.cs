@@ -13,6 +13,7 @@ using BertBrowser.App.ViewModels;
 using BertBrowser.App.Views;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Layout;
+using BertBrowser.Core.Services.Checksums;
 using BertBrowser.Core.Services.Columns;
 using BertBrowser.Core.Services.Compare;
 using BertBrowser.Core.Services.Delete;
@@ -109,6 +110,9 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "tree": Tree(rest); break;
             case "mkdir": MakeDirectory(rest); break;
             case "write": WriteFile(rest); break;
+            case "write-text": WriteTextFile(rest); break;
+            case "checksum-file": WriteChecksumFile(rest); break;
+            case "checksum-algorithms": ChecksumAlgorithmsSetting(rest); break;
             case "sandbox": output.WriteLine(_sandbox.Root); break;
             case "deny": Deny(rest); break;
 
@@ -254,6 +258,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-duplicate-selected": AssertDuplicateSelected(rest); break;
             case "assert-duplicate-row": AssertDuplicateRow(rest, expected: true); break;
             case "assert-no-duplicate-row": AssertDuplicateRow(rest, expected: false); break;
+            case "assert-digest": AssertDigest(rest); break;
+            case "assert-verify": AssertVerify(rest); break;
             case "assert-exists": AssertOnDisk(rest, expected: true); break;
             case "assert-missing": AssertOnDisk(rest, expected: false); break;
             case "assert-visible": AssertVisibility(rest, expected: true); break;
@@ -523,6 +529,72 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         var bytes = tail.Length == 0 ? 64 : Number(tail, "write");
 
         Sandbox.Write(_sandbox.RequireInside(Require(path, "write"), "write"), bytes);
+    }
+
+    /// <summary>
+    /// <c>write-text &lt;path&gt; &lt;line&gt;|&lt;line&gt;|…</c> — a file with content you chose.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Sandbox.Write"/> fills a file with its own name repeated, which is exactly right
+    /// for hashing — deterministic, and two files of different names never collide — and exactly
+    /// wrong for a diff, where two such files share no line at all and every comparison is a total
+    /// rewrite. This is how a script makes a pair that differs in the middle.
+    /// </remarks>
+    private void WriteTextFile(string rest)
+    {
+        var (path, tail) = Split(rest);
+        var full = _sandbox.RequireInside(Require(path, "write-text"), "write-text");
+
+        if (Path.GetDirectoryName(full) is { Length: > 0 } directory)
+            Directory.CreateDirectory(directory);
+
+        File.WriteAllText(full, string.Join("\n", tail.Split('|')) + "\n");
+    }
+
+    /// <summary>
+    /// <c>checksum-algorithms Md5,Sha256</c> — which boxes the next checksum window opens with.
+    /// </summary>
+    /// <remarks>
+    /// The window reads them from settings on construction, exactly as it does for a person, so this
+    /// is how a script reaches a state that is otherwise only reachable by ticking a box.
+    /// </remarks>
+    private void ChecksumAlgorithmsSetting(string rest) =>
+        session.Services.GetRequiredService<AppSettings>().ChecksumAlgorithms =
+            Require(rest, "checksum-algorithms");
+
+    /// <summary>
+    /// <c>checksum-file &lt;path&gt; &lt;algorithm&gt; &lt;name&gt;,&lt;name&gt;…</c> — a real checksum file over
+    /// real files, written through the same <see cref="ChecksumFile.Render"/> the app writes with.
+    /// </summary>
+    private void WriteChecksumFile(string rest)
+    {
+        var parts = Require(rest, "checksum-file").Split(' ', 3, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 3)
+            throw new FormatException("checksum-file wants <path> <algorithm> <name>,<name>…");
+
+        if (!Enum.TryParse<ChecksumAlgorithm>(parts[1], ignoreCase: true, out var algorithm))
+            throw new FormatException($"'{parts[1]}' is not an algorithm.");
+
+        var full = _sandbox.RequireInside(parts[0], "checksum-file");
+        var folder = Path.GetDirectoryName(full)
+            ?? throw new FormatException("A checksum file needs a folder to sit in.");
+
+        var digester = session.Services.GetRequiredService<IFileDigester>();
+        var lines = new List<ChecksumLine>();
+
+        foreach (var name in parts[2].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var target = _sandbox.RequireInside(name, "checksum-file");
+            var digests = digester.Digest(target, [algorithm], null, CancellationToken.None)
+                ?? throw new AssertionException($"'{name}' could not be read.");
+
+            var relative = ChecksumPath.Relativise(folder, target)
+                ?? throw new AssertionException($"'{name}' is not under the checksum file's folder.");
+
+            lines.Add(new ChecksumLine(relative, digests.ByAlgorithm[algorithm]));
+        }
+
+        File.WriteAllText(full, ChecksumFile.Render(algorithm, lines));
     }
 
     // ---- navigation -------------------------------------------------------------------
@@ -2662,9 +2734,14 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         // is to hand FlatViewRules the row it would have read from dir_size_cache.
         "flat-large" => FlatLargeDialog(),
 
-        "checksum" => new ChecksumDialog(new ChecksumViewModel(
-            Selection()[0].FullPath,
-            session.Services.GetRequiredService<IFileHasher>())),
+        // Digests whatever is selected, one file or twenty, under whichever algorithms the run's
+        // settings hold — the same window and the same Load the menu goes through.
+        "checksum" => ChecksumWindowFor(w =>
+            w.Load(Selection().Where(i => !i.IsDirectory).Select(i => i.FullPath).ToList())),
+
+        // The other mode of the same window. Wants a checksum file selected, which is what the
+        // 'checksum-file' fixture verb writes.
+        "checksum-verify" => ChecksumWindowFor(w => w.LoadVerify(Selection()[0].FullPath)),
 
         "properties" => new PropertiesDialog(new PropertiesViewModel(
             Selection().Select(i => new PropertiesTarget(i.FullPath, i.IsDirectory)).ToList(),
@@ -2768,6 +2845,83 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         var window = DiskUsageWindow.Create(vm, (_, _) => { });
         window.Load(session.Tab.CurrentPath);
         return window;
+    }
+
+    /// <summary>
+    /// The checksum window, built and pointed the way the menu points it.
+    /// </summary>
+    /// <remarks>
+    /// It hashes on load, so a capture taken straight after this may still show the progress strip.
+    /// Scripts settle before shooting, which is what makes the digests deterministic — the sandbox
+    /// writes each file's own name repeated to length, so a run's digests are the same every time
+    /// and can be asserted rather than merely photographed.
+    /// </remarks>
+    private Window ChecksumWindowFor(Action<ChecksumWindow> load)
+    {
+        var vm = new ChecksumViewModel(
+            session.Services.GetRequiredService<IFileDigester>(),
+            session.Services.GetRequiredService<AppSettings>().ResolvedChecksumAlgorithms);
+
+        var window = ChecksumWindow.Create(vm);
+        load(window);
+        _checksums = vm;
+        return window;
+    }
+
+    /// <summary>Kept so <c>assert-digest</c> can read what the last checksum window computed.</summary>
+    private ChecksumViewModel? _checksums;
+
+    /// <summary>
+    /// <c>assert-digest &lt;name&gt; &lt;algorithm&gt; &lt;digest&gt;</c> — what the window actually computed.
+    /// </summary>
+    /// <remarks>
+    /// Worth having rather than only screenshots because the fixture is deterministic: a sandbox
+    /// file holds its own name repeated to length, so its digest is a constant and a change to it
+    /// means the hashing changed. A picture of a digest proves only that something was rendered.
+    /// </remarks>
+    private void AssertDigest(string rest)
+    {
+        var parts = Require(rest, "assert-digest").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 3)
+            throw new FormatException("assert-digest wants <name> <algorithm> <digest>.");
+
+        if (_checksums is not { } vm)
+            throw new AssertionException("There is no checksum window. Run 'dialog checksum' first.");
+
+        if (!Enum.TryParse<ChecksumAlgorithm>(parts[1], ignoreCase: true, out var algorithm))
+            throw new FormatException($"'{parts[1]}' is not an algorithm.");
+
+        var row = vm.Rows.FirstOrDefault(r => string.Equals(r.Name, parts[0], StringComparison.OrdinalIgnoreCase))
+            ?? throw new AssertionException(
+                $"The checksum window holds no row named '{parts[0]}'. It holds: "
+                + string.Join(", ", vm.Rows.Select(r => r.Name)));
+
+        var actual = row.Computed.TryGetValue(algorithm, out var digest) ? digest : null;
+        if (actual is null)
+            throw new AssertionException($"No {algorithm} digest was computed for '{parts[0]}'.");
+
+        if (!string.Equals(actual, parts[2], StringComparison.OrdinalIgnoreCase))
+            throw new AssertionException(
+                $"'{parts[0]}' {algorithm} is {actual.ToLowerInvariant()}, not {parts[2].ToLowerInvariant()}.");
+    }
+
+    /// <summary><c>assert-verify &lt;name&gt; &lt;state&gt;</c> — how one row of a verify run came out.</summary>
+    private void AssertVerify(string rest)
+    {
+        var parts = Require(rest, "assert-verify").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 2) throw new FormatException("assert-verify wants <name> <state>.");
+
+        if (_checksums is not { } vm)
+            throw new AssertionException("There is no checksum window. Run 'dialog checksum-verify' first.");
+
+        var row = vm.Rows.FirstOrDefault(r => string.Equals(r.Name, parts[0], StringComparison.OrdinalIgnoreCase))
+            ?? throw new AssertionException(
+                $"The verify report holds no row named '{parts[0]}'. It holds: "
+                + string.Join(", ", vm.Rows.Select(r => r.Name)));
+
+        if (!string.Equals(row.VerifyState?.ToString(), parts[1], StringComparison.OrdinalIgnoreCase))
+            throw new AssertionException(
+                $"'{parts[0]}' verified as {row.VerifyState?.ToString() ?? "nothing"}, not {parts[1]}.");
     }
 
     /// <summary>

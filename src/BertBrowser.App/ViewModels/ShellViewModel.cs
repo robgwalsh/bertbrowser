@@ -219,6 +219,24 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         OpenDuplicates(ActiveTab.CurrentPath is { Length: > 0 } path ? path : null);
 
     /// <summary>
+    /// Raised with the files to digest. Shaped like <see cref="DuplicatesRequested"/> and for the
+    /// same reason: the window builds the view, and one route in means one place it can be opened
+    /// wrongly.
+    /// </summary>
+    public event Action<IReadOnlyList<string>>? ChecksumsRequested;
+
+    /// <summary>Raised with a checksum file to check the folder around it against.</summary>
+    public event Action<string>? ChecksumVerifyRequested;
+
+    public void OpenChecksums(IReadOnlyList<string> paths)
+    {
+        if (paths.Count > 0) ChecksumsRequested?.Invoke(paths);
+    }
+
+    public void OpenChecksumVerify(string checksumFilePath) =>
+        ChecksumVerifyRequested?.Invoke(checksumFilePath);
+
+    /// <summary>
     /// Raised with the folder whose recent changes to show, or null for "This PC". Shaped like
     /// <see cref="DiskUsageRequested"/>, for the same reason.
     /// </summary>

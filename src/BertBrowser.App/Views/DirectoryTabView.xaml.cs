@@ -10,6 +10,7 @@ using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Archives;
+using BertBrowser.Core.Services.Checksums;
 using BertBrowser.Core.Services.Columns;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.FlatView;
@@ -913,9 +914,16 @@ public partial class DirectoryTabView : UserControl
         CopyPathMenuItem.Header = selection.Count > 1 ? "Copy as paths" : "Copy as path";
         CopyNameMenuItem.Header = selection.Count > 1 ? "Copy names" : "Copy name";
 
-        // One real file: a checksum answers for a single file's bytes, and an entry inside a
-        // container has no path IFileHasher can open.
-        ChecksumMenuItem.IsEnabled = selection.Count == 1 && !selection[0].IsDirectory && !inArchive;
+        // Real files only: a checksum answers for a file's bytes, a folder has none of its own, and
+        // an entry inside a container has no path the digester can open. Not offered on an empty
+        // selection either — digesting a whole folder is a different, much slower verb.
+        var realFiles = selection.Count(i => !i.IsDirectory);
+        ChecksumMenuItem.IsEnabled = realFiles > 0 && realFiles == selection.Count && !inArchive;
+        ChecksumMenuItem.Header = realFiles > 1 ? $"Checksums of {realFiles:N0} files…" : "Checksum…";
+
+        // Verifying is a verb about a folder, so it follows the folder verbs' rule rather than the
+        // selection's — a checksum file describes what is around it.
+        VerifyChecksumsMenuItem.IsEnabled = !inArchive;
         PasteMenuItem.IsEnabled = FileClipboard.HasFiles() && !inArchive;
 
         // "Open in new tab/pane" only makes sense for folders.
@@ -1508,8 +1516,34 @@ public partial class DirectoryTabView : UserControl
 
     private void ContextChecksum_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedFileItems() is [{ IsDirectory: false } item])
-            ChecksumPrompt.Show(item.FullPath);
+        var paths = SelectedFileItems().Where(i => !i.IsDirectory).Select(i => i.FullPath).ToList();
+
+        // A single checksum file opens in Verify mode instead: opening a .sha256 and being shown
+        // the .sha256's own digest is not what anybody meant by it.
+        if (paths is [var only] && ChecksumAlgorithms.FromExtension(only) is not null)
+        {
+            _shell.OpenChecksumVerify(only);
+            return;
+        }
+
+        _shell.OpenChecksums(paths);
+    }
+
+    private void ContextVerifyChecksums_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = Tab.CurrentPath;
+
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Verify against a checksum file",
+            InitialDirectory = folder is { Length: > 0 } ? folder : null,
+            Filter = "Checksum files|"
+                + string.Join(";", ChecksumAlgorithms.All.Select(a => "*" + ChecksumAlgorithms.FileExtension(a)))
+                + "|All files (*.*)|*.*",
+        };
+
+        if (dialog.ShowDialog(Window.GetWindow(this)) == true)
+            _shell.OpenChecksumVerify(dialog.FileName);
     }
 
     private void ContextProperties_Click(object sender, RoutedEventArgs e)

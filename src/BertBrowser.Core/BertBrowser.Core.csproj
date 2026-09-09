@@ -18,6 +18,12 @@
          it replaceable — see the Archives section of CLAUDE.md for why this dependency exists
          where Markdig and PdfPig deliberately do not. -->
     <PackageReference Include="SharpCompress" Version="1.0.0" />
+    <!-- CRC32, and only CRC32. It is the one algorithm of the five the checksum tool offers that
+         .NET does not ship: MD5, SHA-1, SHA-256 and SHA-512 all come from IncrementalHash. MIT,
+         published by Microsoft, and reached from exactly one class — Services/Checksums/DigestSink.cs
+         — which is what makes it replaceable by the forty lines of table-driven CRC32 it saves us
+         writing. Note its GetHashAndReset is little-endian; see Crc32DigestSink for why that matters. -->
+    <PackageReference Include="System.IO.Hashing" Version="9.0.0" />
   </ItemGroup>
 
   <ItemGroup>

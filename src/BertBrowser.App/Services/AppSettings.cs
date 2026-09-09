@@ -1,5 +1,6 @@
 using System.Text.Json;
 using BertBrowser.Core.Services.Changes;
+using BertBrowser.Core.Services.Checksums;
 
 namespace BertBrowser.App.Services;
 
@@ -126,6 +127,39 @@ public sealed class AppSettings
     /// magnitudes; this is what a session starts from and what changing it writes back.
     /// </remarks>
     public long DuplicateMinSizeBytes { get; set; } = 1024 * 1024;
+
+    /// <summary>
+    /// Which algorithms the checksum window starts with, comma-separated
+    /// (<c>"Sha256"</c>, <c>"Md5,Sha256"</c>).
+    /// </summary>
+    /// <remarks>
+    /// A string rather than a list so the file stays hand-editable, and unparseable names are simply
+    /// dropped rather than resetting the lot. Remembered on the window closing, like
+    /// <see cref="DuplicateMinSizeBytes"/>, and for the same reason it has no Settings page: it is a
+    /// tool's own state, not a preference about the app.
+    /// </remarks>
+    public string ChecksumAlgorithms { get; set; } = "Sha256";
+
+    /// <summary>
+    /// <see cref="ChecksumAlgorithms"/> as the enum, never empty — an unreadable or empty setting
+    /// falls back to SHA-256 rather than opening a window that computes nothing.
+    /// </summary>
+    public IReadOnlyList<ChecksumAlgorithm> ResolvedChecksumAlgorithms
+    {
+        get
+        {
+            var parsed = new List<ChecksumAlgorithm>();
+            foreach (var name in ChecksumAlgorithms.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (Enum.TryParse<ChecksumAlgorithm>(name, ignoreCase: true, out var algorithm))
+                    parsed.Add(algorithm);
+            }
+
+            return parsed.Count > 0
+                ? Core.Services.Checksums.ChecksumAlgorithms.Normalise(parsed)
+                : [ChecksumAlgorithm.Sha256];
+        }
+    }
 
     /// <summary>
     /// Whether the index helper keeps a log of file changes for the "What changed" window.

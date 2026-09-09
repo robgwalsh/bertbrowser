@@ -280,8 +280,14 @@ public partial class App : Application
         // three registrations rather than one service that does its own I/O.
         services.AddSingleton<BertBrowser.Core.Services.Duplicates.IDuplicateCandidateSource,
             BertBrowser.Core.Services.Duplicates.IndexedDuplicateCandidateSource>();
-        services.AddSingleton<BertBrowser.Core.Services.Duplicates.IFileHasher,
-            BertBrowser.Core.Services.Duplicates.FileSystemFileHasher>();
+        // One object behind two interfaces, because it is one read loop behind two seams. Registering
+        // them separately would give the duplicate finder and the checksum tool an instance each, and
+        // the sharing rules they both depend on would exist twice over.
+        services.AddSingleton<BertBrowser.Core.Services.Duplicates.FileSystemFileHasher>();
+        services.AddSingleton<BertBrowser.Core.Services.Duplicates.IFileHasher>(sp =>
+            sp.GetRequiredService<BertBrowser.Core.Services.Duplicates.FileSystemFileHasher>());
+        services.AddSingleton<BertBrowser.Core.Services.Checksums.IFileDigester>(sp =>
+            sp.GetRequiredService<BertBrowser.Core.Services.Duplicates.FileSystemFileHasher>());
         services.AddSingleton<BertBrowser.Core.Services.Duplicates.IDuplicateFinder,
             BertBrowser.Core.Services.Duplicates.DuplicateFinder>();
         // Comparing two folders reads each side from whichever source can answer it — the index

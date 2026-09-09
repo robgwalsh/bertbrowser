@@ -33,6 +33,15 @@ public partial class MainWindow : ThemedWindow
     /// <summary>The modeless change timeline while one is open, re-pointed rather than stacked.</summary>
     private ChangeTimelineWindow? _changes;
 
+    /// <summary>The modeless checksum window while one is open, re-pointed rather than stacked.</summary>
+    private ChecksumWindow? _checksums;
+
+    /// <summary>
+    /// Its view model, kept beside the window because the window does not own it — the same split
+    /// <see cref="DuplicatesWindow"/> makes, so a close can dispose it exactly once.
+    /// </summary>
+    private ChecksumViewModel? _checksumsVm;
+
     private TransferProgressWindow? _transferDetails;
 
     public MainWindow(ShellViewModel shell, BertBrowser.App.Services.AppSettings settings)
@@ -62,6 +71,8 @@ public partial class MainWindow : ThemedWindow
         _shell.DiskUsageRequested += ShowDiskUsage;
         _shell.DuplicatesRequested += ShowDuplicates;
         _shell.ChangesRequested += ShowChanges;
+        _shell.ChecksumsRequested += ShowChecksums;
+        _shell.ChecksumVerifyRequested += ShowChecksumVerify;
         _shell.SyncRequested += ShowSyncPreview;
         _shell.PropertyChanged += Shell_TransferProgressChanged;
         _shell.PropertyChanged += Shell_DrivesViewModeChanged;
@@ -320,6 +331,45 @@ public partial class MainWindow : ThemedWindow
         };
         _duplicates.Show();
         _duplicates.Load(path);
+    }
+
+    private void ShowChecksums(IReadOnlyList<string> paths) => ShowChecksumWindow(w => w.Load(paths));
+
+    private void ShowChecksumVerify(string checksumFilePath) =>
+        ShowChecksumWindow(w => w.LoadVerify(checksumFilePath));
+
+    /// <summary>
+    /// Opens the checksum window, or re-points the one already open, and then points it at
+    /// something — which is the only part the two entry points differ in.
+    /// </summary>
+    private void ShowChecksumWindow(Action<ChecksumWindow> load)
+    {
+        if (_checksums is { IsLoaded: true })
+        {
+            load(_checksums);
+            _checksums.Activate();
+            return;
+        }
+
+        var vm = new ChecksumViewModel(
+            App.Services.GetRequiredService<BertBrowser.Core.Services.Checksums.IFileDigester>(),
+            _settings.ResolvedChecksumAlgorithms);
+
+        _checksumsVm = vm;
+        _checksums = new ChecksumWindow(vm) { Owner = this };
+        _checksums.Closed += (_, _) =>
+        {
+            // Remembered rather than reset, like the duplicate finder's knobs: someone who works in
+            // MD5 because that is what their download pages publish should not re-tick it every time.
+            _settings.ChecksumAlgorithms = string.Join(",", vm.SelectedAlgorithms);
+            _settings.Save();
+
+            vm.Dispose();
+            _checksums = null;
+            _checksumsVm = null;
+        };
+        _checksums.Show();
+        load(_checksums);
     }
 
     /// <summary>
