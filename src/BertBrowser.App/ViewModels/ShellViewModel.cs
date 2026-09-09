@@ -328,7 +328,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             return;
 
         var session = new CompareSessionViewModel(
-            _folderCompare, left, right, () => _settings.ShowHiddenItems);
+            _folderCompare, _contentComparer, left, right, () => _settings.ShowHiddenItems);
         session.Ended += _ => CompareSession = null;
         session.SyncRequested += s => SyncRequested?.Invoke(s);
 
@@ -347,6 +347,10 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     public void EndCompare() => CompareSession?.End(null);
 
     private readonly IFolderCompareService _folderCompare;
+
+    /// <summary>Comparing two files by their bytes — what settles a Differs the timestamps could
+    /// not.</summary>
+    private readonly IFileContentComparer _contentComparer;
 
     /// <summary>How the shell says something that has to be acknowledged. Injected so a scripted
     /// run can record it instead of putting a modal on a window nobody is watching.</summary>
@@ -393,6 +397,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         IElevatedOperationRunner elevation,
         IElevationPrompt elevationPrompt,
         IFolderCompareService folderCompare,
+        IFileContentComparer contentComparer,
         ShortcutPlanner shortcutPlanner,
         ShortcutExecutor shortcutExecutor,
         IUserNotice notice)
@@ -400,6 +405,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         _shortcutPlanner = shortcutPlanner;
         _shortcutExecutor = shortcutExecutor;
         _folderCompare = folderCompare;
+        _contentComparer = contentComparer;
         _notice = notice;
         _syncRunner = new SyncRunner(transferExecutor, deleteExecutor);
         _elevation = elevation;

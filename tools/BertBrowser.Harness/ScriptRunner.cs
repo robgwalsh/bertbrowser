@@ -184,6 +184,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "compare": Compare(); break;
             case "compare-filter": CompareFilter(rest); break;
             case "compare-end": CompareEnd(); break;
+            case "settle-content": SettleByContent(); break;
             case "compare-refused": CompareRefused(rest); break;
             case "sync": Sync(rest); break;
             case "assert-compare": AssertCompare(rest); break;
@@ -2095,6 +2096,26 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     {
         Invoke(() => session.Shell.EndCompare());
         session.Settle();
+    }
+
+    /// <summary>
+    /// Asks the comparison to re-judge the selected rows by their bytes.
+    /// </summary>
+    /// <remarks>
+    /// The one verdict a timestamp comparison cannot reach. Awaited rather than left to
+    /// <c>settle</c>: it reads both files off a background thread, and asserting on a row before
+    /// that lands would be asserting on the old verdict.
+    /// </remarks>
+    private void SettleByContent()
+    {
+        if (session.Shell.CompareSession is not { } compare)
+            throw new AssertionException("Nothing is being compared. Run 'compare' first.");
+
+        var paths = Selection().Where(i => !i.IsDirectory).Select(i => i.FullPath).ToList();
+        if (paths.Count == 0) throw new AssertionException("Settling by content needs files selected.");
+
+        var settled = Await(() => compare.SettleByContentAsync(paths));
+        output.WriteLine($"SETTLED {settled}");
     }
 
     /// <summary>Asserts on the banner's summary, which is where every count a comparison found is

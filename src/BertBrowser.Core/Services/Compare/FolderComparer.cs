@@ -159,7 +159,7 @@ public static class FolderComparer
     /// pairing and writes only to ancestor keys, so no entry is ever folded into itself and the
     /// pass does not depend on the order the dictionary happens to enumerate in.
     /// </summary>
-    private static void RollUpFolders(Dictionary<string, CompareVerdict> verdicts)
+    internal static void RollUpFolders(Dictionary<string, CompareVerdict> verdicts)
     {
         var direct = verdicts.ToArray();
         foreach (var (key, verdict) in direct)

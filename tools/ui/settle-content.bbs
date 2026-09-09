@@ -1,0 +1,47 @@
+# Settling a comparison's verdict by what the bytes actually say.
+#
+# The case this exists for is a file whose timestamp moved without its contents changing — which is
+# most of a backup drive after a restore, a sync tool, or an unzip. The comparison can only see that
+# one side is newer, and copying it back over an identical file is work for nothing.
+#
+# Note which verdicts are even settleable. A leaf "Differs" means equal timestamps and *unequal
+# sizes*, so its bytes cannot be identical and reading them can never change it. Newer, older and
+# unknown are the ones that reading answers.
+
+sandbox
+mkdir left
+mkdir right
+
+# Byte for byte the same, written far enough apart that the comparison calls one of them newer.
+# Sandbox.Write fills a file with its own name repeated, so both sides hold identical bytes.
+write left/moved-timestamp.txt 400
+sleep 2100
+write right/moved-timestamp.txt 400
+
+# Genuinely different, and must stay that way — the settlement is not a rubber stamp.
+write-text left/really-differs.txt alpha|beta
+write-text right/really-differs.txt alpha|gamma
+
+go left
+split right right
+pane 2
+go right
+pane 1
+
+compare
+shot 01-compared
+
+# Before anything is read: one side is newer, and the other pair genuinely differs.
+assert-compare-row moved-timestamp.txt Older
+assert-compare-row really-differs.txt Differs
+
+select moved-timestamp.txt, really-differs.txt
+settle-content
+shot 02-settled
+
+# Identical bytes settle to Same. Different bytes leave the verdict exactly where it was — one
+# direction only, and only on proof.
+assert-compare-row moved-timestamp.txt Same
+assert-compare-row really-differs.txt Differs
+
+echo settled what the bytes agreed on, and nothing else

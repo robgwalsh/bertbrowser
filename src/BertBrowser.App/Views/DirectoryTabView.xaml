@@ -394,6 +394,10 @@
                                   Click="ContextCompareFiles_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.CompareFiles}"/></MenuItem.Icon>
                         </MenuItem>
+                        <MenuItem x:Name="SettleByContentMenuItem" Header="Settle by content"
+                                  Click="ContextSettleByContent_Click">
+                            <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.CompareFiles}"/></MenuItem.Icon>
+                        </MenuItem>
                         <MenuItem x:Name="VerifyChecksumsMenuItem" Header="Verify checksums…"
                                   Click="ContextVerifyChecksums_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Checksum}"/></MenuItem.Icon>

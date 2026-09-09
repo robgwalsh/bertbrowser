@@ -929,6 +929,14 @@ public partial class DirectoryTabView : UserControl
         // way: "are these two the same?" is the general question, and the comparison session is only
         // one of the ways of arriving at it.
         CompareFilesMenuItem.IsEnabled = selection.Count == 2 && realFiles == 2 && !inArchive;
+
+        // Only while a folder comparison is up: this asks it to re-judge these rows by their bytes,
+        // and there is nothing to re-judge otherwise. Hidden rather than greyed, because a disabled
+        // item nobody can explain is worse than an absent one.
+        var comparing = _shell.CompareSession is not null;
+        SettleByContentMenuItem.Visibility = comparing ? Visibility.Visible : Visibility.Collapsed;
+        SettleByContentMenuItem.IsEnabled = comparing && realFiles > 0 && !inArchive;
+        SettleByContentMenuItem.Header = realFiles > 1 ? "Settle these by content" : "Settle by content";
         PasteMenuItem.IsEnabled = FileClipboard.HasFiles() && !inArchive;
 
         // "Open in new tab/pane" only makes sense for folders.
@@ -1538,6 +1546,14 @@ public partial class DirectoryTabView : UserControl
     {
         if (SelectedFileItems() is [{ IsDirectory: false } left, { IsDirectory: false } right])
             _shell.OpenFileCompare(left.FullPath, right.FullPath);
+    }
+
+    private void ContextSettleByContent_Click(object sender, RoutedEventArgs e)
+    {
+        if (_shell.CompareSession is not { } session) return;
+
+        var paths = SelectedFileItems().Where(i => !i.IsDirectory).Select(i => i.FullPath).ToList();
+        if (paths.Count > 0) _ = session.SettleByContentAsync(paths);
     }
 
     private void ContextVerifyChecksums_Click(object sender, RoutedEventArgs e)

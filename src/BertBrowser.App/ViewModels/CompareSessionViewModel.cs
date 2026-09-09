@@ -23,6 +23,7 @@ namespace BertBrowser.App.ViewModels;
 public sealed partial class CompareSessionViewModel : ObservableObject, IDisposable
 {
     private readonly IFolderCompareService _service;
+    private readonly IFileContentComparer _contentComparer;
     private readonly Func<bool> _includeHidden;
     private CancellationTokenSource? _cts;
     private bool _ended;
@@ -73,11 +74,13 @@ public sealed partial class CompareSessionViewModel : ObservableObject, IDisposa
 
     public CompareSessionViewModel(
         IFolderCompareService service,
+        IFileContentComparer contentComparer,
         DirectoryTabViewModel left,
         DirectoryTabViewModel right,
         Func<bool> includeHidden)
     {
         _service = service;
+        _contentComparer = contentComparer;
         _includeHidden = includeHidden;
         Left = left;
         Right = right;
@@ -237,6 +240,71 @@ public sealed partial class CompareSessionViewModel : ObservableObject, IDisposa
         {
             return null; // a virtual or malformed path is simply not part of this comparison
         }
+    }
+
+    // --- Settling by content ---
+
+    /// <summary>
+    /// Reads both sides of the given rows and lets the bytes settle their verdicts.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The one thing a timestamp comparison cannot do. A backup drive is full of files whose
+    /// timestamps moved for reasons that had nothing to do with their contents — a restore, a sync
+    /// tool, an unzip — and all the comparison can see is that one side is newer. Reading both is
+    /// what turns that into "these are the same file", and saves copying it back over itself.
+    /// </para>
+    /// <para>
+    /// The settled verdicts go into a <em>new</em> <see cref="CompareResult"/> rather than beside
+    /// the rows, because <c>SyncPlanner</c> reads them off the result: an overlay would repaint a
+    /// row green while the sync went on copying it. Staleness needs nothing new — <see cref="Stamp"/>
+    /// runs <see cref="HasMoved"/> before it consults any verdict, so a settled row whose file has
+    /// since changed is demoted to unknown like any other.
+    /// </para>
+    /// </remarks>
+    /// <returns>How many rows were settled to a match.</returns>
+    public async Task<int> SettleByContentAsync(IReadOnlyList<string> fullPaths, CancellationToken ct = default)
+    {
+        if (Result?.Result is not { } result || fullPaths.Count == 0) return 0;
+
+        // A row is only comparable when both sides actually hold it; anything else has nothing to
+        // read, and the comparison already says so more precisely than bytes could.
+        var pairs = new List<(string Key, string Left, string Right)>();
+        foreach (var path in fullPaths)
+        {
+            if ((RelativeKeyOf(path, LeftRoot) ?? RelativeKeyOf(path, RightRoot)) is not { } key) continue;
+            if (!result.Left.ContainsKey(key) || !result.Right.ContainsKey(key)) continue;
+            if (result.Left[key].IsDirectory || result.Right[key].IsDirectory) continue;
+
+            pairs.Add((key,
+                Path.Combine(LeftRoot, result.DisplayPath(key, CompareSide.Left)),
+                Path.Combine(RightRoot, result.DisplayPath(key, CompareSide.Right))));
+        }
+
+        if (pairs.Count == 0) return 0;
+
+        var comparer = _contentComparer;
+        var verdicts = await Task.Run(() =>
+        {
+            var found = new Dictionary<string, ContentVerdict>(StringComparer.Ordinal);
+            foreach (var (key, left, right) in pairs)
+            {
+                ct.ThrowIfCancellationRequested();
+                found[key] = comparer.Compare(left, right, null, ct).Verdict;
+            }
+
+            return found;
+        }, ct);
+
+        if (_ended) return 0;
+
+        var settled = ContentSettlement.Apply(result, verdicts);
+        Result = Result with { Result = settled };
+
+        // Re-assigning the stamps is what re-paints every row; the rows themselves remember nothing.
+        Attach();
+
+        return verdicts.Count(v => v.Value is ContentVerdict.Identical);
     }
 
     partial void OnDifferencesOnlyChanged(bool value) => ApplyFilter();
