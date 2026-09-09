@@ -64,6 +64,8 @@ you where and what to watch for.
 | Disk usage | `Core/Services/DiskUsage/*`, `Views/DiskUsageWindow`, `TreemapLayout` |
 | Duplicate finder | `Core/Services/Duplicates/*` |
 | Compare / sync two folders | `Core/Services/Compare/*`, `ViewModels/CompareSessionViewModel` |
+| Compare two files by content | `Core/Services/Compare/FileContentComparer`, `FileComparePlan`, `ContentSettlement`, `Core/Services/Diff/*` (`TextDiffer`), `Views/FileCompareWindow` |
+| Checksums (hash / verify) | `Core/Services/Checksums/*` (`ChecksumAlgorithms`, `DigestSink`, `IFileDigester`, `ChecksumFile`, `ChecksumPath`, `ChecksumVerify`, `ChecksumRunner`), `Views/ChecksumWindow` |
 | Search query language | `Core/Services/Search/*`, `docs/search-indexing.md` |
 | Content search (`content:`) | `Core/Services/Search/ContentTerm.cs`, `Core/Services/Search/ContentReader.cs` |
 | Saved searches | `Core/Services/SavedSearches/*` (`SavedSearchRules`), `Core/Data/SavedSearchRepository`, `ViewModels/SavedSearchesViewModel`, `Views/SavedSearchDialog` |
@@ -150,6 +152,33 @@ you where and what to watch for.
   missing timestamp is `Unknown` and one `Unknown` descendant carries a whole subtree to `Unknown`.
   `dir_size_cache` deliberately never classifies a folder — equal totals do not mean equal trees,
   and the rows are missing on exactly the unmeasured backup drive the comparison is usually about.
+- **One opener, `Core/Services/ReadOnlyFile`.** The share flags, the cloud-placeholder refusal and
+  the reparse-point rule now have three callers — the hasher, the digester and the content
+  comparison — and a third copy of them is a third chance for one to drift, in a way that fails
+  silently both ways (too narrow and the app fights its own rename; too wide and a preview starts a
+  multi-gigabyte download).
+- **Checksums: two seams over one read loop, and the CRC-32 byte order.** `IFileHasher` stays
+  SHA-256-only because the duplicate finder's safety argument is that answer authorises a delete;
+  `IFileDigester` is the user-chosen one. `FileSystemFileHasher` implements both over one loop, so
+  `FileSystemFileHasherTests` being unchanged is the proof the refactor was invisible.
+  `System.IO.Hashing.Crc32` returns its checksum **little-endian** and every `.sfv` states it
+  big-endian — the reversal in `Crc32DigestSink` is guarded by a known-vector test because getting
+  it wrong yields a plausible digest nothing else would catch. Digests are uppercase everywhere
+  inside Core; casing is decided in exactly one place (`ChecksumAlgorithms.IsWrittenLowercase`) and
+  applied only when rendering.
+- **A checksum file is untrusted input.** Every name in one is about to become a path this app
+  opens, so `ChecksumPath.Resolve` refuses anything rooted, device-prefixed or escaping the folder,
+  and returns null rather than throwing — a hostile line becomes a visible row in the report. The
+  format's line order comes from the *extension*, never a sniff: `.sfv` is `name CRC`, the `*sum`
+  family is `digest  name`, and guessing would make a legitimate file unreadable in a way its
+  author could never diagnose.
+- **Content settlement is one-directional, earned, and rewrites the `CompareResult`.** Identical
+  bytes may raise `LeftNewer`/`RightNewer`/`Unknown` to `Same`; nothing else moves, and
+  `Unreadable` is never evidence. It produces a **new** `CompareResult` rather than an overlay on
+  the session, because `SyncPlanner` reads verdicts straight off the result — an overlay would
+  paint a row green while the sync went on copying it. Roll-ups are re-folded from scratch, since
+  `CompareRules.RollUp` only ever raises rank. A leaf `Differs` is unsettleable in practice: it
+  means equal timestamps and *unequal sizes*.
 - **`SearchNode.Matches` (definition) and `WriteSql` (optimization) must never disagree** — SQL may
   be a superset (re-checked per row) but never a subset. `ContentTerm` extends this to three-valued
   matching (`Yes`/`No`/`NeedsContent`) since content can't be answered from a column.

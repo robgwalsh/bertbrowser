@@ -71,6 +71,22 @@ archive-fixture [dir]       the containers nothing here can write: locked.zip (A
                             hunter2), sealed.7z (encrypted headers, correct-horse) and plain.7z.
                             Base64 in Core so a script and a unit test see the same bytes
 mkdir <rel> | write <rel> [bytes] | sandbox
+write-text <rel> <line>|<line>|…
+                            a file with content you chose. `write` fills a file with its own name
+                            repeated, which is right for hashing (deterministic, and two names
+                            never collide) and wrong for a diff, where two such files share no line
+                            at all. This is how a script makes a pair that differs in the middle
+write-binary <rel> <bytes> [differ-at]
+                            a file that is genuinely not text, so a comparison takes the hex path
+                            rather than the line diff. A .bin full of repeated ASCII is not a
+                            binary and FileComparePlan is right to say so. `differ-at` flips one
+                            byte, which is what puts the first difference somewhere worth scrolling
+checksum-file <rel> <algorithm> <name>,<name>…
+                            a real .sfv/.md5/.sha256 over real files, written through the same
+                            ChecksumFile.Render the app's Save goes through
+checksum-algorithms <a>,<a> which boxes the next checksum window opens with (Crc32, Md5, Sha1,
+                            Sha256, Sha512) — the window reads them from settings exactly as it
+                            does for a person
 deny <rel>                  a file the current account may not delete or move — a real Deny ACE,
                             set with no privilege, lifted again on the way out. Its folder is
                             denied too and inheritably, so give it one of its own
@@ -151,6 +167,10 @@ compare-refused [text]      the other half: assert the pair was turned down (not
                             in a modal, which a run cannot dismiss, so the notice service is
                             recorded instead — which is also what makes the wording testable
 compare-filter on|off       "show only differences", on both panes at once
+settle-content              re-judge the selected rows by their bytes, through the same
+                            ContentSettlement the menu item uses, and await it. Identical bytes
+                            raise Newer/Older/Unknown to Same; nothing else moves. Prints
+                            "SETTLED <n>". Needs a `compare` first
 compare-end                 stop comparing and clear the colours
 sync [with-deletes]         run what the comparison would do, through the same planner, runner and
                             undo slot the dialog's Sync button uses — the dialog is skipped,
@@ -212,7 +232,15 @@ dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, renam
                             theme-editor, disk-usage, duplicates, changes, sync-preview,
                             sync-preview-running, search-syntax, saved-search, extract, compress,
                             archive-password, elevation, settings-columns, settings-history,
-                            columns, settings-columns-dragging, flat-large
+                            columns, settings-columns-dragging, flat-large, checksum,
+                            checksum-verify, compare-files
+                            (checksum digests the selection and starts on load, unlike duplicates —
+                            the user picked these exact files, so there is no whole-PC surprise to
+                            guard against. checksum-verify is the same window pointed at a selected
+                            checksum file, which `checksum-file` writes.
+                            compare-files needs exactly two selected; whether it renders a line diff
+                            or a hex dump is FileComparePlan's decision over the pair, so use
+                            `write-text` pairs for the first and `write-binary` for the second)
                             (changes is the "What changed" window: with a run's default settings
                             it shows the recording-off banner — the state every fresh install
                             has — and after `changes-seed` it shows rows. settings-history is
@@ -287,6 +315,15 @@ assert-compare-row <row> <status>         a row's compare state, by the words it
                                           shows. Read off the row, never off a screenshot: the
                                           tints are faint by necessity, so a pixel test would be
                                           asserting about the theme rather than about the verdict
+assert-digest <name> <algorithm> <digest>
+                            what the checksum window actually computed. Worth having over a
+                            screenshot because the fixture is deterministic: a sandbox file holds
+                            its own name repeated, so its digest is a constant
+assert-verify <name> <state>
+                            how one row of a verify run came out: Ok, Mismatch, Missing,
+                            Unreadable, Refused, NotListed
+assert-compare-files <substring>
+                            the file-comparison window's verdict strip
 assert-duplicate-groups <n> | assert-duplicate-selected <n>
 assert-duplicate-row <name> | assert-no-duplicate-row <name>
 assert-visible <Name> | assert-hidden <Name> | assert-not-launched
