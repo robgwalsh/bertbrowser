@@ -7,7 +7,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}"
-        Title="Settings" Width="740" Height="560" MinWidth="580" MinHeight="420"
+        Title="Settings" Width="740" Height="660" MinWidth="580" MinHeight="420"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{StaticResource Theme.Surface.Background}"
         TextElement.Foreground="{StaticResource Theme.Text.Primary}">
@@ -642,18 +642,86 @@
                             <Setter Property="Visibility" Value="Collapsed"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding SelectedCategory.Id}"
-                                             Value="{x:Static vm:SettingsCategory.Commands}">
+                                             Value="{x:Static vm:SettingsCategory.ContextMenu}">
                                     <Setter Property="Visibility" Value="Visible"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </DockPanel.Style>
 
-                    <TextBlock DockPanel.Dock="Top" Text="Custom context menu commands"
+                    <TextBlock DockPanel.Dock="Top" Text="Your commands"
                                Style="{StaticResource PageHeading}" Margin="0,0,0,4"/>
                     <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,12"
                                Foreground="{StaticResource Theme.Text.Secondary}"
-                               Text="These commands appear in the right-click menu of the file list and folder tree. In Arguments, {path}, {name} and {dir} expand per item — quote tokens that may contain spaces, e.g. &quot;{path}&quot;. Blank arguments default to the quoted full path."/>
+                               Text="These appear in the right-click menu of the file list and folder tree. In Arguments, {path}, {name} and {dir} expand per item — quote tokens that may contain spaces, e.g. &quot;{path}&quot;. Blank arguments default to the quoted full path."/>
+
+                    <!-- Below the user's own commands, as they are in the menu itself: the app's
+                         built-in entries on the left, other programs' on the right, one box each.
+                         The right-hand list of what is installed is read once the page opens, off
+                         the UI thread; the checklist is what makes hosting other people's code in
+                         this process acceptable, since an extension that misbehaves can be unticked.
+                         A fixed height so both lists end on the same line whatever the hints say. -->
+                    <Grid DockPanel.Dock="Bottom" Margin="0,16,0,0" Height="220">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <DockPanel Grid.Column="0">
+                            <TextBlock DockPanel.Dock="Top" Text="BertBrowser's entries"
+                                       Style="{StaticResource PageHeading}" Margin="0,0,0,4"/>
+                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,8"
+                                       Text="Untick an entry to leave it out of the right-click menu. Its keyboard shortcut still works."/>
+                            <!-- The bottom margin is the right-hand status line's height, so the
+                                 two lists end level. -->
+                            <ListBox ItemsSource="{Binding BuiltInItems}" Margin="0,0,0,20"
+                                     AutomationProperties.AutomationId="BuiltInMenuItemsList"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel Margin="2">
+                                            <CheckBox DockPanel.Dock="Left" Margin="0,0,6,0"
+                                                      IsChecked="{Binding IsShown, Mode=TwoWay}"
+                                                      ToolTip="Show this entry"/>
+                                            <TextBlock DockPanel.Dock="Right" Text="{Binding PlacesText}"
+                                                       Margin="6,0,0,0" Opacity="0.6"/>
+                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+
+                        <DockPanel Grid.Column="2">
+                            <TextBlock DockPanel.Dock="Top" Text="Windows shell extensions"
+                                       Style="{StaticResource PageHeading}" Margin="0,0,0,4"/>
+                            <CheckBox DockPanel.Dock="Top" Content="Show entries added by other programs"
+                                      IsChecked="{Binding ShowShellExtensions}"
+                                      AutomationProperties.AutomationId="ShowShellExtensions"/>
+                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,4,0,8"
+                                       Text="7-Zip, Git, TortoiseSVN… appear below your commands, as in Explorer. They run inside BertBrowser, so unticking one is also the fix for a slow one."/>
+                            <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource Hint}" Margin="0,4,0,0"
+                                       Text="{Binding ShellExtensionsStatus}"/>
+                            <ListBox ItemsSource="{Binding ShellExtensions}"
+                                     IsEnabled="{Binding ShowShellExtensions}"
+                                     AutomationProperties.AutomationId="ShellExtensionsList"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel Margin="2">
+                                            <CheckBox DockPanel.Dock="Left" Margin="0,0,6,0"
+                                                      IsChecked="{Binding IsShown, Mode=TwoWay}"
+                                                      ToolTip="Show this program's entries"/>
+                                            <TextBlock DockPanel.Dock="Right" Text="{Binding KindText}"
+                                                       Margin="6,0,0,0" Opacity="0.6"/>
+                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </Grid>
 
                     <Grid>
                         <Grid.ColumnDefinitions>

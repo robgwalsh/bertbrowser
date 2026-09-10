@@ -25,6 +25,7 @@ using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Preview;
 using BertBrowser.Core.Services.Rename;
+using BertBrowser.Core.Services.ShellMenu;
 using BertBrowser.Core.Services.Transfer;
 using BertBrowser.Core.Theming;
 using Microsoft.Extensions.DependencyInjection;
@@ -115,6 +116,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "write-binary": WriteBinaryFile(rest); break;
             case "checksum-file": WriteChecksumFile(rest); break;
             case "checksum-algorithms": ChecksumAlgorithmsSetting(rest); break;
+            case "hide-menu-item": BuiltInMenuItemSetting(rest, shown: false); break;
+            case "show-menu-item": BuiltInMenuItemSetting(rest, shown: true); break;
             case "sandbox": output.WriteLine(_sandbox.Root); break;
             case "deny": Deny(rest); break;
 
@@ -236,6 +239,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-columns": AssertColumns(rest); break;
             case "assert-metadata": AssertMetadata(rest); break;
             case "menu": Menu(rest); break;
+            case "assert-menu-item": AssertMenuItem(rest, expected: true); break;
+            case "assert-no-menu-item": AssertMenuItem(rest, expected: false); break;
             case "right-drop-menu": RightDropMenu(rest); break;
             case "assert-header-menu": AssertHeaderMenu(rest); break;
 
@@ -614,6 +619,21 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     /// The window reads them from settings on construction, exactly as it does for a person, so this
     /// is how a script reaches a state that is otherwise only reachable by ticking a box.
     /// </remarks>
+    /// <summary>Unticks (or re-ticks) one of the app's own right-click entries on the Context menu
+    /// page, by id: <c>hide-menu-item copy-path</c>. Writes the setting the way the page saves
+    /// it, so the next <c>menu</c> is what a person would see after saving.</summary>
+    private void BuiltInMenuItemSetting(string rest, bool shown)
+    {
+        var id = Require(rest, shown ? "show-menu-item" : "hide-menu-item");
+        if (!BuiltInMenuItems.IsKnown(id))
+            throw new FormatException(
+                $"'{id}' is not one of the app's menu entries. Try: {string.Join(", ", BuiltInMenuItems.All.Select(i => i.Id))}.");
+
+        var hidden = session.Services.GetRequiredService<AppSettings>().HiddenBuiltInMenuItems;
+        hidden.RemoveAll(h => string.Equals(h, id, StringComparison.OrdinalIgnoreCase));
+        if (!shown) hidden.Add(id);
+    }
+
     private void ChecksumAlgorithmsSetting(string rest) =>
         session.Services.GetRequiredService<AppSettings>().ChecksumAlgorithms =
             Require(rest, "checksum-algorithms");
@@ -973,15 +993,27 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         var (kind, tail) = Split(rest);
         var (name, _) = Split(tail);
 
-        var items = session.Dispatcher.Invoke(() => kind.ToLowerInvariant() switch
+        var items = session.Dispatcher.Invoke<IReadOnlyList<FrameworkElement>>(() => kind.ToLowerInvariant() switch
         {
             "columns" => ColumnMenuItems(),
             "flat" => FlatMenuItems(),
-            var other => throw new FormatException($"'{other}' is not a menu. Try: columns, flat."),
+            "files" => FileListMenuItems(background: false),
+            "background" => FileListMenuItems(background: true),
+            "tree" => TreeMenuItems(),
+            var other => throw new FormatException(
+                $"'{other}' is not a menu. Try: columns, flat, files, background, tree."),
         });
+        _lastMenuHeaders = session.Dispatcher.Invoke(() => Headers(items).ToList());
 
         var path = Resolve(Named(name.Length == 0 ? $"menu-{kind}" : name, ++_shots));
-        session.Dispatcher.Invoke(() => RenderDetached(items, path));
+        session.Dispatcher.Invoke(() =>
+        {
+            RenderDetached(items, path);
+            // The file list's and the tree's menus are declared in XAML and live for the run, so
+            // their items go back where they came from once photographed.
+            _restoreMenu?.Invoke();
+            _restoreMenu = null;
+        });
 
         if (!Capture.HasContent(path))
             throw new AssertionException($"{path} is a single flat colour — the menu rendered nothing.");
@@ -1069,6 +1101,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         var target = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
         target.Render(host);
+        host.Children.Clear(); // so a caller can put the items back in their real menu
 
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(target));
@@ -1120,6 +1153,86 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         var items = menu.Items.OfType<MenuItem>().ToList();
         menu.Items.Clear();
         return items;
+    }
+
+    /// <summary>Puts a photographed menu's items back, set by the two menus below that are declared
+    /// in XAML rather than rebuilt on every open.</summary>
+    private Action? _restoreMenu;
+
+    /// <summary>The headers of the menu most recently photographed, submenus included, for
+    /// <c>assert-menu-item</c>.</summary>
+    private List<string> _lastMenuHeaders = [];
+
+    /// <summary>
+    /// The file list's own menu, prepared the way a right-click prepares it — for the selection,
+    /// or with nothing selected for the folder's empty space — and detached to be photographed.
+    /// </summary>
+    /// <remarks>
+    /// This is the menu that carries other programs' entries (7-Zip, Git, TortoiseSVN), which a run
+    /// gets from <see cref="CannedShellMenuSource"/>. So the picture proves the hosting — the
+    /// section is where it should be, for the right target — and never what a real handler offers.
+    /// </remarks>
+    private IReadOnlyList<FrameworkElement> FileListMenuItems(bool background)
+    {
+        var view = FindNamed<FrameworkElement>("FileListView");
+        var tabView = VisualTreeUtil.FindAncestor<DirectoryTabView>(view)
+            ?? throw new AssertionException("The file list is not inside a DirectoryTabView.");
+
+        if (background) FileList().SelectedItems.Clear();
+        tabView.PrepareFileListMenu();
+
+        return Detach(tabView.FileListMenuForHarness);
+    }
+
+    /// <summary>The folder tree's menu, prepared the way a right-click prepares it — for the row
+    /// showing the active tab's folder when the tree has been expanded that far (`tree-expand`),
+    /// else for the first drive, which is always showing.</summary>
+    private IReadOnlyList<FrameworkElement> TreeMenuItems()
+    {
+        var roots = session.Shell.Tree.Roots.OfType<DirectoryNodeViewModel>().ToList();
+        var node = TreeNode(roots, session.Tab.CurrentPath)
+            ?? roots.FirstOrDefault(r => r.FullPath.Length > 0)
+            ?? throw new AssertionException("The tree has no folder rows at all.");
+
+        session.Window.PrepareTreeMenu(node);
+        return Detach(session.Window.TreeMenuForHarness);
+    }
+
+    private IReadOnlyList<FrameworkElement> Detach(System.Windows.Controls.ContextMenu menu)
+    {
+        var items = menu.Items.OfType<FrameworkElement>().ToList();
+        menu.Items.Clear();
+        _restoreMenu = () =>
+        {
+            foreach (var item in items) menu.Items.Add(item);
+        };
+        return items;
+    }
+
+    private static IEnumerable<string> Headers(IEnumerable<FrameworkElement> items)
+    {
+        foreach (var item in items)
+        {
+            // A collapsed item is one the user unticked on the Context menu page: not offered.
+            if (item is not MenuItem { Visibility: Visibility.Visible } menuItem) continue;
+            if (menuItem.Header is string header) yield return header;
+            foreach (var nested in Headers(menuItem.Items.OfType<FrameworkElement>())) yield return nested;
+        }
+    }
+
+    /// <summary>Whether the menu most recently photographed offered an item whose header contains
+    /// the text — submenus included, and with WPF's access-key underscores taken out.</summary>
+    private void AssertMenuItem(string rest, bool expected)
+    {
+        var text = Require(rest, expected ? "assert-menu-item" : "assert-no-menu-item");
+        var actual = _lastMenuHeaders.Any(h =>
+            h.Replace("__", "").Replace("_", "").Replace('', '_')
+                .Contains(text, StringComparison.OrdinalIgnoreCase));
+
+        if (actual != expected)
+            throw new AssertionException(expected
+                ? $"no item of the last menu contains '{text}'. Items: {string.Join(" | ", _lastMenuHeaders)}"
+                : $"an item of the last menu contains '{text}', and none should.");
     }
 
     /// <summary>
@@ -3108,7 +3221,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             // and a scripted run must never make one. The page hides that box without it, which is
             // also what CanChooseAutoStart is for.
             autoStart: null,
-            session.Services.GetRequiredService<IMftIndexService>());
+            session.Services.GetRequiredService<IMftIndexService>(),
+            session.Services.GetRequiredService<IShellMenuSource>());
         vm.ReadIndexerState();
         vm.SelectedCategory = vm.Categories.First(c => c.Id == category);
         return vm;
@@ -3200,6 +3314,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         // Where "Match Windows light/dark" and the two slot pickers live. Worth its own kind for
         // the reason the others have one, and because the page looks different in each mode.
         "settings-appearance" => new SettingsWindow(SettingsFor(SettingsCategory.Appearance)),
+        "settings-context-menu" => new SettingsWindow(SettingsFor(SettingsCategory.ContextMenu)),
 
         "settings-columns-dragging" => ColumnsPageMidDrag(),
 

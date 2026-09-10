@@ -14,6 +14,7 @@ using BertBrowser.Core.Services.Columns;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
 using BertBrowser.Core.Services.ShellIntegration;
+using BertBrowser.Core.Services.ShellMenu;
 
 namespace BertBrowser.App.ViewModels;
 
@@ -110,7 +111,7 @@ public enum SettingsCategory
     History,
     NewItems,
     Columns,
-    Commands,
+    ContextMenu,
 }
 
 /// <summary>One choice on the History page's "keep for" list.</summary>
@@ -157,6 +158,54 @@ public sealed partial class ColumnItemViewModel : ObservableObject
     private double _width;
 
     public ColumnSetting ToSetting() => new(Id, Width);
+}
+
+/// <summary>One extension on the Context Menu page's checklist: 7-Zip, Git, TortoiseSVN…</summary>
+public sealed partial class ShellExtensionItemViewModel : ObservableObject
+{
+    public ShellExtensionItemViewModel(ShellExtension extension, bool isShown)
+    {
+        Id = extension.Id;
+        Name = extension.Name;
+        KindText = extension.Kind == ShellExtensionKind.Handler ? "extension" : "command";
+        _isShown = isShown;
+    }
+
+    /// <summary>The stable id the hidden list stores — see <see cref="ShellExtension.Id"/>.</summary>
+    public string Id { get; }
+
+    public string Name { get; }
+
+    /// <summary>Shown beside the name so two entries called the same thing can be told apart: a
+    /// program's COM handler ("extension") or a plain registered command.</summary>
+    public string KindText { get; }
+
+    [ObservableProperty]
+    private bool _isShown;
+}
+
+/// <summary>One of the app's own entries on the Context Menu page's checklist: Open, Copy as
+/// path, Analyse disk usage… Same box as an extension's, same meaning.</summary>
+public sealed partial class BuiltInMenuItemViewModel : ObservableObject
+{
+    public BuiltInMenuItemViewModel(BuiltInMenuItem item, bool isShown)
+    {
+        Id = item.Id;
+        Name = item.Name;
+        PlacesText = BuiltInMenuItems.PlacesText(item.Places);
+        _isShown = isShown;
+    }
+
+    /// <summary>The stable id the hidden list stores — see <see cref="BuiltInMenuItem.Id"/>.</summary>
+    public string Id { get; }
+
+    public string Name { get; }
+
+    /// <summary>Where the entry appears, since not every verb is in both menus.</summary>
+    public string PlacesText { get; }
+
+    [ObservableProperty]
+    private bool _isShown;
 }
 
 /// <summary>One row of the navigation list.</summary>
@@ -516,7 +565,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         IFolderHandlerService? folderHandler = null,
         ChangeLogRepository? changeLog = null,
         IndexAutoStartService? autoStart = null,
-        IMftIndexService? mftIndex = null)
+        IMftIndexService? mftIndex = null,
+        IShellMenuSource? shellMenus = null)
     {
         Categories = new[]
         {
@@ -527,7 +577,7 @@ public sealed partial class SettingsViewModel : ObservableObject
             new SettingsCategoryViewModel(SettingsCategory.History, "History", "Icon.Changes"),
             new SettingsCategoryViewModel(SettingsCategory.NewItems, "New items", "Icon.Add"),
             new SettingsCategoryViewModel(SettingsCategory.Columns, "Columns", "Icon.Columns"),
-            new SettingsCategoryViewModel(SettingsCategory.Commands, "Commands", "Icon.CustomCommand"),
+            new SettingsCategoryViewModel(SettingsCategory.ContextMenu, "Context menu", "Icon.CustomCommand"),
         };
         _selectedCategory = Categories[0];
 
@@ -581,6 +631,52 @@ public sealed partial class SettingsViewModel : ObservableObject
         Commands = new ObservableCollection<CustomCommandItemViewModel>(
             settings.CustomCommands.Select(d => new CustomCommandItemViewModel(d)));
         SelectedCommand = Commands.FirstOrDefault();
+
+        var hiddenBuiltIn = new HashSet<string>(settings.HiddenBuiltInMenuItems, StringComparer.OrdinalIgnoreCase);
+        BuiltInItems = new ObservableCollection<BuiltInMenuItemViewModel>(
+            BuiltInMenuItems.All.Select(i => new BuiltInMenuItemViewModel(i, isShown: !hiddenBuiltIn.Contains(i.Id))));
+
+        _shellMenus = shellMenus;
+        ShowShellExtensions = settings.ShowShellExtensions;
+        _ = LoadShellExtensionsAsync();
+    }
+
+    // --- The app's own context-menu entries ---
+
+    /// <summary>Every entry the file list's and folder tree's menus have, each with whether it is
+    /// shown. Known at compile time, unlike the extensions, so it needs no scan.</summary>
+    public ObservableCollection<BuiltInMenuItemViewModel> BuiltInItems { get; }
+
+    // --- Other programs' context-menu entries ---
+
+    private readonly IShellMenuSource? _shellMenus;
+
+    /// <summary>Every extension found on this machine, each with whether it is shown. Filled after
+    /// construction: the scan walks all of HKEY_CLASSES_ROOT and runs off the UI thread.</summary>
+    public ObservableCollection<ShellExtensionItemViewModel> ShellExtensions { get; } = [];
+
+    /// <summary>The master switch; see <c>AppSettings.ShowShellExtensions</c>.</summary>
+    [ObservableProperty]
+    private bool _showShellExtensions;
+
+    /// <summary>"Looking for extensions…" while the scan runs, a note when it finds none, else blank.</summary>
+    [ObservableProperty]
+    private string _shellExtensionsStatus = "";
+
+    private async Task LoadShellExtensionsAsync()
+    {
+        if (_shellMenus is null) return;
+
+        ShellExtensionsStatus = "Looking for extensions…";
+        var catalog = await _shellMenus.CatalogAsync();
+
+        var hidden = new HashSet<string>(_settings.HiddenShellExtensions, StringComparer.OrdinalIgnoreCase);
+        foreach (var extension in catalog)
+            ShellExtensions.Add(new ShellExtensionItemViewModel(extension, isShown: !hidden.Contains(extension.Id)));
+
+        ShellExtensionsStatus = catalog.Count == 0
+            ? "No program on this computer adds right-click entries."
+            : "";
     }
 
     // --- Opening folders ---
@@ -842,13 +938,24 @@ public sealed partial class SettingsViewModel : ObservableObject
                 // The offending command may be on a page the user cannot see, so go there first —
                 // otherwise the message names a field that is nowhere on screen.
                 SelectedCommand = command;
-                ShowCategory(SettingsCategory.Commands);
+                ShowCategory(SettingsCategory.ContextMenu);
                 error = problem;
                 return false;
             }
         }
 
         _settings.CustomCommands = Commands.Select(c => c.ToDefinition()).ToList();
+        _settings.ShowShellExtensions = ShowShellExtensions;
+        // Ids hidden earlier but not found today stay hidden: the list may still be loading, or the
+        // extension may be uninstalled for now. See ShellMenuRules.HiddenAfterSave.
+        _settings.HiddenShellExtensions = ShellMenuRules.HiddenAfterSave(
+            _settings.HiddenShellExtensions,
+            ShellExtensions.Select(e => (e.Id, e.IsShown))).ToList();
+        // Same rule for the app's own entries: an id another version of the app knows and this
+        // one does not is kept, not dropped.
+        _settings.HiddenBuiltInMenuItems = ShellMenuRules.HiddenAfterSave(
+            _settings.HiddenBuiltInMenuItems,
+            BuiltInItems.Select(e => (e.Id, e.IsShown))).ToList();
         // Always a list, never null, once this dialog has been saved: from here on the user has
         // configured it, and an empty one means they emptied it on purpose.
         _settings.NewFileTypes = NewFileTypes.Select(t => t.ToTemplate()).ToList();

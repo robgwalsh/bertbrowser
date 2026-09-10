@@ -90,6 +90,10 @@ checksum-file <rel> <algorithm> <name>,<name>…
 checksum-algorithms <a>,<a> which boxes the next checksum window opens with (Crc32, Md5, Sha1,
                             Sha256, Sha512) — the window reads them from settings exactly as it
                             does for a person
+hide-menu-item <id> | show-menu-item <id>
+                            untick (or re-tick) one of the app's own right-click entries on the
+                            Context menu page, by the ids in Core's BuiltInMenuItems (copy-path,
+                            open-terminal, cut…); the next `menu` reads it as a person's save would
 deny <rel>                  a file the current account may not delete or move — a real Deny ACE,
                             set with no privilege, lifted again on the way out. Its folder is
                             denied too and inheritably, so give it one of its own
@@ -266,7 +270,7 @@ dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, renam
                             theme-editor, disk-usage, duplicates, changes, sync-preview,
                             sync-preview-running, search-syntax, saved-search, extract, compress,
                             archive-password, elevation, settings-columns, settings-appearance,
-                            settings-history,
+                            settings-history, settings-context-menu,
                             columns, settings-columns-dragging, flat-large, checksum,
                             checksum-verify, compare-files, transfer, conflicts
                             (transfer is the queue window — the running job's items on top and
@@ -323,10 +327,20 @@ columns width <id> <px>
 columns reset               back to the saved default
 columns default             the header menu's "Set as default for new tabs" — what the settings
                             page reads, and the only way to seed it from a script
-menu columns|flat [name]    PNG of a menu's items — the column header's, or the flat view's shape
-                            menu behind the toolbar chevron. They are rendered detached, not
-                            opened: a ContextMenu is a Popup with its own top-level window that WPF
-                            repositions onto the nearest monitor, i.e. onto the user's screen
+menu columns|flat|files|background|tree [name]
+                            PNG of a menu's items — the column header's, the flat view's shape
+                            menu behind the toolbar chevron, the file list's for the selection,
+                            the file list's over empty space (the folder background), or the
+                            folder tree's — for the current folder's row when `tree-expand` has
+                            got the tree that far, else for the first drive. They are rendered
+                            detached, not opened: a ContextMenu is a Popup with its own top-level
+                            window that WPF repositions onto the nearest monitor, i.e. onto the
+                            user's screen. files/background/tree carry other programs' entries
+                            (7-Zip, Git, TortoiseSVN) from a canned source, so they prove the
+                            hosting and never what a real extension offers
+assert-menu-item <text> | assert-no-menu-item <text>
+                            whether the last `menu` offered an item containing the text, submenus
+                            included — the check a screenshot cannot make
 right-drop-menu <names> to <folder> [as <name>]
                             PNG of the menu a right-drag ends with, built for those sources over
                             that folder — so the wording and the greying are the real ones. Rendered

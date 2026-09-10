@@ -549,7 +549,7 @@
                                                 <MenuItem Header="Open in new tab" Click="BookmarkOpenInNewTab_Click">
                                                     <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.OpenInNewTab}"/></MenuItem.Icon>
                                                 </MenuItem>
-                                                <MenuItem Header="Open in new pane">
+                                                <MenuItem Tag="open-new-pane" Header="Open in new pane">
                                                     <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.OpenInNewPane}"/></MenuItem.Icon>
                                                     <MenuItem Header="To the right" Click="BookmarkOpenInPaneRight_Click"/>
                                                     <MenuItem Header="Below" Click="BookmarkOpenInPaneBelow_Click"/>
@@ -633,7 +633,7 @@
                       ContextMenuOpening="FolderTree_ContextMenuOpening">
                 <TreeView.ContextMenu>
                     <ContextMenu>
-                        <MenuItem x:Name="TreeNewMenuItem" Header="New">
+                        <MenuItem x:Name="TreeNewMenuItem" Tag="new" Header="New">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Add}"/></MenuItem.Icon>
                             <MenuItem Header="Folder" Click="TreeNewFolder_Click">
                                 <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.NewFolder}"/></MenuItem.Icon>
@@ -646,46 +646,48 @@
                             </MenuItem>
                         </MenuItem>
                         <Separator/>
-                        <MenuItem Header="Open in new tab" Click="TreeOpenInNewTab_Click">
+                        <MenuItem Tag="open-new-tab" Header="Open in new tab" Click="TreeOpenInNewTab_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.OpenInNewTab}"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem Header="Open in new pane">
+                        <MenuItem Tag="open-new-pane" Header="Open in new pane">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.OpenInNewPane}"/></MenuItem.Icon>
                             <MenuItem Header="To the right" Click="TreeOpenInPaneRight_Click"/>
                             <MenuItem Header="Below" Click="TreeOpenInPaneBelow_Click"/>
                         </MenuItem>
                         <Separator/>
-                        <MenuItem Header="Open in Terminal" Click="TreeOpenTerminal_Click">
+                        <MenuItem Tag="open-terminal" Header="Open in Terminal" Click="TreeOpenTerminal_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Terminal}"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem Header="Open in VS Code" Click="TreeOpenVSCode_Click">
+                        <MenuItem Tag="open-vscode" Header="Open in VS Code" Click="TreeOpenVSCode_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.VSCode}"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator/>
-                        <MenuItem x:Name="TreeBookmarkMenuItem" Header="Bookmark" Click="TreeBookmark_Click">
+                        <MenuItem x:Name="TreeBookmarkMenuItem" Tag="bookmark" Header="Bookmark" Click="TreeBookmark_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Bookmark}"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem x:Name="TreeDeleteMenuItem" Header="Delete…" Click="TreeDelete_Click">
+                        <MenuItem x:Name="TreeDeleteMenuItem" Tag="delete" Header="Delete…" Click="TreeDelete_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Delete}"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator/>
-                        <MenuItem Header="Copy as path" Click="TreeCopyPath_Click">
+                        <MenuItem Tag="copy-path" Header="Copy as path" Click="TreeCopyPath_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Copy}"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator/>
                         <!-- Right-clicking a drive here is the gesture this feature exists for. -->
-                        <MenuItem Header="Analyse disk usage…" Click="TreeDiskUsage_Click">
+                        <MenuItem Tag="disk-usage" Header="Analyse disk usage…" Click="TreeDiskUsage_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.DiskUsage}"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem Header="Find duplicates…" Click="TreeDuplicates_Click">
+                        <MenuItem Tag="duplicates" Header="Find duplicates…" Click="TreeDuplicates_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Duplicates}"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem Header="What changed here…" Click="TreeChanges_Click">
+                        <MenuItem Tag="changes" Header="What changed here…" Click="TreeChanges_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Changes}"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator x:Name="TreeCustomCommandsSeparator" Visibility="Collapsed"/>
+                        <!-- Other programs' entries, built at ContextMenuOpening like the file list's. -->
+                        <Separator x:Name="TreeShellMenuSeparator" Visibility="Collapsed"/>
                         <Separator/>
-                        <MenuItem Header="Properties…" Click="TreeProperties_Click">
+                        <MenuItem Tag="properties" Header="Properties…" Click="TreeProperties_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Properties}"/></MenuItem.Icon>
                         </MenuItem>
                     </ContextMenu>

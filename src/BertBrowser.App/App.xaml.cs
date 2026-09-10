@@ -18,6 +18,10 @@ public partial class App : Application
 {
     public static IServiceProvider Services { get; private set; } = null!;
 
+    /// <summary>Set by <see cref="UseServices"/>: a host built the graph and the window itself, so
+    /// <see cref="OnStartup"/> has nothing to do. See the note there.</summary>
+    private static bool _hosted;
+
     private static SingleInstance? _instance;
 
     [STAThread]
@@ -54,6 +58,15 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // WPF queues Startup from the Application constructor, so this runs on the first dispatcher
+        // pump even when Run() is never called — which is how the UI harness hosts this class. It
+        // used to run the whole of what follows over the harness's own composition: a second
+        // service graph with the real launcher and index client in it, and a second main window,
+        // shown for real. Nothing noticed until code-behind resolved a service from Services late
+        // enough to get the second graph's answer. A host that adopted its graph has done all of
+        // this itself.
+        if (_hosted) return;
 
         Services = BuildServices();
 
@@ -306,6 +319,9 @@ public partial class App : Application
                 sp.GetRequiredService<BertBrowser.Core.Services.Mft.IMftIndexService>()));
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddSingleton<IProcessLauncher, ProcessLauncher>();
+        // Other programs' right-click entries. Behind an interface so the harness can hand the
+        // menus a fixed list instead of loading whatever is installed on the machine running it.
+        services.AddSingleton<IShellMenuSource, ShellMenuSource>();
         services.AddSingleton<PaneFactory>();
         services.AddSingleton<ShellViewModel>();
         services.AddSingleton<MainWindow>();
@@ -317,7 +333,11 @@ public partial class App : Application
 
     /// <summary>Adopts a service graph built outside <see cref="OnStartup"/>, so the code-behind
     /// that reaches for <see cref="Services"/> works in a harness-hosted window too.</summary>
-    internal static void UseServices(IServiceProvider services) => Services = services;
+    internal static void UseServices(IServiceProvider services)
+    {
+        Services = services;
+        _hosted = true;
+    }
 
     /// <summary>
     /// The startup path already opened the first browsable target in the window's own first tab, so

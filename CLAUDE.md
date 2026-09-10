@@ -77,6 +77,7 @@ you where and what to watch for.
 | Change timeline ("What changed") | `Core/Services/Changes/*` (`ChangeLogRules`, `ChangeRecorder`, `ChangeLogPolicy`), `Core/Data/ChangeLogRepository`, `Views/ChangeTimelineWindow`, the History page of `SettingsWindow` |
 | Elevated file-op retry | `src/BertBrowser.Elevator`, `Core/Services/Elevation/*`, `Core/Ipc/ElevationProtocol.cs` |
 | Launching other programs | `App/Services/ProcessLauncher.cs`, `Core/Services/ExecutablePath.cs`, `Core/Services/VSCodePath.cs`, `Interop/RunAsVerbRegistry` |
+| Shell context menu (7-Zip, Git, TortoiseSVN…) | `Core/Services/ShellMenu/*` (`ShellMenuKeys`, `ShellMenuRules`, `StaticVerbCommand`), `Interop/ShellExtensionRegistry`, `Interop/ShellContextMenu`, `Interop/ShellSelection`, `Interop/ShellMenuIcons`, `Services/ShellMenuSource`, `Views/ShellMenu`, `BuiltInMenuItems` + `MenuSeparatorRules` + `Views/BuiltInMenu` (the app's own entries, unticked the same way), the Context menu page of `SettingsWindow`, `tools/ui/shellmenu.bbs` |
 | Startup / CLI / single instance | `Core/Cli/CommandLine.cs`, `Core/Cli/NavigationRequest.cs`, `Services/SingleInstance.cs`, `Core/Ipc/InstanceEndpoint.cs`, `Interop/ForegroundWindow`, `Core/Services/Foreground/ForegroundRaiseRules` |
 | Default folder handler (shell) | `Core/Services/ShellIntegration/*`, `App/Interop/FolderHandlerRegistry` |
 | Preview pane (incl. hex/raw) | `Core/Services/Preview/*` (`PreviewClassifier`, `TextPreviewReader`, `HexPreviewReader`, `SyntaxTokenizer`) |
@@ -122,7 +123,33 @@ you where and what to watch for.
   it on, on its own Settings page, with a way to clear it.
 - **One `Process.Start` in the whole app**, in `ProcessLauncher`. A second call site is a bug. (The
   rule is about the App; the Indexer registers its sign-in task through Task Scheduler's COM API,
-  which starts no process at all.)
+  which starts no process at all. The other carve-out is `IContextMenu::InvokeCommand` in
+  `ShellContextMenuHandler`: what 7-Zip starts when clicked is 7-Zip's code, not ours. Static
+  registry verbs — "Git Bash Here" — still go through `ProcessLauncher`.)
+- **The shell context menu is composed per extension, never asked of the shell whole.** The
+  app enumerates `shellex\ContextMenuHandlers` and `shell\<verb>` under the families
+  `ShellMenuKeys` picks, then hosts each COM handler in its *own* `HMENU` and mirrors that into
+  WPF `MenuItem`s (`Views/ShellMenu`). `CDefFolderMenu` would hand back Cut/Copy/Delete/Rename/
+  Properties/Send to/Share alongside the extensions with no way to tell whose item is whose — and
+  the per-extension checklist on the Context menu page needs exactly that attribution. Consequences
+  worth keeping: the menu is WPF, so the harness photographs it detached like every other and a
+  native `TrackPopupMenuEx` is never involved; `WM_INITMENUPOPUP` is delivered by hand through
+  `IContextMenu2/3::HandleMenuMsg` before each submenu is walked, since no menu is ever up for
+  Windows to send it; a session (`ShellMenuSession`) owns the COM objects, PIDLs and `HMENU`s and is
+  released **after** `ContextMenu.Closed`, deferred via the dispatcher, because the `Click` that
+  calls `InvokeCommand` has to have run first — and only that session, since a right-click may have
+  opened the next; `Imaging.CreateBitmapSourceFromHBitmap` drops the alpha of a handler's PARGB32
+  menu bitmap, so `ShellMenuIcons` reads the pixels with `GetDIBits` into `Pbgra32`; everything
+  runs on the UI thread because the extensions are apartment-threaded; and it is never offered
+  inside an archive or over a search result's empty space (no path, no folder). Everything is
+  shown unless unticked, so a newly installed extension appears without a visit to Settings, and
+  `HiddenAfterSave` keeps an id hidden while its extension is uninstalled. The harness swaps in
+  `CannedShellMenuSource`, so a scripted run loads no foreign code and launches nothing. The app's
+  own entries are unticked the same way: a `MenuItem` with `Tag="id"` in XAML is one row of
+  `BuiltInMenuItems` (an untagged id throws rather than quietly showing), `BuiltInMenu.Apply` runs
+  *first* and the two items a right-click hides for its own reasons go through `BuiltInMenu.Show`
+  so both answers count, and `TidySeparators` runs *last* over the finished menu — the separators
+  are declared between groups in XAML, so a hidden group would otherwise leave two touching.
 - **The single-instance hand-off defeats the foreground lock on purpose, so it must ask before
   using it.** `ForegroundWindow.Raise` only takes the foreground when `ForegroundRaiseRules` says
   nothing is full screen; otherwise it flashes the taskbar button and does not even un-minimize.
@@ -272,7 +299,11 @@ you where and what to watch for.
   true for shell-metadata columns — see `MetadataReadRules`).
 - **Never launch the app to check UI work.** Use the `verify` skill / harness. `RenderTargetBitmap`
   re-renders the visual tree offscreen; posted input goes through `WM_KEYDOWN`/`WM_CHAR`, not
-  `SendKeys`. Dialogs are shown modelessly and screenshotted, never `ShowDialog`.
+  `SendKeys`. Dialogs are shown modelessly and screenshotted, never `ShowDialog`. **`App.OnStartup`
+  fires under the harness anyway** — WPF queues `Startup` from the `Application` constructor, so
+  not calling `Run()` prevents nothing — and `App.UseServices` marking the app as hosted is what
+  stops it. Before that guard, every run built a second real graph and showed a second main
+  window; code-behind that resolves from `App.Services` gets the harness's graph only because of it.
 - **Icons are named, never numbered.** A wrong picture is the one UI mistake nothing catches: it
   compiles, renders, and passes every test. Call sites say `Data="{StaticResource Icon.Back}"`, so a
   bad name fails at load instead. Add one by editing `tools/icon/icons.txt` and re-running

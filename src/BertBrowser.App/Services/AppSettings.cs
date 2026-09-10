@@ -228,6 +228,26 @@ public sealed class AppSettings
 
     public List<CustomCommandDefinition> CustomCommands { get; set; } = new();
 
+    /// <summary>Whether other programs' right-click entries — 7-Zip, Git, TortoiseSVN — appear in
+    /// the file list's and folder tree's menus.</summary>
+    /// <remarks>
+    /// On by default, unlike the history features: nothing is recorded, and an extension the user
+    /// installed is one they expect to see. What it costs is that those extensions run inside this
+    /// process, as they do inside Explorer, and a slow one delays the menu — which is what
+    /// <see cref="HiddenShellExtensions"/> is for.
+    /// </remarks>
+    public bool ShowShellExtensions { get; set; } = true;
+
+    /// <summary>Extensions unticked on the Context Menu page, by the stable ids
+    /// <c>ShellExtension</c> assigns (<c>clsid:{…}</c> or <c>verb:name</c>). Everything not listed
+    /// is shown, so a newly installed extension appears without a visit to Settings.</summary>
+    public List<string> HiddenShellExtensions { get; set; } = new();
+
+    /// <summary>The app's own entries unticked on the Context Menu page, by the ids
+    /// <c>BuiltInMenuItems</c> assigns (<c>copy-path</c>, <c>open-terminal</c>…). Everything not
+    /// listed is shown, and an id this build does not know is kept rather than dropped.</summary>
+    public List<string> HiddenBuiltInMenuItems { get; set; } = new();
+
     /// <summary>The file types on the "New" submenu, in menu order. Null means the user has never
     /// configured the list, which is what lets a first launch ship
     /// <see cref="BertBrowser.Core.Services.NewItem.NewFileTemplate.Defaults"/> — an empty list is a

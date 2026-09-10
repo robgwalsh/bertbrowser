@@ -123,9 +123,11 @@ internal sealed class UiSession : IDisposable
         RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
 
         // InitializeComponent merges Theme.xaml and Styles.xaml at application scope exactly as
-        // production does. Run() is what would call OnStartup — the MFT indexer, the update check,
-        // the abandoned-staging sweep, the single-instance listener and a visible window all live
-        // there, and none of it should happen here.
+        // production does. OnStartup — the MFT indexer, the update check, the abandoned-staging
+        // sweep, the single-instance listener and a visible window — must not happen here, and Run()
+        // never being called is *not* what prevents it: WPF queues Startup from the Application
+        // constructor and it fires on the first dispatcher pump. What prevents it is UseServices
+        // below marking this Application as hosted, which OnStartup checks first.
         var app = new AppShell();
         app.InitializeComponent();
 
@@ -143,6 +145,11 @@ internal sealed class UiSession : IDisposable
         var services = AppShell.BuildServices(s =>
         {
             s.AddSingleton<IProcessLauncher>(launcher);
+
+            // The real one loads whatever shell extensions this machine has into the process and
+            // runs them when clicked. A scripted run gets a fixed list, so the menu it photographs
+            // is the same on every machine and picking from it starts nothing.
+            s.AddSingleton<IShellMenuSource>(sp => new CannedShellMenuSource(sp.GetRequiredService<AppSettings>()));
 
             // The settings page can make BertBrowser the Windows shell's folder handler, which is a
             // registry write outside the sandbox affecting every folder double-click on the machine.
@@ -212,6 +219,13 @@ internal sealed class UiSession : IDisposable
             throw new InvalidOperationException(
                 "The harness resolved the elevating file-operation launcher. A scripted run must " +
                 "never raise a UAC prompt; register RefusingElevationLauncher instead.");
+
+        // And for the shell extensions: the real source loads whatever this machine has installed
+        // into the process and runs it when an item is picked.
+        if (services.GetRequiredService<IShellMenuSource>() is not CannedShellMenuSource)
+            throw new InvalidOperationException(
+                "The harness resolved the real shell-extension source. A scripted run must never " +
+                "load or run other programs' context-menu handlers; register CannedShellMenuSource instead.");
 
         services.GetRequiredService<Db>().Migrate();
 

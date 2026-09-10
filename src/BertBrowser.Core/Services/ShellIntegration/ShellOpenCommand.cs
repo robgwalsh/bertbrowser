@@ -33,8 +33,13 @@ public static class ShellOpenCommandParser
     /// <param name="exists">Whether a path names a file. Injected for the reason
     /// <c>UniquePath</c> and <c>ArchivePath</c> inject theirs: the decision is testable without a
     /// disk, and the awkward case below genuinely needs to ask.</param>
+    /// <param name="requirePlaceholder">Whether a command that never names the file is refused.
+    /// True for the run-as-administrator caller, for the reason below; the shell-menu caller
+    /// passes false, because a static verb that takes its target from the working directory is
+    /// legitimate and nothing is being started with a token.</param>
     /// <returns>Null when there is nothing safe to start.</returns>
-    public static ShellOpenCommand? Parse(string? command, string filePath, Func<string, bool> exists)
+    public static ShellOpenCommand? Parse(
+        string? command, string filePath, Func<string, bool> exists, bool requirePlaceholder = true)
     {
         if (string.IsNullOrWhiteSpace(command) || string.IsNullOrWhiteSpace(filePath)) return null;
 
@@ -46,7 +51,8 @@ public static class ShellOpenCommandParser
         // a program an argument it does not expect, elevated — so this is refused rather than
         // guessed at. It is mostly the DDE-era entries, which could not be started this way anyway.
         var placeholder = Placeholders.FirstOrDefault(p => arguments.Contains(p, StringComparison.Ordinal));
-        if (placeholder is null) return null;
+        if (placeholder is null)
+            return requirePlaceholder ? null : new ShellOpenCommand(executable, arguments);
 
         return new ShellOpenCommand(executable, arguments.Replace(placeholder, filePath, StringComparison.Ordinal));
     }

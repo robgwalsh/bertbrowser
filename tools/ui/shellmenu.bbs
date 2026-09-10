@@ -1,0 +1,74 @@
+# Other programs' right-click entries — 7-Zip, Git, TortoiseSVN — hosted in the app's own menus,
+# and the Context menu page that decides which entries, the app's own included, appear.
+#
+# A run gets the extensions from CannedShellMenuSource, not from this machine's registry, so what
+# this proves is the hosting: the section is built where it belongs, for the selection or for the
+# folder's empty space, in the tree too, and the Settings page lists the extensions behind a master
+# switch with a box each. What it cannot prove is a real handler's own items — those need the real
+# registry and real COM, on a machine that has them.
+
+tree .
+refresh
+assert-count 8
+
+# --- A selected file: 7-Zip's submenu, "Open with Code", TortoiseSVN, below the custom commands ---
+
+select photo.jpg
+menu files 01-menu-file
+assert-menu-item 7-Zip
+assert-menu-item Add to archive
+assert-menu-item Open with Code
+assert-menu-item TortoiseSVN
+# still there: the app's own items are untouched by the section
+assert-menu-item Properties
+
+# --- Empty space: the folder's background. Git Bash Here belongs here; 7-Zip, which registers for
+# items, does not. ---
+
+deselect
+menu background 02-menu-background
+assert-menu-item Open Git Bash here
+assert-no-menu-item 7-Zip
+
+# --- The folder tree's node menu gets the same section ---
+
+menu tree 03-menu-tree
+assert-menu-item TortoiseSVN
+assert-menu-item Open Git Bash here
+
+# --- The page that decides which appear: the app's own entries on the left, extensions on the right ---
+
+dialog settings-context-menu 04-settings-context-menu
+
+# --- The app's own entries can be unticked too. A whole group (Cut, Copy, Paste) goes, and the
+# picture must show one separator where it was, not two; an entry in both menus goes from both. ---
+
+hide-menu-item cut
+hide-menu-item copy
+hide-menu-item paste
+hide-menu-item copy-path
+select photo.jpg
+menu files 05-menu-file-unticked
+assert-no-menu-item Paste
+assert-no-menu-item Cut
+assert-no-menu-item Copy as path
+assert-menu-item Copy name
+assert-menu-item Rename
+assert-menu-item 7-Zip
+
+menu tree 06-menu-tree-unticked
+assert-no-menu-item Copy as path
+assert-menu-item Analyse disk usage
+
+dialog settings-context-menu 07-settings-context-menu-unticked
+
+# --- And back: the next opening reads the setting again ---
+
+show-menu-item cut
+show-menu-item copy
+show-menu-item paste
+show-menu-item copy-path
+menu files 08-menu-file-restored
+assert-menu-item Paste
+assert-menu-item Copy as path
+assert-not-launched

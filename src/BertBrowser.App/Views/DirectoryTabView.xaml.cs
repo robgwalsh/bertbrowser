@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using BertBrowser.App.Services;
 using BertBrowser.App.ViewModels;
@@ -16,6 +17,8 @@ using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.FlatView;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
+using BertBrowser.Core.Services.ShellMenu;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace BertBrowser.App.Views;
 
@@ -29,6 +32,17 @@ public partial class DirectoryTabView : UserControl
     private readonly ShellViewModel _shell;
     private readonly AppSettings _settings;
     private readonly MarqueeSelector _marquee;
+
+    /// <summary>Other programs' part of the file-list menu, for one opening of it. Owns their COM
+    /// objects, so it is let go after the menu closes — see <see cref="PrepareFileListMenu"/>.</summary>
+    private ShellMenuSession? _shellMenu;
+
+    private IShellMenuSource? _shellMenus;
+
+    /// <summary>Resolved on first use rather than injected: the constructor is the pane factory's
+    /// and every tab view would otherwise carry one more argument for one menu section.</summary>
+    private IShellMenuSource ShellMenus =>
+        _shellMenus ??= App.Services.GetRequiredService<IShellMenuSource>();
 
     public DirectoryTabViewModel Tab { get; }
 
@@ -48,6 +62,9 @@ public partial class DirectoryTabView : UserControl
         // Attached after the marquee so the two never fight: the marquee ignores presses that land
         // on a row, and this ignores presses that land on empty space.
         FileDragDropController.Attach(FileListView, tab, shell);
+
+        if (FileListView.ContextMenu is { } fileMenu)
+            fileMenu.Closed += (_, _) => ReleaseShellMenuLater();
 
         Tab.FileList.PropertyChanged += FileList_PropertyChanged;
         Tab.PropertyChanged += Tab_PropertyChanged;
@@ -76,6 +93,8 @@ public partial class DirectoryTabView : UserControl
         DetailsView.Columns.CollectionChanged -= Columns_CollectionChanged;
         FileListView.RemoveHandler(Thumb.DragCompletedEvent, new DragCompletedEventHandler(Header_DragCompleted));
         PreviewPane.Detach();
+        _shellMenu?.Dispose();
+        _shellMenu = null;
     }
 
     /// <summary>Keeps the deepest crumb visible: panes are narrower than a window, so a long path
@@ -893,7 +912,27 @@ public partial class DirectoryTabView : UserControl
             return;
         }
 
+        PrepareFileListMenu();
+    }
+
+    /// <summary>The file list's menu, for the UI harness to photograph after
+    /// <see cref="PrepareFileListMenu"/> — the same object a right-click opens.</summary>
+    internal ContextMenu FileListMenuForHarness =>
+        FileListView.ContextMenu ?? throw new InvalidOperationException("The file list has no context menu.");
+
+    /// <summary>
+    /// Everything a right-click decides before the menu shows: which items are on, what they say,
+    /// and the three built sections — New, the user's commands, and other programs' entries.
+    /// Separate from the event so the harness can build the menu without opening it.
+    /// </summary>
+    internal void PrepareFileListMenu()
+    {
         if (FileListView.ContextMenu is not { } menu) return;
+
+        // The user's own unticking first; the few items a right-click hides for reasons of its
+        // own go through BuiltInMenu.Show below, so both answers count.
+        var hidden = BuiltInMenu.Hidden(_settings);
+        BuiltInMenu.Apply(menu, hidden);
 
         var selection = SelectedFileItems();
 
@@ -934,7 +973,7 @@ public partial class DirectoryTabView : UserControl
         // and there is nothing to re-judge otherwise. Hidden rather than greyed, because a disabled
         // item nobody can explain is worse than an absent one.
         var comparing = _shell.CompareSession is not null;
-        SettleByContentMenuItem.Visibility = comparing ? Visibility.Visible : Visibility.Collapsed;
+        BuiltInMenu.Show(SettleByContentMenuItem, comparing, hidden);
         SettleByContentMenuItem.IsEnabled = comparing && realFiles > 0 && !inArchive;
         SettleByContentMenuItem.Header = realFiles > 1 ? "Settle these by content" : "Settle by content";
         PasteMenuItem.IsEnabled = FileClipboard.HasFiles() && !inArchive;
@@ -975,8 +1014,8 @@ public partial class DirectoryTabView : UserControl
             (selection.Count == 1 && !selection[0].IsDirectory &&
              ArchiveFormats.IsArchiveName(selection[0].Name));
 
-        ExtractHereMenuItem.Visibility = ExtractToMenuItem.Visibility =
-            extractable ? Visibility.Visible : Visibility.Collapsed;
+        BuiltInMenu.Show(ExtractHereMenuItem, extractable, hidden);
+        BuiltInMenu.Show(ExtractToMenuItem, extractable, hidden);
 
         // Compressing reads files by path, so it needs real ones — off inside a container and off
         // over a search result, where "the folder being shown" is not a folder. A flat branch view
@@ -1039,6 +1078,56 @@ public partial class DirectoryTabView : UserControl
         CustomCommandMenu.Rebuild(menu, CustomCommandsSeparator,
             selection.Select(i => (i.FullPath, i.IsDirectory)).ToList(),
             _settings, _shell.RunCustomCommand);
+
+        // Other programs' entries last, below the user's own and above Properties, as in Explorer.
+        // Off inside a container, where nothing has a path another program can open. With nothing
+        // selected the target is the folder's background — and a search result has no folder, so
+        // no background either; a flat branch view does, and keeps it. The rows go in list order,
+        // not click order, because that is the order a handler is expected to see them in.
+        //
+        // Each opening is a session that owns the extensions' COM objects. The previous one is let
+        // go here in case the menu closed without the deferred release having run yet; the current
+        // one goes after this menu closes, so a click's InvokeCommand has already happened.
+        _shellMenu?.Dispose();
+        _shellMenu = null;
+        if (!inArchive && Tab.CurrentPath.Length > 0)
+        {
+            var chosen = selection.ToHashSet();
+            var targets = Tab.FileList.Items.Where(chosen.Contains)
+                .Select(i => new ShellMenuTarget(i.FullPath, i.IsDirectory)).ToList();
+
+            if (targets.Count > 0)
+                _shellMenu = ShellMenus.Open(targets, ShellMenuContext.Items, Tab.CurrentPath);
+            else if (!Tab.FileList.IsSearchResult)
+                _shellMenu = ShellMenus.Open([], ShellMenuContext.Background, Tab.CurrentPath);
+        }
+
+        ShellMenu.Rebuild(menu, ShellMenuSeparator, _shellMenu, OwnerWindowHandle, _shell.SetStatus);
+
+        // Last, once every section is in place: a group the user unticked must not leave its
+        // separators touching the next group's.
+        BuiltInMenu.TidySeparators(menu);
+    }
+
+    /// <summary>The window an extension's own dialog should be owned by, asked for at click time
+    /// because a tab can move between windows' panes.</summary>
+    private IntPtr OwnerWindowHandle() =>
+        Window.GetWindow(this) is { } window ? new WindowInteropHelper(window).Handle : IntPtr.Zero;
+
+    /// <summary>
+    /// Lets the shell session go once the menu has closed — deferred, so the click that closed it
+    /// has run first; and only that session, since a right-click may already have opened the next.
+    /// </summary>
+    private void ReleaseShellMenuLater()
+    {
+        var session = _shellMenu;
+        if (session is null) return;
+
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            if (ReferenceEquals(_shellMenu, session)) _shellMenu = null;
+            session.Dispose();
+        });
     }
 
     private void ContextNewFolder_Click(object sender, RoutedEventArgs e) =>

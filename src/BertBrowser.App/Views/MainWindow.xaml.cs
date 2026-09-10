@@ -5,8 +5,10 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using BertBrowser.App.Services;
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services.Delete;
@@ -14,6 +16,7 @@ using BertBrowser.Core.Services.DiskUsage;
 using BertBrowser.Core.Services.Duplicates;
 using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Services.NewItem;
+using BertBrowser.Core.Services.ShellMenu;
 
 namespace BertBrowser.App.Views;
 
@@ -66,6 +69,9 @@ public partial class MainWindow : ThemedWindow
         // Attached once, not per pane: the tree is shared, so N file-list controllers each hooking
         // its Drop would carry the same transfer out once per open pane.
         TreeDropTarget.Attach(FolderTree, shell);
+
+        if (FolderTree.ContextMenu is { } treeMenu)
+            treeMenu.Closed += (_, _) => ReleaseTreeShellMenuLater();
 
         ApplyWindowSettings();
 
@@ -168,7 +174,8 @@ public partial class MainWindow : ThemedWindow
             App.Services.GetRequiredService<BertBrowser.App.Services.IFolderHandlerService>(),
             App.Services.GetRequiredService<BertBrowser.Core.Data.ChangeLogRepository>(),
             App.Services.GetRequiredService<BertBrowser.App.Services.Indexing.IndexAutoStartService>(),
-            App.Services.GetRequiredService<BertBrowser.Core.Services.Mft.IMftIndexService>());
+            App.Services.GetRequiredService<BertBrowser.Core.Services.Mft.IMftIndexService>(),
+            App.Services.GetRequiredService<IShellMenuSource>());
         vm.ReadIndexerState();
         if (page is { } category)
             vm.ShowCategory(category);
@@ -1032,21 +1039,65 @@ public partial class MainWindow : ThemedWindow
         if (d is TreeViewItem { DataContext: DirectoryNodeViewModel { FullPath.Length: > 0 } node })
         {
             _treeContextNode = node;
-            TreeBookmarkMenuItem.Header =
-                _shell.Bookmarks.IsBookmarked(node.FullPath) ? "Remove bookmark" : "Bookmark";
-            NewItemMenu.Rebuild(TreeNewMenuItem, TreeNewFileTypesSeparator, _settings,
-                template => _ = CreateInTreeFolderAsync(node.FullPath, NewItemKind.File, template));
-
-            if (FolderTree.ContextMenu is { } menu)
-            {
-                CustomCommandMenu.Rebuild(menu, TreeCustomCommandsSeparator, [(node.FullPath, true)],
-                    _settings, _shell.RunCustomCommand);
-            }
+            PrepareTreeMenu(node);
         }
         else
         {
             e.Handled = true; // portable device, empty area, or unexpanded placeholder: no menu
         }
+    }
+
+    /// <summary>Other programs' part of the tree menu, for one opening; see the file list's
+    /// <c>_shellMenu</c> for the lifetime rule.</summary>
+    private ShellMenuSession? _treeShellMenu;
+
+    private IShellMenuSource? _shellMenus;
+
+    private IShellMenuSource ShellMenus =>
+        _shellMenus ??= App.Services.GetRequiredService<IShellMenuSource>();
+
+    /// <summary>The folder tree's menu, for the UI harness to photograph after
+    /// <see cref="PrepareTreeMenu"/>.</summary>
+    internal ContextMenu TreeMenuForHarness =>
+        FolderTree.ContextMenu ?? throw new InvalidOperationException("The folder tree has no context menu.");
+
+    /// <summary>What a right-click on a tree node decides before its menu shows. Separate from the
+    /// event so the harness can build the menu without opening it.</summary>
+    internal void PrepareTreeMenu(DirectoryNodeViewModel node)
+    {
+        TreeBookmarkMenuItem.Header =
+            _shell.Bookmarks.IsBookmarked(node.FullPath) ? "Remove bookmark" : "Bookmark";
+        NewItemMenu.Rebuild(TreeNewMenuItem, TreeNewFileTypesSeparator, _settings,
+            template => _ = CreateInTreeFolderAsync(node.FullPath, NewItemKind.File, template));
+
+        if (FolderTree.ContextMenu is not { } menu) return;
+
+        BuiltInMenu.Apply(menu, BuiltInMenu.Hidden(_settings));
+        CustomCommandMenu.Rebuild(menu, TreeCustomCommandsSeparator, [(node.FullPath, true)],
+            _settings, _shell.RunCustomCommand);
+
+        // A folder in the tree is an item in its parent, which is what the handlers are told; a
+        // drive root has no parent and stands in for itself.
+        _treeShellMenu?.Dispose();
+        _treeShellMenu = ShellMenus.Open(
+            [new ShellMenuTarget(node.FullPath, true)],
+            ShellMenuContext.Items,
+            Path.GetDirectoryName(node.FullPath) ?? node.FullPath);
+        ShellMenu.Rebuild(menu, TreeShellMenuSeparator, _treeShellMenu,
+            () => new WindowInteropHelper(this).Handle, _shell.SetStatus);
+        BuiltInMenu.TidySeparators(menu);
+    }
+
+    private void ReleaseTreeShellMenuLater()
+    {
+        var session = _treeShellMenu;
+        if (session is null) return;
+
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            if (ReferenceEquals(_treeShellMenu, session)) _treeShellMenu = null;
+            session.Dispose();
+        });
     }
 
     private void TreeBookmark_Click(object sender, RoutedEventArgs e)
