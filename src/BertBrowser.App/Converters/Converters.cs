@@ -103,6 +103,29 @@ public sealed class EnumEqualsVisibilityConverter : IValueConverter
 }
 
 /// <summary>
+/// An enum value's name compared against <c>ConverterParameter</c>, as a bool — for a radio button
+/// per value bound to one enum property, which is how a row in the conflict dialog carries its own
+/// answer.
+/// </summary>
+/// <remarks>
+/// <b><see cref="ConvertBack"/> returns <see cref="Binding.DoNothing"/> for false</b>, which is the
+/// whole trick. A group of radio buttons raises two changes when the selection moves: the one being
+/// cleared reports false and the one being set reports true. Writing the parameter back on the
+/// false report would set the property to the value just <em>un</em>ticked, and the answer would
+/// stick on whatever was clicked second-to-last.
+/// </remarks>
+public sealed class EnumEqualsBoolConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value?.ToString() == parameter?.ToString();
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is true && parameter is not null
+            ? Enum.Parse(Nullable.GetUnderlyingType(targetType) ?? targetType, parameter.ToString()!)
+            : Binding.DoNothing;
+}
+
+/// <summary>
 /// Tree nesting depth to a left margin, so indentation lives inside the row and the
 /// row's highlight/hit area can span the full width of the tree panel.
 /// </summary>

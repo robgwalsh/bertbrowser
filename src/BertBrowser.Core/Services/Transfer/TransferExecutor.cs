@@ -60,7 +60,8 @@ public sealed class TransferExecutor
         TransferPlan plan,
         IReadOnlyDictionary<string, ConflictResolution>? resolutions = null,
         CancellationToken ct = default,
-        IProgress<TransferProgress>? progress = null)
+        IProgress<TransferProgress>? progress = null,
+        PauseGate? pause = null)
     {
         var completed = new List<CompletedTransfer>();
         var skipped = new List<string>();
@@ -68,7 +69,7 @@ public sealed class TransferExecutor
         string? stagingDirectory = null;
         var cancelled = false;
 
-        var run = new ProgressCoalescer(ct, progress, plan.Transfers.Count);
+        var run = new ProgressCoalescer(ct, progress, plan.Transfers.Count, pause);
         foreach (var transfer in plan.Transfers)
         {
             if (ct.IsCancellationRequested)
@@ -77,7 +78,9 @@ public sealed class TransferExecutor
                 break;
             }
 
-            run.BeginItem(transfer.Name);
+            // The label, not the leaf name: after a merge, four hundred items called img.jpg are
+            // four hundred headlines the user cannot tell apart.
+            run.BeginItem(plan.LabelFor(transfer));
             try
             {
                 var resolution = Resolution(resolutions, transfer, plan.Verb);
@@ -100,6 +103,10 @@ public sealed class TransferExecutor
             run.EndItem();
         }
 
+        // Even on a cancelled run: it can only remove what this run emptied, which is exactly the
+        // right amount.
+        var pruned = plan.Verb == TransferVerb.Move ? PruneEmptied(plan.PruneDirectories) : [];
+
         run.Finished();
         return new TransferOutcome(
             plan.Verb,
@@ -108,7 +115,56 @@ public sealed class TransferExecutor
             skipped,
             failed,
             stagingDirectory is null ? [] : [stagingDirectory],
-            cancelled);
+            cancelled)
+        {
+            PrunedDirectories = pruned,
+        };
+    }
+
+    /// <summary>
+    /// Removes the source folders a merge emptied, and reports which ones went.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this is not "deleting to make room".</b> That rule is about displacing something the
+    /// user already had, and it still holds — nothing here can lose data, by four separate
+    /// constructions. Only paths <em>the plan listed</em> are considered, never a discovered walk.
+    /// Only a folder that is genuinely empty is touched. The removal is a <b>non-recursive</b>
+    /// <see cref="Directory.Delete(string)"/>, which cannot take anything with it: handed a folder
+    /// with contents it throws rather than obeying. And a link is skipped outright, so a junction
+    /// that merely looks empty is never mistaken for one.
+    /// </para>
+    /// <para>
+    /// It exists because a whole-folder <see cref="Directory.Move"/> removes those same directories
+    /// from the source implicitly. Expanding the move must not change what the source looks like
+    /// afterwards, or a merge reads as a half-failed move that left a shell of empty folders behind.
+    /// A Skip, a failure, or a file that arrived since planning all leave a folder non-empty, and it
+    /// correctly stays — no special case needed for any of them.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<string> PruneEmptied(IReadOnlyList<string> candidates)
+    {
+        if (candidates.Count == 0) return [];
+
+        var pruned = new List<string>();
+        foreach (var path in candidates)
+        {
+            try
+            {
+                if (!Directory.Exists(path)) continue;
+                if (DirectoryRemoval.IsLink(new DirectoryInfo(path))) continue;
+                if (Directory.EnumerateFileSystemEntries(path).Any()) continue;
+
+                Directory.Delete(path);
+                pruned.Add(path);
+            }
+            catch (Exception ex) when (IsTransferFailure(ex))
+            {
+                // A folder left standing is cosmetic. It must never fail the transfer that filled
+                // the destination correctly.
+            }
+        }
+        return pruned;
     }
 
     /// <summary>Returns the completed record, or null when the item was skipped.</summary>
@@ -234,6 +290,22 @@ public sealed class TransferExecutor
 
         var failed = new List<FailedTransfer>();
         var restored = 0;
+
+        // Put back the folders a merge emptied, before anything is restored into them. Shallowest
+        // first, so a parent exists by the time its child is created. Only the ones this outcome
+        // removed: the guard below must keep meaning "the user deleted this", which is the whole
+        // reason it refuses rather than recreating whatever it finds missing.
+        foreach (var directory in outcome.PrunedDirectories.Reverse())
+        {
+            try
+            {
+                Directory.CreateDirectory(directory);
+            }
+            catch (Exception ex) when (IsTransferFailure(ex))
+            {
+                // The items that belonged here will report the folder as gone, which is true.
+            }
+        }
 
         // Reverse order so nested transfers unwind in the order they were made.
         foreach (var item in outcome.Completed.Reverse())
@@ -503,12 +575,7 @@ public sealed class TransferExecutor
     {
         var info = new DirectoryInfo(source);
 
-        // Junctions and symlinks cannot be reproduced by copying, and deleting the source after a
-        // copy that dropped them would destroy them. Refuse instead.
-        if (FindReparsePoint(info) is { } link)
-            throw new IOException(
-                $"'{info.Name}' contains a junction or symbolic link ({Path.GetFileName(link)}) and cannot be " +
-                "moved to another drive. Move it within the same drive, or copy it and remove the original.");
+        if (CrossVolumeRefusal(info) is { } refusal) throw new IOException(refusal);
 
         var expected = Measure(info);
 
@@ -549,12 +616,47 @@ public sealed class TransferExecutor
         return (files, bytes);
     }
 
-    /// <summary>The first junction/symlink anywhere in the tree, or null.</summary>
+    /// <summary>
+    /// Why <paramref name="root"/> cannot be moved to another volume, or null when nothing stands in
+    /// the way. Copy-then-delete cannot reproduce a junction or symbolic link, and the delete at the
+    /// end of <see cref="CrossVolumeMoveDirectory"/> would then destroy it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The root is asked about separately, and first.</b> <see cref="FindReparsePoint"/> only ever
+    /// looked at what is <em>inside</em> a folder, which was enough while a folder was always moved
+    /// whole: a linked root could not arrive here, because the link itself was the item and its
+    /// parent was what got walked. A merged transfer emits a linked child as an item of its own, and
+    /// that is exactly what does arrive here. Walking through it would copy the target's contents to
+    /// the destination and then delete the link — destroying the junction and duplicating whatever it
+    /// pointed at.
+    /// </para>
+    /// <para>
+    /// Public and pure so both refusals can be tested without a second volume to hand. The path they
+    /// guard loses data, and a test that needs particular hardware is a test that does not run.
+    /// </para>
+    /// </remarks>
+    public static string? CrossVolumeRefusal(DirectoryInfo root)
+    {
+        if (DirectoryRemoval.IsLink(root))
+            return $"'{root.Name}' is a junction or symbolic link and cannot be moved to another " +
+                "drive. Move it within the same drive, or recreate it at the destination.";
+
+        if (FindReparsePoint(root) is { } link)
+            return $"'{root.Name}' contains a junction or symbolic link ({Path.GetFileName(link)}) " +
+                "and cannot be moved to another drive. Move it within the same drive, or copy it " +
+                "and remove the original.";
+
+        return null;
+    }
+
+    /// <summary>The first junction/symlink anywhere <em>inside</em> the tree, or null. Says nothing
+    /// about the root — see <see cref="CrossVolumeRefusal"/>.</summary>
     private static string? FindReparsePoint(DirectoryInfo root)
     {
         foreach (var entry in root.EnumerateFileSystemInfos())
         {
-            if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) return entry.FullName;
+            if (DirectoryRemoval.IsLink(entry)) return entry.FullName;
             if (entry is DirectoryInfo child && FindReparsePoint(child) is { } found) return found;
         }
         return null;

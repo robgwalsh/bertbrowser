@@ -56,6 +56,9 @@ you where and what to watch for.
 | Database / migrations | `Core/Data/Db.cs`, `Core/Data/Migrations/NNN_*.sql` |
 | Directory sizes | `Core/Services/MftDirectorySizeBuilder`, `DirSizeRepository`, `docs/search-indexing.md` |
 | Move/copy/drag-drop/paste | `Core/Services/Transfer/*` (`TransferPlanner`, `TransferExecutor`, `IFileCopier`) |
+| Queue / pause / resume | `Core/Services/Transfer/PauseGate`, `TransferQueueRules`, `ViewModels/TransferQueueViewModel`, `ShellViewModel.EnqueueAsync`/`DrainQueueAsync`, `Views/TransferProgressWindow` |
+| Conflict resolution (per item) | `Core/Services/Transfer/IConflictPrompt`, `ViewModels/TransferConflictsViewModel`, `Views/TransferConflictDialog`, `Views/ConflictPrompt` |
+| Merging a folder into a folder | `Core/Services/Transfer/TransferMergeExpander` (+ `TransferMergeLimits`), `ITransferEntrySource`, `TransferClash`/`ConflictDefaults` in `TransferModels`, `ShellViewModel.ExecuteDropAsync` |
 | Right-drag verb menu | `Core/Services/Transfer/RightDropMenuRules`, `Views/DropPipeline.BuildVerbMenu`, `Views/DragSession` |
 | Shortcuts (`.lnk`) | `Core/Services/Shortcuts/*` (`ShortcutPlanner`, `ShortcutExecutor`, `IShortcutWriter`), `Interop/ShellLink` |
 | Rename (incl. advanced/tokens) | `Core/Services/Rename/*` (`RenamePattern`, `RenamePlanner`, `RenameExecutor`, `RenameRule`) |
@@ -142,13 +145,60 @@ you where and what to watch for.
   drop the button is generally already up and `KeyStates` would say "left"; and the menu is
   **posted**, not opened inside `Drop` — `DoDragDrop`'s modal loop still owns the mouse there, so a
   menu opened under it never sees the click meant to choose from it.
+- **The queue holds `IsTransferring` for its whole drain, and pause lives in `ProgressCoalescer`.**
+  That flag is not "a transfer is running" but "this app is writing" — ten operations raise it, and
+  the four long ones (drop/paste, extract, compress, archive-edit) now queue behind it instead of
+  being dropped on the floor. Releasing it between jobs would let a rename slip into the gap and
+  take the undo slot out from under a queue the user is watching, and would make the harness call a
+  six-job drain finished five times over. Pausing is a `PauseGate` waited on in `FileProgress`,
+  `BeginItem` and `BeginFile` — not in `IFileCopier`: all four executors already funnel their bytes
+  through one coalescer, and `CopyFileExW` invokes its progress routine synchronously, so a progress
+  delegate that blocks *is* a pause in the middle of a single large file. Consequences worth keeping:
+  `PauseGate.Wait` returns false rather than throwing (an exception would unwind across the P/Invoke
+  boundary out of a callback Windows is still inside), `ProgressCoalescer.Silent()` takes no gate
+  because staging must finish once started, a paused run holds a half-written destination open so
+  every other write stays blocked, `UiSession.Settle` therefore treats a paused queue as quiescent,
+  and `TransferProgressViewModel` stops its stopwatch — `TransferRate` is fed elapsed time, so a
+  watch left running turns a five-minute pause into an invented stall.
+- **Only the conflict *dialog* was ever single-answer.** `TransferExecutor.Execute`, `ElevatedRetry`,
+  the elevation IPC and `SyncPlanner` have all taken a per-path
+  `IReadOnlyDictionary<string, ConflictResolution>` since they were written. Asking goes through
+  `IConflictPrompt` (a seam, like `IUserConfirm`) inside `ExecuteDropAsync`, so a drop and a paste
+  reach one dialog — paste used to pass `null` and quietly number the newcomer. `null` now means
+  *ask*; pass an empty map to mean "nothing needs an answer". A clash is not always with disk:
+  `TransferPlan.EarlierClaimantOf` names the other incoming item, because probing disk for a name
+  nothing has written yet answers "missing".
+- **A folder landing on a folder of the same name is merged, and the folder itself is never asked
+  about.** `TransferMergeExpander` replaces that one item with the descendants that really clash,
+  each named by its path relative to the drop; everything else is carried across without a question.
+  It runs **once, at the drop, off the UI thread** — never inside `TransferPlanner.Plan`, which
+  `DropPipeline.IsAllowed` calls on every drag-over, and which keeps taking the narrower
+  `ITransferProbe` so it *cannot* enumerate. The rest is consequence: every emitted destination's
+  parent already exists because the walk descends only where **both** sides have a real directory
+  (the same property `SyncPlanner` keeps by acting on a folder whole or not at all), so nothing ever
+  invents a folder nobody selected; **a link on either side is always a leaf**, because a junction at
+  the *destination* pointing back into the source would merge a folder into itself by a path
+  `Revalidate` never inspects — it only compares against `DestinationDirectory`, and an expanded
+  source is always deeper; a move prunes the source folders it emptied (`plan.PruneDirectories`,
+  non-recursive `Directory.Delete` only, never a link) and `Undo` recreates exactly those before
+  restoring, so the "its original folder is gone" guard keeps meaning *the user* deleted it; the
+  clash's two sides are carried on the plan (`TransferClash`) so a dialog of five thousand rows does
+  no disk IO; "identical" is `CompareEquality.CompareTimes` at **`Strict`** tolerance, never `Loose`,
+  since forgiving an hour here pre-selects Skip on a file that really is an hour newer; and past
+  `TransferMergeLimits` the folder keeps its old wholesale question rather than becoming a dialog
+  nobody can answer.
 - **There is one undo slot**, shared across move/rename/delete/archive-edit/sync — five-way, one
   level, whichever operation happened last. `RetireUndoable` is what finally commits staged/held
   data — call it before assuming a Replace or Delete's staging is irreversibly gone. Sync is the
-  only arm that is two operations at once (copies *and* removals) and the only undoable copy: a
-  copy's outcome still reports `CanUndo == false`, and `ConflictResolution.Overwrite` exists
-  precisely because a copy that displaced something with no record kept would strand it in staging
-  for ever. Only a caller that keeps the outcome may ask for it.
+  only arm that is two operations at once (copies *and* removals). **A copy's outcome still reports
+  `CanUndo == false`** — that property means "`Undo()` will work", and `Undo` refuses a copy —
+  and `ConflictResolution.Overwrite` exists precisely because a copy that displaced something with
+  no record kept would strand it in staging for ever. Only a caller that keeps the outcome may ask
+  for it, and there are now two: a sync, and a **merged** drop or paste, which says so through the
+  separate `CanUndoCopy` and is reversed by `UndoCopies`. That one must never be routed through
+  `ElevateIfRefusedAsync` — `ElevationHost.UndoTransfer` hardcodes `TransferVerb.Move`, so handed a
+  copy's outcome it would move the pasted files back into the folder they came from instead of
+  removing them, corrupting both sides.
 - **A comparison's "same" is what authorises a delete**, so every doubt resolves away from it: a
   missing timestamp is `Unknown` and one `Unknown` descendant carries a whole subtree to `Unknown`.
   `dir_size_cache` deliberately never classifies a folder — equal totals do not mean equal trees,

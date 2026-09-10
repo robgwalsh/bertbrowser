@@ -12,6 +12,7 @@ namespace BertBrowser.App.ViewModels;
 public interface IPaneHost
 {
     void SplitPane(PaneViewModel pane, SplitOrientation orientation, string? path);
+    void MoveTabToNewPane(PaneViewModel source, DirectoryTabViewModel tab, SplitOrientation orientation);
     void ClosePane(PaneViewModel pane);
     void ActivatePane(PaneViewModel pane);
 
@@ -81,6 +82,27 @@ public sealed partial class PaneViewModel : ObservableObject
     {
         if (ReferenceEquals(tab, ActiveTab))
             _host.NotifyLocation(this, tab);
+    }
+
+    /// <summary>Removes a tab so another pane can take it over, without disposing it. The caller
+    /// (the host, mid-handoff) is responsible for wiring it into its new home.</summary>
+    public void DetachTab(DirectoryTabViewModel tab)
+    {
+        var index = Tabs.IndexOf(tab);
+        if (index < 0) return;
+
+        Tabs.Remove(tab);
+        tab.LocationChanged -= OnTabLocationChanged;
+        if (ReferenceEquals(ActiveTab, tab))
+            ActiveTab = Tabs.Count > 0 ? Tabs[Math.Min(index, Tabs.Count - 1)] : null;
+    }
+
+    /// <summary>Takes over a tab detached from another pane, as its active tab.</summary>
+    public void AdoptTab(DirectoryTabViewModel tab)
+    {
+        tab.LocationChanged += OnTabLocationChanged;
+        Tabs.Add(tab);
+        ActiveTab = tab;
     }
 
     [RelayCommand]
@@ -205,6 +227,15 @@ public sealed partial class PaneViewModel : ObservableObject
 
     public void SplitWith(string path, SplitOrientation orientation) =>
         _host.SplitPane(this, orientation, path);
+
+    /// <summary>Tab header context menu: pulls a tab out into a pane of its own, beside this one.</summary>
+    [RelayCommand]
+    private void MoveTabToNewPane(DirectoryTabViewModel? tab)
+    {
+        tab ??= ActiveTab;
+        if (tab is null || !Tabs.Contains(tab)) return;
+        _host.MoveTabToNewPane(this, tab, SplitOrientation.Vertical);
+    }
 
     [RelayCommand]
     private void ClosePane() => _host.ClosePane(this);

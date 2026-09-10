@@ -140,6 +140,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "reopen": Invoke(() => session.Shell.ActivePane.ReopenClosedTab()); break;
             case "tab": ActivateTab(rest); break;
             case "movetab": MoveTab(rest); break;
+            case "movetab-newpane": MoveTabToNewPane(rest); break;
             case "tab-dragging": TabDragging(rest); break;
             case "split": Split(rest, out _); break;
             case "closepane": Invoke(() => session.Shell.ClosePane(session.Shell.ActivePane)); break;
@@ -177,6 +178,12 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "copy": Transfer(rest, TransferVerb.Copy); break;
             case "shortcut": Shortcut(rest); break;
             case "undo": Undo(); break;
+            case "pause": PauseQueue(paused: true); break;
+            case "resume": PauseQueue(paused: false); break;
+            case "queue-move": QueueMove(rest); break;
+            case "queue-cancel": QueueCancel(rest); break;
+            case "conflict": Conflict(rest); break;
+            case "conflict-plan": ConflictPlan(rest); break;
             case "progress-demo": ProgressDemo(rest); break;
             case "archive-fixture": ArchiveFixture(rest); break;
             case "extract": Extract(rest); break;
@@ -246,6 +253,13 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "start-indexer": StartIndexer(); break;
             case "assert-transfer": AssertTransfer(rest); break;
             case "assert-transfer-indeterminate": AssertTransferIndeterminate(); break;
+            case "assert-queue": AssertQueue(rest); break;
+            case "assert-paused": AssertPaused(expected: true); break;
+            case "assert-not-paused": AssertPaused(expected: false); break;
+            case "assert-conflicts": AssertConflicts(rest); break;
+            case "assert-conflict-rows": AssertConflictRows(rest); break;
+            case "assert-conflict-row": AssertConflictRow(rest); break;
+            case "assert-conflict-default": AssertConflictDefault(rest); break;
             case "assert-count": AssertCount(rest); break;
             case "assert-row": AssertRow(rest, expected: true); break;
             case "assert-no-row": AssertRow(rest, expected: false); break;
@@ -1252,6 +1266,24 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         session.Settle();
     }
 
+    /// <summary>"movetab-newpane [n]" (default the active tab): what the tab header's "Move to new
+    /// pane" menu item does, through the same <see cref="PaneViewModel.MoveTabToNewPaneCommand"/> —
+    /// a click cannot reach the context menu itself, so this reaches the command it is bound to.</summary>
+    private void MoveTabToNewPane(string rest)
+    {
+        Invoke(() =>
+        {
+            var pane = session.Shell.ActivePane;
+            var tabs = pane.Tabs;
+            var tab = rest.Length == 0 ? pane.ActiveTab : tabs.ElementAtOrDefault(Number(rest, "movetab-newpane") - 1);
+            if (tab is null)
+                throw new AssertionException($"This pane has {tabs.Count} tab(s); there is no tab '{rest}'.");
+
+            pane.MoveTabToNewPaneCommand.Execute(tab);
+        });
+        session.Settle();
+    }
+
     /// <summary>Poses the insertion line on the active pane's tab strip at a gap (0 is before the
     /// first tab), for a <c>shot</c>. Like <c>settings-columns-dragging</c>, the line is only ever
     /// on screen mid-drag and a run posts no mouse input — and reaching a capture at all is the
@@ -1878,6 +1910,21 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
     private void Transfer(string rest, TransferVerb verb)
     {
+        var plan = PlanTransfer(rest, verb);
+
+        // Null, not an empty map: null is what asks. Which resolutions come back is the scripted
+        // prompt's business, and it answers keep-both for everything unless `conflict` said
+        // otherwise — exactly what every transfer did before there was a prompt at all.
+        Await(() => session.Shell.ExecuteDropAsync(plan, resolutions: null));
+    }
+
+    /// <summary>
+    /// Works out what a <c>move</c> or <c>copy</c> would do, without carrying it out. Shared by
+    /// the two commands and by <c>conflict-plan</c>, so the dialog a run photographs is built over
+    /// the plan a real transfer would produce rather than over a made-up one.
+    /// </summary>
+    private TransferPlan PlanTransfer(string rest, TransferVerb verb)
+    {
         var (names, destination) = SplitOn(rest, "to", verb.ToString().ToLowerInvariant());
 
         var sources = (names.Length == 0
@@ -1899,8 +1946,85 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         if (!plan.HasWork) throw new AssertionException($"There was nothing to {verb.ToString().ToLowerInvariant()}.");
 
-        Await(() => session.Shell.ExecuteDropAsync(plan, resolutions: null));
+        return plan;
     }
+
+    /// <summary>
+    /// Builds the plan <c>dialog conflicts</c> photographs, and remembers it — the same arrangement
+    /// <c>duplicates</c> and <c>dialog duplicates</c> already use, and for the same reason: the
+    /// window shows what a real gesture found rather than starting one of its own.
+    /// </summary>
+    private void ConflictPlan(string rest)
+    {
+        var (verbWord, remainder) = SplitFirstWord(rest.Trim());
+        var verb = verbWord.ToLowerInvariant() switch
+        {
+            "move" => TransferVerb.Move,
+            "copy" => TransferVerb.Copy,
+            _ => throw new FormatException("conflict-plan wants 'move|copy <names> to <folder>'."),
+        };
+
+        // Expanded exactly as ExecuteDropAsync expands it, so a folder landing on a folder of the
+        // same name photographs as the merge it would really be rather than as one wholesale row.
+        var plan = session.Dispatcher.Invoke(
+            () => new TransferMergeExpander().Expand(PlanTransfer(remainder, verb)));
+
+        if (plan.Conflicts.Count == 0)
+            throw new AssertionException(
+                "Nothing in that plan clashes, so there would be no dialog. Put files of the same " +
+                "name in the destination first.");
+
+        _conflictPlan = plan;
+        session.Conflicts.Offer(plan);
+    }
+
+    private TransferConflictsViewModel ConflictsView() =>
+        session.Dispatcher.Invoke(() => new TransferConflictsViewModel(
+            _conflictPlan ?? throw new AssertionException(
+                "Run 'conflict-plan move <names> to <folder>' before 'dialog conflicts'.")));
+
+    /// <summary>
+    /// Poses the answer the conflict dialog would come back with. Bare
+    /// <c>skip|replace|keep-both|cancel</c> answers every clash; <c>name=answer,name=answer</c>
+    /// answers them one at a time, which is the case the single-answer dialog could not express and
+    /// the whole reason it now asks per item.
+    /// </summary>
+    private void Conflict(string rest)
+    {
+        var argument = Require(rest, "conflict");
+
+        if (!argument.Contains('=', StringComparison.Ordinal))
+        {
+            if (argument.Equals("cancel", StringComparison.OrdinalIgnoreCase))
+            {
+                session.Conflicts.AnswerCancel();
+                return;
+            }
+
+            session.Conflicts.AnswerAll(Resolution(argument));
+            return;
+        }
+
+        var answers = new Dictionary<string, ConflictResolution>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in argument.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var at = pair.IndexOf('=', StringComparison.Ordinal);
+            if (at < 0) throw new FormatException("conflict wants '<name>=<answer>, <name>=<answer>'.");
+            answers[pair[..at].Trim()] = Resolution(pair[(at + 1)..].Trim());
+        }
+
+        session.Conflicts.AnswerByName(answers);
+    }
+
+    private static ConflictResolution Resolution(string word) => word.ToLowerInvariant() switch
+    {
+        "skip" => ConflictResolution.Skip,
+        "replace" => ConflictResolution.Replace,
+        "keep-both" or "keepboth" => ConflictResolution.KeepBoth,
+        "overwrite" => ConflictResolution.Overwrite,
+        _ => throw new FormatException(
+            $"'{word}' is not an answer. Use skip, replace, keep-both, overwrite or cancel."),
+    };
 
     /// <summary>
     /// The right-drag menu's third verb: <c>shortcut notes.txt to Documents</c>.
@@ -1963,13 +2087,19 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         var argument = rest.Trim();
         if (argument.Equals("off", StringComparison.OrdinalIgnoreCase))
         {
-            session.Dispatcher.Invoke(() => session.Shell.TransferProgress = null);
+            session.Dispatcher.Invoke(() =>
+            {
+                session.Shell.TransferProgress = null;
+                session.Shell.TransferQueue.Clear();
+            });
             return;
         }
 
+        var queued = argument.Equals("queued", StringComparison.OrdinalIgnoreCase);
         var complete = !argument.Equals("unsized", StringComparison.OrdinalIgnoreCase);
-        if (argument.Length > 0 && complete && !argument.Equals("sized", StringComparison.OrdinalIgnoreCase))
-            throw new FormatException("progress-demo takes nothing, 'sized', 'unsized' or 'off'.");
+        if (argument.Length > 0 && complete && !queued &&
+            !argument.Equals("sized", StringComparison.OrdinalIgnoreCase))
+            throw new FormatException("progress-demo takes nothing, 'sized', 'unsized', 'queued' or 'off'.");
 
         var destination = Path.Combine(_sandbox.Root, "Archive");
         PlannedTransfer Item(string name, bool isDirectory) =>
@@ -1984,10 +2114,25 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         session.Dispatcher.Invoke(() =>
         {
+            var queue = session.Shell.TransferQueue;
+            queue.Clear();
+
             // A cancel that does nothing — there is nothing to stop. Given rather than left null so
             // the button photographs in the state it is really in during a transfer, enabled.
             var surface = new TransferProgressViewModel(plan, estimate, cancel: () => { });
             surface.PoseForCapture(itemsDone: 1, bytesDone: 4_509_715_660, bytesPerSecond: 117_440_512);
+
+            // The queue rows are posed the same way and for the same reasons: a run slow enough to
+            // catch mid-drain would put timing into every picture. `Pose` marks the first row
+            // running without starting anything, so Pause and the reorder buttons photograph in the
+            // states they are really in.
+            queue.Pose(("Copy", "3 item(s) to Archive", 3, estimate, QueuedJobState.Running));
+            if (queued)
+                queue.Pose(
+                    ("Move", "128 item(s) to Backup", 128, new TransferEstimate(9_663_676_416, 128, true), QueuedJobState.Waiting),
+                    ("Extract", "41 item(s) to Photos", 41, new TransferEstimate(214_748_364, 41, true), QueuedJobState.Waiting),
+                    ("Compress", "site-backup.zip", 6, null, QueuedJobState.Waiting));
+
             session.Shell.TransferProgress = surface;
         });
 
@@ -1995,6 +2140,145 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         // capture taken straight afterwards gets it measured but not yet filled in — an empty bar
         // and blank labels, which looks like a binding fault and is not one.
         session.Settle();
+    }
+
+    /// <summary>
+    /// Holds the queue and lets it go again, through the same commands the buttons are bound to.
+    /// </summary>
+    /// <remarks>
+    /// A paused queue is deliberately treated as settled by <c>UiSession.Settle</c>: the flag that
+    /// says this app is writing stays raised for a pause, so waiting for it to drop would hang every
+    /// run that photographs a paused transfer.
+    /// </remarks>
+    private void PauseQueue(bool paused)
+    {
+        var queue = session.Dispatcher.Invoke(() => session.Shell.TransferQueue);
+        var command = paused ? queue.PauseCommand : queue.ResumeCommand;
+
+        if (!session.Dispatcher.Invoke(() => command.CanExecute(null)))
+            throw new AssertionException(paused
+                ? "There is no queued transfer to pause. Run 'progress-demo' or start one first."
+                : "Nothing is paused.");
+
+        Invoke(() => command.Execute(null));
+    }
+
+    /// <summary>Moves a waiting job, 1-indexed over the whole queue, through the same command its
+    /// row's arrow button is bound to.</summary>
+    private void QueueMove(string rest)
+    {
+        var parts = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length != 2 || !int.TryParse(parts[0], out var slot) || !int.TryParse(parts[1], out var to))
+            throw new FormatException("queue-move wants '<from> <to>', both 1-indexed.");
+
+        var job = QueueJob(slot, "queue-move");
+        var delta = to - slot;
+        var step = Math.Sign(delta);
+
+        for (var i = 0; i < Math.Abs(delta); i++)
+        {
+            var command = step < 0 ? job.MoveUpCommand : job.MoveDownCommand;
+            if (!session.Dispatcher.Invoke(() => command.CanExecute(null)))
+                throw new AssertionException(
+                    $"'{job.Description}' cannot move any further — the running job is always first.");
+            Invoke(() => command.Execute(null));
+        }
+    }
+
+    private void QueueCancel(string rest)
+    {
+        var job = QueueJob(int.Parse(Require(rest, "queue-cancel")), "queue-cancel");
+        Invoke(() => job.CancelCommand.Execute(null));
+    }
+
+    private QueuedJobViewModel QueueJob(int slot, string verb)
+    {
+        var jobs = session.Dispatcher.Invoke(() => session.Shell.TransferQueue.Jobs.ToList());
+        if (slot < 1 || slot > jobs.Count)
+            throw new AssertionException(
+                $"{verb} wants a slot between 1 and {jobs.Count}; the queue holds {jobs.Count}.");
+        return jobs[slot - 1];
+    }
+
+    private void AssertQueue(string rest)
+    {
+        var expected = int.Parse(Require(rest, "assert-queue"));
+        var actual = session.Dispatcher.Invoke(() => session.Shell.TransferQueue.Jobs.Count);
+        if (actual != expected)
+            throw new AssertionException($"expected {expected} job(s) in the queue, found {actual}.");
+    }
+
+    private void AssertPaused(bool expected)
+    {
+        var actual = session.Dispatcher.Invoke(() => session.Shell.TransferQueue.IsPaused);
+        if (actual != expected)
+            throw new AssertionException(expected
+                ? "expected the queue to be paused, and it is running."
+                : "expected the queue to be running, and it is paused.");
+    }
+
+    /// <summary>
+    /// How many times a transfer has actually had to ask about a clash.
+    /// </summary>
+    /// <remarks>
+    /// Worth an assertion of its own rather than only checking what landed on disk: a paste onto a
+    /// taken name used to ask zero times and quietly number the newcomer, which looks exactly like
+    /// keep-both having been chosen.
+    /// </remarks>
+    private void AssertConflicts(string rest)
+    {
+        var expected = int.Parse(Require(rest, "assert-conflicts"));
+        if (session.Conflicts.Asked != expected)
+            throw new AssertionException(
+                $"expected the conflict dialog to be asked {expected} time(s), it was asked " +
+                $"{session.Conflicts.Asked}.");
+    }
+
+    /// <summary>
+    /// How many rows the last conflict question actually put up. The count is the whole proof that
+    /// a merged folder is not one row: <c>assert-conflict-rows 2</c> over a folder holding a dozen
+    /// files says the folder itself was never asked about.
+    /// </summary>
+    private void AssertConflictRows(string rest)
+    {
+        var expected = int.Parse(Require(rest, "assert-conflict-rows"));
+        var offered = session.Conflicts.LastOffered;
+        if (offered.Count != expected)
+            throw new AssertionException(
+                $"expected {expected} conflict row(s), got {offered.Count}" +
+                (offered.Count == 0 ? "." : $": {string.Join(", ", offered.Keys)}."));
+    }
+
+    /// <summary>A row with this label was offered. Labels are relative to the drop folder.</summary>
+    private void AssertConflictRow(string rest)
+    {
+        var label = ScriptedConflictPrompt.Normalize(Require(rest, "assert-conflict-row"));
+        var offered = session.Conflicts.LastOffered;
+        if (!offered.ContainsKey(label))
+            throw new AssertionException(
+                $"no conflict row named '{label}'. Offered: {string.Join(", ", offered.Keys)}.");
+    }
+
+    /// <summary>
+    /// What a row started on before anybody answered — the one thing a screenshot cannot prove,
+    /// and the whole of how "an identical file defaults to skip" is held down.
+    /// </summary>
+    private void AssertConflictDefault(string rest)
+    {
+        var argument = Require(rest, "assert-conflict-default");
+        var at = argument.LastIndexOf('=');
+        if (at < 0) throw new FormatException("assert-conflict-default wants '<label>=<answer>'.");
+
+        var key = ScriptedConflictPrompt.Normalize(argument[..at].Trim());
+        var wanted = Resolution(argument[(at + 1)..].Trim());
+
+        if (!session.Conflicts.LastOffered.TryGetValue(key, out var actual))
+            throw new AssertionException(
+                $"no conflict row named '{key}'. " +
+                $"Offered: {string.Join(", ", session.Conflicts.LastOffered.Keys)}.");
+
+        if (actual != wanted)
+            throw new AssertionException($"'{key}' defaulted to {actual}, expected {wanted}.");
     }
 
     private void Undo()
@@ -2014,6 +2298,9 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     /// delete are three script lines rather than one that does everything.
     /// </summary>
     private DuplicatesViewModel? _duplicates;
+
+    /// <summary>The plan <c>dialog conflicts</c> shows, built by <c>conflict-plan</c>.</summary>
+    private TransferPlan? _conflictPlan;
 
     /// <summary>
     /// Scans a folder for identical files. <c>duplicates [path]</c>, defaulting to the folder the
@@ -2948,11 +3235,17 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
                 "There are no duplicate results to show. Run 'duplicates' before 'dialog duplicates'."),
 
         // Posed rather than run, for the reasons on ProgressDemo. Needs a progress-demo first, so
-        // the window shows the same fixed figures the status bar does.
-        "transfer" => session.Shell.TransferProgress is { } progress
-            ? TransferProgressWindow.Create(progress)
+        // the window shows the same fixed figures the status bar does — and `progress-demo queued`
+        // puts jobs behind it, which is the only way to photograph the queue list.
+        "transfer" => session.Shell.TransferProgress is not null
+            ? TransferProgressWindow.Create(session.Shell.TransferQueue)
             : throw new AssertionException(
                 "There is no transfer to show. Run 'progress-demo' before 'dialog transfer'."),
+
+        // The question every transfer asks when names are already taken, with each row carrying its
+        // own answer. Built over the plan a real move would produce, so the wording, the two
+        // descriptions and the greying of Replace are the real ones.
+        "conflicts" => TransferConflictDialog.Create(ConflictsView()),
 
         // Both are built through the same internal Create the menu goes through, so a capture
         // cannot drift from what the app puts on screen.
@@ -2975,7 +3268,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         _ => throw new FormatException(
             $"'{kind}' is not a dialog. Try: new-folder, new-file, rename, rename-advanced, " +
             "delete, delete-permanent, message, warning, properties, settings, theme-editor, " +
-            "disk-usage, duplicates, changes, transfer, extract, compress, archive-password, " +
+            "disk-usage, duplicates, changes, transfer, conflicts, extract, compress, archive-password, " +
             "settings-columns, settings-appearance, settings-history, settings-search-index, columns."),
     };
 
@@ -3317,6 +3610,11 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             ("transferBytes", Text(shell.TransferProgress?.BytesDone ?? 0)),
             ("transferBytesTotal", Text(shell.TransferProgress?.BytesTotal ?? 0)),
             ("transferIndeterminate", Bool(shell.TransferProgress?.IsIndeterminate ?? false)),
+            ("queueJobs", Text(shell.TransferQueue.Jobs.Count)),
+            ("queueWaiting", Quote(shell.TransferQueue.WaitingText)),
+            ("queuePaused", Bool(shell.TransferQueue.IsPaused)),
+            ("queueKinds", Quote(string.Join(
+                ", ", shell.TransferQueue.Jobs.Select(j => $"{j.Kind}:{j.StateText}")))),
         };
 
         return "{" + string.Join(",", fields.Select(f => $"{Quote(f.Name)}:{f.Value}")) + "}";

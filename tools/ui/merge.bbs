@@ -1,0 +1,92 @@
+# A folder pasted onto a folder of the same name is merged, not settled wholesale.
+#
+# Everything here is real: the plan, the expansion, the per-path map, the executor. What a scripted
+# run cannot do is click, so the dialog is answered through the scripted prompt — but the rows it is
+# answering are the rows a person would see, which is what the assert-conflict-* assertions check.
+
+sandbox
+tree .
+refresh
+
+# --- the tree ---
+#
+# photos\ and Backup\photos\ overlap in two places and differ everywhere else:
+#
+#   photos\2024\a.jpg    clashes, different content
+#   photos\2024\b.jpg    clashes, byte-identical
+#   photos\2024\c.jpg    no twin
+#   photos\notes.txt     no twin, one level up
+#   Backup\photos\old\   only on the destination side, and must survive
+
+mkdir Backup/photos/2024
+mkdir Backup/photos/old
+write-text Backup/photos/2024/a.jpg destination a
+write-text Backup/photos/old/keep.txt untouched
+write-text photos/2024/a.jpg incoming a
+write-text photos/2024/c.jpg incoming c
+write-text photos/notes.txt incoming notes
+
+# Written last and with identical content, so both sides carry the same size and — within the
+# two-second granularity the rule allows for — the same timestamp.
+write-text Backup/photos/2024/b.jpg same b
+write-text photos/2024/b.jpg same b
+refresh
+
+# --- what the dialog asks ---
+#
+# Two rows, not one. The folder itself is never asked about: that is the whole change. Rows are
+# named by their path relative to the drop, because after a merge two of them can share a leaf name.
+
+conflict-plan copy photos to Backup
+assert-conflict-rows 2
+assert-conflict-row photos/2024/a.jpg
+assert-conflict-row photos/2024/b.jpg
+
+# The identical pair starts on Skip, and says why. Nothing else in the folder is a question at all.
+assert-conflict-default photos/2024/b.jpg=skip
+assert-conflict-default photos/2024/a.jpg=keep-both
+
+dialog conflicts 01-merge-conflicts
+theme dark-plus
+dialog conflicts 02-merge-conflicts-dark
+theme light-plus
+
+# --- answered per row, and carried out ---
+#
+# Replace on a copy is new. It goes through ConflictResolution.Overwrite, which stages what it
+# displaced rather than destroying it — which is what makes the paste undoable below.
+
+conflict photos/2024/a.jpg=replace, photos/2024/b.jpg=skip
+copy photos to Backup
+assert-conflicts 1
+
+# Replaced: the incoming copy took the name.
+assert-exists Backup/photos/2024/a.jpg
+
+# Merged in without a question, because nothing was in the way.
+assert-exists Backup/photos/2024/c.jpg
+assert-exists Backup/photos/notes.txt
+
+# The destination kept what the source never had. A wholesale Replace would have moved this whole
+# folder into staging; a merge leaves it exactly where it was.
+assert-exists Backup/photos/old/keep.txt
+
+# A copy adds without removing, so every source file is still where it started.
+assert-exists photos/2024/a.jpg
+assert-exists photos/2024/c.jpg
+
+shot 03-merged
+
+# --- and it can be taken back ---
+#
+# A paste was never undoable before, because a copy that displaced something kept no record of it.
+# A merged one does: the shell holds the outcome, so Ctrl+Z removes what was written and restores
+# what was replaced.
+
+assert-can-undo
+undo
+assert-missing Backup/photos/2024/c.jpg
+assert-missing Backup/photos/notes.txt
+assert-exists Backup/photos/old/keep.txt
+
+echo merged a folder, asked about two files, and put the paste back

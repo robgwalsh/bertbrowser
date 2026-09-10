@@ -43,13 +43,14 @@ public sealed class ArchiveEditExecutor
     public ArchiveEditOutcome Execute(
         ArchiveEditPlan plan,
         CancellationToken ct = default,
-        IProgress<TransferProgress>? progress = null)
+        IProgress<TransferProgress>? progress = null,
+        PauseGate? pause = null)
     {
         if (!plan.HasWork) return ArchiveEditOutcome.Nothing(plan.ArchiveFile);
 
         var archive = plan.ArchiveFile;
         var rewrite = Beside(archive, RewriteMarker);
-        var run = new ProgressCoalescer(ct, progress, 0);
+        var run = new ProgressCoalescer(ct, progress, 0, pause);
         var written = 0;
 
         try

@@ -55,8 +55,6 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        AppPaths.MigrateLegacyData();
-
         Services = BuildServices();
 
         Services.GetRequiredService<Db>().Migrate();
@@ -197,6 +195,7 @@ public partial class App : Application
         services.AddSingleton<BertBrowser.Core.Services.Archives.IArchiveBrowser>(
             s => s.GetRequiredService<BertBrowser.Core.Services.Archives.ArchiveAwareFileSystemService>());
         services.AddSingleton<BertBrowser.Core.Services.Transfer.TransferPlanner>();
+        services.AddSingleton<BertBrowser.Core.Services.Transfer.TransferMergeExpander>();
         services.AddSingleton<BertBrowser.Core.Services.Transfer.TransferExecutor>();
         services.AddSingleton<BertBrowser.Core.Services.Rename.RenamePlanner>();
         services.AddSingleton<BertBrowser.Core.Services.Rename.RenameExecutor>();
@@ -296,6 +295,7 @@ public partial class App : Application
         // and the MFT service, and no I/O of its own.
         services.AddSingleton<BertBrowser.Core.Services.IUserNotice, Views.UserNotice>();
         services.AddSingleton<BertBrowser.Core.Services.IUserConfirm, Views.UserConfirm>();
+        services.AddSingleton<BertBrowser.Core.Services.Transfer.IConflictPrompt, Views.ConflictPrompt>();
         // Comparing two files by their bytes. Stateless, so one instance serves the compare window
         // and the folder comparison's "settle this by content" alike.
         services.AddSingleton<BertBrowser.Core.Services.Compare.IFileContentComparer,

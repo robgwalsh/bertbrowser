@@ -223,8 +223,8 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _enterArchivesOnDoubleClick;
 
-    /// <summary>Whether picking a drive/device in the sidebar's Cards view opens a new panel
-    /// instead of a new tab. See <c>AppSettings.DrivesOpenTarget</c>.</summary>
+    /// <summary>Whether middle-clicking a drive/device in the sidebar opens a new panel instead
+    /// of a new tab. See <c>AppSettings.DrivesOpenTarget</c>.</summary>
     [ObservableProperty]
     private bool _openDrivesInNewPanel;
 

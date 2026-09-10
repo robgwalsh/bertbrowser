@@ -47,10 +47,11 @@ public sealed class ArchiveCreator
         CompressionLevel level,
         IReadOnlyList<ArchiveSource> sources,
         CancellationToken ct = default,
-        IProgress<TransferProgress>? progress = null)
+        IProgress<TransferProgress>? progress = null,
+        PauseGate? pause = null)
     {
         var partial = archivePath + PartialSuffix;
-        var run = new ProgressCoalescer(ct, progress, sources.Count);
+        var run = new ProgressCoalescer(ct, progress, sources.Count, pause);
         var failed = new List<string>();
         var written = 0;
         long read = 0;

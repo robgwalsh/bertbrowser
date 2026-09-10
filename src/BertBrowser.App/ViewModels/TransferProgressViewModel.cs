@@ -20,9 +20,9 @@ public enum TransferItemState
 /// <summary>One row of the detail window.</summary>
 public sealed partial class TransferItemRow : ObservableObject
 {
-    public TransferItemRow(PlannedTransfer transfer)
+    public TransferItemRow(TransferPlan plan, PlannedTransfer transfer)
     {
-        Name = transfer.Name;
+        Name = plan.LabelFor(transfer);
         Destination = System.IO.Path.GetDirectoryName(transfer.DestinationPath) ?? "";
     }
 
@@ -60,7 +60,7 @@ public sealed partial class TransferProgressViewModel : ObservableObject
         _isIndeterminate = !estimate.IsUsable;
 
         foreach (var transfer in plan.Transfers)
-            Items.Add(new TransferItemRow(transfer));
+            Items.Add(new TransferItemRow(plan, transfer));
 
         _headline = $"{Verbing} {ItemsTotal:N0} item(s)…";
     }
@@ -120,6 +120,14 @@ public sealed partial class TransferProgressViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(CancelCommand))]
     private bool _isCancelling;
 
+    /// <summary>True while the run is held at a chunk boundary. Set by the queue, which owns the
+    /// gate; this surface only has to say so and stop its clock.</summary>
+    [ObservableProperty]
+    private bool _isPaused;
+
+    /// <summary>What the headline said before "Paused — " was put in front of it.</summary>
+    private string? _headlineBeforePause;
+
     private bool CanCancel => _cancel is not null && !IsCancelling;
 
     [RelayCommand(CanExecute = nameof(CanCancel))]
@@ -127,7 +135,45 @@ public sealed partial class TransferProgressViewModel : ObservableObject
     {
         IsCancelling = true;
         Headline = "Stopping…";
+        _headlineBeforePause = null;
         _cancel?.Invoke();
+    }
+
+    /// <summary>
+    /// Holds or releases the clock and the wording. Called by the queue on both sides of a pause.
+    /// </summary>
+    /// <remarks>
+    /// <b>The stopwatch stops.</b> <see cref="TransferRate"/> is fed elapsed time rather than
+    /// reading a clock, so a stopwatch left running across a five-minute pause hands the first
+    /// sample after the resume a huge interval with almost no bytes in it — and the smoothing then
+    /// carries that invented stall into the throughput figure for several seconds. Stopping the
+    /// watch means the rate simply picks up where it left off, which is what actually happened.
+    /// </remarks>
+    internal void SetPaused(bool paused)
+    {
+        if (paused == IsPaused || IsCancelling) return;
+
+        if (paused)
+        {
+            _elapsed.Stop();
+            _headlineBeforePause = Headline;
+            Headline = $"Paused — {Headline}";
+
+            // Nothing is moving, so there is no throughput and no time remaining. Leaving "112 MB/s
+            // · about 7 minutes left" beside the word "Paused" states two things that contradict
+            // each other, and the byte count is the only one of the three still true.
+            RateText = "";
+            EtaText = "";
+            DetailText = JoinDetails();
+        }
+        else
+        {
+            _elapsed.Start();
+            if (_headlineBeforePause is { } previous) Headline = previous;
+            _headlineBeforePause = null;
+        }
+
+        IsPaused = paused;
     }
 
     /// <summary>
@@ -150,7 +196,9 @@ public sealed partial class TransferProgressViewModel : ObservableObject
         EtaText = RateFormatter.Remaining(_rate.Remaining(progress.BytesDone, Estimate));
         DetailText = JoinDetails();
 
-        if (!IsCancelling)
+        // A report already on the dispatcher can land after the pause took hold; it must not
+        // overwrite "Paused — …" with the wording of a run that is no longer moving.
+        if (!IsCancelling && !IsPaused)
             Headline = progress.CurrentName.Length > 0
                 ? $"{Verbing} {Math.Min(progress.Done + 1, ItemsTotal):N0} of {ItemsTotal:N0} — {progress.CurrentName}"
                 : $"{Verbing} {ItemsTotal:N0} item(s)…";
@@ -180,15 +228,32 @@ public sealed partial class TransferProgressViewModel : ObservableObject
     private string JoinDetails() =>
         string.Join("  ·  ", new[] { BytesText, RateText, EtaText }.Where(part => part.Length > 0));
 
+    /// <summary>
+    /// Rows only ever advance Waiting → Working → Done, in order, so only the ones between the last
+    /// report and this one can have changed.
+    /// </summary>
+    /// <remarks>
+    /// It used to rewrite every row on every report. That was invisible for a drop of forty items
+    /// and quadratic for a merged folder of five thousand, at ten reports a second — the same shape
+    /// of mistake as the thumbnail panel measuring every tile for every arriving image.
+    /// </remarks>
     private void MarkRows(int done, string currentName)
     {
-        for (var i = 0; i < Items.Count; i++)
+        var working = currentName.Length > 0 ? done : -1;
+        var last = Math.Min(Math.Max(done, working), Items.Count - 1);
+
+        for (var i = _markedUpTo; i <= last; i++)
             Items[i].State = i < done
                 ? TransferItemState.Done
-                : i == done && currentName.Length > 0
+                : i == working
                     ? TransferItemState.Working
                     : TransferItemState.Waiting;
+
+        // The row in flight is not settled yet, so it is re-examined on the next report.
+        _markedUpTo = Math.Max(0, Math.Min(done, Items.Count - 1));
     }
+
+    private int _markedUpTo;
 
     /// <summary>
     /// A fixed, plausible mid-transfer state, so the two surfaces can be photographed without a

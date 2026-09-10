@@ -90,10 +90,10 @@
                     <TextBlock Style="{StaticResource Hint}"
                                Text="Double-clicking a zip, 7z, tar or rar walks into it. With this off they open in whichever program owns them — and the breadcrumb, Enter and typing the path still go in."/>
 
-                    <CheckBox Content="Open drives/devices in a new panel" Margin="0,12,0,0"
+                    <CheckBox Content="Middle-click a drive/device to open a new panel" Margin="0,12,0,0"
                               IsChecked="{Binding OpenDrivesInNewPanel}"/>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="In the sidebar's card view of DRIVES &amp; DEVICES, clicking a drive or device opens it in a new panel instead of a new tab."/>
+                               Text="Middle-clicking a drive or device in the DRIVES &amp; DEVICES sidebar opens it in a new panel instead of a new tab. A plain click always opens a new tab."/>
 
                     <CheckBox Content="Restore last session on startup" Margin="0,12,0,0"
                               IsChecked="{Binding RestoreLastSession}"/>

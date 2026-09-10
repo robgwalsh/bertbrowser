@@ -10,12 +10,13 @@ public enum DrivesViewMode
     /// <summary>The existing expandable folder tree, rooted at each drive/device.</summary>
     Tree,
 
-    /// <summary>Each drive/device as a card in a flat list; clicking one opens it per
-    /// <see cref="AppSettings.DrivesOpenTarget"/> rather than navigating in place.</summary>
+    /// <summary>Each drive/device as a card in a flat list; clicking one opens it in a new tab
+    /// rather than navigating in place.</summary>
     Cards,
 }
 
-/// <summary>Where selecting a drive/device in Cards view (or its context menu) opens it.</summary>
+/// <summary>Where middle-clicking a drive/device anywhere in the sidebar (its card, its ordinary
+/// tree row, or its pinned header) opens it. A plain click always opens a new tab.</summary>
 public enum DrivesOpenTarget
 {
     NewTab,

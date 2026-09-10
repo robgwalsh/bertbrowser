@@ -81,6 +81,10 @@
                                                 <MenuItem Header="Close other tabs"
                                                           Command="{Binding PlacementTarget.Tag.CloseOtherTabsCommand,
                                                                             RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                                <MenuItem Header="Move to new pane"
+                                                          Command="{Binding PlacementTarget.Tag.MoveTabToNewPaneCommand,
+                                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding}"/>
                                                 <Separator/>
                                                 <MenuItem Header="Close tab" InputGestureText="Ctrl+W"
                                                           Command="{Binding PlacementTarget.Tag.CloseTabCommand,

@@ -42,12 +42,13 @@ public sealed class ExtractExecutor
         ExtractPlan plan,
         string? password = null,
         CancellationToken ct = default,
-        IProgress<TransferProgress>? progress = null)
+        IProgress<TransferProgress>? progress = null,
+        PauseGate? pause = null)
     {
         if (!plan.HasWork) return ExtractOutcome.Nothing;
 
         var files = plan.Items.Where(i => !i.IsDirectory).ToList();
-        var run = new ProgressCoalescer(ct, progress, files.Count);
+        var run = new ProgressCoalescer(ct, progress, files.Count, pause);
 
         // Everything this call brings into being, in the order it did, so a cancel can undo exactly
         // that much and nothing of what was already there.

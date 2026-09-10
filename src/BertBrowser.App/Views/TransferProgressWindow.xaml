@@ -6,8 +6,8 @@
                 xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
                 xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
                 mc:Ignorable="d"
-                d:DataContext="{d:DesignInstance Type=vm:TransferProgressViewModel}"
-                Title="Transfer" Width="520" Height="400" MinWidth="380" MinHeight="260"
+                d:DataContext="{d:DesignInstance Type=vm:TransferQueueViewModel}"
+                Title="Transfers" Width="560" Height="480" MinWidth="420" MinHeight="300"
                 WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
                 AutomationProperties.AutomationId="TransferProgress"
                 Background="{StaticResource Theme.Surface.Background}"
@@ -15,42 +15,125 @@
     <!--
       Modeless, and closing it does not cancel: the transfer outlives the window, unlike the delete
       dialog's survey, which nothing depends on. Only Cancel cancels.
+
+      Every binding names Running. in full rather than the panel switching DataContext to it once.
+      That form binds the DataContext against the DataContext it is setting, which is a trap worth
+      staying out of on a panel whose siblings bind to the queue.
     -->
     <DockPanel Margin="16">
 
         <!-- What is happening right now. -->
         <StackPanel DockPanel.Dock="Top">
-            <TextBlock Text="{Binding Headline}" FontSize="14" TextTrimming="CharacterEllipsis"/>
+            <TextBlock Text="{Binding Running.Headline}" FontSize="14" TextTrimming="CharacterEllipsis"/>
             <ProgressBar Margin="0,10,0,0" Height="6"
-                         Minimum="0" Maximum="1" Value="{Binding Fraction, Mode=OneWay}"
-                         IsIndeterminate="{Binding IsIndeterminate}"
-                         Focusable="False" IsHitTestVisible="False"/>
+                         Minimum="0" Maximum="1" Value="{Binding Running.Fraction, Mode=OneWay}"
+                         IsIndeterminate="{Binding Running.IsIndeterminate}"
+                         Focusable="False" IsHitTestVisible="False">
+                <ProgressBar.Style>
+                    <Style TargetType="ProgressBar" BasedOn="{StaticResource {x:Type ProgressBar}}">
+                        <Style.Triggers>
+                            <!-- A paused run is not an indeterminate one: freeze the bar rather than
+                                 leaving it animating over something that has stopped moving. -->
+                            <DataTrigger Binding="{Binding IsPaused}" Value="True">
+                                <Setter Property="IsIndeterminate" Value="False"/>
+                                <Setter Property="Opacity" Value="0.55"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ProgressBar.Style>
+            </ProgressBar>
             <DockPanel Margin="0,8,0,0">
                 <!-- Blank rather than zero when the size index has no total for this plan: an
                      invented percentage is worse than an absent one. -->
-                <TextBlock DockPanel.Dock="Left" Text="{Binding BytesText}"
+                <TextBlock DockPanel.Dock="Left" Text="{Binding Running.BytesText}"
                            Foreground="{StaticResource Theme.Text.Secondary}"/>
-                <TextBlock DockPanel.Dock="Right" Text="{Binding EtaText}" HorizontalAlignment="Right"
+                <TextBlock DockPanel.Dock="Right" Text="{Binding Running.EtaText}" HorizontalAlignment="Right"
                            Foreground="{StaticResource Theme.Text.Secondary}"/>
-                <TextBlock Text="{Binding RateText}" Margin="12,0,0,0"
+                <TextBlock Text="{Binding Running.RateText}" Margin="12,0,0,0"
                            Foreground="{StaticResource Theme.Text.Secondary}"/>
             </DockPanel>
         </StackPanel>
 
-        <!-- Cancel is the only button, and it is not the default: stopping a transfer part-way
-             should take a deliberate press, not a stray Enter. -->
+        <!-- Cancel is not the default: stopping a transfer part-way should take a deliberate press,
+             not a stray Enter. Pause and Resume share a slot — only ever one of them applies. -->
         <DockPanel DockPanel.Dock="Bottom" Margin="0,14,0,0">
             <Button DockPanel.Dock="Right" Content="Cancel" MinWidth="88"
-                    Command="{Binding CancelCommand}"
+                    Command="{Binding Running.CancelCommand}"
                     ToolTip="Stop this transfer. Whatever has already been transferred stays, and can be undone."/>
             <Button DockPanel.Dock="Right" Content="Close" MinWidth="88" Margin="0,0,8,0"
                     IsCancel="True" Click="Close_Click"
                     ToolTip="Hide this window. The transfer carries on."/>
+            <Button DockPanel.Dock="Right" Content="Pause" MinWidth="88" Margin="0,0,8,0"
+                    Command="{Binding PauseCommand}"
+                    AutomationProperties.AutomationId="TransferPause"
+                    ToolTip="Hold this transfer where it is. Nothing else can be moved, renamed or deleted while it is paused."
+                    Visibility="{Binding IsPaused, Converter={StaticResource InverseBoolToVisibility}}"/>
+            <Button DockPanel.Dock="Right" Content="Resume" MinWidth="88" Margin="0,0,8,0"
+                    Command="{Binding ResumeCommand}"
+                    AutomationProperties.AutomationId="TransferResume"
+                    ToolTip="Carry on from where it stopped"
+                    Visibility="{Binding IsPaused, Converter={StaticResource BoolToVisibility}}"/>
             <TextBlock/>
         </DockPanel>
 
-        <!-- Every item, so a batch says which ones are through and which are still to come. -->
-        <ListBox x:Name="ItemList" Margin="0,14,0,0" ItemsSource="{Binding Items}"
+        <!-- Everything queued behind the job in flight, in the order it will run. Hidden entirely
+             when there is nothing waiting, so a single transfer looks exactly as it always did. -->
+        <Grid DockPanel.Dock="Bottom" Margin="0,14,0,0"
+              Visibility="{Binding WaitingText, Converter={StaticResource NullToCollapsed}}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <TextBlock Text="Queued" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <ListBox Grid.Row="1" MaxHeight="150" ItemsSource="{Binding Jobs}"
+                     AutomationProperties.AutomationId="TransferQueue"
+                     BorderThickness="1" Focusable="False"
+                     HorizontalContentAlignment="Stretch"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <!-- A queued job is not a selectable thing; its own buttons are what act. -->
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Focusable" Value="False"/>
+                        <Setter Property="Padding" Value="4,2"/>
+                        <Setter Property="Background" Value="Transparent"/>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:QueuedJobViewModel}">
+                        <DockPanel Margin="0,2">
+                            <!-- Reordering and cancelling apply only to what has not started. The
+                                 running job is first and stays first: it has already written bytes. -->
+                            <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}"
+                                    Content="Cancel" Margin="8,0,0,0" VerticalAlignment="Center"
+                                    Command="{Binding CancelCommand}"
+                                    AutomationProperties.Name="{Binding Description}"/>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}"
+                                    Content="↓" Margin="6,0,0,0" VerticalAlignment="Center"
+                                    Command="{Binding MoveDownCommand}"
+                                    Visibility="{Binding IsWaiting, Converter={StaticResource BoolToVisibility}}"/>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}"
+                                    Content="↑" Margin="6,0,0,0" VerticalAlignment="Center"
+                                    Command="{Binding MoveUpCommand}"
+                                    Visibility="{Binding IsWaiting, Converter={StaticResource BoolToVisibility}}"/>
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding StateText}" MinWidth="76"
+                                       VerticalAlignment="Center" TextAlignment="Right"
+                                       Foreground="{StaticResource Theme.Text.Secondary}"/>
+                            <!-- Blank, never a zero, while a job cannot yet say what it will write. -->
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding SizeText}" MinWidth="70"
+                                       VerticalAlignment="Center" TextAlignment="Right"
+                                       Foreground="{StaticResource Theme.Text.Secondary}"/>
+                            <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                                <Run Text="{Binding Kind, Mode=OneWay}" FontWeight="SemiBold"/>
+                                <Run Text="{Binding Description, Mode=OneWay}"/>
+                            </TextBlock>
+                        </DockPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Grid>
+
+        <!-- Every item of the job in flight, so a batch says which ones are through. -->
+        <ListBox x:Name="ItemList" Margin="0,14,0,0" ItemsSource="{Binding Running.Items}"
                  BorderThickness="1" Focusable="False"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListBox.ItemTemplate>

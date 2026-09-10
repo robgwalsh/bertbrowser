@@ -785,7 +785,169 @@ public sealed class TransferExecutorTests : IDisposable
         AssertContent(Path.Combine(moved, "inner.txt"), "real");
     }
 
-    /// <summary>Fails loudly rather than skipping: these two tests guard a path where a junction
+    // --- a merged move empties its source, and an undo puts it back ---
+
+    /// <summary>
+    /// The real end-to-end shape: a folder merged into a folder of the same name, planned by the
+    /// expander against real files, run, and then undone. A whole-folder <c>Directory.Move</c>
+    /// removes the source folders implicitly, so expanding the move must leave the source looking
+    /// the same way — or a merge reads as a half-failed move.
+    /// </summary>
+    [Fact]
+    public void AMergedMove_LeavesNoEmptySourceFoldersBehind()
+    {
+        File_("new", "src", "photos", "2024", "a.txt");
+        File_("new", "src", "photos", "fresh.txt");
+        File_("old", "dest", "photos", "2024", "a.txt");
+
+        var outcome = RunMerged(P("src", "photos"), Dir("dest"), ConflictResolution.Replace);
+
+        Assert.Empty(outcome.Failed);
+        AssertContent(P("dest", "photos", "2024", "a.txt"), "new");
+        AssertContent(P("dest", "photos", "fresh.txt"), "new");
+        Assert.False(Directory.Exists(P("src", "photos")), "the merged source folder should be gone");
+        Assert.False(Directory.Exists(P("src", "photos", "2024")));
+    }
+
+    [Fact]
+    public void AMergedMove_LeavesASourceFolderThatStillHoldsASkippedFile()
+    {
+        File_("new", "src", "photos", "2024", "a.txt");
+        File_("old", "dest", "photos", "2024", "a.txt");
+
+        var outcome = RunMerged(P("src", "photos"), Dir("dest"), ConflictResolution.Skip);
+
+        Assert.Empty(outcome.Failed);
+        AssertContent(P("dest", "photos", "2024", "a.txt"), "old");
+        AssertContent(P("src", "photos", "2024", "a.txt"), "new");
+        Assert.True(Directory.Exists(P("src", "photos", "2024")), "a folder that still holds a file stays");
+        Assert.Empty(outcome.PrunedDirectories);
+    }
+
+    [Fact]
+    public void AMergedMove_ThenUndo_PutsTheWholeTreeBack()
+    {
+        File_("new", "src", "photos", "2024", "a.txt");
+        File_("new", "src", "photos", "fresh.txt");
+        File_("old", "dest", "photos", "2024", "a.txt");
+
+        var outcome = RunMerged(P("src", "photos"), Dir("dest"), ConflictResolution.Replace);
+        Assert.NotEmpty(outcome.PrunedDirectories);
+
+        var undone = _executor.Undo(outcome);
+
+        Assert.Empty(undone.Failed);
+        AssertContent(P("src", "photos", "2024", "a.txt"), "new");
+        AssertContent(P("src", "photos", "fresh.txt"), "new");
+        AssertContent(P("dest", "photos", "2024", "a.txt"), "old"); // the displaced file came back
+    }
+
+    [Fact]
+    public void ACopy_NeverPrunes()
+    {
+        File_("new", "src", "photos", "a.txt");
+        Dir("dest", "photos");
+
+        var outcome = RunMerged(P("src", "photos"), P("dest"), ConflictResolution.KeepBoth, TransferVerb.Copy);
+
+        Assert.Empty(outcome.PrunedDirectories);
+        Assert.True(Directory.Exists(P("src", "photos")));
+    }
+
+    [Fact]
+    public void Pruning_NeverRemovesAJunctionThatLooksEmpty()
+    {
+        Dir("target");
+        Dir("src", "photos");
+        CreateDirectoryLink(P("src", "photos", "link"), P("target"));
+        Dir("dest", "photos");
+
+        var outcome = RunMerged(P("src", "photos"), P("dest"), ConflictResolution.KeepBoth);
+
+        // The link moved as an item of its own; nothing pruned it as an empty folder on the way.
+        Assert.DoesNotContain(P("target"), outcome.PrunedDirectories);
+        Assert.True(Directory.Exists(P("target")), "the link's target must survive");
+    }
+
+    /// <summary>
+    /// A merged paste may Replace, through <see cref="ConflictResolution.Overwrite"/> — and what it
+    /// displaced is staged rather than destroyed, so <see cref="TransferExecutor.UndoCopies"/> can
+    /// put both sides back.
+    /// </summary>
+    [Fact]
+    public void UndoCopies_OnAMergedPaste_RemovesWhatItWroteAndRestoresWhatItDisplaced()
+    {
+        File_("new", "src", "photos", "a.txt");
+        File_("new", "src", "photos", "fresh.txt");
+        File_("old", "dest", "photos", "a.txt");
+
+        var outcome = RunMerged(
+            P("src", "photos"), P("dest"), ConflictResolution.Overwrite, TransferVerb.Copy);
+
+        Assert.Empty(outcome.Failed);
+        AssertContent(P("dest", "photos", "a.txt"), "new");
+        Assert.True(outcome.Completed.Any(c => c.DisplacedStagePath is not null), "a Replace stages");
+
+        var undone = _executor.UndoCopies(outcome);
+
+        Assert.Empty(undone.Failed);
+        AssertContent(P("dest", "photos", "a.txt"), "old");
+        Assert.False(File.Exists(P("dest", "photos", "fresh.txt")), "what the paste added is gone");
+        AssertContent(P("src", "photos", "a.txt"), "new"); // a copy never touched the source
+    }
+
+    /// <summary>Plans, expands and runs the way <c>ShellViewModel.ExecuteDropAsync</c> does.</summary>
+    private TransferOutcome RunMerged(
+        string source, string destination, ConflictResolution resolution,
+        TransferVerb verb = TransferVerb.Move)
+    {
+        var plan = new TransferMergeExpander().Expand(_planner.Plan([source], destination, verb));
+        var resolutions = plan.Conflicts.ToDictionary(
+            t => PathKey.Canonicalize(t.SourcePath), _ => resolution);
+        return _executor.Execute(plan, resolutions);
+    }
+
+    /// <summary>
+    /// A cross-volume move of a linked folder must be refused before it starts. Asked of the rule
+    /// directly rather than through a move, because reaching
+    /// <c>TransferExecutor.CrossVolumeMoveDirectory</c> needs a genuine second volume — and the
+    /// thing being guarded is that walking through the link copies the target's contents and then
+    /// deletes the link.
+    /// </summary>
+    [Fact]
+    public void AFolderThatIsItselfAJunction_IsRefusedAcrossVolumes()
+    {
+        File_("real", "target", "inner.txt");
+        var link = P("src", "link");
+        Directory.CreateDirectory(P("src"));
+        CreateDirectoryLink(link, P("target"));
+
+        var refusal = TransferExecutor.CrossVolumeRefusal(new DirectoryInfo(link));
+
+        Assert.NotNull(refusal);
+        Assert.Contains("junction", refusal, StringComparison.OrdinalIgnoreCase);
+        AssertContent(P("target", "inner.txt"), "real");
+    }
+
+    [Fact]
+    public void AFolderContainingAJunction_IsStillRefusedAcrossVolumes()
+    {
+        File_("real", "target", "inner.txt");
+        var tree = Dir("src", "tree");
+        CreateDirectoryLink(Path.Combine(tree, "link"), P("target"));
+
+        Assert.NotNull(TransferExecutor.CrossVolumeRefusal(new DirectoryInfo(tree)));
+    }
+
+    [Fact]
+    public void AnOrdinaryFolder_HasNothingStandingInTheWayOfACrossVolumeMove()
+    {
+        File_("payload", "src", "tree", "sub", "x.txt");
+
+        Assert.Null(TransferExecutor.CrossVolumeRefusal(new DirectoryInfo(P("src", "tree"))));
+    }
+
+    /// <summary>Fails loudly rather than skipping: these tests guard a path where a junction
     /// could be silently destroyed, so quietly not running them is worse than a red build.</summary>
     private static void CreateDirectoryLink(string link, string target)
     {
@@ -799,6 +961,191 @@ public sealed class TransferExecutorTests : IDisposable
                 "This test needs permission to create directory symbolic links — run it elevated, or turn on " +
                 "Windows Developer Mode. It covers a data-loss path and must not be skipped silently.", ex);
         }
+    }
+
+    // --- a mixed answer, one item at a time ---
+
+    /// <summary>
+    /// The executor has taken a per-path map since it was written, but every test above builds a
+    /// uniform one through <see cref="Run"/> — so until the dialog could ask per item, nothing
+    /// exercised three different answers inside one plan. This is that.
+    /// </summary>
+    [Fact]
+    public void OnePlanCanCarryADifferentAnswerForEveryClash()
+    {
+        var skipped = File_("new a", "src", "a.txt");
+        var replaced = File_("new b", "src", "b.txt");
+        var kept = File_("new c", "src", "c.txt");
+        var dest = Dir("dest");
+        File_("old a", "dest", "a.txt");
+        File_("old b", "dest", "b.txt");
+        File_("old c", "dest", "c.txt");
+
+        var plan = _planner.Plan([skipped, replaced, kept], dest, TransferVerb.Move);
+        Assert.Equal(3, plan.Conflicts.Count);
+
+        var outcome = _executor.Execute(plan, new Dictionary<string, ConflictResolution>
+        {
+            [PathKey.Canonicalize(skipped)] = ConflictResolution.Skip,
+            [PathKey.Canonicalize(replaced)] = ConflictResolution.Replace,
+            [PathKey.Canonicalize(kept)] = ConflictResolution.KeepBoth,
+        });
+
+        Assert.Empty(outcome.Failed);
+
+        // Skip: neither side moved.
+        AssertContent(P("dest", "a.txt"), "old a");
+        AssertContent(skipped, "new a");
+        Assert.Equal(skipped, Assert.Single(outcome.Skipped));
+
+        // Replace: the incoming copy took the name, the displaced one went to staging.
+        AssertContent(P("dest", "b.txt"), "new b");
+        Assert.False(File.Exists(replaced));
+        AssertContent(TransferExecutor.StagedItems(outcome).Single(), "old b");
+
+        // Keep both: the existing entry was never touched.
+        AssertContent(P("dest", "c.txt"), "old c");
+        AssertContent(P("dest", "c (2).txt"), "new c");
+        Assert.False(File.Exists(kept));
+    }
+
+    /// <summary>
+    /// Anything the map does not mention still falls back to the one resolution that can destroy
+    /// nothing — which is what makes a dialog listing only the clashes a complete answer.
+    /// </summary>
+    [Fact]
+    public void AnswersAreNeededOnlyForTheItemsThatClash()
+    {
+        var clashing = File_("new", "src", "a.txt");
+        var free = File_("fresh", "src", "z.txt");
+        var dest = Dir("dest");
+        File_("existing", "dest", "a.txt");
+
+        var plan = _planner.Plan([clashing, free], dest, TransferVerb.Move);
+
+        var outcome = _executor.Execute(plan, new Dictionary<string, ConflictResolution>
+        {
+            [PathKey.Canonicalize(clashing)] = ConflictResolution.Replace,
+        });
+
+        Assert.Empty(outcome.Failed);
+        AssertContent(P("dest", "a.txt"), "new");
+        AssertContent(P("dest", "z.txt"), "fresh");
+    }
+
+    // --- pausing ---
+
+    /// <summary>How long something that should happen is given before it is called a hang.</summary>
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
+
+    /// <summary>Long enough that a run which was going to proceed would have.</summary>
+    private static readonly TimeSpan LongEnoughToNotice = TimeSpan.FromMilliseconds(200);
+
+    private static async Task<bool> Finished(Task task, TimeSpan within) =>
+        await Task.WhenAny(task, Task.Delay(within)) == task;
+
+    /// <summary>
+    /// A pause lands <em>inside</em> a file, not merely between two of them: the gate is waited on
+    /// in the per-chunk progress callback, which for the real copier is a callback
+    /// <c>CopyFileExW</c> is sitting in.
+    /// </summary>
+    [Fact]
+    public async Task PausingHoldsARunPartWayThroughAFile_AndResumingFinishesIt()
+    {
+        var content = new string('x', 8192);
+        var source = File_(content, "src", "big.txt");
+        var dest = Dir("dest");
+
+        using var gate = new PauseGate();
+        using var paused = new ManualResetEventSlim(false);
+
+        var executor = new TransferExecutor(
+            new FileSystemTransferProbe(),
+            new SteppedCopier(8, (_, _) =>
+            {
+                if (paused.IsSet) return;
+                gate.Pause();
+                paused.Set();
+            }));
+
+        var plan = _planner.Plan([source], dest, TransferVerb.Move);
+        var run = Task.Run(() => executor.Execute(plan, null, CancellationToken.None, null, gate));
+
+        Assert.True(paused.Wait(Patience));
+
+        // The proof it is really held: given time to finish, it does not.
+        Assert.False(await Finished(run, LongEnoughToNotice));
+        Assert.True(gate.IsPaused);
+
+        // And the proof it stopped *inside* the file rather than before it: a partial destination
+        // is sitting there with the copy still holding it open. That is what a mid-file pause is,
+        // and it is why a paused run keeps every other write in the app blocked behind it.
+        Assert.True(File.Exists(P("dest", "big.txt")));
+        AssertContent(source, content);
+
+        gate.Resume();
+
+        var outcome = await run.WaitAsync(Patience);
+        Assert.Empty(outcome.Failed);
+        Assert.False(outcome.Cancelled);
+        AssertContent(P("dest", "big.txt"), content);
+        Assert.False(File.Exists(source));
+    }
+
+    /// <summary>
+    /// Cancelling a paused run stops it without anyone resuming the gate first. The App does resume
+    /// it as well — so the <em>next</em> job does not start held — but a run that could only be
+    /// stopped by first letting it go would be a deadlock waiting for a user who has already
+    /// pressed Cancel.
+    /// </summary>
+    [Fact]
+    public async Task CancellingAPausedRun_StopsIt_WithoutBeingResumed()
+    {
+        var content = new string('x', 8192);
+        var source = File_(content, "src", "big.txt");
+        var dest = Dir("dest");
+
+        using var gate = new PauseGate();
+        using var cancellation = new CancellationTokenSource();
+        using var paused = new ManualResetEventSlim(false);
+
+        var executor = new TransferExecutor(
+            new FileSystemTransferProbe(),
+            new SteppedCopier(8, (_, _) =>
+            {
+                if (paused.IsSet) return;
+                gate.Pause();
+                paused.Set();
+            }));
+
+        var plan = _planner.Plan([source], dest, TransferVerb.Move);
+        var run = Task.Run(() => executor.Execute(plan, null, cancellation.Token, null, gate));
+
+        Assert.True(paused.Wait(Patience));
+        Assert.False(await Finished(run, LongEnoughToNotice));
+
+        await cancellation.CancelAsync();
+
+        var outcome = await run.WaitAsync(Patience);
+        Assert.True(outcome.Cancelled);
+        Assert.Empty(outcome.Completed);
+        Assert.False(File.Exists(P("dest", "big.txt")));
+        AssertContent(source, content);
+    }
+
+    /// <summary>A gate nobody ever pauses costs a run nothing and changes nothing.</summary>
+    [Fact]
+    public void AGateThatIsNeverPaused_LeavesATransferExactlyAsItWas()
+    {
+        var source = File_("hello", "src", "a.txt");
+        var dest = Dir("dest");
+        using var gate = new PauseGate();
+
+        var plan = _planner.Plan([source], dest, TransferVerb.Move);
+        var outcome = _executor.Execute(plan, null, CancellationToken.None, null, gate);
+
+        Assert.Empty(outcome.Failed);
+        AssertContent(P("dest", "a.txt"), "hello");
     }
 
     /// <summary>Synchronous <see cref="IProgress{T}"/>: the built-in one posts to a sync context,

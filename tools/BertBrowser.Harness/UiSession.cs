@@ -47,11 +47,13 @@ internal sealed class UiSession : IDisposable
         RecordingElevationPrompt elevationPrompt,
         RecordingUserNotice notice,
         RecordingUserConfirm confirm,
+        ScriptedConflictPrompt conflicts,
         FakeSystemAppearance appearance)
     {
         ElevationPrompt = elevationPrompt;
         Notice = notice;
         Confirm = confirm;
+        Conflicts = conflicts;
         SystemAppearance = appearance;
         _options = options;
         Window = window;
@@ -78,6 +80,9 @@ internal sealed class UiSession : IDisposable
 
     /// <summary>What the run was asked to confirm — today, only flattening an enormous folder.</summary>
     public RecordingUserConfirm Confirm { get; }
+
+    /// <summary>How the run answers the conflict dialog, and how many times it has been asked.</summary>
+    public ScriptedConflictPrompt Conflicts { get; }
 
     /// <summary>The Windows light/dark and high-contrast settings this run is posing.</summary>
     public FakeSystemAppearance SystemAppearance { get; }
@@ -134,6 +139,7 @@ internal sealed class UiSession : IDisposable
         var notice = new RecordingUserNotice();
         var confirm = new RecordingUserConfirm();
         var appearance = new FakeSystemAppearance();
+        var conflicts = new ScriptedConflictPrompt();
         var services = AppShell.BuildServices(s =>
         {
             s.AddSingleton<IProcessLauncher>(launcher);
@@ -177,6 +183,11 @@ internal sealed class UiSession : IDisposable
             // And the question half of the same problem: a flat view over an enormous folder asks
             // before it lists, in a modal a run can neither see nor dismiss.
             s.AddSingleton<IUserConfirm>(_ => confirm);
+
+            // And the third: how to settle names already taken. The real one is a modal a run can
+            // neither see nor dismiss; this answers from the script, defaulting to keep-both — what
+            // every transfer got before there was a prompt at all.
+            s.AddSingleton<BertBrowser.Core.Services.Transfer.IConflictPrompt>(_ => conflicts);
 
             // The real one reads this machine's Windows theme, which would make every screenshot
             // depend on how the developer taking it has their desktop set up. `system-theme` poses
@@ -244,7 +255,8 @@ internal sealed class UiSession : IDisposable
         window.Show();
 
         var session = new UiSession(
-            options, window, services, launcher, guard, elevationPrompt, notice, confirm, appearance);
+            options, window, services, launcher, guard, elevationPrompt, notice, confirm, conflicts,
+            appearance);
 
         // The MFT indexer is off unless asked for: it reads every NTFS volume's master file table,
         // which is minutes of disk on a machine someone is using. With --index it runs *in this
@@ -373,10 +385,19 @@ internal sealed class UiSession : IDisposable
         Dispatcher.Invoke(() => { }, DispatcherPriority.ContextIdle);
     }
 
-    /// <summary>Every open tab, not just the visible one: a background tab reloading is still work
-    /// in flight, and a capture taken over it would catch the list mid-replacement.</summary>
+    /// <summary>
+    /// Every open tab, not just the visible one: a background tab reloading is still work in
+    /// flight, and a capture taken over it would catch the list mid-replacement.
+    /// </summary>
+    /// <remarks>
+    /// <b>A paused queue counts as settled.</b> <c>IsTransferring</c> is held for the queue's whole
+    /// drain, pause included — deliberately, since a paused run is holding a half-written file
+    /// open and nothing else may write. But a script that pauses on purpose has arrived exactly
+    /// where it meant to, and waiting for it to un-pause would hang every run that photographs a
+    /// paused transfer until the watchdog fired.
+    /// </remarks>
     private bool IsBusy => Dispatcher.Invoke(() =>
-        Shell.IsTransferring ||
+        (Shell.IsTransferring && !Shell.TransferQueue.IsPaused) ||
         Shell.AllTabs.Any(t => t.FileList.IsLoading || t.FileList.IsHydratingMetadata));
 
     /// <summary>

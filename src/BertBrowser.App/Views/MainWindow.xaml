@@ -255,10 +255,30 @@
                     <TextBlock Text="{Binding TransferProgress.DetailText}" Margin="10,0,0,0"
                                Foreground="{StaticResource Theme.StatusBar.Foreground}" Opacity="0.8"
                                VerticalAlignment="Center"/>
+                    <!-- How many more are queued behind this one. Blank rather than "0 waiting" when
+                         there is only the running job, so the strip carries no separator with
+                         nothing after it. -->
+                    <TextBlock Text="{Binding TransferQueue.WaitingText}" Margin="10,0,0,0"
+                               Foreground="{StaticResource Theme.StatusBar.Foreground}" Opacity="0.8"
+                               VerticalAlignment="Center"/>
+                    <!-- Pause and Resume are one slot: only ever one of them applies, and a run that
+                         is not queued (a sync hosts its own progress) offers neither. -->
+                    <Button Style="{StaticResource LinkButton}" Margin="12,0,0,0"
+                            Foreground="{StaticResource Theme.StatusBar.Foreground}"
+                            Content="Pause" VerticalAlignment="Center"
+                            ToolTip="Hold this transfer where it is. Nothing else can be moved, renamed or deleted while it is paused."
+                            Command="{Binding TransferQueue.PauseCommand}"
+                            Visibility="{Binding TransferQueue.IsPaused, Converter={StaticResource InverseBoolToVisibility}}"/>
+                    <Button Style="{StaticResource LinkButton}" Margin="12,0,0,0"
+                            Foreground="{StaticResource Theme.StatusBar.Foreground}"
+                            Content="Resume" FontWeight="SemiBold" VerticalAlignment="Center"
+                            ToolTip="Carry on from where it stopped"
+                            Command="{Binding TransferQueue.ResumeCommand}"
+                            Visibility="{Binding TransferQueue.IsPaused, Converter={StaticResource BoolToVisibility}}"/>
                     <Button Style="{StaticResource LinkButton}" Margin="12,0,0,0"
                             Foreground="{StaticResource Theme.StatusBar.Foreground}"
                             Content="Details" VerticalAlignment="Center"
-                            ToolTip="Show every item in this transfer"
+                            ToolTip="Show every item in this transfer, and everything queued behind it"
                             Click="TransferDetails_Click"/>
                     <Button Style="{StaticResource LinkButton}" Margin="10,0,0,0"
                             Foreground="{StaticResource Theme.StatusBar.Foreground}"
@@ -674,6 +694,7 @@
                     <HierarchicalDataTemplate ItemsSource="{Binding Children}">
                         <DockPanel Background="Transparent"
                                    PreviewMouseLeftButtonDown="FolderTreeItem_PreviewMouseDown"
+                                   PreviewMouseDown="FolderTreeItem_PreviewMiddleClick"
                                    MouseLeftButtonUp="FolderTreeItem_Click">
                             <Image x:Name="RowIcon" DockPanel.Dock="Left" Source="{Binding Icon}"
                                    Width="16" Height="16" Margin="0,0,6,0" VerticalAlignment="Center"
@@ -730,7 +751,7 @@
                         <Border Background="{StaticResource Theme.Surface.Raised}"
                                 BorderBrush="{StaticResource Theme.Border.Subtle}" BorderThickness="0,0,0,1"
                                 Padding="12,10" Cursor="Hand"
-                                MouseLeftButtonUp="DriveCard_Click"
+                                MouseUp="DriveCard_Click"
                                 ToolTip="{Binding FullPath}">
                             <DockPanel>
                                 <Image DockPanel.Dock="Left" Source="{Binding Icon}"
@@ -771,6 +792,7 @@
                                     BorderBrush="{StaticResource Theme.Border.Subtle}" BorderThickness="0,0,0,1"
                                     MinHeight="40" SnapsToDevicePixels="True" Cursor="Hand"
                                     MouseLeftButtonUp="PinnedRootRow_Click"
+                                    MouseUp="PinnedRootRow_MiddleClick"
                                     ToolTip="{Binding FullPath}">
                                 <Border.Style>
                                     <Style TargetType="Border">

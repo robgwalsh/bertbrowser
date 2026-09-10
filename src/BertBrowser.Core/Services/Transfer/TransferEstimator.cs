@@ -62,7 +62,11 @@ public static class TransferEstimator
             }
             else
             {
-                if (sizes.File(transfer.SourcePath) is not { } size)
+                // A size the plan already carries is preferred to asking disk for it again: an
+                // expanded merge knows every file's length from the enumeration that found it, and
+                // without this a merge of four thousand files would be four thousand stats on the
+                // enqueue path, in front of the user.
+                if ((transfer.KnownBytes ?? sizes.File(transfer.SourcePath)) is not { } size)
                 {
                     complete = false;
                     continue;

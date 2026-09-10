@@ -44,6 +44,8 @@ MSB3021 because a running BertBrowser locks `bin\Debug`, kill it
 & $harness --script C:\Source\bertbrowser\tools\ui\smoke.bbs          # the canonical pass
 & $harness --script C:\Source\bertbrowser\tools\ui\themes.bbs         # every built-in theme + dialogs
 & $harness --script C:\Source\bertbrowser\tools\ui\system-theme.bbs   # matching the Windows theme
+& $harness --script C:\Source\bertbrowser\tools\ui\transfer.bbs       # the queue, pause, per-item conflicts
+& $harness --script C:\Source\bertbrowser\tools\ui\merge.bbs          # a folder merged into a folder of the same name
 & $harness -c "tree .; refresh; shot check" --out $env:TEMP\look      # ad hoc
 
 # The folder tree keeping its selection through a rebuild. Needs a visible sandbox — see the
@@ -147,6 +149,27 @@ delete | delete-permanent [names]
                             inside an archive, delete rewrites the container without those entries
                             (and Ctrl+Z puts the whole original back); rename does the same for one
 move|copy [names] to <folder>
+conflict <answer>            what the conflict dialog comes back with. skip | replace | keep-both |
+conflict <name>=<answer>,…   overwrite | cancel for every clash, or one answer per name — the case
+                             the single-answer dialog could not express. A run never clicks, so this
+                             answers through the same IConflictPrompt seam the shell asks on.
+                             Defaults to keep-both for everything, which is what every transfer got
+                             before there was a prompt, so scripts that say nothing are unaffected.
+                             A name may be a path relative to the drop (`photos/2024/a.jpg`, either
+                             slash) — after a merge two rows can share a leaf name
+conflict-plan move|copy <names> to <folder>
+                             builds (but does not run) a plan that clashes, for `dialog conflicts`
+                             to photograph — the same arrangement `duplicates` and
+                             `dialog duplicates` use. Expands folder-vs-folder clashes exactly as a
+                             real drop does, so what it photographs is the merge, not one wholesale
+                             row
+pause | resume               hold the transfer queue at its next chunk boundary and let it go again,
+                             through the same commands the buttons are bound to. A paused queue is
+                             treated as settled: IsTransferring stays raised for a pause, so waiting
+                             for it to drop would hang every run that photographs one
+queue-move <from> <to>       reorder a waiting job, 1-indexed over the whole queue. The running job
+queue-cancel <n>             is always first and cannot move or be jumped; cancelling a waiting one
+                             drops it without ever running it
 shortcut [names] to <folder> the right-drag menu's third verb: a .lnk per item, named Explorer's
                             way ("notes.txt - Shortcut.lnk", stepping aside to "(2)"). Goes through
                             the real IShellLink, which is the point — whether a link this app writes
@@ -245,7 +268,16 @@ dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, renam
                             archive-password, elevation, settings-columns, settings-appearance,
                             settings-history,
                             columns, settings-columns-dragging, flat-large, checksum,
-                            checksum-verify, compare-files
+                            checksum-verify, compare-files, transfer, conflicts
+                            (transfer is the queue window — the running job's items on top and
+                            everything waiting underneath. It needs a `progress-demo` first, and
+                            `progress-demo queued` to put jobs behind the running one.
+                            conflicts needs a `conflict-plan` first: it shows what a real move
+                            would clash with, each row carrying its own answer), transfer, conflicts
+                            (transfer is the queue window; it needs a `progress-demo` first, and
+                            `progress-demo queued` to put jobs behind the running one.
+                            conflicts needs a `conflict-plan` first — it shows what a real move
+                            would clash with, each row carrying its own answer)
                             (checksum digests the selection and starts on load, unlike duplicates —
                             the user picked these exact files, so there is no whole-PC surprise to
                             guard against. checksum-verify is the same window pointed at a selected
@@ -325,6 +357,25 @@ assert-columns <id>, <id>, ...            the whole column order, injected ones 
 assert-metadata <row> <canonical> <text>  what a shell-metadata cell actually reads (substring)
 assert-header-menu columns|files          which menu a right-click past the last column opens
 assert-can-undo | assert-cannot-undo | assert-exists <path> | assert-missing <path>
+assert-transfer <substring> | assert-transfer-indeterminate
+                            the running transfer's own strip — its headline and its figures
+assert-queue <n> | assert-paused | assert-not-paused
+                            how many jobs the queue holds, and whether it is held. `state` also
+                            carries queueJobs, queueWaiting, queuePaused and queueKinds
+assert-conflicts <n>        how many times a transfer has had to ask about a clash. Worth having
+                            over checking what landed on disk: a paste onto a taken name used to
+                            ask zero times and quietly number the newcomer, which looks exactly
+                            like keep-both having been chosen
+assert-conflict-rows <n>    how many rows the last question put up — after a `conflict-plan` or a
+                            real transfer. The count is the proof a merged folder is not one row:
+                            2 rows over a folder of a dozen files says the folder itself was
+                            never asked about
+assert-conflict-row <label> a row with that label was offered. Labels are relative to the drop
+                            folder, so `photos/2024/a.jpg`, not `a.jpg`
+assert-conflict-default <label>=<answer>
+                            what a row started on before anybody answered — the one thing a
+                            screenshot cannot prove, and how "an identical file defaults to skip"
+                            is held down
 assert-compare <substring>                the comparison banner's summary
 assert-compare-row <row> <status>         a row's compare state, by the words its Status column
                                           shows. Read off the row, never off a screenshot: the

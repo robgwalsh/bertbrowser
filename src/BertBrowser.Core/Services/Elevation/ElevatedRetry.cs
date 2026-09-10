@@ -178,7 +178,17 @@ public static class ElevatedRetry
         if (completed.Count == 0) return null;
 
         return new TransferUndoRetry(
-            outcome with { Completed = completed, Skipped = [], Failed = [], StagingDirectories = [] },
+            // PrunedDirectories is emptied for the same reason StagingDirectories is: the unelevated
+            // undo has already recreated those folders, and the elevated pass repeating it would be
+            // a second attempt at work that is done.
+            outcome with
+            {
+                Completed = completed,
+                Skipped = [],
+                Failed = [],
+                StagingDirectories = [],
+                PrunedDirectories = [],
+            },
             [.. covers]);
     }
 
@@ -227,7 +237,15 @@ public static class ElevatedRetry
             [.. first.Skipped, .. second.Skipped],
             [.. Survivors(first.Failed, f => f.SourcePath, retry.Covers), .. second.Failed],
             [.. first.StagingDirectories, .. second.StagingDirectories],
-            first.Cancelled || second.Cancelled);
+            first.Cancelled || second.Cancelled)
+        {
+            // Carried across for the reason StagingDirectories is: a record dropped here is a
+            // folder the undo can never put back, and every item that belonged in it would then
+            // fail on the "its original folder is gone" guard. The elevated half never prunes —
+            // its plan carries no list — so in practice this is always the first half's.
+            PrunedDirectories = [.. first.PrunedDirectories, .. second.PrunedDirectories],
+            CanUndoCopy = first.CanUndoCopy || second.CanUndoCopy,
+        };
     }
 
     public static DeleteOutcome Merge(DeleteOutcome first, DeleteRetry retry, DeleteOutcome second)

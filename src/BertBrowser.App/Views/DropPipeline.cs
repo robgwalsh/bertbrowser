@@ -44,8 +44,10 @@ internal sealed class DropPipeline(ShellViewModel shell, Action<string> report)
         e.Handled = true;
         e.Effects = DragDropEffects.None;
 
+        // No longer refused while something is running: a drop made during a transfer joins the
+        // queue behind it, which is the whole point of there being one.
         if (Payload(e) is not { Paths.Length: > 0 } payload || destination is null ||
-            shell.IsTransferring || !DropInContract.CanAccept(Allowed(e)))
+            !DropInContract.CanAccept(Allowed(e)))
         {
             ClearHighlight();
             return;
@@ -252,19 +254,9 @@ internal sealed class DropPipeline(ShellViewModel shell, Action<string> report)
                 return;
             }
 
-            IReadOnlyDictionary<string, ConflictResolution>? resolutions = null;
-            if (plan.Conflicts.Count > 0)
-            {
-                if (ConflictPrompt.Ask(plan) is not { } resolution)
-                {
-                    report("Drop cancelled.");
-                    return;
-                }
-                resolutions = plan.Transfers.ToDictionary(
-                    t => BertBrowser.Core.Paths.PathKey.Canonicalize(t.SourcePath), _ => resolution);
-            }
-
-            await shell.ExecuteDropAsync(plan, resolutions);
+            // Null means "ask": the shell puts the conflict dialog up before it queues anything, so
+            // a paste and a drop reach the same question through the same code.
+            await shell.ExecuteDropAsync(plan, resolutions: null);
         }
         catch (Exception ex)
         {

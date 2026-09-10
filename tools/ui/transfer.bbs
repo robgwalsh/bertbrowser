@@ -1,0 +1,113 @@
+# The transfer queue and the per-item conflict dialog.
+#
+# Two halves, and they need opposite treatment. The queue's surfaces are POSED — a real drain fast
+# enough to be safe here is over before a capture could catch it, and one slow enough to catch would
+# put a throughput figure and a time remaining into every picture. The conflict half is REAL: the
+# plan, the per-path map and the executor all run, and what a run cannot do is click, so the dialog
+# is answered through the scripted prompt instead.
+
+sandbox
+tree .
+refresh
+
+# --- the strip and the window, one transfer, no queue ---
+#
+# A single transfer must look exactly as it did before there was a queue: no "waiting" text, and no
+# Queued list in the window.
+
+progress-demo
+assert-transfer "Copying 2 of 3"
+assert-queue 1
+assert-not-paused
+shot 01-strip-one-transfer
+dialog transfer 02-window-one-transfer
+
+# --- three more behind it ---
+
+progress-demo queued
+assert-queue 4
+shot 03-strip-with-queue
+dialog transfer 04-window-with-queue
+
+# --- paused ---
+#
+# The headline says so, the bar stops animating, and Pause has become Resume. The run is still
+# holding a half-written file open, which is why nothing else in the app may write while it is here.
+
+pause
+assert-paused
+assert-transfer "Paused"
+shot 05-strip-paused
+dialog transfer 06-window-paused
+
+resume
+assert-not-paused
+assert-transfer "Copying"
+
+# --- reordering and cancelling what has not started ---
+#
+# Slot 1 is running and cannot move; the rest can move among themselves.
+
+queue-move 4 2
+assert-queue 4
+queue-cancel 4
+assert-queue 4
+shot 07-queue-reordered
+
+progress-demo off
+assert-queue 0
+
+# --- a real clash, answered per item ---
+#
+# Three files that all already exist at the destination, each given a different answer. This is the
+# case the single-answer dialog could not express, and the reason it now asks per item.
+
+mkdir Archive
+write-text a.txt incoming a
+write-text b.txt incoming b
+write-text c.txt incoming c
+write-text Archive/a.txt existing a
+write-text Archive/b.txt existing b
+write-text Archive/c.txt existing c
+refresh
+
+conflict-plan move a.txt, b.txt, c.txt to Archive
+dialog conflicts 08-conflicts
+
+conflict a.txt=skip, b.txt=replace, c.txt=keep-both
+move a.txt, b.txt, c.txt to Archive
+assert-conflicts 1
+
+# Skipped: both sides untouched, so the source never left.
+assert-exists a.txt
+
+# Replaced: the incoming copy took the name, and Ctrl+Z can still put both sides back.
+assert-missing b.txt
+assert-can-undo
+
+# Kept both: the existing entry was never touched and the newcomer stepped aside.
+assert-missing c.txt
+assert-exists Archive/c (2).txt
+
+# --- cancelling the dialog abandons the whole transfer ---
+
+write-text d.txt incoming d
+write-text Archive/d.txt existing d
+refresh
+
+conflict cancel
+move d.txt to Archive
+assert-conflicts 2
+assert-exists d.txt
+
+# --- and pasting asks, which it never used to ---
+#
+# The comment above PasteAsync always claimed paste went through the same code "which is what gives
+# it conflict handling". It did not: it passed no answers at all and quietly numbered the newcomer.
+
+conflict skip
+move d.txt to Archive
+assert-conflicts 3
+assert-exists d.txt
+
+echo queued, paused, reordered, and answered one clash at a time

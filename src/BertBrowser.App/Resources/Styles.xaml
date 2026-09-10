@@ -51,6 +51,7 @@
     <conv:ColorToBrushConverter x:Key="ColorToBrush"/>
     <conv:EnumEqualsVisibilityConverter x:Key="EnumEqualsVisibility"/>
     <conv:EnumEqualsVisibilityConverter x:Key="EnumNotEqualsVisibility" Invert="True"/>
+    <conv:EnumEqualsBoolConverter x:Key="EnumEqualsBool"/>
 
     <!--
       Icons are drawn outlines in Resources/Icons.xaml, named for the job they do and generated

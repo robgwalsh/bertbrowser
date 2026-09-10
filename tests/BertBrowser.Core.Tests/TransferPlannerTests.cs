@@ -291,6 +291,37 @@ public sealed class TransferPlannerTests
         Assert.True(plan.Transfers[1].Conflicts);
     }
 
+    /// <summary>
+    /// The other half of that case, and the reason it needs naming: nothing is on disk at the
+    /// destination, so asking the filesystem what the second item clashes with answers "missing".
+    /// What the user has to be told is which other item in the same drop they are choosing between.
+    /// </summary>
+    [Fact]
+    public void TheSecondOfTwoSameNamedSources_ClashesWithTheFirst_NotWithTheDisk()
+    {
+        _probe.AddFile(@"C:\one\a.txt");
+        _probe.AddFile(@"C:\two\a.txt");
+        _probe.AddDirectory(@"C:\dest");
+
+        var plan = Plan([@"C:\one\a.txt", @"C:\two\a.txt"], @"C:\dest");
+
+        Assert.Equal(plan.Transfers[0], plan.EarlierClaimantOf(plan.Transfers[1]));
+        Assert.Null(plan.EarlierClaimantOf(plan.Transfers[0]));
+    }
+
+    [Fact]
+    public void AClashWithSomethingAlreadyOnDisk_HasNoEarlierClaimant()
+    {
+        _probe.AddFile(@"C:\src\a.txt");
+        _probe.AddDirectory(@"C:\dest");
+        _probe.AddFile(@"C:\dest\a.txt");
+
+        var plan = Plan([@"C:\src\a.txt"], @"C:\dest");
+
+        Assert.True(plan.Transfers.Single().Conflicts);
+        Assert.Null(plan.EarlierClaimantOf(plan.Transfers.Single()));
+    }
+
     [Fact]
     public void NoExistingName_IsNotAConflict()
     {

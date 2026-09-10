@@ -37,6 +37,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private readonly IMftIndexService _mftIndex;
     private readonly AppSettings _settings;
     private readonly TransferPlanner _transferPlanner;
+    private readonly TransferMergeExpander _mergeExpander;
     private readonly TransferExecutor _transferExecutor;
     private readonly RenamePlanner _renamePlanner;
     private readonly RenameExecutor _renameExecutor;
@@ -82,7 +83,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private void ToggleDrivesViewMode() =>
         DrivesViewMode = DrivesViewMode == DrivesViewMode.Tree ? DrivesViewMode.Cards : DrivesViewMode.Tree;
 
-    /// <summary>Whether Cards view opens a drive/device in a new panel instead of a new tab.
+    /// <summary>Whether middle-clicking a drive/device opens a new panel instead of a new tab.
     /// Mirrors <see cref="AppSettings.DrivesOpenTarget"/>; set from the Settings dialog.</summary>
     [ObservableProperty]
     private bool _openDrivesInNewPanel;
@@ -356,6 +357,11 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// run can record it instead of putting a modal on a window nobody is watching.</summary>
     private readonly IUserNotice _notice;
 
+    /// <summary>How the shell asks what to do about names that are already taken. Injected for the
+    /// same reason <see cref="IUserNotice"/> is: a scripted run answers without a window, and every
+    /// way of transferring — a drop, a paste, the right-drag verbs — reaches the one dialog.</summary>
+    private readonly IConflictPrompt _conflictPrompt;
+
     /// <summary>Sequencing only: every byte goes through the transfer executor and every removal
     /// through the delete executor, so a sync inherits all of their guarantees unchanged.</summary>
     private readonly SyncRunner _syncRunner;
@@ -376,6 +382,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         IMftIndexService mftIndex,
         DirSizeRepository dirSizes,
         TransferPlanner transferPlanner,
+        TransferMergeExpander mergeExpander,
         TransferExecutor transferExecutor,
         RenamePlanner renamePlanner,
         RenameExecutor renameExecutor,
@@ -400,13 +407,15 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         IFileContentComparer contentComparer,
         ShortcutPlanner shortcutPlanner,
         ShortcutExecutor shortcutExecutor,
-        IUserNotice notice)
+        IUserNotice notice,
+        IConflictPrompt conflictPrompt)
     {
         _shortcutPlanner = shortcutPlanner;
         _shortcutExecutor = shortcutExecutor;
         _folderCompare = folderCompare;
         _contentComparer = contentComparer;
         _notice = notice;
+        _conflictPrompt = conflictPrompt;
         _syncRunner = new SyncRunner(transferExecutor, deleteExecutor);
         _elevation = elevation;
         _elevationPrompt = elevationPrompt;
@@ -421,6 +430,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         _searchService = searchService;
         _mftIndex = mftIndex;
         _transferPlanner = transferPlanner;
+        _mergeExpander = mergeExpander;
         _transferExecutor = transferExecutor;
         _renamePlanner = renamePlanner;
         _renameExecutor = renameExecutor;
@@ -692,6 +702,29 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         PaneFocusRequested?.Invoke(created);
     }
 
+    /// <summary>Pulls one tab out of <paramref name="source"/> into a brand-new pane beside it,
+    /// carrying the actual tab object across — not a clone — so its history and scroll position
+    /// survive the move. Emptying the source this way closes it, exactly as <see cref="ClosePane"/>
+    /// would for its last tab.</summary>
+    public void MoveTabToNewPane(PaneViewModel source, DirectoryTabViewModel tab, SplitOrientation orientation)
+    {
+        if (!source.Tabs.Contains(tab)) return;
+        if (LayoutTree.FindLeaf(Layout, source) is not { } leaf) return;
+
+        source.DetachTab(tab);
+
+        var created = new PaneViewModel(_factory, this);
+        created.AdoptTab(tab);
+
+        Layout = LayoutTree.Split(Layout, leaf, orientation, created, out _);
+        LayoutChanged?.Invoke();
+        ActivatePane(created);
+        PaneFocusRequested?.Invoke(created);
+
+        if (source.Tabs.Count == 0)
+            ClosePane(source);
+    }
+
     public void ClosePane(PaneViewModel pane)
     {
         if (LayoutTree.FindLeaf(Layout, pane) is not { } leaf) return;
@@ -749,12 +782,29 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         SplitPane(ActivePane, orientation, path);
     }
 
-    /// <summary>Opens a drive/device card from the Cards view of the sidebar. A drive goes to a new
-    /// tab or a new panel per <see cref="OpenDrivesInNewPanel"/>, activated immediately — unlike the
-    /// tree's own "open in new tab" context menu item, clicking a card is the whole point of the
-    /// click, not a background prefetch. A portable device has no navigable path, so it opens in
-    /// Explorer instead, matching the tree's double-click behavior.</summary>
+    /// <summary>Opens a drive/device card from the Cards view of the sidebar, in a new tab,
+    /// activated immediately — unlike the tree's own "open in new tab" context menu item, clicking
+    /// a card is the whole point of the click, not a background prefetch. A portable device has no
+    /// navigable path, so it opens in Explorer instead, matching the tree's double-click behavior.
+    /// Middle-clicking a drive/device anywhere in the sidebar is the separate, configurable gesture
+    /// — see <see cref="MiddleClickDriveOrDevice"/>.</summary>
     public void OpenDriveOrDevice(ISidebarNode node)
+    {
+        if (node is PortableDeviceNodeViewModel device)
+        {
+            OpenPortableDevice(device.Device);
+            return;
+        }
+
+        if (node is DirectoryNodeViewModel dir)
+            OpenInNewTab(dir.FullPath, activate: true);
+    }
+
+    /// <summary>Middle-clicking a drive/device — its card, its ordinary tree row, or its pinned
+    /// header — opens it in a new tab or a new panel per <see cref="OpenDrivesInNewPanel"/>. A
+    /// portable device has no navigable path, so it opens in Explorer instead, same as a plain
+    /// click.</summary>
+    public void MiddleClickDriveOrDevice(ISidebarNode node)
     {
         if (node is PortableDeviceNodeViewModel device)
         {
@@ -1839,7 +1889,17 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// </summary>
     private SyncOutcome? _undoableSync;
 
-    /// <summary>True while a drop is being carried out; blocks a second one from overlapping it.</summary>
+    /// <summary>
+    /// True while this app is writing — a drop, a rename, a delete, an extract, a sync, an undo.
+    /// One flag over all of them, so two can never overlap and Ctrl+Z can never reach the previous
+    /// operation's record part-way through the next one.
+    /// </summary>
+    /// <remarks>
+    /// <b>The queue holds it for its whole drain</b>, not one job at a time. Releasing it between
+    /// jobs would let a rename slip into the gap and take the undo slot out from under a queue the
+    /// user is still watching — and the harness's quiescence check, which reads this, would call a
+    /// six-job drain finished five times over.
+    /// </remarks>
     [ObservableProperty]
     private bool _isTransferring;
 
@@ -1855,8 +1915,128 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     [ObservableProperty]
     private TransferProgressViewModel? _transferProgress;
 
+    /// <summary>
+    /// Every long write this app is doing or about to do. Always present — an empty queue is the
+    /// resting state, not the absence of one — so the strip and the window can bind to it once.
+    /// </summary>
+    public TransferQueueViewModel TransferQueue { get; } = new();
+
+    /// <summary>True while <see cref="DrainQueueAsync"/> is working through the queue. Distinct from
+    /// <see cref="IsTransferring"/>, which a sync or a delete also raises without queueing.</summary>
+    private bool _draining;
+
+    /// <summary>Keeps the queue pointed at whichever surface is current, including the ones that
+    /// never go through it — a sync sets this too, and the queue has to know that is not its job to
+    /// pause.</summary>
+    partial void OnTransferProgressChanged(TransferProgressViewModel? value)
+    {
+        TransferQueue.Running = value;
+        TransferQueue.Refresh();
+    }
+
+    /// <summary>
+    /// Puts one long write in the queue and hands back what it eventually produced.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The caller awaits its own outcome exactly as it did before there was a queue — which is what
+    /// lets a paste still decide whether to clear the clipboard, and the harness still assert on a
+    /// move it drove.
+    /// </para>
+    /// <para>
+    /// <b>An unqueued write still refuses.</b> A sync, a delete or a rename holds
+    /// <see cref="IsTransferring"/> without going through here, and there is no second lock to make
+    /// the queue wait on one; so an enqueue arriving under one of those is turned down — with a
+    /// status line, which is already better than the silence it used to get.
+    /// </para>
+    /// </remarks>
+    private async Task<T?> EnqueueAsync<T>(
+        string kind,
+        string description,
+        int items,
+        TransferEstimate? estimate,
+        Func<PauseGate, CancellationTokenSource, Task<T?>> body)
+        where T : class
+    {
+        if (IsTransferring && !_draining)
+        {
+            SetStatus($"Busy — try {kind.ToLowerInvariant()} again once the current operation finishes.");
+            return null;
+        }
+
+        var job = TransferQueue.Add(
+            kind, description, items, estimate,
+            async (gate, cancellation) => await body(gate, cancellation));
+
+        StartDraining();
+        return (T?)await job.Completion.Task;
+    }
+
+    private void StartDraining()
+    {
+        if (_draining) return;
+
+        _draining = true;
+        IsTransferring = true;
+        UndoCommand.NotifyCanExecuteChanged();
+        _ = DrainQueueAsync();
+    }
+
+    /// <summary>
+    /// Runs the queue down, one job at a time, on the UI thread's turn — every job body already
+    /// does its own work on a background thread and comes back here.
+    /// </summary>
+    /// <remarks>
+    /// A job that throws faults only its own caller: the queue carries on, the same way one item's
+    /// failure never affects the others inside a single transfer.
+    /// </remarks>
+    private async Task DrainQueueAsync()
+    {
+        try
+        {
+            while (TransferQueue.NextWaiting() is { } job)
+            {
+                job.State = QueuedJobState.Running;
+                TransferQueue.Refresh();
+
+                try
+                {
+                    var result = await job.Body(TransferQueue.Gate, job.Cancellation);
+                    job.State = job.Cancellation.IsCancellationRequested
+                        ? QueuedJobState.Cancelled
+                        : QueuedJobState.Done;
+                    job.Completion.TrySetResult(result);
+                }
+                catch (Exception ex)
+                {
+                    job.State = QueuedJobState.Cancelled;
+                    job.Completion.TrySetException(ex);
+                }
+                finally
+                {
+                    TransferProgress = null;
+                    job.Cancellation.Dispose();
+                    TransferQueue.Refresh();
+                }
+            }
+        }
+        finally
+        {
+            _draining = false;
+
+            // Never leave the gate shut behind us: the next drain would start held, with nothing on
+            // screen offering to release it.
+            TransferQueue.Gate.Resume();
+            TransferQueue.Clear();
+
+            IsTransferring = false;
+            UndoCommand.NotifyCanExecuteChanged();
+        }
+    }
+
     public bool CanUndo =>
-        (_undoableTransfer?.CanUndo == true || _undoableRename?.CanUndo == true ||
+        (_undoableTransfer?.CanUndo == true || _undoableTransfer?.CanUndoCopy == true ||
+            _undoableRename?.CanUndo == true ||
             _undoableDelete?.CanUndo == true || _undoableArchiveEdit?.CanUndo == true ||
             _undoableSync?.CanUndo == true)
         && !IsTransferring;
@@ -1870,59 +2050,115 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     public TransferPlan PlanDrop(IReadOnlyList<string> sources, string destination, TransferVerb verb) =>
         _transferPlanner.Plan(sources, destination, verb);
 
-    /// <summary>Carries out a planned drop off the UI thread, then refreshes the tree nodes and
-    /// every open tab on both sides of the transfer.</summary>
-    /// <returns>What happened, or null when the drop was refused before it began — another
-    /// transfer already running, or a plan with nothing in it.</returns>
+    /// <summary>
+    /// Queues a planned drop, then refreshes the tree nodes and every open tab on both sides of the
+    /// transfer once it has run.
+    /// </summary>
+    /// <param name="resolutions">How to settle any clashes, keyed by canonical source path. Null
+    /// means <em>ask</em>: a plan with conflicts and no answers puts the conflict dialog up before
+    /// anything is queued. Pass an empty dictionary to mean "no clash needs an answer".</param>
+    /// <returns>What happened, or null when the drop was refused before it began — a plan with
+    /// nothing in it, an unqueueable moment, or a conflict dialog the user cancelled.</returns>
+    /// <remarks>
+    /// The conflict question is asked <b>at enqueue time</b>, not when the job starts. The user is
+    /// here now, and the two sides they are being asked to compare are the ones they can still see;
+    /// asking twenty minutes later, when the queue reaches this job, would be a dialog appearing
+    /// over whatever they had moved on to.
+    /// </remarks>
     public async Task<TransferOutcome?> ExecuteDropAsync(
         TransferPlan plan, IReadOnlyDictionary<string, ConflictResolution>? resolutions)
     {
-        if (IsTransferring || !plan.HasWork) return null;
+        if (!plan.HasWork) return null;
 
-        IsTransferring = true;
-        UndoCommand.NotifyCanExecuteChanged();
-
-        var cancellation = new CancellationTokenSource();
-        try
+        if (resolutions is null && plan.Conflicts.Count > 0)
         {
-            // The byte total is a lookup, not a walk: dir_size_cache already holds the recursive
-            // size of every directory on an indexed volume. Where it does not, the estimate comes
-            // back incomplete and the surfaces show throughput without a percentage or an ETA.
-            var estimate = await Task.Run(
-                () => TransferEstimator.Estimate(plan, IndexedTransferSizeSource.For(plan, _dirSizes)));
+            var into = Path.GetFileName(plan.DestinationDirectory) is { Length: > 0 } destinationName
+                ? destinationName
+                : plan.DestinationDirectory;
+            SetStatus($"Checking what is already in {into}…");
 
-            var surface = new TransferProgressViewModel(plan, estimate, cancellation.Cancel);
-            TransferProgress = surface;
-            SetStatus(surface.Headline);
+            // A folder landing on a folder of the same name is merged, so the question becomes the
+            // items inside it that really clash rather than the folder as a whole. Off the UI
+            // thread, because it opens directories — and never inside TransferPlanner.Plan, which
+            // DropPipeline.IsAllowed runs on every drag-over.
+            plan = await Task.Run(() => _mergeExpander.Expand(plan));
 
-            // Constructed here so it captures the UI dispatcher: the handler then touches the view
-            // model directly from the executor's background thread.
-            var progress = new Progress<TransferProgress>(surface.Apply);
-
-            var (outcome, elevated) = await ElevateIfRefusedAsync(
-                plan,
-                await Task.Run(
-                    () => _transferExecutor.Execute(plan, resolutions, cancellation.Token, progress)),
-                resolutions);
-
-            RetireUndoable();
-            if (outcome.CanUndo)
+            if (!plan.HasWork)
             {
-                _undoableTransfer = outcome;
-                UndoDescription = $"Ctrl+Z: undo move of {outcome.Completed.Count:N0} item(s)";
+                SetStatus($"Nothing to {(plan.Verb == TransferVerb.Move ? "move" : "copy")}.");
+                return null;
             }
 
-            await RefreshAfterTransferAsync(plan, outcome);
-            SetStatus(DescribeOutcome(plan, outcome) + elevated);
-            return outcome;
+            // A merge whose descendants do not clash asks nothing at all, which is the point of it.
+            if (plan.Conflicts.Count > 0)
+            {
+                resolutions = _conflictPrompt.Ask(plan);
+                if (resolutions is null)
+                {
+                    SetStatus("Cancelled — nothing was moved.");
+                    return null;
+                }
+            }
         }
-        finally
+
+        // The byte total is a lookup, not a walk: dir_size_cache already holds the recursive size
+        // of every directory on an indexed volume. Where it does not, the estimate comes back
+        // incomplete and the surfaces show throughput without a percentage or an ETA. Done before
+        // the job is queued so its row can show a size while it waits.
+        var estimate = await Task.Run(
+            () => TransferEstimator.Estimate(plan, IndexedTransferSizeSource.For(plan, _dirSizes)));
+
+        var verb = plan.Verb == TransferVerb.Move ? "Move" : "Copy";
+        var where = Path.GetFileName(plan.DestinationDirectory) is { Length: > 0 } folder
+            ? folder
+            : plan.DestinationDirectory;
+
+        return await EnqueueAsync<TransferOutcome>(
+            verb,
+            $"{plan.Transfers.Count:N0} item(s) to {where}",
+            plan.Transfers.Count,
+            estimate,
+            (gate, cancellation) => RunDropAsync(plan, resolutions, estimate, gate, cancellation));
+    }
+
+    private async Task<TransferOutcome?> RunDropAsync(
+        TransferPlan plan,
+        IReadOnlyDictionary<string, ConflictResolution>? resolutions,
+        TransferEstimate estimate,
+        PauseGate gate,
+        CancellationTokenSource cancellation)
+    {
+        var surface = new TransferProgressViewModel(plan, estimate, cancellation.Cancel);
+        TransferProgress = surface;
+        SetStatus(surface.Headline);
+
+        // Constructed here so it captures the UI dispatcher: the handler then touches the view
+        // model directly from the executor's background thread.
+        var progress = new Progress<TransferProgress>(surface.Apply);
+
+        var (outcome, elevated) = await ElevateIfRefusedAsync(
+            plan,
+            await Task.Run(
+                () => _transferExecutor.Execute(plan, resolutions, cancellation.Token, progress, gate)),
+            resolutions);
+
+        // A merged paste may have replaced files, which it did by staging what it displaced rather
+        // than destroying it. That only stays true while somebody holds the record — which is the
+        // undertaking ConflictResolution.Overwrite was written under, and this is where it is made.
+        if (plan.IsMerged && plan.Verb == TransferVerb.Copy && outcome.Completed.Count > 0)
+            outcome = outcome with { CanUndoCopy = true };
+
+        RetireUndoable();
+        if (outcome.CanUndo || outcome.CanUndoCopy)
         {
-            TransferProgress = null;
-            cancellation.Dispose();
-            IsTransferring = false;
-            UndoCommand.NotifyCanExecuteChanged();
+            _undoableTransfer = outcome;
+            var verbed = outcome.Verb == TransferVerb.Move ? "move" : "paste";
+            UndoDescription = $"Ctrl+Z: undo {verbed} of {outcome.Completed.Count:N0} item(s)";
         }
+
+        await RefreshAfterTransferAsync(plan, outcome);
+        SetStatus(DescribeOutcome(plan, outcome) + elevated);
+        return outcome;
     }
 
     // --- Syncing two folders ---
@@ -2294,51 +2530,56 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// </remarks>
     public async Task<ExtractOutcome?> ExecuteExtractAsync(ExtractPlan plan)
     {
-        if (IsTransferring || !plan.HasWork) return null;
+        if (!plan.HasWork) return null;
 
-        IsTransferring = true;
-        UndoCommand.NotifyCanExecuteChanged();
+        var files = plan.Items.Where(i => !i.IsDirectory).ToList();
 
-        var cancellation = new CancellationTokenSource();
-        try
-        {
-            var files = plan.Items.Where(i => !i.IsDirectory).ToList();
+        // Exact for an addressable container, because the uncompressed lengths were already in its
+        // directory — better than the filesystem case. A sequential one reports a floor, and the
+        // bar goes indeterminate rather than lying about a percentage.
+        var estimate = new TransferEstimate(plan.TotalBytes, files.Count, plan.BytesAreExact);
 
-            var synthetic = new TransferPlan(
-                TransferVerb.Copy,
-                plan.DestinationDirectory,
-                files.Select(f => new PlannedTransfer(
-                    f.EntryPath, IsDirectory: false, f.DestinationPath, Conflicts: false)).ToList(),
-                []);
+        var where = Path.GetFileName(plan.DestinationDirectory) is { Length: > 0 } folder
+            ? folder
+            : plan.DestinationDirectory;
 
-            // Exact for an addressable container, because the uncompressed lengths were already in
-            // its directory — better than the filesystem case. A sequential one reports a floor,
-            // and the bar goes indeterminate rather than lying about a percentage.
-            var estimate = new TransferEstimate(plan.TotalBytes, files.Count, plan.BytesAreExact);
+        return await EnqueueAsync<ExtractOutcome>(
+            "Extract",
+            $"{files.Count:N0} item(s) to {where}",
+            files.Count,
+            estimate,
+            (gate, cancellation) => RunExtractAsync(plan, files, estimate, gate, cancellation));
+    }
 
-            var surface = new TransferProgressViewModel(synthetic, estimate, cancellation.Cancel);
-            surface.Headline = $"Extracting {files.Count:N0} item(s)…";
-            TransferProgress = surface;
-            SetStatus(surface.Headline);
+    private async Task<ExtractOutcome?> RunExtractAsync(
+        ExtractPlan plan,
+        IReadOnlyList<PlannedExtraction> files,
+        TransferEstimate estimate,
+        PauseGate gate,
+        CancellationTokenSource cancellation)
+    {
+        var synthetic = new TransferPlan(
+            TransferVerb.Copy,
+            plan.DestinationDirectory,
+            files.Select(f => new PlannedTransfer(
+                f.EntryPath, IsDirectory: false, f.DestinationPath, Conflicts: false)).ToList(),
+            []);
 
-            var progress = new Progress<TransferProgress>(surface.Apply);
-            var password = _archivePasswords.For(plan.ArchiveFile);
+        var surface = new TransferProgressViewModel(synthetic, estimate, cancellation.Cancel);
+        surface.Headline = $"Extracting {files.Count:N0} item(s)…";
+        TransferProgress = surface;
+        SetStatus(surface.Headline);
 
-            var outcome = await Task.Run(
-                () => _extractExecutor.Execute(plan, password, cancellation.Token, progress));
+        var progress = new Progress<TransferProgress>(surface.Apply);
+        var password = _archivePasswords.For(plan.ArchiveFile);
 
-            await RefreshTabsShowingAsync([plan.DestinationDirectory]);
-            await Tree.RefreshDirectoriesAsync([plan.DestinationDirectory]);
-            SetStatus(DescribeExtract(outcome));
-            return outcome;
-        }
-        finally
-        {
-            TransferProgress = null;
-            cancellation.Dispose();
-            IsTransferring = false;
-            UndoCommand.NotifyCanExecuteChanged();
-        }
+        var outcome = await Task.Run(
+            () => _extractExecutor.Execute(plan, password, cancellation.Token, progress, gate));
+
+        await RefreshTabsShowingAsync([plan.DestinationDirectory]);
+        await Tree.RefreshDirectoriesAsync([plan.DestinationDirectory]);
+        SetStatus(DescribeExtract(outcome));
+        return outcome;
     }
 
     // --- Creating ---
@@ -2357,62 +2598,72 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         ArchiveWriteFormat format,
         CompressionLevel level)
     {
-        if (IsTransferring || sources.Count == 0) return null;
+        if (sources.Count == 0) return null;
 
-        IsTransferring = true;
-        UndoCommand.NotifyCanExecuteChanged();
+        // Alone among the four, this one cannot say what it will write until it runs: the byte
+        // total comes from walking the sources, and that walk is the first half of the job. The row
+        // shows an item count and a blank size until then, never a zero.
+        return await EnqueueAsync<CreateArchiveOutcome>(
+            "Compress",
+            Path.GetFileName(archivePath),
+            sources.Count,
+            estimate: null,
+            (gate, cancellation) =>
+                RunCreateArchiveAsync(sources, archivePath, format, level, gate, cancellation));
+    }
 
-        var cancellation = new CancellationTokenSource();
-        try
+    private async Task<CreateArchiveOutcome?> RunCreateArchiveAsync(
+        IReadOnlyList<string> sources,
+        string archivePath,
+        ArchiveWriteFormat format,
+        CompressionLevel level,
+        PauseGate gate,
+        CancellationTokenSource cancellation)
+    {
+        var collected = await Task.Run(
+            () => ArchiveSourceWalk.Collect(sources, _settings.ShowHiddenItems, cancellation.Token));
+
+        if (collected.Count == 0)
         {
-            var collected = await Task.Run(
-                () => ArchiveSourceWalk.Collect(sources, _settings.ShowHiddenItems, cancellation.Token));
-
-            if (collected.Count == 0)
-            {
-                SetStatus("There is nothing to compress.");
-                return null;
-            }
-
-            var synthetic = new TransferPlan(
-                TransferVerb.Copy,
-                Path.GetDirectoryName(archivePath) ?? "",
-                collected.Select(s => new PlannedTransfer(
-                    s.Path, IsDirectory: false, archivePath, Conflicts: false)).ToList(),
-                []);
-
-            var estimate = new TransferEstimate(
-                collected.Sum(s => s.SizeBytes), collected.Count, Complete: true);
-
-            var surface = new TransferProgressViewModel(synthetic, estimate, cancellation.Cancel);
-            surface.Headline = $"Compressing {collected.Count:N0} item(s)…";
-            TransferProgress = surface;
-            SetStatus(surface.Headline);
-
-            var progress = new Progress<TransferProgress>(surface.Apply);
-
-            var outcome = await Task.Run(() => _archiveCreator.Create(
-                archivePath, format, level, collected, cancellation.Token, progress));
-
-            var folder = Path.GetDirectoryName(archivePath);
-            if (folder is { Length: > 0 })
-            {
-                await RefreshTabsShowingAsync([folder]);
-                await Tree.RefreshDirectoriesAsync([folder]);
-            }
-
-            SetStatus(outcome.Cancelled
-                ? "Compress cancelled — nothing was written."
-                : $"{Path.GetFileName(archivePath)} created from {outcome.FilesWritten:N0} file(s).");
-            return outcome;
+            SetStatus("There is nothing to compress.");
+            return null;
         }
-        finally
+
+        var synthetic = new TransferPlan(
+            TransferVerb.Copy,
+            Path.GetDirectoryName(archivePath) ?? "",
+            collected.Select(s => new PlannedTransfer(
+                s.Path, IsDirectory: false, archivePath, Conflicts: false)).ToList(),
+            []);
+
+        var estimate = new TransferEstimate(
+            collected.Sum(s => s.SizeBytes), collected.Count, Complete: true);
+
+        // Now that the walk has answered, the queue row can carry a size like every other.
+        if (TransferQueue.Jobs.FirstOrDefault(j => j.State == QueuedJobState.Running) is { } row)
+            row.Estimate = estimate;
+
+        var surface = new TransferProgressViewModel(synthetic, estimate, cancellation.Cancel);
+        surface.Headline = $"Compressing {collected.Count:N0} item(s)…";
+        TransferProgress = surface;
+        SetStatus(surface.Headline);
+
+        var progress = new Progress<TransferProgress>(surface.Apply);
+
+        var outcome = await Task.Run(() => _archiveCreator.Create(
+            archivePath, format, level, collected, cancellation.Token, progress, gate));
+
+        var folder = Path.GetDirectoryName(archivePath);
+        if (folder is { Length: > 0 })
         {
-            TransferProgress = null;
-            cancellation.Dispose();
-            IsTransferring = false;
-            UndoCommand.NotifyCanExecuteChanged();
+            await RefreshTabsShowingAsync([folder]);
+            await Tree.RefreshDirectoriesAsync([folder]);
         }
+
+        SetStatus(outcome.Cancelled
+            ? "Compress cancelled — nothing was written."
+            : $"{Path.GetFileName(archivePath)} created from {outcome.FilesWritten:N0} file(s).");
+        return outcome;
     }
 
     // --- Editing a container ---
@@ -2477,63 +2728,63 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// </remarks>
     public async Task<ArchiveEditOutcome?> ExecuteArchiveEditAsync(ArchiveEditPlan plan)
     {
-        if (IsTransferring || !plan.HasWork) return null;
+        if (!plan.HasWork) return null;
 
-        IsTransferring = true;
-        UndoCommand.NotifyCanExecuteChanged();
+        // The whole container is rewritten however small the change, so the bar measures the
+        // archive rather than the edit — which is the honest figure and the surprising one.
+        var estimate = new TransferEstimate(plan.RewriteBytes, 1, Complete: true);
 
-        var cancellation = new CancellationTokenSource();
-        try
+        return await EnqueueAsync<ArchiveEditOutcome>(
+            "Archive edit",
+            Path.GetFileName(plan.ArchiveFile),
+            items: 1,
+            estimate,
+            (gate, cancellation) => RunArchiveEditAsync(plan, estimate, gate, cancellation));
+    }
+
+    private async Task<ArchiveEditOutcome?> RunArchiveEditAsync(
+        ArchiveEditPlan plan,
+        TransferEstimate estimate,
+        PauseGate gate,
+        CancellationTokenSource cancellation)
+    {
+        var name = Path.GetFileName(plan.ArchiveFile);
+
+        var synthetic = new TransferPlan(
+            TransferVerb.Copy, Path.GetDirectoryName(plan.ArchiveFile) ?? "",
+            [new PlannedTransfer(plan.ArchiveFile, false, plan.ArchiveFile, false)], []);
+
+        var surface = new TransferProgressViewModel(synthetic, estimate, cancellation.Cancel);
+        surface.Headline = $"Rewriting {name}…";
+        TransferProgress = surface;
+        SetStatus(surface.Headline);
+
+        var progress = new Progress<TransferProgress>(surface.Apply);
+        var outcome = await Task.Run(
+            () => _archiveEditExecutor.Execute(plan, cancellation.Token, progress, gate));
+
+        RetireUndoable();
+        if (outcome.CanUndo)
         {
-            var name = Path.GetFileName(plan.ArchiveFile);
-
-            var synthetic = new TransferPlan(
-                TransferVerb.Copy, Path.GetDirectoryName(plan.ArchiveFile) ?? "",
-                [new PlannedTransfer(plan.ArchiveFile, false, plan.ArchiveFile, false)], []);
-
-            // The whole container is rewritten however small the change, so the bar measures the
-            // archive rather than the edit — which is the honest figure and the surprising one.
-            var estimate = new TransferEstimate(plan.RewriteBytes, 1, Complete: true);
-
-            var surface = new TransferProgressViewModel(synthetic, estimate, cancellation.Cancel);
-            surface.Headline = $"Rewriting {name}…";
-            TransferProgress = surface;
-            SetStatus(surface.Headline);
-
-            var progress = new Progress<TransferProgress>(surface.Apply);
-            var outcome = await Task.Run(
-                () => _archiveEditExecutor.Execute(plan, cancellation.Token, progress));
-
-            RetireUndoable();
-            if (outcome.CanUndo)
-            {
-                _undoableArchiveEdit = outcome;
-                UndoDescription = $"Ctrl+Z: undo changes to {name}";
-            }
-
-            var folder = Path.GetDirectoryName(plan.ArchiveFile);
-            if (folder is { Length: > 0 })
-            {
-                await Tree.RefreshDirectoriesAsync([folder]);
-                await RefreshTabsShowingAsync([folder]);
-            }
-            await RefreshTabsUnderAsync(plan.ArchiveFile);
-
-            SetStatus(outcome switch
-            {
-                { Cancelled: true } => $"{name} was left unchanged.",
-                { Failure: { } failure } => failure,
-                _ => $"{name} updated.",
-            });
-            return outcome;
+            _undoableArchiveEdit = outcome;
+            UndoDescription = $"Ctrl+Z: undo changes to {name}";
         }
-        finally
+
+        var folder = Path.GetDirectoryName(plan.ArchiveFile);
+        if (folder is { Length: > 0 })
         {
-            TransferProgress = null;
-            cancellation.Dispose();
-            IsTransferring = false;
-            UndoCommand.NotifyCanExecuteChanged();
+            await Tree.RefreshDirectoriesAsync([folder]);
+            await RefreshTabsShowingAsync([folder]);
         }
+        await RefreshTabsUnderAsync(plan.ArchiveFile);
+
+        SetStatus(outcome switch
+        {
+            { Cancelled: true } => $"{name} was left unchanged.",
+            { Failure: { } failure } => failure,
+            _ => $"{name} updated.",
+        });
+        return outcome;
     }
 
     /// <summary>
@@ -2644,8 +2895,24 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         try
         {
             SetStatus("Undoing…");
-            var (result, elevated) = await ElevateIfRefusedAsync(
-                outcome, await Task.Run(() => _transferExecutor.Undo(outcome)));
+
+            // A copy is reversed by removing what it wrote, and it is never retried elevated.
+            // ElevationHost.UndoTransfer hardcodes TransferVerb.Move and calls Undo, so handed a
+            // copy's outcome it would move the pasted files back into the folder they came from
+            // instead of deleting them — corrupting both sides. An elevated copy-undo would need
+            // its own operation over the pipe, and there is not one.
+            var isCopy = outcome.Verb == TransferVerb.Copy;
+            TransferUndoResult result;
+            var elevated = "";
+            if (isCopy)
+            {
+                result = await Task.Run(() => _transferExecutor.UndoCopies(outcome));
+            }
+            else
+            {
+                (result, elevated) = await ElevateIfRefusedAsync(
+                    outcome, await Task.Run(() => _transferExecutor.Undo(outcome)));
+            }
 
             // The record is spent either way: a partial undo must not be replayed.
             _undoableTransfer = null;
@@ -2659,9 +2926,11 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             await Tree.RefreshDirectoriesAsync(directories);
             await RefreshTabsShowingAsync(directories);
 
+            // A copy removed what it wrote; "put back" would describe the wrong direction.
+            var did = isCopy ? "removed" : "put back";
             SetStatus((result.Failed.Count == 0
-                ? $"Undone — {result.Restored:N0} item(s) put back"
-                : $"Put back {result.Restored:N0} item(s); {result.Failed.Count:N0} could not be restored — {result.Failed[0].Message}") + elevated);
+                ? $"Undone — {result.Restored:N0} item(s) {did}"
+                : $"{(isCopy ? "Removed" : "Put back")} {result.Restored:N0} item(s); {result.Failed.Count:N0} could not be — {result.Failed[0].Message}") + elevated);
         }
         finally
         {
@@ -2698,10 +2967,15 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
     private async Task RefreshAfterTransferAsync(TransferPlan plan, TransferOutcome outcome)
     {
+        // Distinct, because a merged transfer's five thousand items come from a handful of folders
+        // and refreshing one of them five thousand times is five thousand listings. The pruned
+        // folders' parents are here too, or the source tab keeps showing a folder that has gone.
         var directories = outcome.Completed
             .Select(c => Path.GetDirectoryName(c.SourcePath))
+            .Concat(outcome.PrunedDirectories.Select(Path.GetDirectoryName))
             .Append(plan.DestinationDirectory)
             .OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         await Tree.RefreshDirectoriesAsync(directories);
         await RefreshTabsShowingAsync(directories);
@@ -2718,7 +2992,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             : $"{verb} {outcome.Completed.Count:N0} item(s)";
         if (outcome.Skipped.Count > 0) text += $", skipped {outcome.Skipped.Count:N0}";
         if (outcome.Failed.Count > 0) text += $", {outcome.Failed.Count:N0} failed — {outcome.Failed[0].Message}";
-        else if (outcome.CanUndo) text += " — Ctrl+Z to undo";
+        else if (outcome.CanUndo || outcome.CanUndoCopy) text += " — Ctrl+Z to undo";
         return text;
     }
 

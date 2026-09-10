@@ -179,6 +179,7 @@ public partial class MainWindow : ThemedWindow
             // refreshes the list and re-filters bookmarks. (Custom-command menus rebuild on every
             // open, so they need no refresh.)
             _shell.ShowHiddenItems = _settings.ShowHiddenItems;
+            _shell.OpenDrivesInNewPanel = _settings.DrivesOpenTarget == BertBrowser.App.Services.DrivesOpenTarget.NewPanel;
             _shell.RefreshTileAspect();
             // Reaches every tab that has not arranged its own columns. Without this the Columns page
             // would appear to do nothing until a new tab was opened.
@@ -206,7 +207,7 @@ public partial class MainWindow : ThemedWindow
             return;
         }
 
-        _transferDetails = TransferProgressWindow.Show(this, progress);
+        _transferDetails = TransferProgressWindow.Show(this, _shell.TransferQueue);
         _transferDetails.Closed += (_, _) => _transferDetails = null;
     }
 
@@ -927,6 +928,18 @@ public partial class MainWindow : ThemedWindow
         }, DispatcherPriority.Loaded);
     }
 
+    /// <summary>Middle-clicking the pinned drive/device header opens that drive/device in a new
+    /// tab or a new pane per <see cref="ShellViewModel.MiddleClickDriveOrDevice"/>, same as its
+    /// card in Cards view and its ordinary row in Tree view — left-click here stays the
+    /// collapse/scroll-up gesture in <see cref="PinnedRootRow_Click"/>.</summary>
+    private void PinnedRootRow_MiddleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Middle) return;
+        if (PinnedRootRow.DataContext is not ISidebarNode node) return;
+        _shell.MiddleClickDriveOrDevice(node);
+        e.Handled = true;
+    }
+
     /// <summary>Scrolls the tree so the chain's node sits flush at the top of the viewport.</summary>
     private void ScrollTreeChainToTop(IReadOnlyList<DirectoryNodeViewModel> chain)
     {
@@ -1130,12 +1143,16 @@ public partial class MainWindow : ThemedWindow
     }
 
     /// <summary>Cards view: clicking a drive/device card is the whole point of the click, so it
-    /// opens immediately per <see cref="ShellViewModel.OpenDriveOrDevice"/> rather than merely
-    /// selecting.</summary>
+    /// opens immediately (a new tab) rather than merely selecting. Middle-click is the separate,
+    /// configurable gesture — new tab or new panel per <see cref="ShellViewModel.MiddleClickDriveOrDevice"/>
+    /// — same as middle-clicking its row in Tree view.</summary>
     private void DriveCard_Click(object sender, MouseButtonEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: ISidebarNode node })
+        if (sender is not FrameworkElement { DataContext: ISidebarNode node }) return;
+        if (e.ChangedButton == MouseButton.Left)
             _shell.OpenDriveOrDevice(node);
+        else if (e.ChangedButton == MouseButton.Middle)
+            _shell.MiddleClickDriveOrDevice(node);
     }
 
     // The clicked row with its expansion and selection state at mouse-down, captured before
@@ -1158,22 +1175,31 @@ public partial class MainWindow : ThemedWindow
     private TreeViewItem? _treeAnchorContainer;
     private double _treeAnchorViewportY;
 
+    /// <summary>Middle-click opens a pane of its own to the right instead of navigating — or, for
+    /// a drive/device header (Depth == 0), follows <see cref="ShellViewModel.MiddleClickDriveOrDevice"/>,
+    /// same as clicking its card in Cards view (new tab or new pane per DrivesOpenTarget, not
+    /// always a pane). Wired to the row's <c>PreviewMouseDown</c> rather than
+    /// <see cref="FolderTreeItem_PreviewMouseDown"/>'s <c>PreviewMouseLeftButtonDown</c>, which
+    /// never fires for a middle press. Handling it here (tunnelling, before <c>TreeViewItem</c>
+    /// gets it) also stops the row being selected, which would otherwise navigate the active tab
+    /// as well.</summary>
+    private void FolderTreeItem_PreviewMiddleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Middle) return;
+        if (sender is not FrameworkElement { DataContext: ISidebarNode node }) return;
+
+        if (node.Depth == 0)
+            _shell.MiddleClickDriveOrDevice(node);
+        else if (node is DirectoryNodeViewModel { FullPath.Length: > 0 } target)
+            _shell.OpenInNewPane(target.FullPath, SplitOrientation.Vertical);
+        e.Handled = true;
+    }
+
     private void FolderTreeItem_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
         ClearTreeAnchor();
         _treeItemMouseDownNode = null;
         if (sender is not FrameworkElement { DataContext: ISidebarNode node }) return;
-
-        // Middle-click opens a pane of its own to the right instead of navigating. Handling it here
-        // also stops TreeViewItem selecting the row, which is what would otherwise navigate the
-        // active tab as well.
-        if (e.ChangedButton == MouseButton.Middle)
-        {
-            if (node is DirectoryNodeViewModel { FullPath.Length: > 0 } target)
-                _shell.OpenInNewPane(target.FullPath, SplitOrientation.Vertical);
-            e.Handled = true;
-            return;
-        }
 
         if (node is DirectoryNodeViewModel dir)
         {
