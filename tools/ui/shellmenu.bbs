@@ -38,7 +38,9 @@ assert-menu-item Open Git Bash here
 
 # --- The page that decides which appear: the app's own entries on the left, extensions on the right ---
 
-dialog settings-context-menu 04-settings-context-menu
+settings context-menu
+shot 04-settings-context-menu
+settings close
 
 # --- The app's own entries can be unticked too. A whole group (Cut, Copy, Paste) goes, and the
 # picture must show one separator where it was, not two; an entry in both menus goes from both. ---
@@ -60,7 +62,9 @@ menu tree 06-menu-tree-unticked
 assert-no-menu-item Copy as path
 assert-menu-item Analyse disk usage
 
-dialog settings-context-menu 07-settings-context-menu-unticked
+settings context-menu
+shot 07-settings-context-menu-unticked
+settings close
 
 # --- And back: the next opening reads the setting again ---
 

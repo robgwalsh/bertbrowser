@@ -16,7 +16,9 @@ system-follow on
 system-theme dark
 assert-theme dark-plus
 shot 01-follow-dark
-dialog settings-appearance 02-appearance-following
+settings appearance
+shot 02-appearance-following
+settings close
 
 system-theme light
 assert-theme light-plus
@@ -27,7 +29,9 @@ system-slot light solarized-light
 system-slot dark nord
 assert-theme solarized-light
 shot 04-light-slot-solarized
-dialog settings-appearance 05-appearance-slots-set
+settings appearance
+shot 05-appearance-slots-set
+settings close
 
 system-theme dark
 assert-theme nord
@@ -37,7 +41,9 @@ shot 06-dark-slot-nord
 system-theme high-contrast
 assert-theme high-contrast-dark
 shot 07-high-contrast
-dialog settings-appearance 08-appearance-high-contrast
+settings appearance
+shot 08-appearance-high-contrast
+settings close
 
 # ...and turning it off lands back on the dark slot, not on Dark+. This is what the two-switch
 # SystemAppearance exists for: the light/dark bit is kept underneath high contrast rather than
@@ -55,7 +61,9 @@ assert-theme nord
 system-follow off
 assert-theme nord
 assert-following off
-dialog settings-appearance 10-appearance-not-following
+settings appearance
+shot 10-appearance-not-following
+settings close
 shot 11-not-following
 
 # The OS moving now changes nothing at all.

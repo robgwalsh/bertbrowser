@@ -165,7 +165,9 @@ columns reset
 columns add Created
 columns add System.Photo.CameraManufacturer
 columns default
-dialog settings-columns 08-columns-page
+settings columns
+shot 08-columns-page
+settings close
 columns reset
 columns default
 
@@ -177,7 +179,9 @@ dialog columns 09-add-column
 
 # The reorder insertion line. Placed rather than dragged — a run posts no mouse input — and the
 # capture is secondary: building the line is what once crashed the app, so getting here is the test.
-dialog settings-columns-dragging 10-reorder-line
+settings columns dragging
+shot 10-reorder-line
+settings close
 
 assert-not-launched
 state

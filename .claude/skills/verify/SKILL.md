@@ -118,7 +118,7 @@ movetab <from> <to>         put tab <from> in slot <to> (1-indexed), through the
                             mouse capture, which a run cannot post; `state`'s tabTitles and
                             `tab <n>` + `assert-path` check where the tabs ended up
 tab-dragging <gap>          poses the strip's insertion line at a gap (0 is before the first tab)
-                            and leaves it there for a `shot`, like `settings-columns-dragging`
+                            and leaves it there for a `shot`, like `settings columns dragging`
 split right|down [path] | closepane | pane <n>
 
 search <text>               this folder's box, debounce and search waited out
@@ -265,13 +265,22 @@ flat-cap <n>                lowers how many rows one flat listing shows, so a fi
                             alternative is fifty thousand real files
 
 shot <name> [element]       PNG of the window, or of any x:Name'd element in it
+settings <page> [dragging]  puts the settings page up in the main window, where the app shows it
+                            (it is not a dialog), for a `shot`. Pages: general, appearance,
+                            preview, search-index, history, new-items, columns, context-menu.
+                            The columns page shows the *saved default*, so put an arrangement in
+                            front of it with `columns default` first; `dragging` adds a row's
+                            insertion line, placed rather than dragged since a run posts no mouse
+                            input
+settings tick <label> on|off  sets a box on the open page by its label. Settings apply live on a
+                            debounce, so `settle 800` before asserting what it changed
+settings close              back to the folders, without the question an incomplete entry would ask
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, rename-advanced,
-                            delete, delete-permanent, message, warning, properties, settings,
+                            delete, delete-permanent, message, warning, properties,
                             theme-editor, disk-usage, duplicates, changes, sync-preview,
                             sync-preview-running, search-syntax, saved-search, extract, compress,
-                            archive-password, elevation, settings-columns, settings-appearance,
-                            settings-history, settings-context-menu,
-                            columns, settings-columns-dragging, flat-large, checksum,
+                            archive-password, elevation,
+                            columns, flat-large, checksum,
                             checksum-verify, compare-files, transfer, conflicts
                             (transfer is the queue window — the running job's items on top and
                             everything waiting underneath. It needs a `progress-demo` first, and
@@ -291,7 +300,7 @@ dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, renam
                             `write-text` pairs for the first and `write-binary` for the second)
                             (changes is the "What changed" window: with a run's default settings
                             it shows the recording-off banner — the state every fresh install
-                            has — and after `changes-seed` it shows rows. settings-history is
+                            has — and after `changes-seed` it shows rows. `settings history` is
                             the page with its switch)
                             (both sync ones need a `compare` first, like `dialog duplicates`: they
                             show what that comparison found rather than starting one of their own.
@@ -299,13 +308,8 @@ dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, renam
                             the list read-only, and a bar and Cancel where the buttons were. Posed,
                             like `dialog transfer`, because it is a state that only exists while
                             something slow is happening)
-                            (settings opens on General, so settings-columns is how the Columns
-                            page gets photographed at all; it shows the *saved default*, so put an
-                            arrangement in front of it with `columns default` first.
-                            `columns` is the Add-column list, which the app shows in a Popup —
+                            (`columns` is the Add-column list, which the app shows in a Popup —
                             not a Window — so the harness hosts it in a bare one to photograph it)
-                            (settings-columns-dragging is that page with a row being dragged: the
-                            insertion line is placed, not dragged, because a run posts no mouse input)
                             (new-folder/new-file/search-syntax need no selection; every other
                             kind uses one.
                             rename-advanced is the rename dialog with its options panel open —

@@ -170,9 +170,17 @@ public static class PreviewClassifier
         ".webp .heic .heif .avif .psd .tga .exr " +
         ".raw .cr2 .cr3 .nef .arw .dng .orf .rw2 .raf .pef .sr2 .srw .3fr .erf .kdc .mrw");
 
-    private static readonly HashSet<string> Media = Set(
-        ".mp3 .wav .flac .m4a .m4b .aac .ogg .oga .opus .wma .aif .aiff .ape .mid .midi " +
+    /// <summary>Whether a <see cref="PreviewKind.Media"/> name is a video rather than audio — what
+    /// <see cref="MediaPlaylist"/> keeps a run of "next" within.</summary>
+    public static bool IsVideo(string name) => Video.Contains(Path.GetExtension(name));
+
+    private static readonly HashSet<string> Audio = Set(
+        ".mp3 .wav .flac .m4a .m4b .aac .ogg .oga .opus .wma .aif .aiff .ape .mid .midi");
+
+    private static readonly HashSet<string> Video = Set(
         ".mp4 .mov .avi .mkv .wmv .webm .m4v .flv .mpg .mpeg .3gp .3g2 .m2ts .mts .vob .ogv .asf .rm");
+
+    private static readonly HashSet<string> Media = new(Audio.Concat(Video), StringComparer.OrdinalIgnoreCase);
 
     // Office and OpenDocument are zip containers, and are deliberately not here: the shell makes a
     // real page-one thumbnail of them, which beats a listing of their guts every time.

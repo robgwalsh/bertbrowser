@@ -86,6 +86,14 @@ public sealed class AppSettings
     /// moving on its own rather than as the app remembering anything.</summary>
     public double PreviewPaneWidth { get; set; } = 360;
 
+    /// <summary>Whether the preview pane's details strip is folded down to its header. Global, like
+    /// the width: it is a choice about how much room a video gets, not about one file.</summary>
+    public bool PreviewDetailsCollapsed { get; set; }
+
+    /// <summary>Whether a video that finishes in the preview pane goes on to the next one in the
+    /// list. Off by default: selecting a file should never start a chain of playback on its own.</summary>
+    public bool PreviewAutoAdvance { get; set; }
+
     /// <summary>The file list's columns, in order, with their widths. Null means the user has never
     /// configured them, which is what ships <c>ColumnCatalog.Defaults()</c>; an empty list means they
     /// stripped it back on purpose and is honoured as such. Same distinction as

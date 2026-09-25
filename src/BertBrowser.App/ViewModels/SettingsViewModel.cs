@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using BertBrowser.App.Services;
@@ -101,7 +103,7 @@ public sealed partial class NewFileTypeItemViewModel : ObservableObject
     };
 }
 
-/// <summary>A page of the Settings dialog, i.e. one entry in its left-hand navigation list.</summary>
+/// <summary>A page of Settings, i.e. one entry in its left-hand navigation list.</summary>
 public enum SettingsCategory
 {
     General,
@@ -295,7 +297,7 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     /// <summary>Tile shapes offered by the picker. Seeded from <see cref="AspectRatio.Presets"/>,
     /// plus whatever the settings file already holds if it isn't one of them — otherwise a ratio
-    /// typed in by hand would be silently replaced the first time this dialog is saved.</summary>
+    /// typed in by hand would be silently replaced the first time settings are saved.</summary>
     public IReadOnlyList<AspectRatio> TileAspectOptions { get; }
 
     [ObservableProperty]
@@ -352,9 +354,8 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// Deletes every recorded change, immediately.
     /// </summary>
     /// <remarks>
-    /// Outside the Save/Cancel contract, like the theme picker and for a related reason: this is
-    /// an action, not a preference, and a "clear" that Cancel could undo would not be one. The
-    /// page says so beside the button.
+    /// An action rather than a preference, so it is not part of <see cref="Apply"/> and never waits
+    /// on its debounce. The page says so beside the button.
     /// </remarks>
     [RelayCommand]
     private async Task ClearHistory()
@@ -379,8 +380,8 @@ public sealed partial class SettingsViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Theme selection and editing. Unlike everything else here it applies live rather than on
-    /// Save — see the note in the dialog.
+    /// Theme selection and editing. Applied and persisted by the theme service itself rather than
+    /// by <see cref="Apply"/>.
     /// </summary>
     public AppearanceViewModel Appearance { get; }
 
@@ -391,11 +392,9 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>This one applies immediately, like <see cref="Appearance"/> and unlike everything else on
-    /// this page.</b> It is machine state rather than a stored preference — the registry is the
-    /// single source of truth, and there is deliberately no mirrored flag in
-    /// <c>AppSettings</c> for it to drift from. Cancel cannot un-write a registry key, so holding
-    /// the change until Save would be a promise the dialog cannot keep.
+    /// <b>Written straight to the registry rather than by <see cref="Apply"/>.</b> It is machine
+    /// state rather than a stored preference — the registry is the single source of truth, and
+    /// there is deliberately no mirrored flag in <c>AppSettings</c> for it to drift from.
     /// </para>
     /// </remarks>
     [ObservableProperty]
@@ -424,7 +423,7 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     /// <summary>
     /// Whether the helper is registered to start at sign-in. Applied immediately, like the folder
-    /// handler — the scheduled task is the state, so there is nothing here for <c>TrySave</c> to
+    /// handler — the scheduled task is the state, so there is nothing here for <c>Apply</c> to
     /// write.
     /// </summary>
     [ObservableProperty]
@@ -639,6 +638,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         _shellMenus = shellMenus;
         ShowShellExtensions = settings.ShowShellExtensions;
         _ = LoadShellExtensionsAsync();
+
+        TrackChanges();
     }
 
     // --- The app's own context-menu entries ---
@@ -672,7 +673,11 @@ public sealed partial class SettingsViewModel : ObservableObject
 
         var hidden = new HashSet<string>(_settings.HiddenShellExtensions, StringComparer.OrdinalIgnoreCase);
         foreach (var extension in catalog)
-            ShellExtensions.Add(new ShellExtensionItemViewModel(extension, isShown: !hidden.Contains(extension.Id)));
+        {
+            var item = new ShellExtensionItemViewModel(extension, isShown: !hidden.Contains(extension.Id));
+            item.PropertyChanged += OnShownChanged;
+            ShellExtensions.Add(item);
+        }
 
         ShellExtensionsStatus = catalog.Count == 0
             ? "No program on this computer adds right-click entries."
@@ -895,56 +900,170 @@ public sealed partial class SettingsViewModel : ObservableObject
     }
 
     /// <summary>Brings a page to the front — the only way to point at something now that the
-    /// dialog shows one category at a time.</summary>
+    /// page shows one category at a time.</summary>
     public void ShowCategory(SettingsCategory category)
     {
         SelectedCategory = Categories.First(c => c.Id == category);
     }
 
-    /// <summary>Validates and persists all commands to settings.json.</summary>
-    public bool TrySave(out string? error)
+    // --- Applying ---
+    //
+    // There is no Save: the page writes settings.json as things change, on a short debounce because
+    // the text boxes update per keystroke and every apply also re-lays out every tab's columns.
+    // What triggers one is an allowlist, not "any property changed", so moving between pages or
+    // selecting a row never writes anything.
+
+    private static readonly HashSet<string> PersistedProperties =
+    [
+        nameof(ShowHiddenItems), nameof(EnterArchivesOnDoubleClick), nameof(OpenDrivesInNewPanel),
+        nameof(RestoreLastSession), nameof(StartupDefaultPath), nameof(ScrollSpeed), nameof(TileAspect),
+        nameof(ShowPreviewPane), nameof(PreviewTextLimitKb), nameof(ContentSearchLimitKb),
+        nameof(RecordFileChanges), nameof(FileChangeRetentionHours), nameof(StartIndexerAtLaunch),
+        nameof(ShowShellExtensions),
+    ];
+
+    private DispatcherTimer? _applyTimer;
+
+    /// <summary>Raised after each write, for the host to push what changed through the shell.</summary>
+    public event EventHandler? Applied;
+
+    /// <summary>
+    /// Why a list is not being written, e.g. a command with no program yet. Null when everything
+    /// on the page has been saved.
+    /// </summary>
+    [ObservableProperty]
+    private string? _pendingProblem;
+
+    /// <summary>Called last in the constructor, so seeding the fields from settings is not itself
+    /// a change.</summary>
+    private void TrackChanges()
+    {
+        _applyTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(400) };
+        _applyTimer.Tick += (_, _) => Apply();
+
+        PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is { } name && PersistedProperties.Contains(name)) ScheduleApply();
+        };
+
+        Track(Commands);
+        Track(NewFileTypes);
+        Track(Columns);
+
+        // Only the tick counts on these two. The extension list fills in after construction, and
+        // that scan finishing is not something the user changed.
+        foreach (var item in BuiltInItems) item.PropertyChanged += OnShownChanged;
+    }
+
+    private void Track<T>(ObservableCollection<T> list) where T : INotifyPropertyChanged
+    {
+        foreach (var item in list) item.PropertyChanged += OnItemChanged;
+        list.CollectionChanged += (_, e) =>
+        {
+            foreach (var item in e.NewItems?.OfType<T>() ?? []) item.PropertyChanged += OnItemChanged;
+            foreach (var item in e.OldItems?.OfType<T>() ?? []) item.PropertyChanged -= OnItemChanged;
+            ScheduleApply();
+        };
+    }
+
+    private void OnItemChanged(object? sender, PropertyChangedEventArgs e) => ScheduleApply();
+
+    private void OnShownChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(BuiltInMenuItemViewModel.IsShown)) ScheduleApply();
+    }
+
+    private void ScheduleApply()
+    {
+        if (_applyTimer is null) return;
+        _applyTimer.Stop();
+        _applyTimer.Start();
+    }
+
+    /// <summary>Writes anything still waiting on the debounce. For leaving the page and closing the
+    /// window, where a change made in the last moment would otherwise be lost.</summary>
+    public void Flush()
+    {
+        if (_applyTimer?.IsEnabled == true) Apply();
+    }
+
+    /// <summary>
+    /// Flushes, then says whether anything on the page could not be saved.
+    /// </summary>
+    /// <remarks>
+    /// Only here does an incomplete entry get brought on screen. While the page is open it would
+    /// jump pages under someone halfway through typing it.
+    /// </remarks>
+    public bool TryLeave(out string? problem)
+    {
+        Flush();
+
+        if (NewFileTypeProblem() is { } type)
+        {
+            SelectedNewFileType = type.Item;
+            ShowCategory(SettingsCategory.NewItems);
+            problem = type.Message;
+            return false;
+        }
+
+        if (CommandProblem() is { } command)
+        {
+            SelectedCommand = command.Item;
+            ShowCategory(SettingsCategory.ContextMenu);
+            problem = command.Message;
+            return false;
+        }
+
+        problem = null;
+        return true;
+    }
+
+    private (NewFileTypeItemViewModel Item, string Message)? NewFileTypeProblem()
     {
         foreach (var type in NewFileTypes)
         {
-            string? problem = null;
             if (string.IsNullOrWhiteSpace(type.Label))
-                problem = "Every file type needs a name.";
-            else if (!type.Extension.StartsWith('.') || type.Extension.Length < 2)
-                problem = $"'{type.Label}' needs an extension starting with a dot, like \".txt\".";
-            else if (RenamePattern.Validate("x" + type.Extension.Trim()) is { } invalid)
-                problem = $"'{type.Label}' has an extension that can't end a file name — {invalid}";
-
-            if (problem is not null)
-            {
-                // The offending row may be on a page the user cannot see, so go there first —
-                // otherwise the message names a field that is nowhere on screen.
-                SelectedNewFileType = type;
-                ShowCategory(SettingsCategory.NewItems);
-                error = problem;
-                return false;
-            }
+                return (type, "Every file type needs a name.");
+            if (!type.Extension.StartsWith('.') || type.Extension.Length < 2)
+                return (type, $"'{type.Label}' needs an extension starting with a dot, like \".txt\".");
+            if (RenamePattern.Validate("x" + type.Extension.Trim()) is { } invalid)
+                return (type, $"'{type.Label}' has an extension that can't end a file name — {invalid}");
         }
+        return null;
+    }
 
+    private (CustomCommandItemViewModel Item, string Message)? CommandProblem()
+    {
         foreach (var command in Commands)
         {
-            string? problem = null;
             if (string.IsNullOrWhiteSpace(command.Name) || string.IsNullOrWhiteSpace(command.Command))
-                problem = "Every command needs a name and a program.";
-            else if (!command.AppliesToFiles && !command.AppliesToDirectories)
-                problem = $"'{command.Name}' must apply to files, folders, or both.";
-
-            if (problem is not null)
-            {
-                // The offending command may be on a page the user cannot see, so go there first —
-                // otherwise the message names a field that is nowhere on screen.
-                SelectedCommand = command;
-                ShowCategory(SettingsCategory.ContextMenu);
-                error = problem;
-                return false;
-            }
+                return (command, "Every command needs a name and a program.");
+            if (!command.AppliesToFiles && !command.AppliesToDirectories)
+                return (command, $"'{command.Name}' must apply to files, folders, or both.");
         }
+        return null;
+    }
 
-        _settings.CustomCommands = Commands.Select(c => c.ToDefinition()).ToList();
+    /// <summary>
+    /// Writes the page to settings.json.
+    /// </summary>
+    /// <remarks>
+    /// The new-file types and the commands are each written only when every entry in the list is
+    /// complete. Until then the list already saved stays in force and <see cref="PendingProblem"/>
+    /// says why. Everything else is always written.
+    /// </remarks>
+    public void Apply()
+    {
+        _applyTimer?.Stop();
+
+        var typeProblem = NewFileTypeProblem();
+        var commandProblem = CommandProblem();
+        PendingProblem = (typeProblem?.Message ?? commandProblem?.Message) is { } message
+            ? $"{message} That list is not saved until this is fixed."
+            : null;
+
+        if (commandProblem is null)
+            _settings.CustomCommands = Commands.Select(c => c.ToDefinition()).ToList();
         _settings.ShowShellExtensions = ShowShellExtensions;
         // Ids hidden earlier but not found today stay hidden: the list may still be loading, or the
         // extension may be uninstalled for now. See ShellMenuRules.HiddenAfterSave.
@@ -956,9 +1075,10 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settings.HiddenBuiltInMenuItems = ShellMenuRules.HiddenAfterSave(
             _settings.HiddenBuiltInMenuItems,
             BuiltInItems.Select(e => (e.Id, e.IsShown))).ToList();
-        // Always a list, never null, once this dialog has been saved: from here on the user has
+        // Always a list, never null, once settings have been saved: from here on the user has
         // configured it, and an empty one means they emptied it on purpose.
-        _settings.NewFileTypes = NewFileTypes.Select(t => t.ToTemplate()).ToList();
+        if (typeProblem is null)
+            _settings.NewFileTypes = NewFileTypes.Select(t => t.ToTemplate()).ToList();
         _settings.ShowHiddenItems = ShowHiddenItems;
         _settings.EnterArchivesOnDoubleClick = EnterArchivesOnDoubleClick;
         _settings.DrivesOpenTarget = OpenDrivesInNewPanel ? DrivesOpenTarget.NewPanel : DrivesOpenTarget.NewTab;
@@ -974,12 +1094,11 @@ public sealed partial class SettingsViewModel : ObservableObject
         // task itself and was already applied when the box was ticked.
         _settings.StartIndexerAtLaunch = StartIndexerAtLaunch;
         _settings.TileAspectRatio = TileAspect.ToString();
-        // Always a list once this dialog has been saved, never null: from here on the user has
+        // Always a list once settings have been saved, never null: from here on the user has
         // configured their columns, and the "never configured" state has nothing left to say.
         _settings.FileListColumns = ColumnLayoutRules.Normalize(CurrentColumns())
             .Select(c => c.Copy()).ToList();
         _settings.Save();
-        error = null;
-        return true;
+        Applied?.Invoke(this, EventArgs.Empty);
     }
 }

@@ -22,7 +22,7 @@ public partial class ThemeEditorWindow : ThemedWindow
 
         // The editor is modeless and can be open for a long time, which makes it the window most
         // likely to be up when Windows flips at sunset.
-        SettingsWindow.WatchThemeChanges(this, vm);
+        SettingsView.WatchThemeChanges(this, vm);
     }
 
     /// <summary>

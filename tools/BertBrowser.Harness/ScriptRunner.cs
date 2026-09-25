@@ -229,6 +229,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             // capturing and reading back
             case "shot": Shot(rest); break;
             case "dialog": Dialog(rest); break;
+            case "settings": SettingsPage(rest); break;
             case "state": output.WriteLine("STATE " + State()); break;
             case "session": Session(); break;
             case "probe": Probe(rest); break;
@@ -823,7 +824,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         ?? throw new InvalidOperationException("The active tab has no file list.");
 
     /// <summary>Poses the rubber-band selection rectangle over the active tab's file list. Like
-    /// <c>settings-columns-dragging</c>, the band is only ever on screen mid-drag and a run posts
+    /// <c>settings columns dragging</c>, the band is only ever on screen mid-drag and a run posts
     /// no mouse input, so this is the only way a capture reaches it. "x0,y0,x1,y1" is the
     /// rectangle in list coordinates.</summary>
     private void Marquee(string rest) => Invoke(() =>
@@ -1398,7 +1399,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     }
 
     /// <summary>Poses the insertion line on the active pane's tab strip at a gap (0 is before the
-    /// first tab), for a <c>shot</c>. Like <c>settings-columns-dragging</c>, the line is only ever
+    /// first tab), for a <c>shot</c>. Like <c>settings columns dragging</c>, the line is only ever
     /// on screen mid-drag and a run posts no mouse input — and reaching a capture at all is the
     /// proof that the horizontal line constructs against the real theme.</summary>
     private void TabDragging(string rest) => Invoke(() =>
@@ -3157,6 +3158,96 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     }
 
     /// <summary>
+    /// <c>settings &lt;page&gt; [dragging]</c> puts the settings page up in the main window, where the
+    /// app shows it, for a <c>shot</c>; <c>settings close</c> goes back to the folders.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The page is built from <see cref="SettingsFor"/>, never the app's own construction site, so a
+    /// run cannot register a sign-in task. Close does not ask about an incomplete entry, since a
+    /// run never answers a dialog; it leaves the way the "Leave" answer would.
+    /// </para>
+    /// <para>
+    /// <c>dragging</c> (Columns only) places the insertion line of a row being dragged. It is placed
+    /// rather than dragged into place because a run posts no mouse input, so this is the only way it
+    /// is ever on screen in a capture. It is also the regression test for the crash that made the
+    /// gesture unusable — building the line threw, because its pen held a live theme brush and a
+    /// Freezable holding one cannot be frozen.
+    /// </para>
+    /// </remarks>
+    private void SettingsPage(string rest)
+    {
+        var (page, tail) = Split(rest);
+        if (page.Length == 0)
+            throw new FormatException("settings needs a page (general, appearance, preview, search-index, " +
+                                      "history, new-items, columns, context-menu) or close.");
+
+        // "settings tick Show hidden items on": sets a box on the open page by its label, the way a
+        // click would. Nothing is saved by this verb — what makes it stick is the page's own
+        // debounced apply, which is the thing being tested, so follow it with a settle.
+        if (page.Equals("tick", StringComparison.OrdinalIgnoreCase))
+        {
+            var split = tail.LastIndexOf(' ');
+            var state = split < 0 ? "" : tail[(split + 1)..];
+            if (state is not ("on" or "off"))
+                throw new FormatException("settings tick wants a label and on|off, e.g. 'settings tick Show hidden items on'.");
+            var label = tail[..split].Trim();
+
+            Invoke(() =>
+            {
+                if (!session.Window.IsSettingsOpen)
+                    throw new AssertionException("settings tick needs a settings page open.");
+                var box = Descendants(session.Window).OfType<CheckBox>()
+                              .FirstOrDefault(b => b.IsVisible && Equals(b.Content, label))
+                          ?? throw new AssertionException($"There is no box labelled '{label}' on this page.");
+                box.IsChecked = state == "on";
+            });
+            session.Settle();
+            return;
+        }
+
+        if (page.Equals("close", StringComparison.OrdinalIgnoreCase))
+        {
+            Invoke(() =>
+            {
+                if (!session.Window.CloseSettings(ask: false))
+                    throw new AssertionException("The settings page did not close.");
+            });
+            session.Settle();
+            return;
+        }
+
+        var category = Enum.TryParse<SettingsCategory>(page.Replace("-", ""), ignoreCase: true, out var parsed)
+            ? parsed
+            : throw new FormatException($"'{page}' is not a settings page.");
+
+        Invoke(() =>
+        {
+            if (session.Window.IsSettingsOpen) session.Window.CloseSettings(ask: false);
+            session.Window.ShowSettings(SettingsFor(category));
+        });
+        session.Settle();
+
+        if (tail.Equals("dragging", StringComparison.OrdinalIgnoreCase))
+        {
+            Invoke(() =>
+            {
+                if (FindNamed<ListBox>("ColumnDefaultsList") is not { } list)
+                    throw new AssertionException("The Columns page has no ColumnDefaultsList.");
+
+                // Containers are generated by the layout pass, and the line is positioned off them.
+                list.UpdateLayout();
+                if (ListReorderDrag.ShowInsertionLine(list, Orientation.Vertical, 2) is null)
+                    throw new AssertionException("The column list has no adorner layer to draw on.");
+            });
+        }
+        else if (tail.Length > 0)
+        {
+            throw new FormatException($"'{tail}' is not a settings option. The only one is 'dragging'.");
+        }
+    }
+
+    /// <summary>
     /// The "Add column" list, in a bare window so <c>dialog</c> can photograph it.
     /// </summary>
     /// <remarks>
@@ -3164,32 +3255,6 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     /// for the capture to walk. The window contributes no chrome of its own — what is in the picture
     /// is the panel's own border, which is all a popup ever shows.
     /// </remarks>
-    /// <summary>
-    /// The Columns page with a row being dragged, i.e. showing the insertion line.
-    /// </summary>
-    /// <remarks>
-    /// The line is placed rather than dragged into place: a run posts no mouse input, so this is the
-    /// only way it is ever on screen in a capture. It is also the regression test for the crash that
-    /// made this whole gesture unusable — building the line threw, because its pen held a live theme
-    /// brush and a Freezable holding one cannot be frozen. Reaching a screenshot at all proves the
-    /// adorner constructs and renders against the real theme.
-    /// </remarks>
-    private Window ColumnsPageMidDrag()
-    {
-        var window = new SettingsWindow(SettingsFor(SettingsCategory.Columns));
-        window.Loaded += (_, _) =>
-        {
-            if (window.FindName("ColumnDefaultsList") is not ListBox list)
-                throw new AssertionException("The Columns page has no ColumnDefaultsList.");
-
-            // Containers are generated by the layout pass, and the line is positioned off them.
-            list.UpdateLayout();
-            if (ListReorderDrag.ShowInsertionLine(list, Orientation.Vertical, 2) is null)
-                throw new AssertionException("The column list has no adorner layer to draw on.");
-        };
-        return window;
-    }
-
     private Window ColumnAddPanelWindow()
     {
         // Blocking, deliberately, and only here: the panel fills its second half when the property
@@ -3305,19 +3370,6 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         "new-file" => NewItemDialogFor(NewItemKind.File),
 
-        "settings" => new SettingsWindow(SettingsFor(SettingsCategory.General)),
-
-        // Settings opens on General, so a page further down the list needs its own kind to be
-        // photographed at all.
-        "settings-columns" => new SettingsWindow(SettingsFor(SettingsCategory.Columns)),
-
-        // Where "Match Windows light/dark" and the two slot pickers live. Worth its own kind for
-        // the reason the others have one, and because the page looks different in each mode.
-        "settings-appearance" => new SettingsWindow(SettingsFor(SettingsCategory.Appearance)),
-        "settings-context-menu" => new SettingsWindow(SettingsFor(SettingsCategory.ContextMenu)),
-
-        "settings-columns-dragging" => ColumnsPageMidDrag(),
-
         "columns" => ColumnAddPanelWindow(),
 
         "theme-editor" => new ThemeEditorWindow(new AppearanceViewModel(
@@ -3328,10 +3380,6 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         // With the run's default settings this photographs the "recording is off" banner — the
         // state that matters most, since it is the default. After 'changes-seed' it shows rows.
         "changes" => ChangesWindowFor(),
-
-        "settings-history" => new SettingsWindow(SettingsFor(SettingsCategory.History)),
-
-        "settings-search-index" => new SettingsWindow(SettingsFor(SettingsCategory.SearchIndex)),
 
         // Needs a 'compare' first, for the reason 'duplicates' does: the dialog shows what that
         // comparison found rather than starting one of its own while a capture waits on it.
@@ -3382,9 +3430,9 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         _ => throw new FormatException(
             $"'{kind}' is not a dialog. Try: new-folder, new-file, rename, rename-advanced, " +
-            "delete, delete-permanent, message, warning, properties, settings, theme-editor, " +
+            "delete, delete-permanent, message, warning, properties, theme-editor, " +
             "disk-usage, duplicates, changes, transfer, conflicts, extract, compress, archive-password, " +
-            "settings-columns, settings-appearance, settings-history, settings-search-index, columns."),
+            "columns. Settings is a page of the main window now: see the settings verb."),
     };
 
     /// <summary>

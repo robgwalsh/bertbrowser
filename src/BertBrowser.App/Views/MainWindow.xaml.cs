@@ -92,6 +92,9 @@ public partial class MainWindow : ThemedWindow
         Loaded += async (_, _) => await _shell.InitializeAsync();
         Closing += (_, _) =>
         {
+            // A change made in the last moment before closing would otherwise still be waiting on
+            // the settings page's debounce.
+            _settingsView?.ViewModel.Flush();
             SaveWindowSettings();
             // The pending undo is gone once we exit, so commit what is still being held — whatever
             // a Replace set aside, and whatever the last delete was holding on to — rather than
@@ -161,11 +164,50 @@ public partial class MainWindow : ThemedWindow
 
     // --- Toolbar / dialogs ---
 
-    private void Settings_Click(object sender, RoutedEventArgs e) => ShowSettings(null);
+    private void Settings_Click(object sender, RoutedEventArgs e) => ShowSettings((SettingsCategory?)null);
 
-    /// <summary>The one construction site for the settings dialog; <paramref name="page"/> opens
-    /// it on a page other than General, which is how the change timeline points at its switch.</summary>
+    /// <summary>The settings page while it is up, in place of <see cref="BrowserRoot"/>.</summary>
+    private SettingsView? _settingsView;
+
+    /// <summary>The window's shortcuts, set aside while settings is up: Backspace, Ctrl+T, F5 and
+    /// the rest would otherwise act on panes nobody can see.</summary>
+    private InputBinding[]? _suspendedBindings;
+
+    internal bool IsSettingsOpen => _settingsView is not null;
+
+    /// <summary>What <see cref="Settings_Applied"/> last pushed through the shell, taken when the
+    /// page opens, so each write only redoes the parts whose values actually moved.</summary>
+    private AppliedSettings? _lastApplied;
+
+    private sealed record AppliedSettings(string? TileAspect, string Columns, bool RecordFileChanges, int RetentionHours)
+    {
+        public static AppliedSettings Of(BertBrowser.App.Services.AppSettings settings) => new(
+            settings.TileAspectRatio,
+            string.Join("|", (settings.FileListColumns ?? []).Select(c => $"{c.Id}:{c.Width}")),
+            settings.RecordFileChanges,
+            settings.FileChangeRetentionHours);
+    }
+
+    /// <summary>Opens settings in place of the folders; <paramref name="page"/> opens it on a page
+    /// other than General, which is how the change timeline points at its switch. Pressed again
+    /// while it is up, it only changes page — there is only ever one.</summary>
     private void ShowSettings(SettingsCategory? page)
+    {
+        if (_settingsView is { } open)
+        {
+            if (page is { } category) open.ViewModel.ShowCategory(category);
+            open.FocusCategories();
+            return;
+        }
+
+        var vm = CreateSettingsViewModel();
+        if (page is { } first)
+            vm.ShowCategory(first);
+        ShowSettings(vm);
+    }
+
+    /// <summary>The one construction site for the settings view model.</summary>
+    private SettingsViewModel CreateSettingsViewModel()
     {
         var vm = new SettingsViewModel(
             _settings,
@@ -177,25 +219,105 @@ public partial class MainWindow : ThemedWindow
             App.Services.GetRequiredService<BertBrowser.Core.Services.Mft.IMftIndexService>(),
             App.Services.GetRequiredService<IShellMenuSource>());
         vm.ReadIndexerState();
-        if (page is { } category)
-            vm.ShowCategory(category);
+        return vm;
+    }
 
-        if (new SettingsWindow(vm) { Owner = this }.ShowDialog() == true)
+    /// <summary>
+    /// Puts <paramref name="vm"/>'s page up in place of the folders. Internal for the UI harness,
+    /// which builds its own view model (one that cannot register a sign-in task).
+    /// </summary>
+    internal void ShowSettings(SettingsViewModel vm)
+    {
+        if (_settingsView is not null) return;
+
+        var view = new SettingsView(vm);
+        view.BackRequested += (_, _) => CloseSettings();
+        view.CustomiseThemeRequested += (_, _) => CustomiseTheme();
+        vm.Applied += Settings_Applied;
+        _lastApplied = AppliedSettings.Of(_settings);
+        _settingsView = view;
+
+        _suspendedBindings = [.. InputBindings.Cast<InputBinding>()];
+        InputBindings.Clear();
+        GlobalSearchGroup.IsEnabled = false;
+        CompareButton.IsEnabled = false;
+
+        BrowserRoot.Visibility = Visibility.Hidden;
+        SettingsHost.Content = view;
+        view.FocusCategories();
+    }
+
+    /// <summary>
+    /// Back to the folders, unless something on the page could not be saved and the user would
+    /// rather stay and finish it. Returns whether the page closed.
+    /// </summary>
+    internal bool CloseSettings(bool ask = true)
+    {
+        if (_settingsView is not { } view) return true;
+
+        if (!view.ViewModel.TryLeave(out var problem) && ask &&
+            !MessageDialog.Show(this, $"{problem}\n\nLeave anyway? That entry and the rest of its list won't be saved.",
+                "Settings", MessageDialogKind.Warning, showCancel: true, confirmLabel: "Leave"))
         {
-            // Push a "Show hidden items" change made in the dialog through the shell; its setter
-            // refreshes the list and re-filters bookmarks. (Custom-command menus rebuild on every
-            // open, so they need no refresh.)
-            _shell.ShowHiddenItems = _settings.ShowHiddenItems;
-            _shell.OpenDrivesInNewPanel = _settings.DrivesOpenTarget == BertBrowser.App.Services.DrivesOpenTarget.NewPanel;
-            _shell.RefreshTileAspect();
-            // Reaches every tab that has not arranged its own columns. Without this the Columns page
-            // would appear to do nothing until a new tab was opened.
-            _shell.ApplyColumnDefaults();
-            App.ApplyChangeLogPolicy(_settings);
-            // "Start the indexer when BertBrowser launches" only matters next launch, and the
-            // sign-in task applied itself the moment its box was ticked. Neither needs re-applying
-            // here — this comment is so nobody adds a line and wonders why it does nothing.
+            return false;
         }
+
+        view.ViewModel.Applied -= Settings_Applied;
+        _settingsView = null;
+        SettingsHost.Content = null;
+        BrowserRoot.Visibility = Visibility.Visible;
+
+        foreach (var binding in _suspendedBindings ?? [])
+            InputBindings.Add(binding);
+        _suspendedBindings = null;
+        GlobalSearchGroup.IsEnabled = true;
+        CompareButton.ClearValue(IsEnabledProperty);
+
+        _layoutHost.ActivePaneView?.FocusActiveTabList();
+        return true;
+    }
+
+    /// <summary>The editor is modeless so its changes can be judged against the file list, which
+    /// means the settings page has to get out of the way first.</summary>
+    private void CustomiseTheme()
+    {
+        if (_settingsView is not { } view) return;
+        var appearance = view.ViewModel.Appearance;
+        if (!CloseSettings()) return;
+
+        new ThemeEditorWindow(appearance) { Owner = this }.Show();
+    }
+
+    /// <summary>
+    /// Pushes what the settings page just wrote through the shell. Runs on every write — the page
+    /// applies as it goes, on a debounce — so everything here has to be cheap to repeat.
+    /// </summary>
+    private void Settings_Applied(object? sender, EventArgs e)
+    {
+        // Its setter refreshes the list and re-filters bookmarks, and does nothing when the value
+        // is unchanged. (Custom-command menus rebuild on every open, so they need no refresh.)
+        _shell.ShowHiddenItems = _settings.ShowHiddenItems;
+        _shell.OpenDrivesInNewPanel = _settings.DrivesOpenTarget == BertBrowser.App.Services.DrivesOpenTarget.NewPanel;
+
+        // The rest re-lay out every tab or talk to the index helper, so each goes only when its
+        // own value moved rather than on every keystroke typed elsewhere on the page.
+        var applied = AppliedSettings.Of(_settings);
+
+        if (applied.TileAspect != _lastApplied?.TileAspect)
+            _shell.RefreshTileAspect();
+        // Reaches every tab that has not arranged its own columns. Without this the Columns page
+        // would appear to do nothing until a new tab was opened.
+        if (applied.Columns != _lastApplied?.Columns)
+            _shell.ApplyColumnDefaults();
+        // Turning recording off wipes the log, so this must not run on changes that are not its own.
+        if (applied.RecordFileChanges != _lastApplied?.RecordFileChanges ||
+            applied.RetentionHours != _lastApplied?.RetentionHours)
+            App.ApplyChangeLogPolicy(_settings);
+
+        _lastApplied = applied;
+        // "Start the indexer when BertBrowser launches" only matters next launch, and the
+        // sign-in task applied itself the moment its box was ticked. Neither needs re-applying
+        // here — this comment is so nobody adds a line and wonders why it does nothing.
     }
 
     /// <summary>
@@ -474,7 +596,12 @@ public partial class MainWindow : ThemedWindow
             App.Services.GetRequiredService<IMftIndexService>(),
             _settings);
 
-        _changes = new ChangeTimelineWindow(vm, RevealFromDiskUsage, () => ShowSettings(SettingsCategory.History)) { Owner = this };
+        _changes = new ChangeTimelineWindow(vm, RevealFromDiskUsage, () =>
+        {
+            // The page opens inside this window now, behind the timeline that asked for it.
+            Activate();
+            ShowSettings(SettingsCategory.History);
+        }) { Owner = this };
         _changes.Closed += (_, _) => _changes = null;
         _changes.Show();
         _changes.Load(path);
@@ -553,6 +680,13 @@ public partial class MainWindow : ThemedWindow
     /// <c>ActivePane</c> in XAML.</summary>
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
+        // Every shortcut below acts on the panes, which the settings page is standing in for.
+        if (IsSettingsOpen)
+        {
+            base.OnPreviewKeyDown(e);
+            return;
+        }
+
         // Focusing search is window-wide so it works from the sidebar too. Ctrl+F is the active
         // pane's folder-local box; Ctrl+Shift+F opens the header's whole-PC one, which would
         // otherwise be reachable only with the mouse.

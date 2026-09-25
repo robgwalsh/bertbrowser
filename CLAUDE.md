@@ -74,14 +74,16 @@ you where and what to watch for.
 | Saved searches | `Core/Services/SavedSearches/*` (`SavedSearchRules`), `Core/Data/SavedSearchRepository`, `ViewModels/SavedSearchesViewModel`, `Views/SavedSearchDialog` |
 | Elevated MFT indexer | `src/BertBrowser.Indexer`, `Core/Services/Mft/MftIndexClient`, `Core/Ipc/IndexEndpoint`, `Core/Ipc/IndexerPresenceLock` |
 | Indexer banner / sign-in task | `Core/Services/Mft/IndexerBannerRules`, `IndexerAutoStartTask`, `App/Services/Indexing/IndexAutoStartService` |
-| Change timeline ("What changed") | `Core/Services/Changes/*` (`ChangeLogRules`, `ChangeRecorder`, `ChangeLogPolicy`), `Core/Data/ChangeLogRepository`, `Views/ChangeTimelineWindow`, the History page of `SettingsWindow` |
+| Change timeline ("What changed") | `Core/Services/Changes/*` (`ChangeLogRules`, `ChangeRecorder`, `ChangeLogPolicy`), `Core/Data/ChangeLogRepository`, `Views/ChangeTimelineWindow`, the History page of `SettingsView` |
 | Elevated file-op retry | `src/BertBrowser.Elevator`, `Core/Services/Elevation/*`, `Core/Ipc/ElevationProtocol.cs` |
 | Launching other programs | `App/Services/ProcessLauncher.cs`, `Core/Services/ExecutablePath.cs`, `Core/Services/VSCodePath.cs`, `Interop/RunAsVerbRegistry` |
-| Shell context menu (7-Zip, Git, TortoiseSVN…) | `Core/Services/ShellMenu/*` (`ShellMenuKeys`, `ShellMenuRules`, `StaticVerbCommand`), `Interop/ShellExtensionRegistry`, `Interop/ShellContextMenu`, `Interop/ShellSelection`, `Interop/ShellMenuIcons`, `Services/ShellMenuSource`, `Views/ShellMenu`, `BuiltInMenuItems` + `MenuSeparatorRules` + `Views/BuiltInMenu` (the app's own entries, unticked the same way), the Context menu page of `SettingsWindow`, `tools/ui/shellmenu.bbs` |
+| Shell context menu (7-Zip, Git, TortoiseSVN…) | `Core/Services/ShellMenu/*` (`ShellMenuKeys`, `ShellMenuRules`, `StaticVerbCommand`), `Interop/ShellExtensionRegistry`, `Interop/ShellContextMenu`, `Interop/ShellSelection`, `Interop/ShellMenuIcons`, `Services/ShellMenuSource`, `Views/ShellMenu`, `BuiltInMenuItems` + `MenuSeparatorRules` + `Views/BuiltInMenu` (the app's own entries, unticked the same way), the Context menu page of `SettingsView`, `tools/ui/shellmenu.bbs` |
 | Startup / CLI / single instance | `Core/Cli/CommandLine.cs`, `Core/Cli/NavigationRequest.cs`, `Services/SingleInstance.cs`, `Core/Ipc/InstanceEndpoint.cs`, `Interop/ForegroundWindow`, `Core/Services/Foreground/ForegroundRaiseRules` |
 | Default folder handler (shell) | `Core/Services/ShellIntegration/*`, `App/Interop/FolderHandlerRegistry` |
 | Preview pane (incl. hex/raw) | `Core/Services/Preview/*` (`PreviewClassifier`, `TextPreviewReader`, `HexPreviewReader`, `SyntaxTokenizer`) |
+| Video playback in the preview (scrub, next, full screen) | `Core/Services/Preview/MediaPlaylist`, `Views/PreviewPane` (media + full-screen sections; `MediaHost` is lent to a borderless window, hence `UnloadedBehavior="Manual"`), `DirectoryTabView.Preview_NextMediaRequested` |
 | Archives (zip/7z/tar/rar) | `Core/Services/Archives/*` (`ArchivePath`, `ArchiveReader`, `ArchiveIndexBuilder`) |
+| Settings page | `ViewModels/SettingsViewModel` (`Apply`, `TryLeave`), `Views/SettingsView`, `MainWindow.ShowSettings`/`CloseSettings`, `tools/ui/settings.bbs` |
 | Theming | `Core/Theming/*` (`ThemeCatalog`, `ThemeResolver`), `App/Theming/*` |
 | Matching the Windows theme | `Core/Theming/SystemThemeRules`, `SystemAppearance`, `App/Theming/ISystemAppearance` |
 | App icon | `tools/icon/build-app-icon.ps1` → `src/BertBrowser.App/Assets/app.ico` |
@@ -314,6 +316,16 @@ you where and what to watch for.
   smiley face on the split-pane button, `E8B0` a mouse cursor on "Open in new pane", `E74B` a down
   arrow on "Delete permanently", and one number meant two things twice over (`E8A7` = new tab *and*
   custom command; `E8C8` = Copy *and* Find duplicates).
+- **Settings is a page of the main window, not a dialog, and it applies as you go.** It replaces
+  `BrowserRoot` (everything under the title bar), which is Hidden rather than Collapsed so panes
+  keep their layout, and the window's `InputBindings` are set aside meanwhile, since Backspace or
+  Ctrl+T would act on panes nobody can see. There is no Save: `SettingsViewModel.Apply` writes on a
+  400 ms debounce, driven by an *allowlist* of persisted properties so selecting a row or a page
+  writes nothing, and it is flushed on Back and on window close. A command or new-file type with a
+  missing field keeps its whole list unwritten and says so in a strip rather than jumping pages
+  mid-typing; only leaving (`TryLeave`) takes the user to it. `MainWindow.Settings_Applied` re-pushes
+  each value only when it moved — `App.ApplyChangeLogPolicy` wipes the log whenever recording is
+  off, so calling it on every keystroke elsewhere on the page is not harmless.
 - **Theme colors**: no literal colors in XAML/C# — always a `Theme.*` token. `ThemeCatalogTests`
   contrast-checks every built-in; darken a palette's colors if it fails AA.
 - **Matching Windows is the default only because there is no settings file.** `FollowSystemTheme ??

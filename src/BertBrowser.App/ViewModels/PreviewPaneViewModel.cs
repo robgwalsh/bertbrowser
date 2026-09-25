@@ -83,6 +83,8 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         _archives = archives;
         _archiveReader = archiveReader;
         _passwords = passwords;
+        _autoAdvance = settings.PreviewAutoAdvance;
+        _detailsCollapsed = settings.PreviewDetailsCollapsed;
     }
 
     // --- what the view binds to ---
@@ -114,6 +116,25 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     [ObservableProperty] private Uri? _mediaSource;
 
     [ObservableProperty] private bool _canPlayMedia;
+
+    /// <summary>Continue to the next video in the list when this one ends. Persisted globally.</summary>
+    [ObservableProperty] private bool _autoAdvance;
+
+    partial void OnAutoAdvanceChanged(bool value) => _settings.PreviewAutoAdvance = value;
+
+    /// <summary>The details strip folded down to its header — room given back to a video.</summary>
+    [ObservableProperty] private bool _detailsCollapsed;
+
+    partial void OnDetailsCollapsedChanged(bool value) => _settings.PreviewDetailsCollapsed = value;
+
+    /// <summary>Asks the tab to select whatever <see cref="Core.Services.Preview.MediaPlaylist"/>
+    /// says comes next. The list's order and selection are the view's; this pane only knows the one
+    /// file it was handed.</summary>
+    public event EventHandler? NextMediaRequested;
+
+    /// <summary>The path to start playing as soon as it has loaded, set by the tab when it advances.
+    /// A path rather than a flag, so a selection the user makes meanwhile is never auto-played.</summary>
+    private string? _playWhenLoaded;
 
     /// <summary>Fit-to-pane, or 1:1 with panning. Double-click toggles it.</summary>
     [ObservableProperty]
@@ -188,6 +209,19 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         if (_target is { IsDirectory: false } item && Kind == PreviewKind.Media)
             MediaSource = new Uri(item.FullPath);
     }
+
+    [RelayCommand]
+    private void PlayNext() => NextMediaRequested?.Invoke(this, EventArgs.Empty);
+
+    [RelayCommand]
+    private void ToggleAutoAdvance() => AutoAdvance = !AutoAdvance;
+
+    [RelayCommand]
+    private void ToggleDetails() => DetailsCollapsed = !DetailsCollapsed;
+
+    /// <summary>Called by the tab just before it selects <paramref name="path"/>, so that file
+    /// starts playing when it arrives instead of stopping at its poster frame.</summary>
+    public void PlayWhenLoaded(string path) => _playWhenLoaded = path;
 
     [RelayCommand]
     private void ToggleFit() => FitImageToPane = !FitImageToPane;
@@ -346,6 +380,7 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         FontFooter = "";
         MediaSource = null;
         CanPlayMedia = false;
+        _playWhenLoaded = null;
         Metadata = [];
         FitImageToPane = true;
 
@@ -383,6 +418,12 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         IsLoading = false;
         Message = payload.Message;
         Raise();
+
+        var autoPlay = _playWhenLoaded;
+        _playWhenLoaded = null;
+        if (autoPlay is not null && payload.Kind == PreviewKind.Media
+            && string.Equals(autoPlay, _target?.FullPath, StringComparison.OrdinalIgnoreCase))
+            PlayMedia();
     }
 
     /// <summary>A font family is built on the UI thread from a source string, never carried across

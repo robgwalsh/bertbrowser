@@ -38,6 +38,36 @@
                 <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
                 <Setter Property="Margin" Value="8,3,8,4"/>
             </Style>
+
+            <!-- A transport button whose whole content is an icon. -->
+            <Style x:Key="MediaButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+                <Setter Property="ContentTemplate" Value="{StaticResource IconContent}"/>
+                <Setter Property="FontSize" Value="16"/>
+                <Setter Property="Padding" Value="5,3"/>
+                <Setter Property="Margin" Value="1,0"/>
+            </Style>
+
+            <!-- The details strip's header: the full width of the strip is the click target, so
+                 folding it never needs aiming at a 16-pixel chevron. -->
+            <Style x:Key="DetailsHeaderButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+                <Setter Property="Padding" Value="0,2"/>
+                <Setter Property="Margin" Value="0"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Bd" Background="Transparent" CornerRadius="3">
+                                <ContentPresenter Margin="{TemplateBinding Padding}"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background"
+                                            Value="{StaticResource Theme.Toolbar.HoverBackground}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
         </ResourceDictionary>
     </UserControl.Resources>
 
@@ -130,7 +160,7 @@
                 <Button Style="{StaticResource ToolbarButton}"
                         Command="{Binding ToggleFitCommand}"
                         Content="{Binding FitLabel}"
-                        ToolTip="Fit to the pane, or show at 100% and pan (double-click the image)"
+                        ToolTip="Fit to the pane, or show at 100% (double-click the image). Scroll to zoom, drag to pan"
                         Visibility="{Binding HasImage, Converter={StaticResource BoolToVisibility}}"/>
                 <!-- Not offered over a dump: its rows are a fixed width, and wrapping them would
                      put half of one under the offset of the next. -->
@@ -148,24 +178,50 @@
         <!-- Details, from the shell's property handlers. Curated per kind, not the whole dump —
              the Properties dialog is where everything lives. -->
         <Border DockPanel.Dock="Bottom" BorderThickness="0,1,0,0"
-                BorderBrush="{StaticResource Theme.Border.Subtle}" Padding="8,4"
+                BorderBrush="{StaticResource Theme.Border.Subtle}" Padding="8,2,8,4"
                 Visibility="{Binding HasMetadata, Converter={StaticResource BoolToVisibility}}">
-            <ItemsControl ItemsSource="{Binding Metadata}" Grid.IsSharedSizeScope="True">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <Grid Margin="0,1">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" SharedSizeGroup="MetaLabel"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="{Binding Label}" Margin="0,0,10,0" FontSize="11"
-                                       Foreground="{StaticResource Theme.Text.Muted}"/>
-                            <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="11"
-                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding Value}"/>
-                        </Grid>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+            <DockPanel>
+                <!-- Folds the strip to this one line. Remembered across files and restarts, since it is
+                     a choice about how much room the body gets rather than about any one file. -->
+                <Button DockPanel.Dock="Top" Style="{StaticResource DetailsHeaderButton}"
+                        Command="{Binding ToggleDetailsCommand}"
+                        AutomationProperties.AutomationId="PreviewDetailsToggle"
+                        ToolTip="Show or hide the details">
+                    <DockPanel>
+                        <Path DockPanel.Dock="Right" Width="12" Height="12">
+                            <Path.Style>
+                                <Style TargetType="Path" BasedOn="{StaticResource IconPath}">
+                                    <Setter Property="Data" Value="{StaticResource Icon.ChevronDown}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding DetailsCollapsed}" Value="True">
+                                            <Setter Property="Data" Value="{StaticResource Icon.ChevronUp}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Path.Style>
+                        </Path>
+                        <TextBlock Text="Details" FontSize="11" FontWeight="SemiBold"
+                                   Foreground="{StaticResource Theme.Text.Muted}"/>
+                    </DockPanel>
+                </Button>
+                <ItemsControl ItemsSource="{Binding Metadata}" Grid.IsSharedSizeScope="True" Margin="0,2,0,0"
+                              Visibility="{Binding DetailsCollapsed, Converter={StaticResource InverseBoolToVisibility}}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" SharedSizeGroup="MetaLabel"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding Label}" Margin="0,0,10,0" FontSize="11"
+                                           Foreground="{StaticResource Theme.Text.Muted}"/>
+                                <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="11"
+                                           TextTrimming="CharacterEllipsis" ToolTip="{Binding Value}"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </DockPanel>
         </Border>
 
         <!-- Whichever footer belongs to the body that is showing. -->
@@ -182,16 +238,27 @@
         <Grid>
             <!-- Image. The chequerboard is built in code-behind from the theme's two colours and
                  rebuilt when they change: a tiling brush caches its realisation, so recolouring a
-                 brush inside one does not repaint it. -->
-            <ScrollViewer x:Name="ImageScroller"
-                          HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
-                          Visibility="{Binding HasImage, Converter={StaticResource BoolToVisibility}}">
-                <Border x:Name="ImageBackdrop" MouseLeftButtonDown="Image_MouseDown">
-                    <Image x:Name="PreviewImage" Source="{Binding Image}"
-                           RenderOptions.BitmapScalingMode="HighQuality"
-                           Stretch="Uniform" StretchDirection="DownOnly"/>
-                </Border>
-            </ScrollViewer>
+                 brush inside one does not repaint it.
+                 Laid out fitted to the pane, up or down; zoom and pan are a render transform over
+                 that (see ImageZoom), so a wheel notch never costs a layout pass. -->
+            <Border x:Name="ImageBackdrop" ClipToBounds="True"
+                    MouseLeftButtonDown="Image_MouseDown" MouseMove="Image_MouseMove"
+                    MouseLeftButtonUp="Image_MouseUp" LostMouseCapture="Image_LostCapture"
+                    MouseWheel="Image_MouseWheel" SizeChanged="ImageBackdrop_SizeChanged"
+                    Visibility="{Binding HasImage, Converter={StaticResource BoolToVisibility}}">
+                <Image x:Name="PreviewImage" Source="{Binding Image}"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Stretch="Uniform" StretchDirection="Both"
+                       RenderTransformOrigin="0,0" SizeChanged="ImageBackdrop_SizeChanged">
+                    <Image.RenderTransform>
+                        <TransformGroup>
+                            <ScaleTransform x:Name="ImageScale"/>
+                            <TranslateTransform x:Name="ImageOffset"/>
+                        </TransformGroup>
+                    </Image.RenderTransform>
+                </Image>
+            </Border>
 
             <!-- Text and code. A RichTextBox rather than a TextBlock so the text can be selected
                  and copied, which Explorer's pane cannot do; the gutter is a single TextBlock
@@ -274,47 +341,97 @@
             </ScrollViewer>
 
             <!-- Media. The poster frame is all there is until the user presses play — nothing is
-                 opened, nothing makes a sound, and the harness photographs the poster. -->
-            <Grid Visibility="{Binding HasMedia, Converter={StaticResource BoolToVisibility}}">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
+                 opened, nothing makes a sound, and the harness photographs the poster.
+                 MediaHost is lifted whole out of MediaSlot into a borderless window for full screen
+                 and put back after, so the one MediaElement and every handler below keep working;
+                 that is also why the element's UnloadedBehavior is Manual (see OnUnloaded). -->
+            <Border x:Name="MediaSlot"
+                    Visibility="{Binding HasMedia, Converter={StaticResource BoolToVisibility}}">
+                <Grid x:Name="MediaHost">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
 
-                <Image Source="{Binding Image}" Stretch="Uniform" StretchDirection="DownOnly"
-                       RenderOptions.BitmapScalingMode="HighQuality"
-                       Visibility="{Binding MediaSource, Converter={StaticResource NullToVisible}}"/>
-                <MediaElement x:Name="MediaView" LoadedBehavior="Manual" UnloadedBehavior="Close"
-                              ScrubbingEnabled="True" Stretch="Uniform"
-                              MediaOpened="Media_Opened" MediaEnded="Media_Ended" MediaFailed="Media_Failed"
-                              Visibility="{Binding MediaSource, Converter={StaticResource NullToCollapsed}}"/>
+                    <!-- Transparent so the whole picture takes the click: once to play or pause,
+                         twice for full screen. -->
+                    <Grid x:Name="VideoArea" Background="Transparent" MouseLeftButtonDown="VideoArea_MouseDown">
+                        <Image Source="{Binding Image}" Stretch="Uniform" StretchDirection="DownOnly"
+                               RenderOptions.BitmapScalingMode="HighQuality"
+                               Visibility="{Binding MediaSource, Converter={StaticResource NullToVisible}}"/>
+                        <MediaElement x:Name="MediaView" LoadedBehavior="Manual" UnloadedBehavior="Manual"
+                                      ScrubbingEnabled="True" Stretch="Uniform"
+                                      MediaOpened="Media_Opened" MediaEnded="Media_Ended" MediaFailed="Media_Failed"
+                                      Visibility="{Binding MediaSource, Converter={StaticResource NullToCollapsed}}"/>
 
-                <Button Grid.Row="0" Style="{StaticResource ToolbarButton}" Content="▶  Play"
-                        HorizontalAlignment="Center" VerticalAlignment="Center" Padding="14,8"
-                        Command="{Binding PlayMediaCommand}"
-                        Visibility="{Binding MediaSource, Converter={StaticResource NullToVisible}}"/>
+                        <Button Style="{StaticResource ToolbarButton}" Content="▶  Play"
+                                HorizontalAlignment="Center" VerticalAlignment="Center" Padding="14,8"
+                                Command="{Binding PlayMediaCommand}"
+                                Visibility="{Binding MediaSource, Converter={StaticResource NullToVisible}}"/>
+                    </Grid>
 
-                <Grid Grid.Row="1" Margin="6,4" x:Name="Transport"
-                      Visibility="{Binding MediaSource, Converter={StaticResource NullToCollapsed}}">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="70"/>
-                    </Grid.ColumnDefinitions>
-                    <Button x:Name="PlayPause" Style="{StaticResource ToolbarButton}" Content="❚❚"
-                            Click="PlayPause_Click" MinWidth="30"/>
-                    <Slider x:Name="Seek" Grid.Column="1" Margin="6,0" VerticalAlignment="Center"
-                            Minimum="0" IsMoveToPointEnabled="True"
-                            Thumb.DragStarted="Seek_DragStarted" Thumb.DragCompleted="Seek_DragCompleted"/>
-                    <TextBlock x:Name="TimeText" Grid.Column="2" VerticalAlignment="Center"
-                               FontSize="11" Margin="0,0,8,0"
-                               Foreground="{StaticResource Theme.Text.Secondary}"/>
-                    <Slider Grid.Column="3" VerticalAlignment="Center" Minimum="0" Maximum="1"
-                            Value="{Binding Volume, ElementName=MediaView, Mode=TwoWay}"
-                            ToolTip="Volume"/>
+                    <!-- Two rows so the seek bar keeps the pane's whole width however narrow it is. -->
+                    <Grid Grid.Row="1" Margin="6,2,6,4" x:Name="Transport"
+                          Visibility="{Binding MediaSource, Converter={StaticResource NullToCollapsed}}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="70"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Dragging the thumb seeks as it goes (see Seek_ValueChanged), not on release. -->
+                        <Slider x:Name="Seek" Grid.ColumnSpan="6" Margin="2,0,2,2" VerticalAlignment="Center"
+                                Minimum="0" IsMoveToPointEnabled="True"
+                                AutomationProperties.AutomationId="MediaSeek"
+                                ValueChanged="Seek_ValueChanged"
+                                Thumb.DragStarted="Seek_DragStarted" Thumb.DragCompleted="Seek_DragCompleted"/>
+
+                        <Button x:Name="PlayPause" Grid.Row="1" Grid.Column="0" Style="{StaticResource MediaButton}"
+                                Content="{StaticResource Icon.Pause}" ToolTip="Play or pause (Space in full screen)"
+                                Click="PlayPause_Click"/>
+                        <Button Grid.Row="1" Grid.Column="1" Style="{StaticResource MediaButton}"
+                                Content="{StaticResource Icon.SkipNext}"
+                                AutomationProperties.AutomationId="MediaSkipNext"
+                                ToolTip="Next video in this folder"
+                                Command="{Binding PlayNextCommand}"/>
+                        <TextBlock x:Name="TimeText" Grid.Row="1" Grid.Column="2" VerticalAlignment="Center"
+                                   FontSize="11" Margin="6,0,6,0" TextTrimming="CharacterEllipsis"
+                                   Foreground="{StaticResource Theme.Text.Secondary}"/>
+                        <Button Grid.Row="1" Grid.Column="3" Content="{StaticResource Icon.AutoAdvance}"
+                                AutomationProperties.AutomationId="MediaAutoAdvance"
+                                ToolTip="Play the next video when this one ends"
+                                Command="{Binding ToggleAutoAdvanceCommand}">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource MediaButton}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding AutoAdvance}" Value="True">
+                                            <Setter Property="Background"
+                                                    Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
+                                            <Setter Property="Foreground"
+                                                    Value="{StaticResource Theme.Toolbar.CheckedForeground}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button x:Name="FullScreenButton" Grid.Row="1" Grid.Column="4" Style="{StaticResource MediaButton}"
+                                Content="{StaticResource Icon.FullScreen}"
+                                AutomationProperties.AutomationId="MediaFullScreen"
+                                ToolTip="Full screen (double-click the video; Esc to leave)"
+                                Click="FullScreen_Click"/>
+                        <Slider Grid.Row="1" Grid.Column="5" VerticalAlignment="Center" Minimum="0" Maximum="1"
+                                Value="{Binding Volume, ElementName=MediaView, Mode=TwoWay}"
+                                ToolTip="Volume"/>
+                    </Grid>
                 </Grid>
-            </Grid>
+            </Border>
 
             <!-- Loading, and the reason there is nothing. Both sit over the bodies rather than
                  beside them, so an empty pane is never simply blank. -->

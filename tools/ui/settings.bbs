@@ -1,0 +1,39 @@
+# The settings page, which stands in for everything below the main window's title bar.
+# Each page in place, then the folders restored. Run it again with --size 900x480 to see a page
+# taller than the window scroll.
+
+settings general
+shot 01-general
+settings appearance
+shot 02-appearance
+settings preview
+shot 03-preview
+settings search-index
+shot 04-search-index
+settings history
+shot 05-history
+settings new-items
+shot 06-new-items
+settings columns
+shot 07-columns
+settings context-menu
+shot 08-context-menu
+settings close
+shot 09-back-to-folders
+
+# --- Live apply. There is no Save: a box ticked on the page reaches the folders once the page's
+# debounce has run, and leaving straight after a change still writes it (the flush on close). ---
+
+tree .
+refresh
+assert-no-row .hidden-notes.txt
+settings general
+settings tick Show hidden items on
+settle 800
+settings close
+assert-row .hidden-notes.txt
+
+settings general
+settings tick Show hidden items off
+settings close
+assert-no-row .hidden-notes.txt

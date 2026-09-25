@@ -16,6 +16,7 @@ using BertBrowser.Core.Services.Columns;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.FlatView;
 using BertBrowser.Core.Services.NewItem;
+using BertBrowser.Core.Services.Preview;
 using BertBrowser.Core.Services.Rename;
 using BertBrowser.Core.Services.ShellMenu;
 using Microsoft.Extensions.DependencyInjection;
@@ -71,6 +72,7 @@ public partial class DirectoryTabView : UserControl
         Tab.RevealFileRequested += OnRevealFileRequested;
         Tab.FileList.ColumnsChanged += FileList_ColumnsChanged;
         PreviewPane.FitWidthRequested += PreviewPane_FitWidthRequested;
+        Tab.Preview.NextMediaRequested += Preview_NextMediaRequested;
         Tab.FileList.RealizedRows = RealizedRows;
         DetailsView.Columns.CollectionChanged += Columns_CollectionChanged;
         // Bubbles from PART_HeaderGripper in the GridViewColumnHeader template.
@@ -90,6 +92,7 @@ public partial class DirectoryTabView : UserControl
         Tab.RevealFileRequested -= OnRevealFileRequested;
         Tab.FileList.ColumnsChanged -= FileList_ColumnsChanged;
         PreviewPane.FitWidthRequested -= PreviewPane_FitWidthRequested;
+        Tab.Preview.NextMediaRequested -= Preview_NextMediaRequested;
         DetailsView.Columns.CollectionChanged -= Columns_CollectionChanged;
         FileListView.RemoveHandler(Thumb.DragCompletedEvent, new DragCompletedEventHandler(Header_DragCompleted));
         PreviewPane.Detach();
@@ -162,6 +165,32 @@ public partial class DirectoryTabView : UserControl
 
         PreviewColumn.Width = new GridLength(target);
         _settings.PreviewPaneWidth = target;
+    }
+
+    /// <summary>Selects the next video after the one previewing, in the order the list shows, and
+    /// has the pane play it on arrival. Walks <c>FileListView.Items</c> rather than the view model's
+    /// collection, so a sort or filter the user applied is the order that plays. Keyboard focus is
+    /// left where it is — in full screen it belongs to the video window.</summary>
+    private void Preview_NextMediaRequested(object? sender, EventArgs e)
+    {
+        if (FileListView.SelectedItem is not FileItemViewModel current) return;
+
+        var items = FileListView.Items;
+        var names = new string?[items.Count];
+        var at = -1;
+        for (var i = 0; i < items.Count; i++)
+        {
+            if (items[i] is not FileItemViewModel row) continue;
+            names[i] = row.IsDirectory ? null : row.Name;
+            if (ReferenceEquals(row, current)) at = i;
+        }
+
+        var next = MediaPlaylist.Next(names, at);
+        if (next < 0 || items[next] is not FileItemViewModel target) return;
+
+        Tab.Preview.PlayWhenLoaded(target.FullPath);
+        FileListView.SelectedItem = target;
+        FileListView.ScrollIntoView(target);
     }
 
     public void FocusList() =>

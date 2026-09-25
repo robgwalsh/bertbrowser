@@ -8,29 +8,84 @@ using Microsoft.Win32;
 
 namespace BertBrowser.App.Views;
 
-public partial class SettingsWindow : ThemedWindow
+/// <summary>
+/// The settings page. It sits in the main window in place of the folders; <see cref="MainWindow"/>
+/// shows it, and it goes back when this raises <see cref="BackRequested"/>.
+/// </summary>
+public partial class SettingsView : UserControl
 {
     private readonly SettingsViewModel _vm;
 
-    public SettingsWindow(SettingsViewModel vm)
+    /// <summary>Back, or Esc. The host decides whether leaving is allowed (see
+    /// <see cref="SettingsViewModel.TryLeave"/>).</summary>
+    public event EventHandler? BackRequested;
+
+    /// <summary>"Customise colours…". The editor is modeless so its changes can be judged against
+    /// the file list, so the host has to put the folders back before opening it.</summary>
+    public event EventHandler? CustomiseThemeRequested;
+
+    public SettingsViewModel ViewModel => _vm;
+
+    public SettingsView(SettingsViewModel vm)
     {
         InitializeComponent();
         _vm = vm;
         DataContext = vm;
 
         // The reorder that replaced the up and down buttons. The drop reports two indexes; what
-        // they mean is ColumnLayoutRules' business, not this window's.
+        // they mean is ColumnLayoutRules' business, not this view's.
         ListReorderDrag.Attach(ColumnDefaultsList, Orientation.Vertical, _vm.MoveColumn);
 
         // While "Match Windows light/dark" is on, the theme can change with this page open —
         // Windows flipping at sunset — and the pickers have to follow it. Subscribed here rather
         // than in the view model because nothing disposes one of those and IThemeService is a
-        // singleton, so a view-model subscription would leak a graph per Settings open.
-        WatchThemeChanges(_vm.Appearance);
+        // singleton, so a view-model subscription would leak a graph per Settings open. Loaded and
+        // Unloaded rather than the constructor: the host drops this view when it goes back.
+        Loaded += (_, _) => WatchThemeChanges(true);
+        Unloaded += (_, _) => WatchThemeChanges(false);
     }
 
+    /// <summary>Puts the keyboard on the category list, so arrows walk the pages straight away.</summary>
+    public void FocusCategories()
+    {
+        if (!IsLoaded)
+        {
+            Loaded += FocusOnLoad;
+            return;
+        }
+
+        CategoryList.UpdateLayout();
+        var row = CategoryList.ItemContainerGenerator.ContainerFromItem(_vm.SelectedCategory) as ListBoxItem;
+        if (row is not null) row.Focus();
+        else CategoryList.Focus();
+    }
+
+    private void FocusOnLoad(object sender, RoutedEventArgs e)
+    {
+        Loaded -= FocusOnLoad;
+        FocusCategories();
+    }
+
+    private Theming.IThemeService? _watchedTheme;
+
+    private void WatchThemeChanges(bool on)
+    {
+        if (on && _watchedTheme is null && App.Services?.GetService<Theming.IThemeService>() is { } theme)
+        {
+            _watchedTheme = theme;
+            theme.ThemeChanged += OnThemeChanged;
+        }
+        else if (!on && _watchedTheme is { } watched)
+        {
+            watched.ThemeChanged -= OnThemeChanged;
+            _watchedTheme = null;
+        }
+    }
+
+    private void OnThemeChanged(object? sender, EventArgs e) => _vm.Appearance.SyncAfterExternalChange();
+
     /// <summary>Keeps an <see cref="AppearanceViewModel"/> in step with theme changes it did not
-    /// cause, for the life of this window. Shared with <see cref="ThemeEditorWindow"/>.</summary>
+    /// cause, for the life of a window. Used by <see cref="ThemeEditorWindow"/>.</summary>
     internal static void WatchThemeChanges(Window window, AppearanceViewModel appearance)
     {
         // Resolved rather than injected, the route ThemedWindow itself uses for this.
@@ -42,39 +97,21 @@ public partial class SettingsWindow : ThemedWindow
         window.Closed += (_, _) => theme.ThemeChanged -= OnThemeChanged;
     }
 
-    private void WatchThemeChanges(AppearanceViewModel appearance) =>
-        WatchThemeChanges(this, appearance);
-
-    private void Save_Click(object sender, RoutedEventArgs e)
-    {
-        if (_vm.TrySave(out var error))
-        {
-            DialogResult = true;
-        }
-        else
-        {
-            MessageDialog.Show(this, error ?? "", "Settings", MessageDialogKind.Warning);
-        }
-    }
+    private void Back_Click(object sender, RoutedEventArgs e) => BackRequested?.Invoke(this, EventArgs.Empty);
 
     /// <summary>
-    /// The editor is modeless so its changes can be judged against the file list, which means this
-    /// dialog has to get out of the way: it commits what is pending and closes.
+    /// Esc goes back. Bubbling rather than Preview, so an open combo box or the column popup takes
+    /// its own Esc first and only an unclaimed one leaves the page.
     /// </summary>
-    private void CustomiseTheme_Click(object sender, RoutedEventArgs e)
+    private void View_KeyDown(object sender, KeyEventArgs e)
     {
-        // TrySave puts the offending command on screen itself, which is what makes leaving the
-        // Appearance page acceptable here.
-        if (!_vm.TrySave(out var error))
-        {
-            MessageDialog.Show(this, error ?? "", "Settings", MessageDialogKind.Warning);
-            return;
-        }
-
-        var editor = new ThemeEditorWindow(_vm.Appearance) { Owner = Application.Current?.MainWindow };
-        DialogResult = true;
-        editor.Show();
+        if (e.Key != Key.Escape || e.Handled || Keyboard.Modifiers != ModifierKeys.None) return;
+        e.Handled = true;
+        BackRequested?.Invoke(this, EventArgs.Empty);
     }
+
+    private void CustomiseTheme_Click(object sender, RoutedEventArgs e) =>
+        CustomiseThemeRequested?.Invoke(this, EventArgs.Empty);
 
     /// <summary>
     /// The whole property system, for the columns the curated list does not name.
@@ -159,7 +196,7 @@ public partial class SettingsWindow : ThemedWindow
             Title = "Choose a program",
             Filter = "Programs (*.exe;*.bat;*.cmd)|*.exe;*.bat;*.cmd|All files (*.*)|*.*",
         };
-        if (dialog.ShowDialog(this) == true)
+        if (dialog.ShowDialog(Window.GetWindow(this)) == true)
             command.Command = dialog.FileName;
     }
 
@@ -172,7 +209,7 @@ public partial class SettingsWindow : ThemedWindow
             Title = "Choose a template file",
             Filter = "All files (*.*)|*.*",
         };
-        if (dialog.ShowDialog(this) == true)
+        if (dialog.ShowDialog(Window.GetWindow(this)) == true)
             type.TemplatePath = dialog.FileName;
     }
 
@@ -183,7 +220,7 @@ public partial class SettingsWindow : ThemedWindow
             Title = "Choose a startup folder",
             InitialDirectory = _vm.StartupDefaultPath,
         };
-        if (dialog.ShowDialog(this) == true)
+        if (dialog.ShowDialog(Window.GetWindow(this)) == true)
             _vm.StartupDefaultPath = dialog.FolderName;
     }
 }

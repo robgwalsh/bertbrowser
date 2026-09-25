@@ -6,7 +6,9 @@
 tree .
 refresh
 dialog changes 01-recording-off
-dialog settings-history 02-settings
+settings history
+shot 02-settings
+settings close
 changes-seed
 dialog changes 03-seeded
 theme light-plus

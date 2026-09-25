@@ -112,3 +112,18 @@ Checksum          | Number Symbol           | number_symbol           | 20
 # pane with the one beside it" — both appear in the file list's menu, and one picture on two verbs
 # is the wrong-picture mistake nothing else catches.
 CompareFiles      | Document Split Hint     | document_split_hint     | 20
+
+# The preview pane's media transport. Next is "skip to the next video in this folder"; AutoAdvance
+# is the toggle that does the same by itself when one ends, so it is the loop-through-a-list arrow
+# rather than a second skip glyph.
+Play              | Play                    | play                    | 20
+Pause             | Pause                   | pause                   | 20
+SkipNext          | Next                    | next                    | 20
+AutoAdvance       | Arrow Repeat All        | arrow_repeat_all        | 20
+FullScreen        | Full Screen Maximize    | full_screen_maximize    | 20
+ExitFullScreen    | Full Screen Minimize    | full_screen_minimize    | 20
+
+# Collapsing and expanding the preview pane's details strip. Up/down chevrons, pointing the way the
+# strip will move.
+ChevronDown       | Chevron Down            | chevron_down            | 20
+ChevronUp         | Chevron Up              | chevron_up              | 20
