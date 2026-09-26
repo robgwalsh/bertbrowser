@@ -18,8 +18,9 @@
         <KeyBinding Key="Right" Modifiers="Alt" Command="{Binding ActiveTab.ForwardCommand}"/>
         <KeyBinding Key="Up" Modifiers="Alt" Command="{Binding ActiveTab.UpCommand}"/>
         <KeyBinding Key="F5" Command="{Binding ActiveTab.RefreshCommand}"/>
-        <!-- Ctrl+Z is handled in code-behind, not bound here: a window-level binding would take it
-             away from the search and path boxes, where it must still undo typing. Ctrl+C/X/V and
+        <!-- Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z and Ctrl+Alt+Z (the undo history) are handled in
+             code-behind, not bound here: a window-level binding would take them away from the
+             search and path boxes, where they must still undo and redo typing. Ctrl+C/X/V and
              Alt+Enter likewise belong to whichever pane has focus, so they live in DirectoryTabView. -->
 
         <!-- Tabs. Routed through ActivePane, so they act on the pane the user is working in. -->
@@ -89,6 +90,34 @@
     <v:ThemedWindow.TitleBarContent>
         <DockPanel Margin="12,0,4,0" TextElement.Foreground="{StaticResource Theme.TitleBar.Foreground}">
             <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                <!--
+                  Undo and Redo, each a split button in the shape every editor's are: the face takes
+                  one step, the chevron lists the history so a click can go back several at once.
+                  The tooltip says what the face would do, so nobody undoes blind.
+                -->
+                <Button Style="{StaticResource ToolbarButton}" Margin="2,0,0,0" Padding="8,4,4,4"
+                        ToolTip="{Binding UndoDescription}" ToolTipService.ShowOnDisabled="False"
+                        Command="{Binding UndoCommand}"
+                        AutomationProperties.Name="Undo">
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Undo}"/>
+                </Button>
+                <Button x:Name="UndoMenuButton" Style="{StaticResource ToolbarButton}" Margin="0" Padding="2,4"
+                        MinWidth="14" ToolTip="Undo history" Click="UndoMenu_Click"
+                        AutomationProperties.Name="Undo history">
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.ChevronDown}" Width="10" Height="10"/>
+                </Button>
+                <Button Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" Padding="8,4,4,4"
+                        ToolTip="{Binding RedoDescription}" ToolTipService.ShowOnDisabled="False"
+                        Command="{Binding RedoCommand}"
+                        AutomationProperties.Name="Redo">
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Redo}"/>
+                </Button>
+                <Button x:Name="RedoMenuButton" Style="{StaticResource ToolbarButton}" Margin="0,0,10,0" Padding="2,4"
+                        MinWidth="14" ToolTip="Redo history" Click="RedoMenu_Click"
+                        AutomationProperties.Name="Redo history">
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.ChevronDown}" Width="10" Height="10"/>
+                </Button>
+
                 <!-- "Show hidden items" lives in the Settings dialog only; it is a preference
                      you set once, not something the caption strip needs a button for. -->
                 <Button Style="{StaticResource ToolbarButton}"
@@ -282,10 +311,16 @@
                 <TextBlock Text="{Binding ActiveTab.StatusText}"/>
             </StatusBarItem>
             <!-- Sticks around after a move or a rename so the way back stays visible once the
-                 result message has been replaced by something else. -->
+                 result message has been replaced by something else. A link to the whole history,
+                 since that is where the rest of the way back is. -->
             <StatusBarItem DockPanel.Dock="Left"
                            Visibility="{Binding UndoDescription, Converter={StaticResource NullToCollapsed}}">
-                <TextBlock Text="{Binding UndoDescription}" Foreground="{StaticResource Theme.Text.Link}" Margin="10,0,0,0"/>
+                <Button Style="{StaticResource LinkButton}" Margin="10,0,0,0"
+                        Click="UndoHistoryLink_Click"
+                        ToolTip="Show the undo history (Ctrl+Alt+Z)"
+                        AutomationProperties.AutomationId="StatusUndo">
+                    <TextBlock Text="{Binding UndoDescription}" Foreground="{StaticResource Theme.Text.Link}"/>
+                </Button>
             </StatusBarItem>
             <!-- Current file-list selection (blank when nothing is selected). -->
             <StatusBarItem DockPanel.Dock="Left"
@@ -701,6 +736,7 @@
                       ContextMenuOpening="FolderTree_ContextMenuOpening">
                 <TreeView.ContextMenu>
                     <ContextMenu>
+                        <!-- Laid out by ContextMenuComposer, in the order the file list's menu uses. -->
                         <MenuItem x:Name="TreeNewMenuItem" Tag="new" Header="New">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Add}"/></MenuItem.Icon>
                             <MenuItem Header="Folder" Click="TreeNewFolder_Click">
@@ -713,7 +749,6 @@
                                 <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.NewFile}"/></MenuItem.Icon>
                             </MenuItem>
                         </MenuItem>
-                        <Separator/>
                         <MenuItem Tag="open-new-tab" Header="Open in new tab" Click="TreeOpenInNewTab_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.OpenInNewTab}"/></MenuItem.Icon>
                         </MenuItem>
@@ -722,25 +757,21 @@
                             <MenuItem Header="To the right" Click="TreeOpenInPaneRight_Click"/>
                             <MenuItem Header="Below" Click="TreeOpenInPaneBelow_Click"/>
                         </MenuItem>
-                        <Separator/>
                         <MenuItem Tag="open-terminal" Header="Open in Terminal" Click="TreeOpenTerminal_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Terminal}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem Tag="open-vscode" Header="Open in VS Code" Click="TreeOpenVSCode_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.VSCode}"/></MenuItem.Icon>
                         </MenuItem>
-                        <Separator/>
                         <MenuItem x:Name="TreeBookmarkMenuItem" Tag="bookmark" Header="Bookmark" Click="TreeBookmark_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Bookmark}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="TreeDeleteMenuItem" Tag="delete" Header="Delete…" Click="TreeDelete_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Delete}"/></MenuItem.Icon>
                         </MenuItem>
-                        <Separator/>
                         <MenuItem Tag="copy-path" Header="Copy as path" Click="TreeCopyPath_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Copy}"/></MenuItem.Icon>
                         </MenuItem>
-                        <Separator/>
                         <!-- Right-clicking a drive here is the gesture this feature exists for. -->
                         <MenuItem Tag="disk-usage" Header="Analyse disk usage…" Click="TreeDiskUsage_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.DiskUsage}"/></MenuItem.Icon>
@@ -751,10 +782,6 @@
                         <MenuItem Tag="changes" Header="What changed here…" Click="TreeChanges_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Changes}"/></MenuItem.Icon>
                         </MenuItem>
-                        <Separator x:Name="TreeCustomCommandsSeparator" Visibility="Collapsed"/>
-                        <!-- Other programs' entries, built at ContextMenuOpening like the file list's. -->
-                        <Separator x:Name="TreeShellMenuSeparator" Visibility="Collapsed"/>
-                        <Separator/>
                         <MenuItem Tag="properties" Header="Properties…" Click="TreeProperties_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Properties}"/></MenuItem.Icon>
                         </MenuItem>

@@ -14,8 +14,9 @@ namespace BertBrowser.App.Views;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Attached to the settings page's column list, which is what replaced its ↑ and ↓ buttons, and to
-/// each pane's tab strip. The drop reports an index and nothing else: the caller decides what that
+/// Attached to the settings page's column list, which is what replaced its ↑ and ↓ buttons, to
+/// each pane's tab strip, and to the Context menu page's preview — which also takes items carried
+/// in from the lists beside it (<see cref="AttachInsert"/>). The drop reports an index and nothing else: the caller decides what that
 /// index means — a row dropped above Name comes back second, because Name is not movable — so this
 /// class never needs to know which list it is reordering. It also never needs to know what kind of
 /// container the list generates: a <see cref="ListBox"/> wraps items in a <c>ListBoxItem</c> and a
@@ -39,32 +40,55 @@ internal sealed class ListReorderDrag
     /// <summary>How close to an edge the pointer must come before the list scrolls under it.</summary>
     private const double AutoScrollMargin = 18;
 
+    /// <summary>The list the line is drawn in and a drop lands in.</summary>
     private readonly ItemsControl _list;
+
+    /// <summary>Where a drag starts: <see cref="_list"/> itself when reordering, another list when
+    /// carrying an item across into it.</summary>
+    private readonly ItemsControl _source;
+
     private readonly Orientation _orientation;
-    private readonly Action<int, int> _moved;
+    private readonly Action<int, int>? _moved;
+    private readonly Action<object, int>? _inserted;
+    private object? _fromItem;
     private InsertionLine? _line;
     private Point _start;
     private int _from = -1;
     private bool _dragging;
 
-    private ListReorderDrag(ItemsControl list, Orientation orientation, Action<int, int> moved)
+    private ListReorderDrag(
+        ItemsControl source, ItemsControl list, Orientation orientation,
+        Action<int, int>? moved, Action<object, int>? inserted)
     {
+        _source = source;
         _list = list;
         _orientation = orientation;
         _moved = moved;
+        _inserted = inserted;
 
-        list.PreviewMouseLeftButtonDown += OnPress;
-        list.PreviewMouseMove += OnMove;
-        list.PreviewMouseLeftButtonUp += OnRelease;
-        list.LostMouseCapture += (_, _) => Cancel();
-        list.PreviewKeyDown += OnKey;
+        source.PreviewMouseLeftButtonDown += OnPress;
+        source.PreviewMouseMove += OnMove;
+        source.PreviewMouseLeftButtonUp += OnRelease;
+        source.LostMouseCapture += (_, _) => Cancel();
+        source.PreviewKeyDown += OnKey;
     }
 
     /// <param name="orientation">Which way the items are laid out, i.e. which way a drag moves.</param>
     /// <param name="moved">The item's old index and the index it was dropped at, in the list's own
     /// terms. Not called when the drop would not move anything.</param>
     public static void Attach(ItemsControl list, Orientation orientation, Action<int, int> moved) =>
-        _ = new ListReorderDrag(list, orientation, moved);
+        _ = new ListReorderDrag(list, list, orientation, moved, null);
+
+    /// <summary>
+    /// Lets items be dragged out of <paramref name="source"/> and dropped into a gap of
+    /// <paramref name="target"/>, with the same line showing where. Nothing leaves the source: what a
+    /// drop means is the caller's business, as it is for a reorder.
+    /// </summary>
+    /// <param name="inserted">The source item and the target gap it was dropped in (0 is before
+    /// the first item). Not called for a drop outside the target.</param>
+    public static void AttachInsert(
+        ItemsControl source, ItemsControl target, Orientation orientation, Action<object, int> inserted) =>
+        _ = new ListReorderDrag(source, target, orientation, null, inserted);
 
     /// <summary>
     /// Draws the insertion line for a gap and leaves it there, for the harness.
@@ -79,7 +103,7 @@ internal sealed class ListReorderDrag
     /// <returns>The line, or null if the list has no adorner layer to draw on.</returns>
     internal static Adorner? ShowInsertionLine(ItemsControl list, Orientation orientation, int gap)
     {
-        var drag = new ListReorderDrag(list, orientation, static (_, _) => { });
+        var drag = new ListReorderDrag(list, list, orientation, static (_, _) => { }, null);
         drag.Show(gap);
         return drag._line;
     }
@@ -87,7 +111,8 @@ internal sealed class ListReorderDrag
     private void OnPress(object sender, MouseButtonEventArgs e)
     {
         _from = -1;
-        _start = e.GetPosition(_list);
+        _fromItem = null;
+        _start = e.GetPosition(_source);
         if (e.OriginalSource is not DependencyObject source) return;
 
         // A press that lands on a control inside the item belongs to that control: dragging across
@@ -95,8 +120,9 @@ internal sealed class ListReorderDrag
         if (VisualTreeUtil.FindAncestor<TextBoxBase>(source) is not null) return;
         if (VisualTreeUtil.FindAncestor<ButtonBase>(source) is not null) return;
 
-        if (ItemsControl.ContainerFromElement(_list, source) is not { } container) return;
-        _from = _list.ItemContainerGenerator.IndexFromContainer(container);
+        if (ItemsControl.ContainerFromElement(_source, source) is not { } container) return;
+        _from = _source.ItemContainerGenerator.IndexFromContainer(container);
+        _fromItem = _source.ItemContainerGenerator.ItemFromContainer(container);
     }
 
     private void OnMove(object sender, MouseEventArgs e)
@@ -108,25 +134,34 @@ internal sealed class ListReorderDrag
             return;
         }
 
-        var now = e.GetPosition(_list);
-
         if (!_dragging)
         {
             if (_from < 0) return;
 
             // The system's own threshold, so a click that wobbles by a pixel is still a click. Below
             // it a drag would start on every selection and the list would be unusable on a trackpad.
-            if (Math.Abs(now.X - _start.X) < SystemParameters.MinimumHorizontalDragDistance &&
-                Math.Abs(now.Y - _start.Y) < SystemParameters.MinimumVerticalDragDistance)
+            var moved = e.GetPosition(_source);
+            if (Math.Abs(moved.X - _start.X) < SystemParameters.MinimumHorizontalDragDistance &&
+                Math.Abs(moved.Y - _start.Y) < SystemParameters.MinimumVerticalDragDistance)
                 return;
 
-            if (!_list.CaptureMouse()) return;
+            if (!_source.CaptureMouse()) return;
             _dragging = true;
-            _list.Cursor = _orientation == Orientation.Vertical ? Cursors.SizeNS : Cursors.SizeWE;
+            _source.Cursor = _inserted is not null ? Cursors.Hand
+                : _orientation == Orientation.Vertical ? Cursors.SizeNS : Cursors.SizeWE;
         }
 
-        AutoScroll(e);
-        Show(Target(now));
+        // Carried across, the line shows only while the pointer is over the list it would land in.
+        var now = e.GetPosition(_list);
+        if (_inserted is not null && !IsOver(now))
+        {
+            Hide();
+        }
+        else
+        {
+            AutoScroll(e);
+            Show(Target(now));
+        }
         e.Handled = true;
     }
 
@@ -139,16 +174,27 @@ internal sealed class ListReorderDrag
         }
 
         var from = _from;
-        var target = Target(e.GetPosition(_list));
+        var item = _fromItem;
+        var at = e.GetPosition(_list);
+        var target = Target(at);
         Cancel();
         e.Handled = true;
         if (from < 0) return;
 
+        if (_inserted is not null)
+        {
+            if (item is not null && IsOver(at)) _inserted(item, target);
+            return;
+        }
+
         // An item released just past itself is where it already is: the gap after item 3 and the
         // gap before item 3 are both "item 3 stays put", and moving it would look like a bug.
         if (target > from) target--;
-        if (target != from) _moved(from, target);
+        if (target != from) _moved?.Invoke(from, target);
     }
+
+    private bool IsOver(Point point) =>
+        point.X >= 0 && point.Y >= 0 && point.X <= _list.ActualWidth && point.Y <= _list.ActualHeight;
 
     private void OnKey(object sender, KeyEventArgs e)
     {
@@ -163,11 +209,12 @@ internal sealed class ListReorderDrag
     {
         Hide();
         _from = -1;
-        _list.ClearValue(FrameworkElement.CursorProperty);
+        _fromItem = null;
+        _source.ClearValue(FrameworkElement.CursorProperty);
         if (!_dragging) return;
 
         _dragging = false;
-        if (_list.IsMouseCaptured) _list.ReleaseMouseCapture();
+        if (_source.IsMouseCaptured) _source.ReleaseMouseCapture();
     }
 
     /// <summary>Scrolls when the pointer reaches an edge, so a list longer than its box can be

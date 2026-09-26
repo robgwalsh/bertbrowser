@@ -27,6 +27,7 @@ using BertBrowser.Core.Services.Preview;
 using BertBrowser.Core.Services.Rename;
 using BertBrowser.Core.Services.ShellMenu;
 using BertBrowser.Core.Services.Transfer;
+using BertBrowser.Core.Services.UndoHistory;
 using BertBrowser.Core.Theming;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -118,6 +119,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "checksum-algorithms": ChecksumAlgorithmsSetting(rest); break;
             case "hide-menu-item": BuiltInMenuItemSetting(rest, shown: false); break;
             case "show-menu-item": BuiltInMenuItemSetting(rest, shown: true); break;
+            case "menu-layout": MenuLayoutSetting(rest); break;
             case "sandbox": output.WriteLine(_sandbox.Root); break;
             case "deny": Deny(rest); break;
 
@@ -181,6 +183,11 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "copy": Transfer(rest, TransferVerb.Copy); break;
             case "shortcut": Shortcut(rest); break;
             case "undo": Undo(); break;
+            case "redo": Redo(); break;
+            case "undo-to": StepTo(rest, UndoDirection.Undo); break;
+            case "redo-to": StepTo(rest, UndoDirection.Redo); break;
+            case "undo-budget": UndoBudgetVerb(rest); break;
+            case "clear-undo-history": ClearUndoHistory(); break;
             case "pause": PauseQueue(paused: true); break;
             case "resume": PauseQueue(paused: false); break;
             case "queue-move": QueueMove(rest); break;
@@ -244,6 +251,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "menu": Menu(rest); break;
             case "assert-menu-item": AssertMenuItem(rest, expected: true); break;
             case "assert-no-menu-item": AssertMenuItem(rest, expected: false); break;
+            case "assert-menu-order": AssertMenuOrder(rest); break;
             case "right-drop-menu": RightDropMenu(rest); break;
             case "assert-header-menu": AssertHeaderMenu(rest); break;
 
@@ -284,6 +292,10 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-not-inside-archive": AssertInsideArchive(expected: false); break;
             case "assert-can-undo": AssertCanUndo(expected: true); break;
             case "assert-cannot-undo": AssertCanUndo(expected: false); break;
+            case "assert-can-redo": AssertCanRedo(expected: true); break;
+            case "assert-cannot-redo": AssertCanRedo(expected: false); break;
+            case "assert-history": AssertHistory(rest); break;
+            case "assert-history-state": AssertHistoryState(rest); break;
             case "assert-duplicate-groups": AssertDuplicateGroups(rest); break;
             case "assert-duplicate-selected": AssertDuplicateSelected(rest); break;
             case "assert-duplicate-row": AssertDuplicateRow(rest, expected: true); break;
@@ -635,6 +647,23 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         var hidden = session.Services.GetRequiredService<AppSettings>().HiddenBuiltInMenuItems;
         hidden.RemoveAll(h => string.Equals(h, id, StringComparison.OrdinalIgnoreCase));
         if (!shown) hidden.Add(id);
+    }
+
+    /// <summary>Arranges both right-click menus, as the Context menu page saves it: <c>menu-layout
+    /// app:compress clsid:{…} - app:cut @more app:properties</c>, one token per entry (see
+    /// <c>MenuLayoutRules</c>). <c>menu-layout default</c> forgets the arrangement. Built-ins left out
+    /// come back at their default spot unless hidden, as they would for a person.</summary>
+    private void MenuLayoutSetting(string rest)
+    {
+        var tokens = Require(rest, "menu-layout").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var token in tokens)
+        {
+            if (MenuLayoutRules.IsBuiltIn(token, out var id) && !BuiltInMenuItems.IsKnown(id))
+                throw new FormatException($"'{id}' is not one of the app's menu entries.");
+        }
+
+        session.Services.GetRequiredService<AppSettings>().ContextMenuLayout =
+            tokens is ["default"] ? null : [.. tokens];
     }
 
     private void ChecksumAlgorithmsSetting(string rest) =>
@@ -1005,10 +1034,14 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             "tree" => TreeMenuItems(),
             "workspaces" => session.Window.BuildWorkspaceMenuItems(),
             "saved-searches" => session.Window.BuildSavedSearchMenuItems(),
+            "undo" => session.Window.BuildUndoMenuItems(),
+            "undo-range" => session.Window.BuildUndoMenuItems(poseHover: 2),
+            "redo" => session.Window.BuildRedoMenuItems(),
             var other => throw new FormatException(
-                $"'{other}' is not a menu. Try: columns, flat, files, background, tree, workspaces, saved-searches."),
+                $"'{other}' is not a menu. Try: columns, flat, files, background, tree, workspaces, saved-searches, undo, undo-range, redo."),
         });
         _lastMenuHeaders = session.Dispatcher.Invoke(() => Headers(items).ToList());
+        _lastMenuTopLevel = session.Dispatcher.Invoke(() => TopLevel(items).ToList());
 
         var path = Resolve(Named(name.Length == 0 ? $"menu-{kind}" : name, ++_shots));
         session.Dispatcher.Invoke(() =>
@@ -1168,6 +1201,9 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     /// <c>assert-menu-item</c>.</summary>
     private List<string> _lastMenuHeaders = [];
 
+    /// <summary>The last menu's visible top-level lines in order, a separator as <c>-</c>.</summary>
+    private List<string> _lastMenuTopLevel = [];
+
     /// <summary>
     /// The file list's own menu, prepared the way a right-click prepares it — for the selection,
     /// or with nothing selected for the folder's empty space — and detached to be photographed.
@@ -1222,6 +1258,43 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             if (item is not MenuItem { Visibility: Visibility.Visible } menuItem) continue;
             if (menuItem.Header is string header) yield return header;
             foreach (var nested in Headers(menuItem.Items.OfType<FrameworkElement>())) yield return nested;
+        }
+    }
+
+    private static IEnumerable<string> TopLevel(IEnumerable<FrameworkElement> items)
+    {
+        foreach (var item in items)
+        {
+            if (item.Visibility != Visibility.Visible) continue;
+            if (item is Separator) yield return "-";
+            else if (item is MenuItem { Header: string header }) yield return header;
+        }
+    }
+
+    /// <summary>
+    /// <c>assert-menu-order Compress | 7-Zip | - | Cut</c>: the last menu's top-level lines contain
+    /// these in this order (not necessarily next to each other). Each is a substring of a header, as
+    /// for <c>assert-menu-item</c>; <c>-</c> is a visible separator.
+    /// </summary>
+    private void AssertMenuOrder(string rest)
+    {
+        var wanted = Require(rest, "assert-menu-order")
+            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var lines = _lastMenuTopLevel
+            .Select(h => h.Replace("__", "\u0001").Replace("_", "").Replace('\u0001', '_'))
+            .ToList();
+
+        var at = -1;
+        foreach (var text in wanted)
+        {
+            var next = lines.FindIndex(at + 1, l => text == "-"
+                ? l == "-"
+                : l != "-" && l.Contains(text, StringComparison.OrdinalIgnoreCase));
+            if (next < 0)
+                throw new AssertionException(
+                    $"'{text}' does not come after '{(at < 0 ? "the top" : lines[at])}' in the last menu. " +
+                    $"Lines: {string.Join(" | ", lines)}");
+            at = next;
         }
     }
 
@@ -2407,6 +2480,70 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         session.Settle();
     }
 
+    private void Redo()
+    {
+        if (!session.Dispatcher.Invoke(() => session.Shell.CanRedo))
+            throw new AssertionException("There is nothing to redo.");
+
+        Invoke(() => session.Shell.RedoCommand.Execute(null));
+        session.Settle();
+    }
+
+    /// <summary>
+    /// <c>undo-to 3</c>: undoes three steps at once, the way picking the third entry of the Undo
+    /// dropdown does. <c>redo-to 2</c> is the same forward. Counted from the cursor, so a script
+    /// reads the same however long the history has grown.
+    /// </summary>
+    private void StepTo(string rest, UndoDirection direction)
+    {
+        if (!int.TryParse(rest.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var steps) || steps < 1)
+            throw new FormatException($"'{rest}' is not a number of steps. Try: {(direction == UndoDirection.Undo ? "undo" : "redo")}-to 3");
+
+        var target = session.Dispatcher.Invoke(() =>
+        {
+            var rows = direction == UndoDirection.Undo
+                ? session.Shell.History.Undoable
+                : session.Shell.History.Redoable;
+            return steps <= rows.Count ? rows[steps - 1].Entry : null;
+        }) ?? throw new AssertionException(
+            $"There are fewer than {steps} steps to {(direction == UndoDirection.Undo ? "undo" : "redo")}.");
+
+        Invoke(() => _ = direction == UndoDirection.Undo
+            ? session.Shell.UndoToAsync(target)
+            : session.Shell.RedoToAsync(target));
+        session.Settle();
+    }
+
+    /// <summary><c>undo-budget steps=2 gb=1</c>: the limits the History page sets, either or both.</summary>
+    private void UndoBudgetVerb(string rest)
+    {
+        var current = session.Dispatcher.Invoke(() => session.Shell.UndoStack.Budget);
+        var steps = current.MaxEntries;
+        var bytes = current.MaxHeldBytes;
+
+        foreach (var part in rest.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var (key, value) = part.Split('=', 2) is [var k, var v] ? (k, v) : throw new FormatException($"'{part}' is not key=value.");
+            var number = long.Parse(value, CultureInfo.InvariantCulture);
+            switch (key)
+            {
+                case "steps": steps = (int)number; break;
+                case "gb": bytes = number << 30; break;
+                case "bytes": bytes = number; break;
+                default: throw new FormatException($"'{key}' is not an undo limit. Try: steps, gb, bytes.");
+            }
+        }
+
+        Invoke(() => _ = session.Shell.SetUndoBudgetAsync(new UndoBudget(steps, bytes)));
+        session.Settle();
+    }
+
+    private void ClearUndoHistory()
+    {
+        Invoke(() => _ = session.Shell.ClearUndoHistoryAsync());
+        session.Settle();
+    }
+
 
     // --- duplicates ---
 
@@ -3188,7 +3325,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     /// run never answers a dialog; it leaves the way the "Leave" answer would.
     /// </para>
     /// <para>
-    /// <c>dragging</c> (Columns only) places the insertion line of a row being dragged. It is placed
+    /// <c>dragging</c> (Columns and Context menu) places the insertion line of a row being dragged. It is placed
     /// rather than dragged into place because a run posts no mouse input, so this is the only way it
     /// is ever on screen in a capture. It is also the regression test for the crash that made the
     /// gesture unusable — building the line threw, because its pen held a live theme brush and a
@@ -3252,8 +3389,9 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         {
             Invoke(() =>
             {
-                if (FindNamed<ListBox>("ColumnDefaultsList") is not { } list)
-                    throw new AssertionException("The Columns page has no ColumnDefaultsList.");
+                var name = category == SettingsCategory.ContextMenu ? "MenuLayoutList" : "ColumnDefaultsList";
+                if (FindNamed<ListBox>(name) is not { } list)
+                    throw new AssertionException($"The {page} page has no {name}.");
 
                 // Containers are generated by the layout pass, and the line is positioned off them.
                 list.UpdateLayout();
@@ -3261,9 +3399,22 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
                     throw new AssertionException("The column list has no adorner layer to draw on.");
             });
         }
+        else if (tail.Equals("new-command", StringComparison.OrdinalIgnoreCase) &&
+                 category == SettingsCategory.ContextMenu)
+        {
+            // The page's own New command button, so the editor it opens is what gets photographed.
+            Invoke(() =>
+            {
+                if (FindNamed<ListBox>("MenuLayoutList")?.DataContext is not SettingsViewModel vm)
+                    throw new AssertionException("The Context menu page has no menu preview.");
+                vm.NewCustomCommandCommand.Execute(null);
+            });
+            session.Settle();
+        }
         else if (tail.Length > 0)
         {
-            throw new FormatException($"'{tail}' is not a settings option. The only one is 'dragging'.");
+            throw new FormatException(
+                $"'{tail}' is not a settings option. Try 'dragging', or 'new-command' on context-menu.");
         }
     }
 
@@ -3403,6 +3554,9 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         // state that matters most, since it is the default. After 'changes-seed' it shows rows.
         "changes" => ChangesWindowFor(),
 
+        "undo-history" => UndoHistoryWindow.Create(
+            session.Shell, session.Confirm, (_, _) => { }, () => { }),
+
         // Needs a 'compare' first, for the reason 'duplicates' does: the dialog shows what that
         // comparison found rather than starting one of its own while a capture waits on it.
         "sync-preview" => SyncPreviewDialog.Create(SyncPreviewFor()),
@@ -3453,7 +3607,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         _ => throw new FormatException(
             $"'{kind}' is not a dialog. Try: new-folder, new-file, rename, rename-advanced, " +
             "delete, delete-permanent, message, warning, properties, theme-editor, " +
-            "disk-usage, duplicates, changes, transfer, conflicts, extract, compress, archive-password, " +
+            "disk-usage, duplicates, changes, undo-history, transfer, conflicts, extract, compress, archive-password, " +
             "columns. Settings is a page of the main window now: see the settings verb."),
     };
 
@@ -3782,6 +3936,11 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             ("previewMetadata", Text(tab.Preview.Metadata.Count)),
             ("canUndo", Bool(shell.CanUndo)),
             ("undo", Quote(shell.UndoDescription)),
+            ("canRedo", Bool(shell.CanRedo)),
+            ("redo", Quote(shell.RedoDescription)),
+            ("history", Text(shell.UndoStack.Entries.Count)),
+            ("historyCursor", Text(shell.UndoStack.Cursor)),
+            ("historyReleased", Text(shell.UndoStack.ReleasedCount)),
             ("foregroundCorrections", Text(session.ForegroundCorrections)),
             ("selection", Quote(tab.SelectionSummary)),
             ("status", Quote(tab.StatusText)),
@@ -4186,6 +4345,74 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             throw new AssertionException(expected
                 ? "there is nothing to undo."
                 : "there is still something to undo.");
+    }
+
+    private void AssertCanRedo(bool expected)
+    {
+        var actual = session.Dispatcher.Invoke(() => session.Shell.CanRedo);
+
+        if (actual != expected)
+            throw new AssertionException(expected
+                ? "there is nothing to redo."
+                : "there is still something to redo.");
+    }
+
+    /// <summary>
+    /// <c>assert-history 3 cursor=2 released=1</c>: how many entries the history holds, and
+    /// optionally how many of them are in effect and how many the limits have let go.
+    /// </summary>
+    private void AssertHistory(string rest)
+    {
+        var parts = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) throw new FormatException("Try: assert-history 3 cursor=2 released=0");
+
+        var (count, cursor, released) = session.Dispatcher.Invoke(() =>
+            (session.Shell.UndoStack.Entries.Count, session.Shell.UndoStack.Cursor, session.Shell.UndoStack.ReleasedCount));
+
+        void Check(string what, string expected, int actual)
+        {
+            if (int.Parse(expected, CultureInfo.InvariantCulture) != actual)
+                throw new AssertionException($"expected {what} {expected}, but it is {actual}.");
+        }
+
+        Check("the history to hold", parts[0], count);
+        foreach (var part in parts.Skip(1))
+        {
+            switch (part.Split('=', 2))
+            {
+                case ["cursor", var value]: Check("the cursor at", value, cursor); break;
+                case ["released", var value]: Check("released entries", value, released); break;
+                default: throw new FormatException($"'{part}' is not cursor=N or released=N.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>assert-history-state 1 undone</c>: what the newest entry (1), or one further back, looks
+    /// like in the History window — done, undone, partial or failed.
+    /// </summary>
+    private void AssertHistoryState(string rest)
+    {
+        var (position, tail) = Split(rest);
+        var expected = tail.Trim().ToLowerInvariant();
+        if (!int.TryParse(position, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) || n < 1)
+            throw new FormatException("Try: assert-history-state 1 undone");
+
+        var actual = session.Dispatcher.Invoke(() =>
+        {
+            var entries = session.Shell.UndoStack.Entries;
+            if (n > entries.Count) return null;
+            var entry = entries[entries.Count - n];
+            return entry.LastReport?.Verdict switch
+            {
+                StepVerdict.Failed => "failed",
+                StepVerdict.Partial => "partial",
+                _ => entry.IsDone ? "done" : "undone",
+            };
+        }) ?? throw new AssertionException($"the history holds fewer than {n} entries.");
+
+        if (actual != expected)
+            throw new AssertionException($"expected entry {n} to be {expected}, but it is {actual}.");
     }
 
     private void AssertOnDisk(string rest, bool expected)

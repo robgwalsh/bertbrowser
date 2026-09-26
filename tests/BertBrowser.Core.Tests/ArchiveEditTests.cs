@@ -269,9 +269,92 @@ public class ArchiveEditTests : IDisposable
         var outcome = _executor.Execute(Plan(zip, new RemoveEntry("two.txt")));
         Assert.Equal(["one.txt"], EntriesOf(zip));
 
-        Assert.Null(_executor.Undo(outcome));
+        Assert.Null(_executor.Undo(outcome).Failure);
         Assert.Equal(before, File.ReadAllBytes(zip));
         Assert.Equal(["one.txt", "two.txt"], EntriesOf(zip));
+    }
+
+    /// <summary>
+    /// The edited container is set aside, not deleted — the only thing that makes a redo possible.
+    /// </summary>
+    [Fact]
+    public void UndoHoldsTheEditedContainerRatherThanErasingIt()
+    {
+        var zip = Zip("a.zip", ("one.txt", "1"), ("two.txt", "2"));
+        var outcome = _executor.Execute(Plan(zip, new RemoveEntry("two.txt")));
+        var edited = File.ReadAllBytes(zip);
+
+        var undo = _executor.Undo(outcome);
+
+        Assert.True(undo.CanRedo);
+        Assert.Contains(ArchiveEditExecutor.EditedMarker, Path.GetFileName(undo.StagedEdited));
+        Assert.Equal(edited, File.ReadAllBytes(undo.StagedEdited!));
+    }
+
+    [Fact]
+    public void RedoTakesTheEditBackIn_AndCanBeUndoneAgain()
+    {
+        var zip = Zip("a.zip", ("one.txt", "1"), ("two.txt", "2"));
+        var before = File.ReadAllBytes(zip);
+        var outcome = _executor.Execute(Plan(zip, new RemoveEntry("two.txt")));
+
+        var redo = _executor.Redo(_executor.Undo(outcome));
+        Assert.Null(redo.Failure);
+        Assert.True(redo.CanUndo);
+        Assert.Equal(["one.txt"], EntriesOf(zip));
+
+        Assert.Null(_executor.Undo(redo).Failure);
+        Assert.Equal(before, File.ReadAllBytes(zip));
+    }
+
+    /// <summary>
+    /// The history can reach an edit long after it was made. A container rewritten by something
+    /// else since is refused rather than swapped for an older original.
+    /// </summary>
+    [Fact]
+    public void UndoRefusesAContainerThatChangedSinceTheEdit()
+    {
+        var zip = Zip("a.zip", ("one.txt", "1"), ("two.txt", "2"));
+        var outcome = _executor.Execute(Plan(zip, new RemoveEntry("two.txt")));
+        File.AppendAllText(zip, "someone else's bytes");
+        var changed = File.ReadAllBytes(zip);
+
+        var undo = _executor.Undo(outcome);
+
+        Assert.NotNull(undo.Failure);
+        Assert.False(undo.CanRedo);
+        Assert.Equal(changed, File.ReadAllBytes(zip));
+        Assert.True(File.Exists(outcome.StagedOriginal));
+    }
+
+    [Fact]
+    public void RedoRefusesAContainerThatChangedSinceTheUndo()
+    {
+        var zip = Zip("a.zip", ("one.txt", "1"), ("two.txt", "2"));
+        var undo = _executor.Undo(_executor.Execute(Plan(zip, new RemoveEntry("two.txt"))));
+        File.AppendAllText(zip, "someone else's bytes");
+        var changed = File.ReadAllBytes(zip);
+
+        var redo = _executor.Redo(undo);
+
+        Assert.NotNull(redo.Failure);
+        Assert.Equal(changed, File.ReadAllBytes(zip));
+        Assert.True(File.Exists(undo.StagedEdited));
+    }
+
+    [Fact]
+    public void CommittingAnUndoErasesOnlyTheHeldEditedContainer()
+    {
+        var zip = Zip("a.zip", ("one.txt", "1"), ("two.txt", "2"));
+        var undo = _executor.Undo(_executor.Execute(Plan(zip, new RemoveEntry("two.txt"))));
+        var innocent = Zip("precious.zip", ("mine.txt", "do not delete"));
+
+        ArchiveEditExecutor.CommitStaging(undo with { StagedEdited = innocent });
+        Assert.True(File.Exists(innocent));
+
+        ArchiveEditExecutor.CommitStaging(undo);
+        Assert.False(File.Exists(undo.StagedEdited));
+        Assert.True(File.Exists(zip));
     }
 
     /// <summary>

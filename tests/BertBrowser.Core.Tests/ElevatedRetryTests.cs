@@ -370,6 +370,40 @@ public class ElevatedRetryTests
         Assert.Empty(merged.Failed);
     }
 
+    /// <summary>
+    /// The pipe reports a count, never a list — so the elevated half of what went back is worked
+    /// out here, or a redo would skip everything the retry restored.
+    /// </summary>
+    [Fact]
+    public void MergingAnUndoWorksOutWhatTheElevatedHalfPutBack()
+    {
+        var outcome = MoveOutcome(completed:
+            [Completed(@"C:\src\a.txt"), Completed(@"C:\src\b.txt"), Completed(@"C:\src\c.txt")]);
+        var first = new TransferUndoResult(1, [Denied(@"C:\src\b.txt"), Denied(@"C:\src\c.txt")])
+        {
+            Reverted = [Completed(@"C:\src\a.txt")],
+        };
+        var retry = ElevatedRetry.UndoRetryFor(outcome, first)!;
+        var second = new TransferUndoResult(1, [new FailedTransfer(@"C:\src\c.txt", "still refused")]);
+
+        var merged = ElevatedRetry.Merge(first, retry, second);
+
+        Assert.Equal([@"C:\src\a.txt", @"C:\src\b.txt"], merged.Reverted.Select(r => r.SourcePath));
+    }
+
+    [Fact]
+    public void MergingADeleteUndoWorksOutWhatTheElevatedHalfPutBack()
+    {
+        var item = new DeletedItem(@"C:\src\a.txt", false, null, @"C:\$Recycle.Bin\S-1-5-21-1\$RAA.txt");
+        var outcome = new DeleteOutcome(false, [item], [], []);
+        var first = new DeleteUndoResult(0, [new FailedDelete(@"C:\src\a.txt", "denied", AccessDenied: true)]);
+        var retry = ElevatedRetry.UndoRetryFor(outcome, first)!;
+
+        var merged = ElevatedRetry.Merge(first, retry, new DeleteUndoResult(1, []));
+
+        Assert.Equal([item], merged.Reverted);
+    }
+
     // --- helpers ---
 
     private static PlannedTransfer Planned(string source) =>

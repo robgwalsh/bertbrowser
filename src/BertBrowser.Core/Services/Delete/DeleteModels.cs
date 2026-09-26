@@ -181,7 +181,12 @@ public sealed record DeleteOutcome(
 }
 
 /// <summary>Restoring a delete: how many items came back, and what could not.</summary>
-public sealed record DeleteUndoResult(int Restored, IReadOnlyList<FailedDelete> Failed);
+public sealed record DeleteUndoResult(int Restored, IReadOnlyList<FailedDelete> Failed)
+{
+    /// <summary>Exactly the items that came back, so a redo deletes those and nothing else.
+    /// Init-only for the reason <c>TransferUndoResult.Reverted</c> is.</summary>
+    public IReadOnlyList<DeletedItem> Reverted { get; init; } = [];
+}
 
 /// <summary>Progress for the status bar while a delete runs.</summary>
 public sealed record DeleteProgress(int Done, int Total, string CurrentName);

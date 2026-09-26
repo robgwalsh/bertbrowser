@@ -3,7 +3,15 @@ using BertBrowser.Core.Paths;
 namespace BertBrowser.Core.Services.Transfer;
 
 /// <summary>Restoring a transfer: how many items went back, and what could not.</summary>
-public sealed record TransferUndoResult(int Restored, IReadOnlyList<FailedTransfer> Failed);
+public sealed record TransferUndoResult(int Restored, IReadOnlyList<FailedTransfer> Failed)
+{
+    /// <summary>
+    /// Exactly the items that went back, so a redo acts on those and nothing else. Init-only so the
+    /// elevation client, which learns a count over the pipe and never a list, keeps compiling — its
+    /// half is worked out by <c>ElevatedRetry.Merge</c> instead.
+    /// </summary>
+    public IReadOnlyList<CompletedTransfer> Reverted { get; init; } = [];
+}
 
 /// <summary>
 /// Carries out a <see cref="TransferPlan"/>. Every rule the planner applied is re-checked here
@@ -221,8 +229,25 @@ public sealed class TransferExecutor
         }
 
         return new CompletedTransfer(
-            transfer.SourcePath, destinationPath, transfer.IsDirectory, displacedStagePath);
+            transfer.SourcePath, destinationPath, transfer.IsDirectory, displacedStagePath)
+        {
+            Written = plan.Verb == TransferVerb.Copy ? EntryStamp.Of(destinationPath) : null,
+        };
     }
+
+    /// <summary>
+    /// Stamps every completion of a copy that has no stamp yet — the ones an elevated pass reported,
+    /// which arrive over the pipe as paths only. Run as soon as the outcome is merged, while what is
+    /// at each path is still what the copy wrote.
+    /// </summary>
+    public static TransferOutcome StampCopies(TransferOutcome outcome) =>
+        outcome.Verb != TransferVerb.Copy || outcome.Completed.All(c => c.Written is not null)
+            ? outcome
+            : outcome with
+            {
+                Completed = [.. outcome.Completed.Select(c =>
+                    c.Written is null ? c with { Written = EntryStamp.Of(c.FinalPath) } : c)],
+            };
 
     /// <summary>
     /// Puts a staged entry back under the name it was displaced from. Never throws: it runs while
@@ -289,7 +314,7 @@ public sealed class TransferExecutor
             return new TransferUndoResult(0, [new FailedTransfer("", "Only a move can be undone.")]);
 
         var failed = new List<FailedTransfer>();
-        var restored = 0;
+        var reverted = new List<CompletedTransfer>();
 
         // Put back the folders a merge emptied, before anything is restored into them. Shallowest
         // first, so a parent exists by the time its child is created. Only the ones this outcome
@@ -334,20 +359,34 @@ public sealed class TransferExecutor
                 }
 
                 MoveEntry(item.FinalPath, item.SourcePath, item.IsDirectory, ProgressCoalescer.Silent());
-                restored++;
-
-                // The name it took over is free again: put the displaced entry back.
-                if (item.DisplacedStagePath is { } staged && Exists(staged) && !Exists(item.FinalPath))
-                    MoveEntry(staged, item.FinalPath, Directory.Exists(staged), ProgressCoalescer.Silent());
+                reverted.Add(item);
             }
             catch (Exception ex) when (IsTransferFailure(ex))
             {
                 failed.Add(new FailedTransfer(item.SourcePath, $"{name}: {ex.Message}", AccessDenied.Caused(ex)));
+                continue;
+            }
+
+            // The name it took over is free again: put the displaced entry back. Its own failure,
+            // not the item's — the item did go back, and a redo must know that.
+            if (item.DisplacedStagePath is { } staged)
+            {
+                try
+                {
+                    if (Exists(staged) && !Exists(item.FinalPath))
+                        MoveEntry(staged, item.FinalPath, Directory.Exists(staged), ProgressCoalescer.Silent());
+                }
+                catch (Exception ex) when (IsTransferFailure(ex))
+                {
+                    failed.Add(new FailedTransfer(staged,
+                        $"{Path.GetFileName(item.FinalPath)}: what it replaced could not be put back " +
+                        $"({ex.Message}). It is at {staged}.", AccessDenied.Caused(ex)));
+                }
             }
         }
 
         PurgeStaging(outcome);
-        return new TransferUndoResult(restored, failed);
+        return new TransferUndoResult(reverted.Count, failed) { Reverted = reverted };
     }
 
     /// <summary>
@@ -366,9 +405,11 @@ public sealed class TransferExecutor
     /// so no destination here ever held anything but this run's own bytes.
     /// </para>
     /// <para>
-    /// It is still a real undo of a real write, so an edit made to a copied file between the copy
-    /// and the undo goes with it — as it would when undoing a paste anywhere else. The window is
-    /// one operation wide, because there is one undo slot.
+    /// <b>Only what still matches <see cref="CompletedTransfer.Written"/> is removed.</b> The undo
+    /// history can reach a paste many operations later, so an edit made to a copied file in between
+    /// is no longer something to take with it: the item is reported and left alone. The same check
+    /// is what makes a replayed record harmless — the second time round, what is at the name is the
+    /// original the first call put back, and that must never be the thing erased.
     /// </para>
     /// <para>
     /// Removal goes through <see cref="DirectoryRemoval.RemoveTree"/> rather than
@@ -382,7 +423,7 @@ public sealed class TransferExecutor
             return new TransferUndoResult(0, [new FailedTransfer("", "Only a copy can be undone here.")]);
 
         var failed = new List<FailedTransfer>();
-        var restored = 0;
+        var reverted = new List<CompletedTransfer>();
 
         // Reverse order, so a folder is not removed out from under the entries copied into it.
         foreach (var item in outcome.Completed.Reverse())
@@ -391,17 +432,31 @@ public sealed class TransferExecutor
             var name = Path.GetFileName(item.FinalPath);
             try
             {
+                var removed = false;
                 if (Exists(item.FinalPath))
                 {
+                    if (item.Written is { } written && !written.Matches(item.FinalPath))
+                    {
+                        failed.Add(new FailedTransfer(item.FinalPath,
+                            $"{name}: it has changed since it was pasted, so it was left in place."));
+                        continue;
+                    }
+
                     if (item.IsDirectory) DirectoryRemoval.RemoveTree(item.FinalPath);
                     else File.Delete(item.FinalPath);
+                    removed = true;
                 }
 
                 // The name is free again: put back whatever the copy took it from.
+                var putBack = false;
                 if (item.DisplacedStagePath is { } staged && Exists(staged) && !Exists(item.FinalPath))
+                {
                     MoveEntry(staged, item.FinalPath, Directory.Exists(staged), ProgressCoalescer.Silent());
+                    putBack = true;
+                }
 
-                restored++;
+                if (removed || putBack) reverted.Add(item);
+                else failed.Add(new FailedTransfer(item.FinalPath, $"{name}: it was already gone."));
             }
             catch (Exception ex) when (IsTransferFailure(ex))
             {
@@ -410,7 +465,7 @@ public sealed class TransferExecutor
         }
 
         PurgeStaging(outcome);
-        return new TransferUndoResult(restored, failed);
+        return new TransferUndoResult(reverted.Count, failed) { Reverted = reverted };
     }
 
     /// <summary>

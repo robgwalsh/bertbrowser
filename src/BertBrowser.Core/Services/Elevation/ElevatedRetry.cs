@@ -40,7 +40,7 @@ public sealed record DeleteUndoRetry(DeleteOutcome Outcome, IReadOnlyList<string
 /// </para>
 /// <para>
 /// <b>A merged outcome must be indistinguishable from one the executor produced alone.</b> That is
-/// what lets <c>RetireUndoable</c>, the one-level undo slot, <c>RefreshTabsShowingAsync</c> and the
+/// what lets the undo history, the staging commit, <c>RefreshTabsShowingAsync</c> and the
 /// tab fan-out carry on knowing nothing about elevation. It is also why the merge subtracts: an item
 /// that was denied and then fixed must appear exactly once, in the completed list, and an item
 /// denied twice exactly once, in the failures.
@@ -208,15 +208,42 @@ public static class ElevatedRetry
             [.. covers]);
     }
 
+    /// <remarks>
+    /// <b>The elevated half's <c>Reverted</c> is worked out here</b>, since the pipe reports a count
+    /// and never a list: everything the retry was handed, less whatever it reported failing. A redo
+    /// built from it then acts on the items that really did go back.
+    /// </remarks>
     public static TransferUndoResult Merge(
         TransferUndoResult first, TransferUndoRetry retry, TransferUndoResult second) =>
         new(first.Restored + second.Restored,
-            [.. Survivors(first.Failed, f => f.SourcePath, retry.Covers), .. second.Failed]);
+            [.. Survivors(first.Failed, f => f.SourcePath, retry.Covers), .. second.Failed])
+        {
+            Reverted =
+            [
+                .. first.Reverted,
+                .. second.Reverted.Count > 0
+                    ? second.Reverted
+                    : Survivors(retry.Outcome.Completed, c => c.SourcePath, Keys(second.Failed, f => f.SourcePath)),
+            ],
+        };
 
+    /// <inheritdoc cref="Merge(TransferUndoResult, TransferUndoRetry, TransferUndoResult)"/>
     public static DeleteUndoResult Merge(
         DeleteUndoResult first, DeleteUndoRetry retry, DeleteUndoResult second) =>
         new(first.Restored + second.Restored,
-            [.. Survivors(first.Failed, f => f.SourcePath, retry.Covers), .. second.Failed]);
+            [.. Survivors(first.Failed, f => f.SourcePath, retry.Covers), .. second.Failed])
+        {
+            Reverted =
+            [
+                .. first.Reverted,
+                .. second.Reverted.Count > 0
+                    ? second.Reverted
+                    : Survivors(retry.Outcome.Deleted, d => d.SourcePath, Keys(second.Failed, f => f.SourcePath)),
+            ],
+        };
+
+    private static List<string> Keys<T>(IEnumerable<T> items, Func<T, string> path) =>
+        [.. items.Select(i => ElevationRules.KeyOf(path(i))).OfType<string>()];
 
     // --- folding the two results into one ---
 

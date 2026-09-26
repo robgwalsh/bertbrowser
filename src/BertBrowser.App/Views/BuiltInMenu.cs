@@ -21,10 +21,8 @@ internal static class BuiltInMenu
     /// non-archive, Settle by content outside a comparison) go through <see cref="Show"/> after.</summary>
     public static void Apply(ContextMenu menu, IReadOnlySet<string> hidden)
     {
-        foreach (var item in menu.Items.OfType<MenuItem>())
-        {
-            if (item.Tag is string id) Show(item, show: true, hidden);
-        }
+        foreach (var item in ContextMenuComposer.BuiltInItems(menu))
+            Show(item, show: true, hidden);
     }
 
     /// <summary>Shows the item when the menu wants it and the user has not unticked it.</summary>

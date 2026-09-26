@@ -389,7 +389,7 @@ public sealed class DeleteExecutor
             return new DeleteUndoResult(0, [new FailedDelete("", "A permanent delete cannot be undone.")]);
 
         var failed = new List<FailedDelete>();
-        var restored = 0;
+        var reverted = new List<DeletedItem>();
 
         // Reverse order, so a batch unwinds in the order it was made.
         foreach (var item in outcome.Deleted.Reverse())
@@ -413,7 +413,7 @@ public sealed class DeleteExecutor
                             $"{item.Name}: the Recycle Bin no longer holds it ({item.RecycledPath})."));
                         continue;
                     }
-                    restored++;
+                    reverted.Add(item);
                     continue;
                 }
 
@@ -432,7 +432,7 @@ public sealed class DeleteExecutor
                 }
 
                 MoveEntry(staged, item.SourcePath, item.IsDirectory);
-                restored++;
+                reverted.Add(item);
             }
             catch (Exception ex) when (IsDeleteFailure(ex))
             {
@@ -441,7 +441,7 @@ public sealed class DeleteExecutor
         }
 
         PurgeEmptyStaging(outcome);
-        return new DeleteUndoResult(restored, failed);
+        return new DeleteUndoResult(reverted.Count, failed) { Reverted = reverted };
     }
 
     // --- Staging lifecycle ---

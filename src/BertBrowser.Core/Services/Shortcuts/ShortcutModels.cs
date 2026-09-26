@@ -34,7 +34,7 @@ public sealed record FailedShortcut(string LinkPath, string Message, bool Access
 /// There is deliberately no undo record, for the reason <see cref="NewItem.NewItemOutcome"/> gives:
 /// creating is additive, exactly as copying is, and nothing existing is touched. Ctrl+Z is left
 /// pointing at whatever move, rename or delete came before — which is the more valuable thing to
-/// have on the one undo slot than a handful of links the user can select and delete.
+/// have next in the undo history than a handful of links the user can select and delete.
 /// </remarks>
 public sealed record ShortcutOutcome(
     IReadOnlyList<string> Created,

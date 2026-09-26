@@ -175,7 +175,7 @@ public sealed partial class PaneViewModel : ObservableObject
     /// <summary>Ctrl+Shift+T: reopens the most recently closed tab in this pane.</summary>
     /// <remarks>
     /// A no-op rather than an error when there is nothing to reopen — the same reading Ctrl+Z has
-    /// with an empty undo slot. Closing the last tab closes the pane, so a pane that has gone takes
+    /// with an empty undo history. Closing the last tab closes the pane, so a pane that has gone takes
     /// its list with it; that is the one case this cannot reach back into.
     /// </remarks>
     [RelayCommand]

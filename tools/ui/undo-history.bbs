@@ -1,0 +1,133 @@
+# The undo history: several operations deep, undone and redone one at a time or to a chosen
+# entry, the redo branch abandoned by a new operation, and the limits releasing old entries.
+# Every step goes through the same executors the operations themselves do, and every assertion
+# is on disk rather than on a picture.
+
+tree .
+refresh
+assert-cannot-undo
+assert-cannot-redo
+assert-history 0
+dialog undo-history 01-history-empty
+
+# --- Three operations, three entries ---
+
+select notes.txt
+rename memo.txt
+select photo.jpg
+move to Documents
+select budget.xlsx
+delete
+assert-history 3 cursor=3
+assert-status undo
+shot 02-after-three
+dialog undo-history 03-history-all-done
+menu undo 04-undo-menu
+# What pointing at the third entry looks like: all three marked, "Undo 3 actions" underneath.
+menu undo-range 05-undo-menu-range
+
+# --- One step each way ---
+
+undo
+assert-exists budget.xlsx
+assert-can-redo
+assert-history-state 1 undone
+redo
+assert-missing budget.xlsx
+assert-history-state 1 done
+
+# --- Undo to here: the oldest entry, and everything after it, newest first ---
+
+undo-to 3
+assert-exists notes.txt
+assert-missing memo.txt
+assert-exists photo.jpg
+assert-missing Documents/photo.jpg
+assert-exists budget.xlsx
+assert-history 3 cursor=0
+assert-cannot-undo
+menu redo 06-redo-menu
+dialog undo-history 07-history-all-undone
+
+# --- Redo to here: the first two again, the delete left undone ---
+
+redo-to 2
+assert-exists memo.txt
+assert-exists Documents/photo.jpg
+assert-exists budget.xlsx
+assert-history 3 cursor=2
+dialog undo-history 08-history-cursor
+theme light-plus
+dialog undo-history 09-history-light
+theme dark-plus
+
+# --- A new operation abandons the redo branch: the delete can no longer be redone ---
+
+select report.md
+rename summary.md
+assert-cannot-redo
+assert-history 3 cursor=3
+
+# --- The limits: shrinking them releases the oldest entry, and the footer says so ---
+
+undo-budget steps=2
+assert-history 2 cursor=2 released=1
+dialog undo-history 10-history-released
+undo-budget steps=50
+
+# --- A merged paste that replaced a file: undo, redo, undo leaves the original in place ---
+#
+# The regression this holds down: undoing the same paste twice used to delete the original the
+# first undo had put back. Now every step runs a fresh record, and a copy that no longer matches
+# what the paste wrote is left alone.
+
+mkdir Backup/photos
+write-text Backup/photos/a.jpg the original
+write-text photos/a.jpg incoming
+write-text photos/b.jpg new
+refresh
+conflict photos/a.jpg=overwrite
+copy photos to Backup
+dialog undo-history 11-history-held
+assert-missing "Backup/photos/a (2).jpg"
+assert-exists Backup/photos/b.jpg
+undo
+assert-missing Backup/photos/b.jpg
+assert-exists Backup/photos/a.jpg
+redo
+assert-exists Backup/photos/b.jpg
+undo
+assert-missing Backup/photos/b.jpg
+assert-exists Backup/photos/a.jpg
+assert-history-state 1 undone
+
+# --- An archive edit: the edited container is held on undo, so it can be redone ---
+
+select memo.txt, summary.md
+compress zip Sample
+refresh
+enter Sample.zip
+assert-count 2
+select memo.txt
+delete
+assert-count 1
+undo
+assert-count 2
+redo
+assert-count 1
+undo
+assert-count 2
+up
+
+# --- Clearing commits everything and empties the list ---
+
+clear-undo-history
+assert-history 0
+assert-cannot-undo
+assert-cannot-redo
+
+settings history
+shot 12-settings-history
+settings close
+
+echo undid and redid six kinds of step, to here and back, and released on the limits

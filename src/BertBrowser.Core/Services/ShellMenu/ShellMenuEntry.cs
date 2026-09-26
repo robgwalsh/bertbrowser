@@ -28,3 +28,7 @@ public sealed record ShellMenuEntry(
 
     public bool HasChildren => Children.Count > 0;
 }
+
+/// <summary>What one extension offers for one opening of a menu, kept together under its
+/// <see cref="ShellExtension.Id"/> so the menu can put it wherever the user placed that extension.</summary>
+public sealed record ShellMenuGroup(string ExtensionId, IReadOnlyList<ShellMenuEntry> Entries);

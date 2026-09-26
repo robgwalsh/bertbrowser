@@ -17,7 +17,7 @@ namespace BertBrowser.App.ViewModels;
 /// <remarks>
 /// Supplied rather than reached for, the way <c>DiskUsageWindow</c> takes its reveal: it keeps this
 /// view model from knowing about the shell, and it keeps every delete in the app going through the
-/// one plan/confirm/execute chain that owns the Recycle Bin and the undo slot.
+/// one plan/confirm/execute chain that owns the Recycle Bin and the undo history.
 /// </remarks>
 public delegate Task<IReadOnlyCollection<string>> CopyRemover(IReadOnlyList<string> paths);
 

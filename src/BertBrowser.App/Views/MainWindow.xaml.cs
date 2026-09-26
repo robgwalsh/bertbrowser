@@ -82,6 +82,7 @@ public partial class MainWindow : ThemedWindow
         _shell.DiskUsageRequested += ShowDiskUsage;
         _shell.DuplicatesRequested += ShowDuplicates;
         _shell.ChangesRequested += ShowChanges;
+        _shell.UndoHistoryRequested += ShowUndoHistory;
         _shell.ChecksumsRequested += ShowChecksums;
         _shell.ChecksumVerifyRequested += ShowChecksumVerify;
         _shell.FileCompareRequested += ShowFileCompare;
@@ -96,10 +97,10 @@ public partial class MainWindow : ThemedWindow
             // the settings page's debounce.
             _settingsView?.ViewModel.Flush();
             SaveWindowSettings();
-            // The pending undo is gone once we exit, so commit what is still being held — whatever
-            // a Replace set aside, and whatever the last delete was holding on to — rather than
-            // leaving hidden staging folders behind.
-            _shell.RetireUndoable();
+            // The undo history is session-only, so commit everything it is still holding — whatever
+            // a Replace set aside, whatever a delete was holding on to, an archive's other version —
+            // rather than leaving hidden staging folders behind.
+            _shell.ReleaseUndoHistory();
         };
     }
 
@@ -179,13 +180,16 @@ public partial class MainWindow : ThemedWindow
     /// page opens, so each write only redoes the parts whose values actually moved.</summary>
     private AppliedSettings? _lastApplied;
 
-    private sealed record AppliedSettings(string? TileAspect, string Columns, bool RecordFileChanges, int RetentionHours)
+    private sealed record AppliedSettings(
+        string? TileAspect, string Columns, bool RecordFileChanges, int RetentionHours,
+        BertBrowser.Core.Services.UndoHistory.UndoBudget UndoBudget)
     {
         public static AppliedSettings Of(BertBrowser.App.Services.AppSettings settings) => new(
             settings.TileAspectRatio,
             string.Join("|", (settings.FileListColumns ?? []).Select(c => $"{c.Id}:{c.Width}")),
             settings.RecordFileChanges,
-            settings.FileChangeRetentionHours);
+            settings.FileChangeRetentionHours,
+            settings.EffectiveUndoBudget());
     }
 
     /// <summary>Opens settings in place of the folders; <paramref name="page"/> opens it on a page
@@ -326,6 +330,9 @@ public partial class MainWindow : ThemedWindow
         if (applied.RecordFileChanges != _lastApplied?.RecordFileChanges ||
             applied.RetentionHours != _lastApplied?.RetentionHours)
             App.ApplyChangeLogPolicy(_settings);
+        // Lowering a limit releases entries, which commits what they held — only on its own change.
+        if (applied.UndoBudget != _lastApplied?.UndoBudget)
+            _ = _shell.SetUndoBudgetAsync(applied.UndoBudget);
 
         _lastApplied = applied;
         // "Start the indexer when BertBrowser launches" only matters next launch, and the
@@ -550,7 +557,7 @@ public partial class MainWindow : ThemedWindow
 
     /// <summary>
     /// Removes the copies the duplicates view has marked, through the same plan, confirmation and
-    /// undo slot as any other delete in this app.
+    /// undo history as any other delete in this app.
     /// </summary>
     /// <remarks>
     /// <b>Nothing here calls File.Delete.</b> Going through the planner is what keeps the
@@ -713,14 +720,30 @@ public partial class MainWindow : ThemedWindow
             _layoutHost.ActivePaneView?.FocusSearchBox();
             e.Handled = true;
         }
-        // Undo the last move or rename. Skipped while any text box has focus so Ctrl+Z still
-        // undoes typing there — and there is one search box and one path box per open tab now, so
-        // the test has to be about the focused element rather than about named controls.
+        // Undo and redo through the history. Skipped while any text box has focus so the keys still
+        // undo and redo typing there — and there is one search box and one path box per open tab
+        // now, so the test has to be about the focused element rather than about named controls.
+        // Ctrl+Alt+Z opens the history; guarded the same way because Ctrl+Alt is AltGr, and on
+        // some layouts AltGr+Z types a letter.
         else if (e.Key == Key.Z && Keyboard.Modifiers == ModifierKeys.Control &&
             Keyboard.FocusedElement is not TextBoxBase)
         {
             if (_shell.UndoCommand.CanExecute(null))
                 _shell.UndoCommand.Execute(null);
+            e.Handled = true;
+        }
+        else if (((e.Key == Key.Y && Keyboard.Modifiers == ModifierKeys.Control) ||
+                  (e.Key == Key.Z && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))) &&
+            Keyboard.FocusedElement is not TextBoxBase)
+        {
+            if (_shell.RedoCommand.CanExecute(null))
+                _shell.RedoCommand.Execute(null);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Z && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Alt) &&
+            Keyboard.FocusedElement is not TextBoxBase)
+        {
+            ShowUndoHistory();
             e.Handled = true;
         }
         // Explorer's preview-pane chord, for the muscle memory. It cannot be a KeyBinding the way
@@ -1220,8 +1243,6 @@ public partial class MainWindow : ThemedWindow
         if (FolderTree.ContextMenu is not { } menu) return;
 
         BuiltInMenu.Apply(menu, BuiltInMenu.Hidden(_settings));
-        CustomCommandMenu.Rebuild(menu, TreeCustomCommandsSeparator, [(node.FullPath, true)],
-            _settings, _shell.RunCustomCommand);
 
         // A folder in the tree is an item in its parent, which is what the handlers are told; a
         // drive root has no parent and stands in for itself.
@@ -1230,8 +1251,8 @@ public partial class MainWindow : ThemedWindow
             [new ShellMenuTarget(node.FullPath, true)],
             ShellMenuContext.Items,
             Path.GetDirectoryName(node.FullPath) ?? node.FullPath);
-        ShellMenu.Rebuild(menu, TreeShellMenuSeparator, _treeShellMenu,
-            () => new WindowInteropHelper(this).Handle, _shell.SetStatus);
+        ContextMenuComposer.Compose(menu, _settings, [(node.FullPath, true)], _shell.RunCustomCommand,
+            _treeShellMenu, () => new WindowInteropHelper(this).Handle, _shell.SetStatus);
         BuiltInMenu.TidySeparators(menu);
     }
 
@@ -1292,7 +1313,7 @@ public partial class MainWindow : ThemedWindow
     }
 
     /// <summary>Deletes a folder picked out of the tree. Goes through exactly the same plan,
-    /// confirmation and undo slot as the file list's own delete — the tree is just another way of
+    /// confirmation and undo history as the file list's own delete — the tree is just another way of
     /// naming the folder. There is no permanent variant here: a drive root is one careless click
     /// away in this list, so the reversible one is the only one offered.</summary>
     private async Task DeleteTreeFolderAsync(string path)

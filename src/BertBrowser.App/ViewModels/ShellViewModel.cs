@@ -21,13 +21,14 @@ using BertBrowser.Core.Services.SavedSearches;
 using BertBrowser.Core.Services.SavedWorkspaces;
 using BertBrowser.Core.Services.Shortcuts;
 using BertBrowser.Core.Services.Transfer;
+using BertBrowser.Core.Services.UndoHistory;
 
 namespace BertBrowser.App.ViewModels;
 
 /// <summary>
 /// The application shell: everything shared by every open directory. The directories themselves
 /// live in <see cref="DirectoryTabViewModel"/>s — this owns the one folder tree, the one bookmark
-/// list, the browse settings, the transfer/undo slot, and knows which tab is active so the window
+/// list, the browse settings, the transfer queue and undo history, and knows which tab is active so the window
 /// chrome can follow it.
 /// </summary>
 public sealed partial class ShellViewModel : ObservableObject, IPaneHost
@@ -488,6 +489,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         _dirSizes = dirSizes;
         _factory = factory;
         _settings = settings;
+        InitializeUndoHistory();
         _showHiddenItems = settings.ShowHiddenItems; // seed the field so the ctor doesn't refresh
         _drivesViewMode = settings.DrivesViewMode; // seed the fields so the ctor doesn't re-save
         _workspacesPlacement = settings.WorkspacesPlacement;
@@ -1436,12 +1438,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             var (outcome, elevated) = await ElevateIfRefusedAsync(
                 plan, await Task.Run(() => _renameExecutor.Execute(plan)));
 
-            RetireUndoable();
-            if (outcome.CanUndo)
-            {
-                _undoableRename = outcome;
-                UndoDescription = $"Ctrl+Z: undo rename of {outcome.Completed.Count:N0} item(s)";
-            }
+            await RecordAsync(RenameRecord.For(outcome));
 
             await RefreshAfterRenameAsync(outcome.Completed, plan.Renames);
 
@@ -1451,37 +1448,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             else if (outcome.CanUndo) status += " — Ctrl+Z to undo";
             SetStatus(status + elevated);
             return outcome;
-        }
-        finally
-        {
-            IsTransferring = false;
-            UndoCommand.NotifyCanExecuteChanged();
-        }
-    }
-
-    /// <summary>Reverses the last rename, then refreshes exactly as the rename itself did.</summary>
-    private async Task UndoRenameAsync(RenameOutcome outcome)
-    {
-        IsTransferring = true;
-        UndoCommand.NotifyCanExecuteChanged();
-        try
-        {
-            SetStatus("Undoing…");
-            // A rename is its own inverse, so the undo is an ordinary rename of the undo plan — and
-            // the ordinary retry covers it, with no undo-specific verb on the wire at all.
-            var undoPlan = RenameExecutor.UndoPlan(outcome);
-            var (result, elevated) = await ElevateIfRefusedAsync(
-                undoPlan, await Task.Run(() => _renameExecutor.Execute(undoPlan)));
-
-            // Spent either way: a partial undo must not be replayed.
-            _undoableRename = null;
-            UndoDescription = "";
-
-            await RefreshAfterRenameAsync(result.Completed, undoPlan.Renames);
-
-            SetStatus((result.Failed.Count == 0
-                ? $"Undone — {result.Completed.Count:N0} name(s) put back"
-                : $"Put back {result.Completed.Count:N0} name(s); {result.Failed.Count:N0} could not be — {result.Failed[0].Message}") + elevated);
         }
         finally
         {
@@ -1523,9 +1489,9 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             var (outcome, elevated) = await ElevateIfRefusedAsync(
                 plan, await Task.Run(() => _newItemExecutor.Execute(plan)));
 
-            // Deliberately no RetireUndoable and no undo record. Creating is additive, exactly as
-            // copying is, so Ctrl+Z is left pointing at whatever move, rename or delete came
-            // before rather than being spent on something the user can simply delete.
+            // Deliberately no undo record. Creating is additive, exactly as copying is, so Ctrl+Z is
+            // left pointing at whatever move, rename or delete came before rather than being spent
+            // on something the user can simply delete.
 
             if (outcome.CreatedPath is { } created)
             {
@@ -1559,9 +1525,9 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// Writes the links a right-drag asked for, then reselects them where they landed.
     /// </summary>
     /// <remarks>
-    /// No undo record and no <c>RetireUndoable</c>, for the reason <see cref="CreateNewItemAsync"/>
-    /// gives: this only adds files, so the one undo slot stays pointed at whatever move, rename or
-    /// delete came before rather than being spent on links the user can select and delete.
+    /// No undo record, for the reason <see cref="CreateNewItemAsync"/> gives: this only adds files,
+    /// so Ctrl+Z stays pointed at whatever move, rename or delete came before rather than being
+    /// spent on links the user can select and delete.
     /// </remarks>
     public async Task<ShortcutOutcome> CreateShortcutsAsync(ShortcutPlan plan)
     {
@@ -1737,7 +1703,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// This goes through the ordinary reversible delete rather than removing anything directly, and
     /// that is the whole point. An external window's say-so cannot reach past
     /// <c>DeletePlanner</c>'s refusals — a drive root, a protected location — the removal is a
-    /// rename rather than a copy however large the tree is, and it claims the undo slot, so Ctrl+Z
+    /// rename rather than a copy however large the tree is, and it enters the undo history, so Ctrl+Z
     /// puts everything back if the drag went somewhere unexpected.
     /// </para>
     /// <para>
@@ -1766,7 +1732,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         }
 
         var outcome = await DeleteAsync(
-            plan, $"Ctrl+Z: undo moving {plan.Deletions.Count:N0} item(s) out of BertBrowser");
+            plan, $"Move {UndoText.Items(plan.Deletions.Count)} out of BertBrowser");
 
         // DeleteAsync leaves "Deleted N item(s)" behind, which after a drag into another window
         // reads as though the drag destroyed them. Say what actually happened instead.
@@ -1777,8 +1743,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private static IEnumerable<string> ParentDirectoriesOf(IEnumerable<string> paths) =>
         paths.Select(Path.GetDirectoryName).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase);
 
-    /// <param name="undoDescription">What Ctrl+Z will say. Defaults to describing a delete; a drag
-    /// out of the app reuses this whole path but is not, to the user, a delete.</param>
+    /// <param name="undoDescription">What the undo history calls it. Defaults to describing a
+    /// delete; a drag out of the app reuses this whole path but is not, to the user, a delete.</param>
     public async Task<DeleteOutcome> DeleteAsync(DeletePlan plan, string? undoDescription = null)
     {
         // Shares the transfer flag with moves and renames: Ctrl+Z must not reach the previous
@@ -1800,13 +1766,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
                 plan,
                 await Task.Run(() => _deleteExecutor.Execute(plan, CancellationToken.None, progress)));
 
-            RetireUndoable();
-            if (outcome.CanUndo)
-            {
-                _undoableDelete = outcome;
-                UndoDescription = undoDescription
-                    ?? $"Ctrl+Z: undo delete of {outcome.Deleted.Count:N0} item(s)";
-            }
+            await RecordAsync(DeleteRecord.For(outcome, undoDescription));
 
             // Vacate first: a tab still pointing inside a folder that has gone would otherwise be
             // reloaded onto a missing path and flash an error on its way out of it.
@@ -1819,40 +1779,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             else if (outcome.CanUndo) status += " — Ctrl+Z to undo";
             SetStatus(status + elevated);
             return outcome;
-        }
-        finally
-        {
-            IsTransferring = false;
-            UndoCommand.NotifyCanExecuteChanged();
-        }
-    }
-
-    /// <summary>Puts the last delete back, then refreshes exactly as the delete itself did.</summary>
-    private async Task UndoDeleteAsync(DeleteOutcome outcome)
-    {
-        IsTransferring = true;
-        UndoCommand.NotifyCanExecuteChanged();
-        try
-        {
-            SetStatus("Undoing…");
-            var (result, elevated) = await ElevateIfRefusedAsync(
-                outcome, await Task.Run(() => _deleteExecutor.Undo(outcome)));
-
-            // Spent either way: a partial undo must not be replayed. Whatever could not be put back
-            // is still held, and goes when the next operation retires this record.
-            _undoableDelete = null;
-            UndoDescription = "";
-
-            var directories = outcome.Deleted
-                .Select(d => Path.GetDirectoryName(d.SourcePath))
-                .OfType<string>()
-                .ToList();
-            await Tree.RefreshDirectoriesAsync(directories);
-            await RefreshTabsShowingAsync(directories);
-
-            SetStatus((result.Failed.Count == 0
-                ? $"Undone — {result.Restored:N0} item(s) put back"
-                : $"Put back {result.Restored:N0} item(s); {result.Failed.Count:N0} could not be — {result.Failed[0].Message}") + elevated);
         }
         finally
         {
@@ -1940,43 +1866,16 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
 
     // --- Drag-and-drop transfers ---
 
-    /// <summary>The one-level undo slot: whichever of a move, a rename or a delete happened last,
-    /// and only one of the three is ever set. Retiring is not free for two of them — a transfer
-    /// commits any entries a Replace displaced into staging, and a delete erases what it was
-    /// holding — so it goes through <see cref="RetireUndoable"/> rather than being overwritten.
-    /// A rename has nothing set aside: its staging names are gone by the time it finishes.</summary>
-    private TransferOutcome? _undoableTransfer;
-
-    private RenameOutcome? _undoableRename;
-
-    private DeleteOutcome? _undoableDelete;
-
-    /// <summary>
-    /// A fourth arm, and genuinely a fourth thing rather than one of the others in disguise: undoing
-    /// it renames a whole container back, not an item. It carries staging like a transfer and a
-    /// delete do, so it retires through <see cref="RetireUndoable"/> too.
-    /// </summary>
-    private ArchiveEditOutcome? _undoableArchiveEdit;
-
-    /// <summary>
-    /// A fifth arm, and the only one that is two operations at once: a sync both writes and
-    /// removes, so its record carries the transfer outcomes <em>and</em> the delete outcome, and
-    /// undoing it reverses both. It is also the only copy in the app that can be undone — see
-    /// <see cref="ConflictResolution.Overwrite"/> for why that is a property of the record kept
-    /// rather than of the copy itself.
-    /// </summary>
-    private SyncOutcome? _undoableSync;
-
     /// <summary>
     /// True while this app is writing — a drop, a rename, a delete, an extract, a sync, an undo.
-    /// One flag over all of them, so two can never overlap and Ctrl+Z can never reach the previous
-    /// operation's record part-way through the next one.
+    /// One flag over all of them, so two can never overlap and Ctrl+Z can never reach the undo
+    /// history part-way through the next operation.
     /// </summary>
     /// <remarks>
     /// <b>The queue holds it for its whole drain</b>, not one job at a time. Releasing it between
-    /// jobs would let a rename slip into the gap and take the undo slot out from under a queue the
-    /// user is still watching — and the harness's quiescence check, which reads this, would call a
-    /// six-job drain finished five times over.
+    /// jobs would let a rename slip into the gap and push onto the undo history out from under a
+    /// queue the user is still watching — and the harness's quiescence check, which reads this,
+    /// would call a six-job drain finished five times over.
     /// </remarks>
     [ObservableProperty]
     private bool _isTransferring;
@@ -2112,17 +2011,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         }
     }
 
-    public bool CanUndo =>
-        (_undoableTransfer?.CanUndo == true || _undoableTransfer?.CanUndoCopy == true ||
-            _undoableRename?.CanUndo == true ||
-            _undoableDelete?.CanUndo == true || _undoableArchiveEdit?.CanUndo == true ||
-            _undoableSync?.CanUndo == true)
-        && !IsTransferring;
-
-    /// <summary>"Undo move of 3 items" for the menu/tooltip; empty when there is nothing to undo.</summary>
-    [ObservableProperty]
-    private string _undoDescription = "";
-
     /// <summary>Works out what a drop would do, without changing anything. Called while the drag
     /// hovers, so the view can allow or refuse the drop and explain why.</summary>
     public TransferPlan PlanDrop(IReadOnlyList<string> sources, string destination, TransferVerb verb) =>
@@ -2224,15 +2112,9 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         // than destroying it. That only stays true while somebody holds the record — which is the
         // undertaking ConflictResolution.Overwrite was written under, and this is where it is made.
         if (plan.IsMerged && plan.Verb == TransferVerb.Copy && outcome.Completed.Count > 0)
-            outcome = outcome with { CanUndoCopy = true };
+            outcome = TransferExecutor.StampCopies(outcome) with { CanUndoCopy = true };
 
-        RetireUndoable();
-        if (outcome.CanUndo || outcome.CanUndoCopy)
-        {
-            _undoableTransfer = outcome;
-            var verbed = outcome.Verb == TransferVerb.Move ? "move" : "paste";
-            UndoDescription = $"Ctrl+Z: undo {verbed} of {outcome.Completed.Count:N0} item(s)";
-        }
+        await RecordAsync(TransferRecord.For(outcome));
 
         await RefreshAfterTransferAsync(plan, outcome);
         SetStatus(DescribeOutcome(plan, outcome) + elevated);
@@ -2281,12 +2163,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             var outcome = await Task.Run(
                 () => _syncRunner.Run(plans, cancellation.Token, progress));
 
-            RetireUndoable();
-            if (outcome.CanUndo)
-            {
-                _undoableSync = outcome;
-                UndoDescription = $"Ctrl+Z: undo sync of {Touched(outcome):N0} item(s)";
-            }
+            await RecordAsync(SyncRecord.For(outcome));
 
             await RefreshAfterSyncAsync(outcome);
             SetStatus(DescribeSync(outcome, plans));
@@ -2331,9 +2208,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             Headline = $"Syncing {plans.ItemCount:N0} item(s)…",
         };
     }
-
-    private static int Touched(SyncOutcome outcome) =>
-        outcome.CopiedCount + outcome.ReplacedCount + outcome.RemovedCount;
 
     /// <summary>
     /// What the status bar says afterwards. Each half is named separately: "synced 20 items" hides
@@ -2387,10 +2261,10 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// <remarks>
     /// <para>
     /// Called from inside each of the four operations, after the ordinary pass and <b>before</b>
-    /// <see cref="RetireUndoable"/>. That position is forced rather than chosen: retiring claims the
-    /// one-level undo slot and erases the previous operation's staged data, so a retry raised after
-    /// it would need a second undo record and claiming that would commit a staging folder the user
-    /// might still have wanted back.
+    /// <see cref="RecordAsync"/>. That position is forced rather than chosen: the history keeps one
+    /// entry per operation, so a retry raised after it would need a second entry for what is, to
+    /// the user, the same action — and undoing one without the other would put half of it back. The
+    /// undo history's steps come through here too, by way of <see cref="UndoHost"/>.
     /// </para>
     /// <para>
     /// Written out four times rather than made generic over three delegates. The types differ, and
@@ -2398,7 +2272,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// read better than one clever one.
     /// </para>
     /// </remarks>
-    private readonly record struct Elevated<T>(T Outcome, string Note);
 
     private async Task<Elevated<TransferOutcome>> ElevateIfRefusedAsync(
         TransferPlan plan,
@@ -2601,7 +2474,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// </para>
     /// <para>
     /// It claims <see cref="IsTransferring"/> like the others, so two of these cannot overlap and
-    /// the undo slot stays coherent — but it never <em>writes</em> to that slot, because extracting
+    /// the undo history stays coherent — but it never <em>writes</em> to it, because extracting
     /// is additive. Whatever was undoable before an extract is still undoable after it, and Delete
     /// removes what this made, reversibly.
     /// </para>
@@ -2667,7 +2540,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     /// </summary>
     /// <remarks>
     /// Additive like an extract, so it claims <see cref="IsTransferring"/> and never writes to the
-    /// undo slot. The byte total is what the walk already measured — file lengths, not a
+    /// undo history. The byte total is what the walk already measured — file lengths, not a
     /// <c>dir_size_cache</c> lookup — so it is exact, and the bar shows a real percentage.
     /// </remarks>
     public async Task<CreateArchiveOutcome?> ExecuteCreateArchiveAsync(
@@ -2797,12 +2670,11 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             .ToList();
 
     /// <summary>
-    /// Carries out an archive edit, on the transfer progress surface and the shared undo slot.
+    /// Carries out an archive edit, on the transfer progress surface and into the undo history.
     /// </summary>
     /// <remarks>
-    /// Unlike extracting and compressing, this one <em>is</em> destructive, so it takes the undo
-    /// slot like a move, a rename or a delete — retiring whatever was there first, which is what
-    /// commits the previous operation's staging and keeps exactly one thing undoable at a time.
+    /// Unlike extracting and compressing, this one <em>is</em> destructive, so it enters the undo
+    /// history like a move, a rename or a delete.
     /// </remarks>
     public async Task<ArchiveEditOutcome?> ExecuteArchiveEditAsync(ArchiveEditPlan plan)
     {
@@ -2841,12 +2713,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         var outcome = await Task.Run(
             () => _archiveEditExecutor.Execute(plan, cancellation.Token, progress, gate));
 
-        RetireUndoable();
-        if (outcome.CanUndo)
-        {
-            _undoableArchiveEdit = outcome;
-            UndoDescription = $"Ctrl+Z: undo changes to {name}";
-        }
+        await RecordAsync(ArchiveEditRecord.For(outcome));
 
         var folder = Path.GetDirectoryName(plan.ArchiveFile);
         if (folder is { Length: > 0 })
@@ -2894,153 +2761,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         if (outcome.Cancelled) return $"Extract cancelled — {written}.";
         if (outcome.Failed.Count > 0) return $"{written}, {outcome.Failed.Count:N0} failed.";
         return $"{written}.";
-    }
-
-    /// <summary>Reverses the last move, rename, delete, archive edit or sync — whichever the undo slot holds.</summary>
-    [RelayCommand(CanExecute = nameof(CanUndo))]
-    private async Task UndoAsync()
-    {
-        // At most one of these is ever set: each operation retires the slot before claiming it.
-        if (_undoableRename is { } rename) await UndoRenameAsync(rename);
-        else if (_undoableDelete is { } deletion) await UndoDeleteAsync(deletion);
-        else if (_undoableTransfer is { } transfer) await UndoTransferAsync(transfer);
-        else if (_undoableArchiveEdit is { } edit) await UndoArchiveEditAsync(edit);
-        else if (_undoableSync is { } sync) await UndoSyncAsync(sync);
-    }
-
-    private async Task UndoSyncAsync(SyncOutcome outcome)
-    {
-        IsTransferring = true;
-        UndoCommand.NotifyCanExecuteChanged();
-        try
-        {
-            SetStatus("Putting the sync back…");
-            var result = await Task.Run(() => _syncRunner.Undo(outcome));
-
-            _undoableSync = null;
-            UndoDescription = "";
-
-            await RefreshAfterSyncAsync(outcome);
-
-            SetStatus(result.Failed.Count == 0
-                ? $"Put back {result.Restored:N0} item(s)."
-                : $"Put back {result.Restored:N0} item(s), {result.Failed.Count:N0} could not be — {result.Failed[0]}");
-
-            // The verdicts described the folder as it was a moment ago and no longer do.
-            CompareSession?.RescanCommand.Execute(null);
-        }
-        finally
-        {
-            IsTransferring = false;
-            UndoCommand.NotifyCanExecuteChanged();
-        }
-    }
-
-    private async Task UndoArchiveEditAsync(ArchiveEditOutcome outcome)
-    {
-        IsTransferring = true;
-        UndoCommand.NotifyCanExecuteChanged();
-        try
-        {
-            var failure = await Task.Run(() => _archiveEditExecutor.Undo(outcome));
-
-            _undoableArchiveEdit = null;
-            UndoDescription = "";
-
-            // The whole container changed, so anything showing its inside is stale. Refreshed by
-            // the archive's own path as well as its folder, because a tab may be standing in it.
-            var folder = Path.GetDirectoryName(outcome.ArchiveFile);
-            if (folder is { Length: > 0 })
-            {
-                await Tree.RefreshDirectoriesAsync([folder]);
-                await RefreshTabsShowingAsync([folder]);
-            }
-            await RefreshTabsUnderAsync(outcome.ArchiveFile);
-
-            SetStatus(failure ?? $"Put back {Path.GetFileName(outcome.ArchiveFile)}.");
-        }
-        finally
-        {
-            IsTransferring = false;
-            UndoCommand.NotifyCanExecuteChanged();
-        }
-    }
-
-    private async Task UndoTransferAsync(TransferOutcome outcome)
-    {
-        IsTransferring = true;
-        UndoCommand.NotifyCanExecuteChanged();
-        try
-        {
-            SetStatus("Undoing…");
-
-            // A copy is reversed by removing what it wrote, and it is never retried elevated.
-            // ElevationHost.UndoTransfer hardcodes TransferVerb.Move and calls Undo, so handed a
-            // copy's outcome it would move the pasted files back into the folder they came from
-            // instead of deleting them — corrupting both sides. An elevated copy-undo would need
-            // its own operation over the pipe, and there is not one.
-            var isCopy = outcome.Verb == TransferVerb.Copy;
-            TransferUndoResult result;
-            var elevated = "";
-            if (isCopy)
-            {
-                result = await Task.Run(() => _transferExecutor.UndoCopies(outcome));
-            }
-            else
-            {
-                (result, elevated) = await ElevateIfRefusedAsync(
-                    outcome, await Task.Run(() => _transferExecutor.Undo(outcome)));
-            }
-
-            // The record is spent either way: a partial undo must not be replayed.
-            _undoableTransfer = null;
-            UndoDescription = "";
-
-            var directories = outcome.Completed
-                .SelectMany(c => new[] { Path.GetDirectoryName(c.SourcePath), Path.GetDirectoryName(c.FinalPath) })
-                .Append(outcome.DestinationDirectory)
-                .OfType<string>()
-                .ToList();
-            await Tree.RefreshDirectoriesAsync(directories);
-            await RefreshTabsShowingAsync(directories);
-
-            // A copy removed what it wrote; "put back" would describe the wrong direction.
-            var did = isCopy ? "removed" : "put back";
-            SetStatus((result.Failed.Count == 0
-                ? $"Undone — {result.Restored:N0} item(s) {did}"
-                : $"{(isCopy ? "Removed" : "Put back")} {result.Restored:N0} item(s); {result.Failed.Count:N0} could not be — {result.Failed[0].Message}") + elevated);
-        }
-        finally
-        {
-            IsTransferring = false;
-            UndoCommand.NotifyCanExecuteChanged();
-        }
-    }
-
-    /// <summary>
-    /// Drops the pending undo record. This is the moment data actually goes: anything a Replace
-    /// displaced into staging, and everything a delete has been holding, is erased here and not
-    /// before — up until now Ctrl+Z could have brought it back.
-    /// </summary>
-    public void RetireUndoable()
-    {
-        if (_undoableTransfer is { } outcome)
-            TransferExecutor.CommitStaging(outcome);
-        if (_undoableDelete is { } deletion)
-            DeleteExecutor.CommitStaging(deletion);
-        if (_undoableArchiveEdit is { } edit)
-            ArchiveEditExecutor.CommitStaging(edit);
-        // Both halves at once: a sync's staging folders hold what it replaced, and its Recycle Bin
-        // items are what it removed.
-        if (_undoableSync is { } sync)
-            SyncRunner.Retire(sync);
-        _undoableTransfer = null;
-        _undoableRename = null;
-        _undoableDelete = null;
-        _undoableArchiveEdit = null;
-        _undoableSync = null;
-        UndoDescription = "";
-        UndoCommand.NotifyCanExecuteChanged();
     }
 
     private async Task RefreshAfterTransferAsync(TransferPlan plan, TransferOutcome outcome)

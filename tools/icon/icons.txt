@@ -50,6 +50,7 @@ Delete            | Delete                  | delete                  | 20
 DeletePermanent   | Delete Dismiss          | delete_dismiss          | 20
 MoveToFolder      | Folder Arrow Right      | folder_arrow_right      | 20
 Undo              | Arrow Undo              | arrow_undo              | 20
+Redo              | Arrow Redo              | arrow_redo              | 20
 
 # Creating things
 Add               | Add                     | add                     | 20

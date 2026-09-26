@@ -302,6 +302,9 @@
                 </ListView.ItemContainerStyle>
                 <ListView.ContextMenu>
                     <ContextMenu>
+                        <!-- No separators and no fixed order: ContextMenuComposer lays these out, with
+                             the user's commands and other programs' entries, as the Context menu page
+                             arranged them (MenuLayoutRules). -->
                         <!-- New targets the folder being shown, never the selection, which is why
                              it is above Open — and why right-clicking empty space, which opens this
                              same menu, gets it without needing its own affordance. -->
@@ -318,7 +321,6 @@
                                 <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.NewFile}"/></MenuItem.Icon>
                             </MenuItem>
                         </MenuItem>
-                        <Separator/>
                         <MenuItem Tag="open" Header="Open" Click="ContextOpen_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Open}"/></MenuItem.Icon>
                         </MenuItem>
@@ -384,7 +386,6 @@
                                   Click="ContextExtractTo_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.MoveToFolder}"/></MenuItem.Icon>
                         </MenuItem>
-                        <Separator/>
                         <MenuItem x:Name="CopyPathMenuItem" Tag="copy-path" Header="Copy as path"
                                   InputGestureText="Ctrl+Shift+C" Click="ContextCopyPath_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Copy}"/></MenuItem.Icon>
@@ -405,7 +406,6 @@
                         <MenuItem x:Name="ChecksumMenuItem" Tag="checksum" Header="Checksum…" Click="ContextChecksum_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Checksum}"/></MenuItem.Icon>
                         </MenuItem>
-                        <Separator/>
                         <MenuItem x:Name="CutMenuItem" Tag="cut" Header="Cut" InputGestureText="Ctrl+X" Click="ContextCut_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Cut}"/></MenuItem.Icon>
                         </MenuItem>
@@ -415,7 +415,6 @@
                         <MenuItem x:Name="PasteMenuItem" Tag="paste" Header="Paste" InputGestureText="Ctrl+V" Click="ContextPaste_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Paste}"/></MenuItem.Icon>
                         </MenuItem>
-                        <Separator/>
                         <MenuItem x:Name="RenameMenuItem" Tag="rename" Header="Rename…" InputGestureText="F2"
                                   Click="ContextRename_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Rename}"/></MenuItem.Icon>
@@ -434,11 +433,6 @@
                         <MenuItem x:Name="BookmarkMenuItem" Tag="bookmark" Header="Bookmark" Click="ContextBookmark_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Bookmark}"/></MenuItem.Icon>
                         </MenuItem>
-                        <Separator x:Name="CustomCommandsSeparator" Visibility="Collapsed"/>
-                        <!-- Other programs' entries (7-Zip, Git, TortoiseSVN) are built here at
-                             ContextMenuOpening, after the user's own commands. -->
-                        <Separator x:Name="ShellMenuSeparator" Visibility="Collapsed"/>
-                        <Separator/>
                         <MenuItem Tag="properties" Header="Properties…" InputGestureText="Alt+Enter" Click="ContextProperties_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Properties}"/></MenuItem.Icon>
                         </MenuItem>

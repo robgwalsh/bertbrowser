@@ -80,6 +80,31 @@ public sealed record ArchiveEditOutcome(
 {
     public bool CanUndo => StagedOriginal is not null && Failure is null && !Cancelled;
 
+    /// <summary>The original container as it was before the swap — what a redo checks is still in
+    /// place before it takes the edit back in.</summary>
+    public EntryStamp? Original { get; init; }
+
+    /// <summary>The edited container as the swap left it — what an undo checks is still in place
+    /// before it sets it aside. A container changed by anything else since is refused, not lost.</summary>
+    public EntryStamp? Edited { get; init; }
+
     public static ArchiveEditOutcome Nothing(string archiveFile) =>
         new(archiveFile, null, 0, null, false);
+}
+
+/// <summary>
+/// An archive edit that was undone: the original is back in place, and the edited container is
+/// held beside it so the edit can be redone.
+/// </summary>
+/// <param name="StagedEdited">Where the edited container is being held, or null when the undo did
+/// not happen.</param>
+/// <param name="Failure">Why the undo did not happen, or null when it did.</param>
+public sealed record ArchiveEditUndo(
+    string ArchiveFile,
+    string? StagedEdited,
+    EntryStamp? Original,
+    EntryStamp? Edited,
+    string? Failure)
+{
+    public bool CanRedo => StagedEdited is not null && Failure is null;
 }

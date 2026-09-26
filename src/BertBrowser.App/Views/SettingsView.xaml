@@ -101,8 +101,21 @@
              capped so a maximised window does not stretch every hint across the monitor. MinHeight
              is the viewport so the list pages still fill the space when there is room; given less,
              their lists grow to their content and the page scrolls instead. -->
-        <ScrollViewer x:Name="PageScroller" VerticalScrollBarVisibility="Auto"
-                      HorizontalScrollBarVisibility="Disabled" Focusable="False">
+        <ScrollViewer x:Name="PageScroller" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+            <!-- The Context menu page never scrolls as a whole: it takes exactly the viewport, and
+                 its two columns scroll inside themselves, so a drag between them reaches every row.
+                 Disabled rather than Hidden is what hands the page a finite height to fill. -->
+            <ScrollViewer.Style>
+                <Style TargetType="ScrollViewer" BasedOn="{StaticResource {x:Type ScrollViewer}}">
+                    <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding SelectedCategory.Id}"
+                                     Value="{x:Static vm:SettingsCategory.ContextMenu}">
+                            <Setter Property="VerticalScrollBarVisibility" Value="Disabled"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </ScrollViewer.Style>
             <!-- A capped star column rather than MaxWidth on the page itself, which would centre it
                  once the window is wider than the cap. -->
             <Grid MinHeight="{Binding ViewportHeight, ElementName=PageScroller}">
@@ -359,6 +372,41 @@
                     </DockPanel>
                     <TextBlock Style="{StaticResource Hint}"
                                Text="Deletes the log straight away."/>
+
+                    <!--
+                      The undo history's limits. On this page because it is the other history the
+                      app keeps — but unlike the change log it is on by default, since nothing it
+                      holds outlives the session, and the hint says so.
+                    -->
+                    <TextBlock Text="Undo" FontWeight="SemiBold" Margin="0,22,0,8"/>
+
+                    <DockPanel Margin="0,4,0,0">
+                        <TextBlock Text="Keep up to" VerticalAlignment="Center"/>
+                        <ComboBox DockPanel.Dock="Right" MinWidth="110" HorizontalAlignment="Right"
+                                  ItemsSource="{Binding UndoStepOptions}"
+                                  SelectedValue="{Binding UndoMaxSteps, Mode=TwoWay}"
+                                  SelectedValuePath="Value"
+                                  AutomationProperties.Name="Undo steps kept">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate><TextBlock Text="{Binding Label}"/></DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </DockPanel>
+
+                    <DockPanel Margin="0,8,0,0">
+                        <TextBlock Text="Hold up to this much set-aside data" VerticalAlignment="Center"/>
+                        <ComboBox DockPanel.Dock="Right" MinWidth="110" HorizontalAlignment="Right"
+                                  ItemsSource="{Binding UndoHeldOptions}"
+                                  SelectedValue="{Binding UndoMaxHeldGigabytes, Mode=TwoWay}"
+                                  SelectedValuePath="Value"
+                                  AutomationProperties.Name="Undo data held">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate><TextBlock Text="{Binding Label}"/></DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Undo history lasts for this session only (Ctrl+Alt+Z shows it). To make undo possible, BertBrowser holds on to what you replace or delete into its own holding folder, and an edited archive's original. When the history goes past either limit, the oldest actions are released and what they held is removed for good. The same happens when you clear the history or close BertBrowser. The action you would undo next is never released, however large it is. Items sent to the Recycle Bin stay there either way."/>
                 </StackPanel>
 
                 <!-- Appearance persists through IThemeService rather than SettingsViewModel.Apply,
@@ -549,7 +597,7 @@
                                         HorizontalAlignment="Left"
                                         Command="{Binding ImportFromWindowsCommand}"/>
                                 <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,6,0,0"
-                                           Text="Adds the file types Windows offers in its own New menu. This only reads the registry — it never changes what Explorer shows, and types already listed keep their place."/>
+                                           Text="Adds the file types Windows offers in its own New menu."/>
                                 <TextBlock Margin="0,6,0,0" TextWrapping="Wrap"
                                            Foreground="{StaticResource Theme.Text.Secondary}"
                                            Text="{Binding ImportStatus}"/>
@@ -575,9 +623,6 @@
 
                     <TextBlock DockPanel.Dock="Top" Text="Columns" Style="{StaticResource PageHeading}"
                                Margin="0,0,0,4"/>
-                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,10"
-                               Foreground="{StaticResource Theme.Text.Secondary}"
-                               Text="What a new tab starts with. Columns are per tab, so you can also right-click any column header to change just the tab you are in. Tabs you have already arranged by hand are left alone."/>
 
                     <!-- Two buttons where there were four: the popup behind Add reaches the whole
                          property system, and dragging a row replaced the up and down pair. -->
@@ -935,8 +980,15 @@
                     </StackPanel>
                 </StackPanel>
 
-                <!-- Custom context menu commands -->
-                <DockPanel>
+                <!--
+                  Context menu: the menu itself on the left, drawn the way it draws itself, and
+                  everything that could be on it on the right. The preview is the whole truth of the
+                  page — an entry is on the menu when it has a row there — so there are no tick boxes
+                  to disagree with it (SettingsViewModel.ContextMenu). Its height is the viewport's
+                  (see PageScroller's style), so the two columns scroll inside themselves and a drag
+                  across can reach both ends of the menu.
+                -->
+                <DockPanel x:Name="ContextMenuPage" AutomationProperties.AutomationId="SettingsContextMenuPage">
                     <DockPanel.Style>
                         <Style TargetType="DockPanel">
                             <Setter Property="Visibility" Value="Collapsed"/>
@@ -949,157 +1001,367 @@
                         </Style>
                     </DockPanel.Style>
 
-                    <TextBlock DockPanel.Dock="Top" Text="Your commands"
+                    <TextBlock DockPanel.Dock="Top" Text="Context menu"
                                Style="{StaticResource PageHeading}" Margin="0,0,0,4"/>
-                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,12"
-                               Foreground="{StaticResource Theme.Text.Secondary}"
-                               Text="These appear in the right-click menu of the file list and folder tree. In Arguments, {path}, {name} and {dir} expand per item — quote tokens that may contain spaces, e.g. &quot;{path}&quot;. Blank arguments default to the quoted full path."/>
-
-                    <!-- Below the user's own commands, as they are in the menu itself: the app's
-                         built-in entries on the left, other programs' on the right, one box each.
-                         The right-hand list of what is installed is read once the page opens, off
-                         the UI thread; the checklist is what makes hosting other people's code in
-                         this process acceptable, since an extension that misbehaves can be unticked.
-                         A fixed height so both lists end on the same line whatever the hints say. -->
-                    <Grid DockPanel.Dock="Bottom" Margin="0,16,0,0" Height="220">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="16"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-
-                        <DockPanel Grid.Column="0">
-                            <TextBlock DockPanel.Dock="Top" Text="BertBrowser's entries"
-                                       Style="{StaticResource PageHeading}" Margin="0,0,0,4"/>
-                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,8"
-                                       Text="Untick an entry to leave it out of the right-click menu. Its keyboard shortcut still works."/>
-                            <!-- The bottom margin is the right-hand status line's height, so the
-                                 two lists end level. -->
-                            <ListBox ItemsSource="{Binding BuiltInItems}" Margin="0,0,0,20"
-                                     AutomationProperties.AutomationId="BuiltInMenuItemsList"
-                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <DockPanel Margin="2">
-                                            <CheckBox DockPanel.Dock="Left" Margin="0,0,6,0"
-                                                      IsChecked="{Binding IsShown, Mode=TwoWay}"
-                                                      ToolTip="Show this entry"/>
-                                            <TextBlock DockPanel.Dock="Right" Text="{Binding PlacesText}"
-                                                       Margin="6,0,0,0" Opacity="0.6"/>
-                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
-                                        </DockPanel>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                        </DockPanel>
-
-                        <DockPanel Grid.Column="2">
-                            <TextBlock DockPanel.Dock="Top" Text="Windows shell extensions"
-                                       Style="{StaticResource PageHeading}" Margin="0,0,0,4"/>
-                            <CheckBox DockPanel.Dock="Top" Content="Show entries added by other programs"
-                                      IsChecked="{Binding ShowShellExtensions}"
-                                      AutomationProperties.AutomationId="ShowShellExtensions"/>
-                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,4,0,8"
-                                       Text="7-Zip, Git, TortoiseSVN… appear below your commands, as in Explorer. They run inside BertBrowser, so unticking one is also the fix for a slow one."/>
-                            <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource Hint}" Margin="0,4,0,0"
-                                       Text="{Binding ShellExtensionsStatus}"/>
-                            <ListBox ItemsSource="{Binding ShellExtensions}"
-                                     IsEnabled="{Binding ShowShellExtensions}"
-                                     AutomationProperties.AutomationId="ShellExtensionsList"
-                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <DockPanel Margin="2">
-                                            <CheckBox DockPanel.Dock="Left" Margin="0,0,6,0"
-                                                      IsChecked="{Binding IsShown, Mode=TwoWay}"
-                                                      ToolTip="Show this program's entries"/>
-                                            <TextBlock DockPanel.Dock="Right" Text="{Binding KindText}"
-                                                       Margin="6,0,0,0" Opacity="0.6"/>
-                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
-                                        </DockPanel>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                        </DockPanel>
-                    </Grid>
-
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="200"/>
-                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="20"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
 
-                        <!-- Command list -->
+                        <!-- The menu -->
                         <DockPanel Grid.Column="0">
-                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
-                                <Button Content="Add" Padding="12,3" Margin="0,0,6,0" Command="{Binding AddCommand}"/>
-                                <Button Content="Remove" Padding="12,3" Command="{Binding RemoveCommand}"/>
+                            <TextBlock DockPanel.Dock="Top" Text="Your menu" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button Padding="10,3" Margin="0,0,6,0" Command="{Binding AddMenuSeparatorCommand}"
+                                        AutomationProperties.AutomationId="AddMenuSeparator">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Add}"
+                                              Width="11" Height="11" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                        <TextBlock Text="Separator"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button Content="Reset" Padding="12,3" Command="{Binding ResetMenuCommand}"
+                                        ToolTip="BertBrowser's entries back in their original order, all on the menu"/>
+                                <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{StaticResource Theme.Text.Muted}"
+                                           Text="Alt+↑/↓ moves · Del removes"/>
                             </StackPanel>
-                            <ListBox ItemsSource="{Binding Commands}" SelectedItem="{Binding SelectedCommand, Mode=TwoWay}">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding Name}" Margin="2"/>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
+
+                            <Border Background="{StaticResource Theme.Menu.Background}"
+                                    BorderBrush="{StaticResource Theme.Menu.Border}" BorderThickness="1" Padding="2">
+                                <ListBox x:Name="MenuLayoutList"
+                                         AutomationProperties.AutomationId="MenuLayoutList"
+                                         ItemsSource="{Binding MenuRows}"
+                                         SelectedItem="{Binding SelectedMenuRow, Mode=TwoWay}"
+                                         Background="Transparent" BorderThickness="0"
+                                         Foreground="{StaticResource Theme.Menu.Foreground}"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                         PreviewKeyDown="MenuLayoutList_KeyDown">
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                                            <Setter Property="Padding" Value="0"/>
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid>
+                                                <!-- Other programs' rows fade while the master switch
+                                                     is off: kept in place, but not on the menu. -->
+                                                <Grid.Style>
+                                                    <Style TargetType="Grid">
+                                                        <Style.Triggers>
+                                                            <MultiDataTrigger>
+                                                                <MultiDataTrigger.Conditions>
+                                                                    <Condition Binding="{Binding Kind}" Value="Shell"/>
+                                                                    <Condition Value="False"
+                                                                               Binding="{Binding DataContext.ShowShellExtensions,
+                                                                                         RelativeSource={RelativeSource AncestorType=ListBox}}"/>
+                                                                </MultiDataTrigger.Conditions>
+                                                                <Setter Property="Opacity" Value="0.4"/>
+                                                            </MultiDataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Grid.Style>
+                                                <!-- An entry, laid out like a menu item: icon, name,
+                                                     gesture. The detail is the page's own note —
+                                                     "file list only", "your command". -->
+                                                <Grid Height="26"
+                                                      Visibility="{Binding Kind, Converter={StaticResource EnumNotEqualsVisibility}, ConverterParameter=Separator}">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="14"/>
+                                                        <ColumnDefinition Width="28"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="26"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <!-- The grip is a label, not a handle: the whole
+                                                         row is draggable. -->
+                                                    <Path Grid.Column="0" Style="{StaticResource IconPath}" Data="{StaticResource Icon.Reorder}"
+                                                          Width="10" Height="10" Margin="2,0,0,0" Opacity="0.45"
+                                                          VerticalAlignment="Center"/>
+                                                    <Path Grid.Column="1" Style="{StaticResource MenuIconPath}" Data="{Binding Icon}"
+                                                          Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                    <TextBlock Grid.Column="2" Text="{Binding Name}" VerticalAlignment="Center"
+                                                               TextTrimming="CharacterEllipsis">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsMore}" Value="True">
+                                                                        <Setter Property="FontStyle" Value="Italic"/>
+                                                                        <Setter Property="Foreground" Value="{StaticResource Theme.Text.Muted}"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                    <TextBlock Grid.Column="3" Text="{Binding Detail}" FontSize="11" Margin="8,0,0,0"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="{StaticResource Theme.Text.Muted}"/>
+                                                    <TextBlock Grid.Column="4" Text="{Binding Gesture}" Margin="12,0,4,0"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="{StaticResource Theme.Menu.GestureForeground}"/>
+                                                    <Button Grid.Column="5" Width="22" Height="22" Margin="2,0,0,0"
+                                                            ToolTip="Take this off the menu (Del)"
+                                                            AutomationProperties.Name="Remove from menu"
+                                                            Visibility="{Binding IsRemovable, Converter={StaticResource BoolToVisibility}}"
+                                                            Command="{Binding DataContext.RemoveMenuRowCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                            CommandParameter="{Binding}">
+                                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Dismiss}"
+                                                              Width="10" Height="10"/>
+                                                        <Button.Style>
+                                                            <Style TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+                                                                <Setter Property="Opacity" Value="0"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Value="True"
+                                                                                 Binding="{Binding IsMouseOver,
+                                                                                           RelativeSource={RelativeSource AncestorType=ListBoxItem}}">
+                                                                        <Setter Property="Opacity" Value="1"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Value="True"
+                                                                                 Binding="{Binding IsSelected,
+                                                                                           RelativeSource={RelativeSource AncestorType=ListBoxItem}}">
+                                                                        <Setter Property="Opacity" Value="1"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Button.Style>
+                                                    </Button>
+                                                </Grid>
+
+                                                <!-- A separator, drawn as the menu draws one, with the
+                                                     same × so it can be taken out like anything else. -->
+                                                <Grid Height="14"
+                                                      Visibility="{Binding IsSeparator, Converter={StaticResource BoolToVisibility}}">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="42"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="26"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Rectangle Grid.Column="1" Height="1" Margin="0,0,4,0" VerticalAlignment="Center"
+                                                               Fill="{StaticResource Theme.Menu.Separator}"/>
+                                                    <Button Grid.Column="2" Width="22" Height="14" Margin="2,0,0,0" Padding="0"
+                                                            ToolTip="Remove this separator (Del)"
+                                                            AutomationProperties.Name="Remove separator"
+                                                            Command="{Binding DataContext.RemoveMenuRowCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                            CommandParameter="{Binding}">
+                                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Dismiss}"
+                                                              Width="9" Height="9"/>
+                                                        <Button.Style>
+                                                            <Style TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+                                                                <Setter Property="Opacity" Value="0"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Value="True"
+                                                                                 Binding="{Binding IsMouseOver,
+                                                                                           RelativeSource={RelativeSource AncestorType=ListBoxItem}}">
+                                                                        <Setter Property="Opacity" Value="1"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Value="True"
+                                                                                 Binding="{Binding IsSelected,
+                                                                                           RelativeSource={RelativeSource AncestorType=ListBoxItem}}">
+                                                                        <Setter Property="Opacity" Value="1"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Button.Style>
+                                                    </Button>
+                                                </Grid>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Border>
                         </DockPanel>
 
-                        <!-- Editor for the selected command -->
-                        <Grid Grid.Column="2" VerticalAlignment="Top">
-                            <Grid.Style>
-                                <Style TargetType="Grid">
+                        <!-- What can go on it, in the three places entries come from. -->
+                        <ScrollViewer x:Name="MenuChoicesScroller" Grid.Column="2"
+                                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <ScrollViewer.Resources>
+                                <!-- Add or Remove, by whether the entry is on the menu. -->
+                                <Style x:Key="MenuChoiceToggle" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+                                    <Setter Property="Padding" Value="8,2"/>
+                                    <Setter Property="MinWidth" Value="64"/>
+                                    <Setter Property="Content" Value="Add"/>
+                                    <Setter Property="FontWeight" Value="SemiBold"/>
+                                    <Setter Property="Foreground" Value="{StaticResource Theme.Text.Link}"/>
+                                    <Setter Property="ToolTip" Value="Put this on the menu"/>
                                     <Style.Triggers>
-                                        <DataTrigger Binding="{Binding SelectedCommand}" Value="{x:Null}">
-                                            <Setter Property="IsEnabled" Value="False"/>
+                                        <DataTrigger Binding="{Binding IsInMenu}" Value="True">
+                                            <Setter Property="Content" Value="Remove"/>
+                                            <Setter Property="FontWeight" Value="Normal"/>
+                                            <Setter Property="Foreground" Value="{StaticResource Theme.Text.Muted}"/>
+                                            <Setter Property="ToolTip" Value="Take this off the menu"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
-                            </Grid.Style>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
+                                <!-- A name on the menu already is quieter than one that could be added. -->
+                                <Style x:Key="MenuChoiceName" TargetType="TextBlock">
+                                    <Setter Property="VerticalAlignment" Value="Center"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsInMenu}" Value="True">
+                                            <Setter Property="Foreground" Value="{StaticResource Theme.Text.Secondary}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                                <DataTemplate x:Key="MenuChoiceRow">
+                                    <Grid Height="28" Background="Transparent" Cursor="Hand"
+                                          ToolTip="Drag onto the menu to put it exactly where you want">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="26"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Path Grid.Column="0" Style="{StaticResource IconPath}" Data="{Binding Icon}"
+                                              Width="14" Height="14" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding Name}" Style="{StaticResource MenuChoiceName}"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding Detail}" FontSize="11" Margin="8,0"
+                                                   VerticalAlignment="Center" Foreground="{StaticResource Theme.Text.Muted}"/>
+                                        <Button Grid.Column="3" Style="{StaticResource MenuChoiceToggle}" Cursor="Arrow"
+                                                Command="{Binding DataContext.ToggleMenuChoiceCommand,
+                                                          RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ScrollViewer.Resources>
 
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                            <TextBox Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
-                                     VerticalContentAlignment="Center"
-                                     Text="{Binding SelectedCommand.Name, UpdateSourceTrigger=PropertyChanged}"/>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="BertBrowser" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <ItemsControl x:Name="BuiltInChoiceList"
+                                              AutomationProperties.AutomationId="BuiltInChoiceList"
+                                              ItemsSource="{Binding BuiltInChoices}"
+                                              ItemTemplate="{StaticResource MenuChoiceRow}"/>
 
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Program:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                            <TextBox Grid.Row="1" Grid.Column="1" Margin="0,0,6,8"
-                                     VerticalContentAlignment="Center"
-                                     Text="{Binding SelectedCommand.Command, UpdateSourceTrigger=PropertyChanged}"/>
-                            <Button Grid.Row="1" Grid.Column="2" Content="…" Width="28" Margin="0,0,0,8"
-                                    ToolTip="Browse for a program" Click="Browse_Click"/>
+                                <TextBlock Text="Windows shell extensions" FontWeight="SemiBold" Margin="0,20,0,4"/>
+                                <CheckBox Content="Show entries added by other programs"
+                                          IsChecked="{Binding ShowShellExtensions}"
+                                          AutomationProperties.AutomationId="ShowShellExtensions"/>
+                                <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,4"
+                                           Text="{Binding ShellExtensionsStatus}"
+                                           Visibility="{Binding ShellExtensionsStatus, Converter={StaticResource NullToCollapsed}}"/>
+                                <ItemsControl x:Name="ShellChoiceList"
+                                              AutomationProperties.AutomationId="ShellChoiceList"
+                                              ItemsSource="{Binding ShellChoices}"
+                                              IsEnabled="{Binding ShowShellExtensions}"
+                                              ItemTemplate="{StaticResource MenuChoiceRow}"/>
 
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Arguments:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                            <TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
-                                     VerticalContentAlignment="Center"
-                                     ToolTip="{}{path} = full path, {name} = file name, {dir} = parent directory"
-                                     Text="{Binding SelectedCommand.Arguments, UpdateSourceTrigger=PropertyChanged}"/>
+                                <TextBlock Text="Your commands" FontWeight="SemiBold" Margin="0,20,0,4"/>
+                                <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,6"
+                                           Text="Programs of your own. In Arguments, {path}, {name} and {dir} expand per item — quote tokens that may contain spaces, e.g. &quot;{path}&quot;. Blank arguments default to the quoted full path."/>
+                                <ListBox x:Name="CommandChoiceList"
+                                         AutomationProperties.AutomationId="CommandChoiceList"
+                                         ItemsSource="{Binding Commands}"
+                                         SelectedItem="{Binding SelectedCommand, Mode=TwoWay}"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                         ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                         PreviewMouseWheel="NestedList_PreviewMouseWheel">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Height="28" Background="Transparent">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="26"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Path Grid.Column="0" Width="14" Height="14"
+                                                      HorizontalAlignment="Left" VerticalAlignment="Center">
+                                                    <Path.Style>
+                                                        <Style TargetType="Path" BasedOn="{StaticResource IconPath}">
+                                                            <Setter Property="Data" Value="{StaticResource Icon.CustomCommand}"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding RunElevated}" Value="True">
+                                                                    <Setter Property="Data" Value="{StaticResource Icon.Shield}"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Path.Style>
+                                                </Path>
+                                                <TextBlock Grid.Column="1" Text="{Binding Name}" Style="{StaticResource MenuChoiceName}"/>
+                                                <Button Grid.Column="2" Style="{StaticResource MenuChoiceToggle}"
+                                                        Command="{Binding DataContext.ToggleMenuChoiceCommand,
+                                                                  RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        CommandParameter="{Binding}"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <Button Padding="10,3" Margin="0,0,6,0" Command="{Binding NewCustomCommandCommand}"
+                                            AutomationProperties.AutomationId="NewCustomCommand">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Add}"
+                                                  Width="11" Height="11" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                            <TextBlock Text="New command"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Content="Delete" Padding="12,3" Command="{Binding DeleteCustomCommandCommand}"
+                                            ToolTip="Delete the selected command"/>
+                                </StackPanel>
 
-                            <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal">
-                                <CheckBox Content="Show for files" IsChecked="{Binding SelectedCommand.AppliesToFiles}"
-                                          Margin="0,0,16,0"/>
-                                <CheckBox Content="Show for folders" IsChecked="{Binding SelectedCommand.AppliesToDirectories}"/>
+                                <!-- Editor for the selected command, whichever column it was selected in. -->
+                                <Grid x:Name="CommandEditor" Margin="0,14,0,0">
+                                    <Grid.Style>
+                                        <Style TargetType="Grid">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding SelectedCommand}" Value="{x:Null}">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Grid.Style>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                                    <TextBox Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
+                                             VerticalContentAlignment="Center"
+                                             AutomationProperties.AutomationId="CommandName"
+                                             Text="{Binding SelectedCommand.Name, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Program:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                                    <TextBox Grid.Row="1" Grid.Column="1" Margin="0,0,6,8"
+                                             VerticalContentAlignment="Center"
+                                             Text="{Binding SelectedCommand.Command, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <Button Grid.Row="1" Grid.Column="2" Content="…" Width="28" Margin="0,0,0,8"
+                                            ToolTip="Browse for a program" Click="Browse_Click"/>
+
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Arguments:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                                    <TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
+                                             VerticalContentAlignment="Center"
+                                             ToolTip="{}{path} = full path, {name} = file name, {dir} = parent directory"
+                                             Text="{Binding SelectedCommand.Arguments, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                    <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal">
+                                        <CheckBox Content="Show for files" IsChecked="{Binding SelectedCommand.AppliesToFiles}"
+                                                  Margin="0,0,16,0"/>
+                                        <CheckBox Content="Show for folders" IsChecked="{Binding SelectedCommand.AppliesToDirectories}"/>
+                                    </StackPanel>
+
+                                    <!-- Its own row rather than beside the "show for" pair: those two say
+                                         where the command appears, this one says what it can do. -->
+                                    <CheckBox Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0"
+                                              Content="Run as administrator"
+                                              ToolTip="Windows asks for confirmation each time this command runs."
+                                              IsChecked="{Binding SelectedCommand.RunElevated}"/>
+                                </Grid>
                             </StackPanel>
-
-                            <!-- Its own row rather than beside the "show for" pair: those two say
-                                 where the command appears, this one says what it can do. -->
-                            <CheckBox Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0"
-                                      Content="Run as administrator"
-                                      ToolTip="Windows asks for confirmation each time this command runs."
-                                      IsChecked="{Binding SelectedCommand.RunElevated}"/>
-                        </Grid>
+                        </ScrollViewer>
                     </Grid>
                 </DockPanel>
             </Grid>

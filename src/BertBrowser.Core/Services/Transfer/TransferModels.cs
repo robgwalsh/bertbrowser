@@ -73,7 +73,7 @@ public enum ConflictResolution
     /// <para>
     /// Only a caller that keeps the outcome and can undo it may ask for this. Two do: a folder
     /// sync, and a merged drop or paste — which is why <see cref="TransferOutcome.CanUndoCopy"/>
-    /// exists and why the shell sets it in the same breath as putting the outcome in the undo slot.
+    /// exists and why the shell sets it in the same breath as recording the outcome in the undo history.
     /// Without it a merge could never bring an outdated file up to date, which is most of the
     /// reason to want one.
     /// </para>
@@ -316,7 +316,17 @@ public sealed record CompletedTransfer(
     string SourcePath,
     string FinalPath,
     bool IsDirectory,
-    string? DisplacedStagePath);
+    string? DisplacedStagePath)
+{
+    /// <summary>
+    /// The copy as it was written, taken the moment it landed. Set only for a copy:
+    /// <see cref="TransferExecutor.UndoCopies"/> removes nothing that no longer matches it, so an
+    /// entry edited since the paste — or the original a previous undo already put back under this
+    /// name — is left alone rather than erased. Null on a move, and on a completion that arrived over
+    /// the elevation pipe before <see cref="TransferExecutor.StampCopies"/> ran.
+    /// </summary>
+    public EntryStamp? Written { get; init; }
+}
 
 /// <param name="SourcePath">The source that could not be transferred.</param>
 /// <param name="Message">The failure, phrased for the status bar.</param>

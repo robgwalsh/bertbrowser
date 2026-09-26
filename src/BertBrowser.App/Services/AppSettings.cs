@@ -234,6 +234,22 @@ public sealed class AppSettings
         return ChangeLogPolicy.FromHours(hours);
     }
 
+    /// <summary>How many operations the undo history keeps; null for
+    /// <see cref="Core.Services.UndoHistory.UndoBudget.DefaultEntries"/>.</summary>
+    public int? UndoMaxSteps { get; set; }
+
+    /// <summary>How much set-aside data the undo history may hold, in gigabytes; null for
+    /// <see cref="Core.Services.UndoHistory.UndoBudget.DefaultGigabytes"/>.</summary>
+    /// <remarks>
+    /// On by default, unlike the change log, because nothing it keeps outlives the session: what it
+    /// holds is committed as entries leave, and all of it when the app closes.
+    /// </remarks>
+    public int? UndoMaxHeldGigabytes { get; set; }
+
+    /// <summary>The two settings above as the budget the history enforces.</summary>
+    public Core.Services.UndoHistory.UndoBudget EffectiveUndoBudget() =>
+        Core.Services.UndoHistory.UndoBudget.FromSettings(UndoMaxSteps, UndoMaxHeldGigabytes);
+
     /// <summary>Whether the duplicate finder leaves Windows and Program Files out.</summary>
     /// <remarks>
     /// On by default. Those trees are largely one file under several names, and what genuine
@@ -268,6 +284,12 @@ public sealed class AppSettings
     /// <c>BuiltInMenuItems</c> assigns (<c>copy-path</c>, <c>open-terminal</c>…). Everything not
     /// listed is shown, and an id this build does not know is kept rather than dropped.</summary>
     public List<string> HiddenBuiltInMenuItems { get; set; } = new();
+
+    /// <summary>The order of both right-click menus, as <c>MenuLayoutRules</c> tokens (<c>app:cut</c>,
+    /// <c>-</c>, <c>cmd:&lt;id&gt;</c>, <c>clsid:{…}</c>, <c>@more</c>). Null means never arranged,
+    /// which ships <c>MenuLayoutRules.Default</c>. Order only: whether an entry is shown is still
+    /// the hidden lists above and <see cref="CustomCommandDefinition.ShowInMenu"/>.</summary>
+    public List<string>? ContextMenuLayout { get; set; }
 
     /// <summary>The file types on the "New" submenu, in menu order. Null means the user has never
     /// configured the list, which is what lets a first launch ship

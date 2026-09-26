@@ -94,6 +94,9 @@ hide-menu-item <id> | show-menu-item <id>
                             untick (or re-tick) one of the app's own right-click entries on the
                             Context menu page, by the ids in Core's BuiltInMenuItems (copy-path,
                             open-terminal, cut…); the next `menu` reads it as a person's save would
+menu-layout <token…> | menu-layout default
+                            arrange both right-click menus as the Context menu page saves them:
+                            app:<id>, -, cmd:<id>, clsid:{…}/verb:<name>, @more (MenuLayoutRules)
 deny <rel>                  a file the current account may not delete or move — a real Deny ACE,
                             set with no privilege, lifted again on the way out. Its folder is
                             denied too and inheritably, so give it one of its own
@@ -183,7 +186,17 @@ extract [names] to <folder> pull entries out of the archive on show, through the
 compress <format> <name>    zip | tar | tar.gz | tar.bz2 — the selection, or the folder on show
 unlock <password>           give the archive on show a password and reload; writes the session
                             store directly, because the harness never clicks
-undo
+undo | redo                 one step through the undo history, as Ctrl+Z / Ctrl+Y
+undo-to <n> | redo-to <n>   n steps at once, counted from the cursor — what picking the nth entry
+                            of the Undo/Redo dropdown does. Stops at the first step that is not clean
+undo-budget steps=<n> gb=<n> the History page's limits, either or both; lowering one releases
+                            (and commits) the oldest entries straight away
+clear-undo-history          the History window's Clear, confirmation skipped
+assert-can-redo | assert-cannot-redo
+assert-history <n> [cursor=<k>] [released=<r>]
+                            entries held, how many are in effect, how many the limits let go
+assert-history-state <n> done|undone|partial|failed
+                            the nth newest entry, as its badge in the History window reads
 
 compare                     compare the two open panes, as F7 does, and wait for the scan. There
                             must be exactly two — with any other number the app refuses and says
@@ -201,7 +214,7 @@ settle-content              re-judge the selected rows by their bytes, through t
                             "SETTLED <n>". Needs a `compare` first
 compare-end                 stop comparing and clear the colours
 sync [with-deletes]         run what the comparison would do, through the same planner, runner and
-                            undo slot the dialog's Sync button uses — the dialog is skipped,
+                            undo history the dialog's Sync button uses — the dialog is skipped,
                             because a run never clicks. `with-deletes` ticks the destructive half,
                             which the dialog leaves off. `undo` reverses the whole thing
 
@@ -274,14 +287,15 @@ settings <page> [dragging]  puts the settings page up in the main window, where 
                             context-menu.
                             The columns page shows the *saved default*, so put an arrangement in
                             front of it with `columns default` first; `dragging` adds a row's
-                            insertion line, placed rather than dragged since a run posts no mouse
-                            input
+                            insertion line (columns and context-menu), placed rather than dragged
+                            since a run posts no mouse input; `new-command` (context-menu) presses
+                            New command, so the editor it opens is in the shot
 settings tick <label> on|off  sets a box on the open page by its label. Settings apply live on a
                             debounce, so `settle 800` before asserting what it changed
 settings close              back to the folders, without the question an incomplete entry would ask
 dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, rename-advanced,
                             delete, delete-permanent, message, warning, properties,
-                            theme-editor, disk-usage, duplicates, changes, sync-preview,
+                            theme-editor, disk-usage, duplicates, changes, undo-history, sync-preview,
                             sync-preview-running, search-syntax, saved-search, extract, compress,
                             archive-password, elevation,
                             columns, flat-large, checksum,
@@ -335,7 +349,7 @@ columns width <id> <px>
 columns reset               back to the saved default
 columns default             the header menu's "Set as default for new tabs" — what the settings
                             page reads, and the only way to seed it from a script
-menu columns|flat|files|background|tree|workspaces|saved-searches [name]
+menu columns|flat|files|background|tree|workspaces|saved-searches|undo|undo-range|redo [name]
                             PNG of a menu's items — the column header's, the flat view's shape
                             menu behind the toolbar chevron, the file list's for the selection,
                             the file list's over empty space (the folder background), or the
@@ -349,6 +363,9 @@ menu columns|flat|files|background|tree|workspaces|saved-searches [name]
 assert-menu-item <text> | assert-no-menu-item <text>
                             whether the last `menu` offered an item containing the text, submenus
                             included — the check a screenshot cannot make
+assert-menu-order <a> | <b> | …
+                            the last `menu`'s visible top-level lines contain these in this order
+                            (substrings; `-` is a separator), not necessarily adjacent
 right-drop-menu <names> to <folder> [as <name>]
                             PNG of the menu a right-drag ends with, built for those sources over
                             that folder — so the wording and the greying are the real ones. Rendered

@@ -17,6 +17,7 @@ using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
 using BertBrowser.Core.Services.ShellIntegration;
 using BertBrowser.Core.Services.ShellMenu;
+using BertBrowser.Core.Services.UndoHistory;
 
 namespace BertBrowser.App.ViewModels;
 
@@ -41,12 +42,22 @@ public sealed partial class CustomCommandItemViewModel : ObservableObject
     [ObservableProperty]
     private bool _runElevated;
 
+    /// <summary>Whether the command is on the menu (<see cref="CustomCommandDefinition.ShowInMenu"/>).
+    /// Follows the menu preview rather than being ticked directly.</summary>
+    [ObservableProperty]
+    private bool _isInMenu = true;
+
+    /// <summary>What the menu layout places it by; see <see cref="CustomCommandDefinition.Id"/>.</summary>
+    public string Id { get; } = Guid.NewGuid().ToString("N");
+
     public CustomCommandItemViewModel()
     {
     }
 
     public CustomCommandItemViewModel(CustomCommandDefinition definition)
     {
+        Id = definition.Id is { Length: > 0 } id ? id : Id;
+        IsInMenu = definition.ShowInMenu;
         Name = definition.Name;
         Command = definition.Command;
         Arguments = definition.Arguments;
@@ -57,6 +68,8 @@ public sealed partial class CustomCommandItemViewModel : ObservableObject
 
     public CustomCommandDefinition ToDefinition() => new()
     {
+        Id = Id,
+        ShowInMenu = IsInMenu,
         Name = Name.Trim(),
         Command = Command.Trim(),
         Arguments = Arguments.Trim(),
@@ -118,6 +131,9 @@ public enum SettingsCategory
     ContextMenu,
 }
 
+/// <summary>One choice on the History page's undo limits.</summary>
+public sealed record UndoLimitOption(int Value, string Label);
+
 /// <summary>One choice on the History page's "keep for" list.</summary>
 public sealed record RetentionOption(int Hours, string Label)
 {
@@ -162,54 +178,6 @@ public sealed partial class ColumnItemViewModel : ObservableObject
     private double _width;
 
     public ColumnSetting ToSetting() => new(Id, Width);
-}
-
-/// <summary>One extension on the Context Menu page's checklist: 7-Zip, Git, TortoiseSVN…</summary>
-public sealed partial class ShellExtensionItemViewModel : ObservableObject
-{
-    public ShellExtensionItemViewModel(ShellExtension extension, bool isShown)
-    {
-        Id = extension.Id;
-        Name = extension.Name;
-        KindText = extension.Kind == ShellExtensionKind.Handler ? "extension" : "command";
-        _isShown = isShown;
-    }
-
-    /// <summary>The stable id the hidden list stores — see <see cref="ShellExtension.Id"/>.</summary>
-    public string Id { get; }
-
-    public string Name { get; }
-
-    /// <summary>Shown beside the name so two entries called the same thing can be told apart: a
-    /// program's COM handler ("extension") or a plain registered command.</summary>
-    public string KindText { get; }
-
-    [ObservableProperty]
-    private bool _isShown;
-}
-
-/// <summary>One of the app's own entries on the Context Menu page's checklist: Open, Copy as
-/// path, Analyse disk usage… Same box as an extension's, same meaning.</summary>
-public sealed partial class BuiltInMenuItemViewModel : ObservableObject
-{
-    public BuiltInMenuItemViewModel(BuiltInMenuItem item, bool isShown)
-    {
-        Id = item.Id;
-        Name = item.Name;
-        PlacesText = BuiltInMenuItems.PlacesText(item.Places);
-        _isShown = isShown;
-    }
-
-    /// <summary>The stable id the hidden list stores — see <see cref="BuiltInMenuItem.Id"/>.</summary>
-    public string Id { get; }
-
-    public string Name { get; }
-
-    /// <summary>Where the entry appears, since not every verb is in both menus.</summary>
-    public string PlacesText { get; }
-
-    [ObservableProperty]
-    private bool _isShown;
 }
 
 /// <summary>One row of the navigation list.</summary>
@@ -344,6 +312,21 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public IReadOnlyList<RetentionOption> RetentionOptions { get; } =
         ChangeLogPolicy.RetentionOptions.Select(h => new RetentionOption(h, RetentionOption.LabelFor(h))).ToList();
+
+    /// <summary>How many actions the undo history keeps — one of <see cref="UndoStepOptions"/>.</summary>
+    [ObservableProperty]
+    private int _undoMaxSteps;
+
+    /// <summary>How much set-aside data the undo history may hold, in gigabytes — one of
+    /// <see cref="UndoHeldOptions"/>.</summary>
+    [ObservableProperty]
+    private int _undoMaxHeldGigabytes;
+
+    public IReadOnlyList<UndoLimitOption> UndoStepOptions { get; } =
+        [.. UndoBudget.EntryOptions.Select(n => new UndoLimitOption(n, $"{n:N0} actions"))];
+
+    public IReadOnlyList<UndoLimitOption> UndoHeldOptions { get; } =
+        [.. UndoBudget.GigabyteOptions.Select(n => new UndoLimitOption(n, $"{n:N0} GB"))];
 
     /// <summary>"12,408 changes recorded" — what the switch is a switch over. Blank without a
     /// repository, which is only a construction site that did not pass one.</summary>
@@ -628,6 +611,15 @@ public sealed partial class SettingsViewModel : ObservableObject
             : ChangeLogPolicy.DefaultRetentionHours;
         _ = RefreshRecordedCountAsync();
 
+        // Off-menu values fall back to the default for the same reason the retention does: a combo
+        // box showing nothing reads as a setting that is not set.
+        UndoMaxSteps = settings.UndoMaxSteps is { } steps && UndoBudget.EntryOptions.Contains(steps)
+            ? steps
+            : UndoBudget.DefaultEntries;
+        UndoMaxHeldGigabytes = settings.UndoMaxHeldGigabytes is { } gb && UndoBudget.GigabyteOptions.Contains(gb)
+            ? gb
+            : UndoBudget.DefaultGigabytes;
+
         TileAspect = AspectRatio.Parse(settings.TileAspectRatio);
         TileAspectOptions = AspectRatio.Presets.Contains(TileAspect)
             ? AspectRatio.Presets
@@ -637,17 +629,14 @@ public sealed partial class SettingsViewModel : ObservableObject
             settings.CustomCommands.Select(d => new CustomCommandItemViewModel(d)));
         SelectedCommand = Commands.FirstOrDefault();
 
-        var hiddenBuiltIn = new HashSet<string>(settings.HiddenBuiltInMenuItems, StringComparer.OrdinalIgnoreCase);
-        BuiltInItems = new ObservableCollection<BuiltInMenuItemViewModel>(
-            BuiltInMenuItems.All.Select(i => new BuiltInMenuItemViewModel(i, isShown: !hiddenBuiltIn.Contains(i.Id))));
-
         _shellMenus = shellMenus;
+        LoadMenuLayout();
         ShowShellExtensions = settings.ShowShellExtensions;
         WorkspacesPlacement = settings.WorkspacesPlacement;
         Workspaces = workspaces;
         SavedSearchesPlacement = settings.SavedSearchesPlacement;
         SavedSearches = savedSearches;
-        _ = LoadShellExtensionsAsync();
+        _ = LoadShellCatalogAsync();
 
         TrackChanges();
     }
@@ -682,48 +671,6 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     private SavedSearchItemViewModel? _selectedSavedSearch;
-
-    // --- The app's own context-menu entries ---
-
-    /// <summary>Every entry the file list's and folder tree's menus have, each with whether it is
-    /// shown. Known at compile time, unlike the extensions, so it needs no scan.</summary>
-    public ObservableCollection<BuiltInMenuItemViewModel> BuiltInItems { get; }
-
-    // --- Other programs' context-menu entries ---
-
-    private readonly IShellMenuSource? _shellMenus;
-
-    /// <summary>Every extension found on this machine, each with whether it is shown. Filled after
-    /// construction: the scan walks all of HKEY_CLASSES_ROOT and runs off the UI thread.</summary>
-    public ObservableCollection<ShellExtensionItemViewModel> ShellExtensions { get; } = [];
-
-    /// <summary>The master switch; see <c>AppSettings.ShowShellExtensions</c>.</summary>
-    [ObservableProperty]
-    private bool _showShellExtensions;
-
-    /// <summary>"Looking for extensions…" while the scan runs, a note when it finds none, else blank.</summary>
-    [ObservableProperty]
-    private string _shellExtensionsStatus = "";
-
-    private async Task LoadShellExtensionsAsync()
-    {
-        if (_shellMenus is null) return;
-
-        ShellExtensionsStatus = "Looking for extensions…";
-        var catalog = await _shellMenus.CatalogAsync();
-
-        var hidden = new HashSet<string>(_settings.HiddenShellExtensions, StringComparer.OrdinalIgnoreCase);
-        foreach (var extension in catalog)
-        {
-            var item = new ShellExtensionItemViewModel(extension, isShown: !hidden.Contains(extension.Id));
-            item.PropertyChanged += OnShownChanged;
-            ShellExtensions.Add(item);
-        }
-
-        ShellExtensionsStatus = catalog.Count == 0
-            ? "No program on this computer adds right-click entries."
-            : "";
-    }
 
     // --- Opening folders ---
 
@@ -782,14 +729,6 @@ public sealed partial class SettingsViewModel : ObservableObject
             ? $"{Path.GetFileNameWithoutExtension(_folderHandler.OtherProgram()) ?? "Another program"} " +
               "currently opens folders. Turning this on will replace it."
             : "";
-    }
-
-    [RelayCommand]
-    private void Add()
-    {
-        var item = new CustomCommandItemViewModel { Name = "New command" };
-        Commands.Add(item);
-        SelectedCommand = item;
     }
 
     // --- New-item types ---
@@ -931,15 +870,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
-    private void Remove()
-    {
-        if (SelectedCommand is not { } selected) return;
-        var index = Commands.IndexOf(selected);
-        Commands.Remove(selected);
-        SelectedCommand = Commands.Count > 0 ? Commands[Math.Min(index, Commands.Count - 1)] : null;
-    }
-
     /// <summary>Brings a page to the front — the only way to point at something now that the
     /// page shows one category at a time.</summary>
     public void ShowCategory(SettingsCategory category)
@@ -960,6 +890,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         nameof(RestoreLastSession), nameof(StartupDefaultPath), nameof(ScrollSpeed), nameof(TileAspect),
         nameof(ShowPreviewPane), nameof(PreviewTextLimitKb), nameof(ContentSearchLimitKb),
         nameof(RecordFileChanges), nameof(FileChangeRetentionHours), nameof(StartIndexerAtLaunch),
+        nameof(UndoMaxSteps), nameof(UndoMaxHeldGigabytes),
         nameof(ShowShellExtensions), nameof(WorkspacesPlacement), nameof(SavedSearchesPlacement),
     ];
 
@@ -991,9 +922,13 @@ public sealed partial class SettingsViewModel : ObservableObject
         Track(NewFileTypes);
         Track(Columns);
 
-        // Only the tick counts on these two. The extension list fills in after construction, and
-        // that scan finishing is not something the user changed.
-        foreach (var item in BuiltInItems) item.PropertyChanged += OnShownChanged;
+        // The menu's order and membership. The shell rows arriving after the scan are added by
+        // LoadShellCatalogAsync with this switched off, since the scan finishing is not something
+        // the user changed.
+        MenuRows.CollectionChanged += (_, _) =>
+        {
+            if (!_syncingMenu) ScheduleApply();
+        };
     }
 
     private void Track<T>(ObservableCollection<T> list) where T : INotifyPropertyChanged
@@ -1008,11 +943,6 @@ public sealed partial class SettingsViewModel : ObservableObject
     }
 
     private void OnItemChanged(object? sender, PropertyChangedEventArgs e) => ScheduleApply();
-
-    private void OnShownChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName is nameof(BuiltInMenuItemViewModel.IsShown)) ScheduleApply();
-    }
 
     private void ScheduleApply()
     {
@@ -1106,16 +1036,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (commandProblem is null)
             _settings.CustomCommands = Commands.Select(c => c.ToDefinition()).ToList();
         _settings.ShowShellExtensions = ShowShellExtensions;
-        // Ids hidden earlier but not found today stay hidden: the list may still be loading, or the
-        // extension may be uninstalled for now. See ShellMenuRules.HiddenAfterSave.
-        _settings.HiddenShellExtensions = ShellMenuRules.HiddenAfterSave(
-            _settings.HiddenShellExtensions,
-            ShellExtensions.Select(e => (e.Id, e.IsShown))).ToList();
-        // Same rule for the app's own entries: an id another version of the app knows and this
-        // one does not is kept, not dropped.
-        _settings.HiddenBuiltInMenuItems = ShellMenuRules.HiddenAfterSave(
-            _settings.HiddenBuiltInMenuItems,
-            BuiltInItems.Select(e => (e.Id, e.IsShown))).ToList();
+        ApplyMenuLayout();
         // Always a list, never null, once settings have been saved: from here on the user has
         // configured it, and an empty one means they emptied it on purpose.
         if (typeProblem is null)
@@ -1131,6 +1052,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settings.SearchContentMaxBytes = (int)Math.Clamp(ContentSearchLimitKb * 1024, 4096, 64 * 1024 * 1024);
         _settings.RecordFileChanges = RecordFileChanges;
         _settings.FileChangeRetentionHours = FileChangeRetentionHours;
+        _settings.UndoMaxSteps = UndoMaxSteps;
+        _settings.UndoMaxHeldGigabytes = UndoMaxHeldGigabytes;
         // The only search-index value that lives in settings. Sign-in auto-start is the scheduled
         // task itself and was already applied when the box was ticked.
         _settings.StartIndexerAtLaunch = StartIndexerAtLaunch;

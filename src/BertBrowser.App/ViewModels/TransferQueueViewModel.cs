@@ -111,7 +111,7 @@ public sealed partial class QueuedJobViewModel : ObservableObject
 /// <remarks>
 /// <para>
 /// <b>The queue is presentation and ordering; the draining is the shell's.</b> That is where
-/// <c>IsTransferring</c>, <c>RetireUndoable</c> and the undo slots live, and a queue that reached in
+/// <c>IsTransferring</c> and the undo history live, and a queue that reached in
 /// to touch them would be a second place reasoning about which single operation is currently
 /// allowed to write.
 /// </para>

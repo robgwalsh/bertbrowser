@@ -1104,12 +1104,7 @@ public partial class DirectoryTabView : UserControl
         NewItemMenu.Rebuild(NewMenuItem, NewFileTypesSeparator, _settings,
             template => _ = CreateInCurrentFolderAsync(NewItemKind.File, template));
 
-        CustomCommandMenu.Rebuild(menu, CustomCommandsSeparator,
-            selection.Select(i => (i.FullPath, i.IsDirectory)).ToList(),
-            _settings, _shell.RunCustomCommand);
-
-        // Other programs' entries last, below the user's own and above Properties, as in Explorer.
-        // Off inside a container, where nothing has a path another program can open. With nothing
+        // Other programs' entries: off inside a container, where nothing has a path another program can open. With nothing
         // selected the target is the folder's background — and a search result has no folder, so
         // no background either; a flat branch view does, and keeps it. The rows go in list order,
         // not click order, because that is the order a handler is expected to see them in.
@@ -1131,7 +1126,11 @@ public partial class DirectoryTabView : UserControl
                 _shellMenu = ShellMenus.Open([], ShellMenuContext.Background, Tab.CurrentPath);
         }
 
-        ShellMenu.Rebuild(menu, ShellMenuSeparator, _shellMenu, OwnerWindowHandle, _shell.SetStatus);
+        // Everything in the order the Context menu page arranged, the user's commands and other
+        // programs' entries included.
+        ContextMenuComposer.Compose(menu, _settings,
+            selection.Select(i => (i.FullPath, i.IsDirectory)).ToList(),
+            _shell.RunCustomCommand, _shellMenu, OwnerWindowHandle, _shell.SetStatus);
 
         // Last, once every section is in place: a group the user unticked must not leave its
         // separators touching the next group's.

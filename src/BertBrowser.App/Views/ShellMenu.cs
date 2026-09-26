@@ -20,35 +20,12 @@ namespace BertBrowser.App.Views;
 /// </remarks>
 internal static class ShellMenu
 {
-    /// <summary>Replaces the shell section of a menu (everything tagged with a
-    /// <see cref="ShellMenuEntry"/>) with the session's entries, or removes it when there is no
-    /// session.</summary>
+    /// <summary>One of the session's entries as a menu element; <see cref="ContextMenuComposer"/>
+    /// decides where it goes.</summary>
     /// <param name="ownerWindow">Asked at click time for the handle any dialog an extension shows
     /// should be owned by.</param>
     /// <param name="report">Where a failure message goes — the status bar.</param>
-    public static void Rebuild(
-        ContextMenu menu,
-        Separator anchor,
-        ShellMenuSession? session,
-        Func<IntPtr> ownerWindow,
-        Action<string> report)
-    {
-        for (var i = menu.Items.Count - 1; i >= 0; i--)
-        {
-            if (menu.Items[i] is FrameworkElement { Tag: ShellMenuEntry })
-                menu.Items.RemoveAt(i);
-        }
-
-        var entries = session?.Entries ?? [];
-        anchor.Visibility = entries.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (session is null) return;
-
-        var insertAt = menu.Items.IndexOf(anchor) + 1;
-        foreach (var entry in entries)
-            menu.Items.Insert(insertAt++, Build(entry, session, ownerWindow, report));
-    }
-
-    private static FrameworkElement Build(
+    public static FrameworkElement Build(
         ShellMenuEntry entry, ShellMenuSession session, Func<IntPtr> ownerWindow, Action<string> report)
     {
         if (entry.IsSeparator) return new Separator { Tag = entry };

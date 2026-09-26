@@ -23,11 +23,10 @@ public sealed record ElevationOffer(
 /// <para>
 /// <b>It is consulted from the view model rather than from a view, which is the opposite of where
 /// every other failure dialog in this app lives, and that is forced rather than chosen.</b> Each of
-/// the four operations claims the one-level undo slot and calls <c>RetireUndoable</c> — the moment
-/// staged data is erased — inside itself. A retry raised after the method returned would need a
-/// second undo record, and claiming it would retire the first, committing a staging folder the user
-/// might still have wanted back. So the offer has to happen inside the same <c>IsTransferring</c>
-/// window, before the slot is claimed.
+/// the four operations records itself in the undo history inside itself. A retry raised after the
+/// method returned would need a second entry for what is, to the user, one action — and undoing one
+/// without the other would put half of it back. So the offer has to happen inside the same
+/// <c>IsTransferring</c> window, before the entry is recorded.
 /// </para>
 /// </remarks>
 public interface IElevationPrompt

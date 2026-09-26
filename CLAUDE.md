@@ -56,6 +56,7 @@ you where and what to watch for.
 | Database / migrations | `Core/Data/Db.cs`, `Core/Data/Migrations/NNN_*.sql` |
 | Directory sizes | `Core/Services/MftDirectorySizeBuilder`, `DirSizeRepository`, `docs/search-indexing.md` |
 | Move/copy/drag-drop/paste | `Core/Services/Transfer/*` (`TransferPlanner`, `TransferExecutor`, `IFileCopier`) |
+| Undo / redo history | `Core/Services/UndoHistory/*` (`UndoStack`, `UndoNavigator`, `IUndoableRecord` + `TransferRecord`/`DeleteRecord`/`RenameRecord`/`ArchiveEditRecord`/`SyncRecord`, `IUndoHost`, `HeldSizeEstimator`), `TransferRedo`, `DeleteRedo`, `ShellViewModel.UndoHistory`, `ViewModels/UndoHistoryViewModel`, `Views/UndoHistoryWindow`, `MainWindow.UndoHistory` (title-bar split buttons), the History page of `SettingsView`, `tools/ui/undo-history.bbs` |
 | Queue / pause / resume | `Core/Services/Transfer/PauseGate`, `TransferQueueRules`, `ViewModels/TransferQueueViewModel`, `ShellViewModel.EnqueueAsync`/`DrainQueueAsync`, `Views/TransferProgressWindow` |
 | Conflict resolution (per item) | `Core/Services/Transfer/IConflictPrompt`, `ViewModels/TransferConflictsViewModel`, `Views/TransferConflictDialog`, `Views/ConflictPrompt` |
 | Merging a folder into a folder | `Core/Services/Transfer/TransferMergeExpander` (+ `TransferMergeLimits`), `ITransferEntrySource`, `TransferClash`/`ConflictDefaults` in `TransferModels`, `ShellViewModel.ExecuteDropAsync` |
@@ -78,7 +79,7 @@ you where and what to watch for.
 | Change timeline ("What changed") | `Core/Services/Changes/*` (`ChangeLogRules`, `ChangeRecorder`, `ChangeLogPolicy`), `Core/Data/ChangeLogRepository`, `Views/ChangeTimelineWindow`, the History page of `SettingsView` |
 | Elevated file-op retry | `src/BertBrowser.Elevator`, `Core/Services/Elevation/*`, `Core/Ipc/ElevationProtocol.cs` |
 | Launching other programs | `App/Services/ProcessLauncher.cs`, `Core/Services/ExecutablePath.cs`, `Core/Services/VSCodePath.cs`, `Interop/RunAsVerbRegistry` |
-| Shell context menu (7-Zip, Git, TortoiseSVN…) | `Core/Services/ShellMenu/*` (`ShellMenuKeys`, `ShellMenuRules`, `StaticVerbCommand`), `Interop/ShellExtensionRegistry`, `Interop/ShellContextMenu`, `Interop/ShellSelection`, `Interop/ShellMenuIcons`, `Services/ShellMenuSource`, `Views/ShellMenu`, `BuiltInMenuItems` + `MenuSeparatorRules` + `Views/BuiltInMenu` (the app's own entries, unticked the same way), the Context menu page of `SettingsView`, `tools/ui/shellmenu.bbs` |
+| Shell context menu (7-Zip, Git, TortoiseSVN…) | `Core/Services/ShellMenu/*` (`ShellMenuKeys`, `ShellMenuRules`, `StaticVerbCommand`), `Interop/ShellExtensionRegistry`, `Interop/ShellContextMenu`, `Interop/ShellSelection`, `Interop/ShellMenuIcons`, `Services/ShellMenuSource`, `Views/ShellMenu`, `BuiltInMenuItems` + `MenuSeparatorRules` + `Views/BuiltInMenu` (the app's own entries, unticked the same way), `MenuLayoutRules` + `Views/ContextMenuComposer` (the order), the Context menu page of `SettingsView` (`SettingsViewModel.ContextMenu`), `tools/ui/shellmenu.bbs` |
 | Startup / CLI / single instance | `Core/Cli/CommandLine.cs`, `Core/Cli/NavigationRequest.cs`, `Services/SingleInstance.cs`, `Core/Ipc/InstanceEndpoint.cs`, `Interop/ForegroundWindow`, `Core/Services/Foreground/ForegroundRaiseRules` |
 | Default folder handler (shell) | `Core/Services/ShellIntegration/*`, `App/Interop/FolderHandlerRegistry` |
 | Preview pane (incl. hex/raw) | `Core/Services/Preview/*` (`PreviewClassifier`, `TextPreviewReader`, `HexPreviewReader`, `SyntaxTokenizer`) |
@@ -151,8 +152,14 @@ you where and what to watch for.
   own entries are unticked the same way: a `MenuItem` with `Tag="id"` in XAML is one row of
   `BuiltInMenuItems` (an untagged id throws rather than quietly showing), `BuiltInMenu.Apply` runs
   *first* and the two items a right-click hides for its own reasons go through `BuiltInMenu.Show`
-  so both answers count, and `TidySeparators` runs *last* over the finished menu — the separators
-  are declared between groups in XAML, so a hidden group would otherwise leave two touching.
+  so both answers count, and `TidySeparators` runs *last* over the finished menu — separators are
+  the user's to place, so a hidden group would otherwise leave two touching. **Order is
+  `AppSettings.ContextMenuLayout`, one token list for both menus** (`MenuLayoutRules`), laid out by
+  `ContextMenuComposer` on every opening; the XAML declares items but no separators and no order.
+  The layout is order only — shown/hidden stays in the hidden lists and `CustomCommandDefinition.
+  ShowInMenu`, so no layout can un-hide anything — and `@more` is where anything unplaced lands, or
+  a newly installed extension would silently become "hidden unless placed". On the Settings page
+  the preview rows *are* the membership: `ApplyMenuLayout` writes all three from them.
 - **The single-instance hand-off defeats the foreground lock on purpose, so it must ask before
   using it.** `ForegroundWindow.Raise` only takes the foreground when `ForegroundRaiseRules` says
   nothing is full screen; otherwise it flashes the taskbar button and does not even un-minimize.
@@ -179,7 +186,7 @@ you where and what to watch for.
   That flag is not "a transfer is running" but "this app is writing" — ten operations raise it, and
   the four long ones (drop/paste, extract, compress, archive-edit) now queue behind it instead of
   being dropped on the floor. Releasing it between jobs would let a rename slip into the gap and
-  take the undo slot out from under a queue the user is watching, and would make the harness call a
+  push onto the undo history out from under a queue the user is watching, and would make the harness call a
   six-job drain finished five times over. Pausing is a `PauseGate` waited on in `FileProgress`,
   `BeginItem` and `BeginFile` — not in `IFileCopier`: all four executors already funnel their bytes
   through one coalescer, and `CopyFileExW` invokes its progress routine synchronously, so a progress
@@ -217,18 +224,30 @@ you where and what to watch for.
   since forgiving an hour here pre-selects Skip on a file that really is an hour newer; and past
   `TransferMergeLimits` the folder keeps its old wholesale question rather than becoming a dialog
   nobody can answer.
-- **There is one undo slot**, shared across move/rename/delete/archive-edit/sync — five-way, one
-  level, whichever operation happened last. `RetireUndoable` is what finally commits staged/held
-  data — call it before assuming a Replace or Delete's staging is irreversibly gone. Sync is the
-  only arm that is two operations at once (copies *and* removals). **A copy's outcome still reports
-  `CanUndo == false`** — that property means "`Undo()` will work", and `Undo` refuses a copy —
-  and `ConflictResolution.Overwrite` exists precisely because a copy that displaced something with
-  no record kept would strand it in staging for ever. Only a caller that keeps the outcome may ask
-  for it, and there are now two: a sync, and a **merged** drop or paste, which says so through the
-  separate `CanUndoCopy` and is reversed by `UndoCopies`. That one must never be routed through
-  `ElevateIfRefusedAsync` — `ElevationHost.UndoTransfer` hardcodes `TransferVerb.Move`, so handed a
-  copy's outcome it would move the pasted files back into the folder they came from instead of
-  removing them, corrupting both sides.
+- **Undo is a session-only, LIFO history** (`UndoStack`) of moves, renames, deletes, merged
+  pastes, archive edits and syncs, with redo and "undo/redo to here". Data is committed only when
+  an entry's record is `Retire`d: when the budget (steps + held bytes, History settings page)
+  releases it, when a new operation discards the redo branch, on Clear, and on window close
+  (`ReleaseUndoHistory`). The budget never releases the next undo, however large. Each operation
+  records itself via `ShellViewModel.RecordAsync` after its elevated retry, before its refresh.
+  **Records are immutable and every step returns a new one holding only what actually moved**, which
+  is why undo results carry `Reverted` (worked out client-side for an elevated half in
+  `ElevatedRetry.Merge`, since the pipe reports a count) and why a partial undo is never replayed.
+  A walk stops at the first step that is not clean. Redo re-plans from the record
+  (`TransferRedo`/`DeleteRedo`): same final names, displace only what was displaced before, Skip
+  everything else — never number or replace a newcomer. **A copy's outcome still reports
+  `CanUndo == false`** — that means "`Undo()` will work", and `Undo` refuses a copy — and
+  `ConflictResolution.Overwrite` exists because a copy that displaced something with no record kept
+  would strand it in staging for ever; only a sync or a **merged** drop/paste (`CanUndoCopy`) may
+  ask for it. `UndoCopies` removes only what still matches the `Written` `EntryStamp`, which is also
+  what makes a replayed record harmless (it used to delete the original the first call restored).
+  It must never be elevated: `ElevationHost.UndoTransfer` hardcodes `TransferVerb.Move`, so handed a
+  copy it would move the pasted files back into their source — `IUndoHost` has no copy-undo member
+  and `ElevateMoveUndoAsync` throws for a copy. An archive-edit undo **stages** the edited container
+  (`.bertbrowser-edited-`) instead of deleting it, and both directions refuse a container whose
+  stamp changed. Held bytes are file stats plus `dir_size_cache` by original path, falling back to a
+  capped walk of our own staged copy; an estimate for the budget only, never shown as a folder size.
+  On by default, unlike the change log, because nothing it holds outlives the session.
 - **A comparison's "same" is what authorises a delete**, so every doubt resolves away from it: a
   missing timestamp is `Unknown` and one `Unknown` descendant carries a whole subtree to `Unknown`.
   `dir_size_cache` deliberately never classifies a folder — equal totals do not mean equal trees,

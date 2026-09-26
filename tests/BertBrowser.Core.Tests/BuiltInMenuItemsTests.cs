@@ -22,6 +22,15 @@ public class BuiltInMenuItemsTests
     }
 
     [Fact]
+    public void Icons_are_named_resources_and_found_by_id()
+    {
+        Assert.All(BuiltInMenuItems.All.Where(i => i.Icon is not null),
+            i => Assert.StartsWith("Icon.", i.Icon));
+        Assert.Equal("Ctrl+X", BuiltInMenuItems.Find("CUT")?.Gesture);
+        Assert.Null(BuiltInMenuItems.Find("no-such-item"));
+    }
+
+    [Fact]
     public void Shown_unless_hidden()
     {
         var hidden = new HashSet<string>(["copy-path"], StringComparer.OrdinalIgnoreCase);

@@ -38,6 +38,24 @@ public partial class SettingsView : UserControl
         // they mean is ColumnLayoutRules' business, not this view's.
         ListReorderDrag.Attach(ColumnDefaultsList, Orientation.Vertical, _vm.MoveColumn);
 
+        // The Context menu page: the preview reorders itself, and takes entries carried in from
+        // each of the three lists beside it.
+        ListReorderDrag.Attach(MenuLayoutList, Orientation.Vertical, _vm.MoveMenuRow);
+        foreach (var source in new ItemsControl[] { BuiltInChoiceList, ShellChoiceList, CommandChoiceList })
+            ListReorderDrag.AttachInsert(source, MenuLayoutList, Orientation.Vertical, _vm.InsertMenuChoice);
+
+        // Whatever was just added or selected is brought on screen: a row added from the right lands
+        // wherever the selection is, and a command picked on the left is edited on the right.
+        _vm.PropertyChanged += (_, e) =>
+        {
+            if (!ContextMenuPage.IsVisible) return;
+            if (e.PropertyName == nameof(SettingsViewModel.SelectedCommand) && _vm.SelectedCommand is not null)
+                Dispatcher.BeginInvoke(() => CommandEditor.BringIntoView(),
+                    System.Windows.Threading.DispatcherPriority.Loaded);
+            else if (e.PropertyName == nameof(SettingsViewModel.SelectedMenuRow) && _vm.SelectedMenuRow is { } row)
+                MenuLayoutList.ScrollIntoView(row);
+        };
+
         // While "Match Windows light/dark" is on, the theme can change with this page open —
         // Windows flipping at sunset — and the pickers have to follow it. Subscribed here rather
         // than in the view model because nothing disposes one of those and IThemeService is a
@@ -282,6 +300,49 @@ public partial class SettingsView : UserControl
         var notches = e.Delta / Mouse.MouseWheelDeltaForOneLine;
         column.Width = ColumnLayoutRules.StepWidth(
             column.Width, notches, fine: Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
+    }
+
+    /// <summary>Alt+Up/Down moves the selected row and Delete takes it off the menu — the Columns
+    /// page's keys, for the same reasons.</summary>
+    private void MenuLayoutList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers == ModifierKeys.Alt && e.Key is Key.Up or Key.Down or Key.System)
+        {
+            var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (key is not (Key.Up or Key.Down)) return;
+
+            _vm.NudgeSelectedMenuRow(key == Key.Up ? -1 : 1);
+            RefocusSelectedMenuRow();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Delete && Keyboard.Modifiers == ModifierKeys.None && _vm.SelectedMenuRow is { } row)
+        {
+            _vm.RemoveMenuRowCommand.Execute(row);
+            RefocusSelectedMenuRow();
+            e.Handled = true;
+        }
+    }
+
+    private void RefocusSelectedMenuRow()
+    {
+        MenuLayoutList.UpdateLayout();
+        if (_vm.SelectedMenuRow is not { } selected) return;
+        MenuLayoutList.ScrollIntoView(selected);
+        if (MenuLayoutList.ItemContainerGenerator.ContainerFromItem(selected) is ListBoxItem item)
+            item.Focus();
+    }
+
+    /// <summary>A list that is as tall as its rows still takes the wheel for its own scroller, which
+    /// has nothing to scroll; handing it on lets the column it sits in scroll instead.</summary>
+    private void NestedList_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (e.Handled || sender is not FrameworkElement { Parent: UIElement parent }) return;
+        e.Handled = true;
+        parent.RaiseEvent(new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
+        {
+            RoutedEvent = MouseWheelEvent,
+            Source = sender,
+        });
     }
 
     private void Browse_Click(object sender, RoutedEventArgs e)

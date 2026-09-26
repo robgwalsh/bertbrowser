@@ -68,19 +68,19 @@ internal sealed class CannedShellMenuSource : IShellMenuSource
     {
         var visible = ShellMenuRules.Visible(Catalog, _settings.ShowShellExtensions, _settings.HiddenShellExtensions);
 
-        var entries = new List<ShellMenuEntry>();
+        var groups = new List<ShellMenuGroup>();
         foreach (var extension in visible)
         {
             switch (extension.Name)
             {
                 case "Open Git Bash here":
-                    entries.Add(ShellMenuEntry.Item("Open Git Bash here", extension));
+                    Add(extension, ShellMenuEntry.Item("Open Git Bash here", extension));
                     break;
                 case "Open with Code":
-                    entries.Add(ShellMenuEntry.Item("Open with Code", extension));
+                    Add(extension, ShellMenuEntry.Item("Open with Code", extension));
                     break;
                 case "7-Zip" when context == ShellMenuContext.Items:
-                    entries.Add(ShellMenuEntry.Submenu("7-Zip",
+                    Add(extension, ShellMenuEntry.Submenu("7-Zip",
                     [
                         ShellMenuEntry.Item("Add to archive...", extension),
                         ShellMenuEntry.Item("Extract Here", extension, enabled: targets.Any(t => !t.IsDirectory)),
@@ -89,7 +89,7 @@ internal sealed class CannedShellMenuSource : IShellMenuSource
                     ]));
                     break;
                 case "TortoiseSVN":
-                    entries.Add(ShellMenuEntry.Submenu("TortoiseSVN",
+                    Add(extension, ShellMenuEntry.Submenu("TortoiseSVN",
                     [
                         ShellMenuEntry.Item("SVN Checkout...", extension),
                         ShellMenuEntry.Separator,
@@ -99,17 +99,22 @@ internal sealed class CannedShellMenuSource : IShellMenuSource
             }
         }
 
-        var tidy = ShellMenuRules.Tidy(entries);
-        if (tidy.Count == 0) return null;
+        if (groups.Count == 0) return null;
 
         return new ShellMenuSession(
-            tidy,
+            groups,
             (entry, _) =>
             {
                 Invocations.Add(entry.Header);
                 return $"The harness does not run shell extensions: '{entry.Header}' was not invoked.";
             },
             () => { });
+
+        void Add(ShellExtension extension, ShellMenuEntry entry)
+        {
+            if (ShellMenuRules.Tidy([entry]) is { Count: > 0 } tidy)
+                groups.Add(new ShellMenuGroup(extension.Id, tidy));
+        }
     }
 
     public Task<IReadOnlyList<ShellExtension>> CatalogAsync() => Task.FromResult(Catalog);

@@ -18,9 +18,9 @@ namespace BertBrowser.Core.Services.Archives;
 /// </para>
 /// <para>
 /// <b>The original goes to staging, not to the bin and not to oblivion.</b> That is what makes the
-/// edit undoable, and <c>ShellViewModel.RetireUndoable</c> is the only thing that finally erases it
-/// — so the replaced container outlives its undo record by exactly one operation, the same contract
-/// a displaced Replace has.
+/// edit undoable, and retiring its undo history entry is the only thing that finally erases it —
+/// the same contract a displaced Replace has. An undo sets the <em>edited</em> container aside in
+/// turn, under <see cref="EditedMarker"/>, so the edit can be redone.
 /// </para>
 /// <para>
 /// <b>A cancel deletes the sibling and touches nothing else</b>, which is the entire reason for
@@ -35,6 +35,9 @@ public sealed class ArchiveEditExecutor
 
     /// <summary>Marks a replaced container while it is still undoable.</summary>
     public const string ReplacedMarker = ".bertbrowser-replaced-";
+
+    /// <summary>Marks an edited container an undo set aside, while it can still be redone.</summary>
+    public const string EditedMarker = ".bertbrowser-edited-";
 
     private readonly IArchiveReader _reader;
 
@@ -69,6 +72,7 @@ public sealed class ArchiveEditExecutor
                     false);
             }
 
+            var original = EntryStamp.Of(archive);
             var staged = Beside(archive, ReplacedMarker);
             File.Move(archive, staged);
 
@@ -85,7 +89,11 @@ public sealed class ArchiveEditExecutor
             }
 
             run.Finished();
-            return new ArchiveEditOutcome(archive, staged, written, null, false);
+            return new ArchiveEditOutcome(archive, staged, written, null, false)
+            {
+                Original = original,
+                Edited = EntryStamp.Of(archive),
+            };
         }
         catch (OperationCanceledException)
         {
@@ -102,34 +110,101 @@ public sealed class ArchiveEditExecutor
     }
 
     /// <summary>
-    /// Undoes an edit by putting the staged original back.
+    /// Undoes an edit by swapping the staged original back in. The edited container is set aside
+    /// under <see cref="EditedMarker"/> rather than deleted, which is what lets it be redone.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// Refused when the container is no longer the one the edit wrote. The undo history can reach an
+    /// edit many operations later, and by then something else may have rewritten the file — setting
+    /// that aside for an older original would be an undo of somebody else's change.
+    /// </para>
+    /// <para>
     /// Uncancellable and silent on purpose, the same as the transfer executor's staging moves: a
     /// cancel landing half-way through putting a container back would strand it.
+    /// </para>
     /// </remarks>
-    public string? Undo(ArchiveEditOutcome outcome)
+    public ArchiveEditUndo Undo(ArchiveEditOutcome outcome)
     {
-        if (outcome.StagedOriginal is not { } staged) return "There is nothing to put back.";
-        if (!File.Exists(staged)) return "The replaced archive is no longer there.";
+        var archive = outcome.ArchiveFile;
+        ArchiveEditUndo Refuse(string why) => new(archive, null, outcome.Original, outcome.Edited, why);
 
+        if (outcome.StagedOriginal is not { } staged) return Refuse("There is nothing to put back.");
+        if (!File.Exists(staged)) return Refuse("The replaced archive is no longer there.");
+        if (outcome.Edited is { } edited && File.Exists(archive) && !edited.Matches(archive))
+            return Refuse($"{Path.GetFileName(archive)} has changed since the edit, so it was left as it is.");
+
+        var aside = Beside(archive, EditedMarker);
         try
         {
-            // The edited container is this call's own doing, so it goes; the staged one is the
-            // user's and is only ever moved.
-            if (File.Exists(outcome.ArchiveFile)) File.Delete(outcome.ArchiveFile);
-            File.Move(staged, outcome.ArchiveFile);
-            return null;
+            if (File.Exists(archive)) File.Move(archive, aside);
+            try
+            {
+                File.Move(staged, archive);
+            }
+            catch (Exception)
+            {
+                TryRestore(aside, archive);
+                throw;
+            }
+
+            // Stamped afresh rather than carried over: a rename into a name freed seconds ago takes
+            // on the old entry's creation time (NTFS tunnelling), so only a stamp taken after the
+            // move describes what is really there now.
+            return new ArchiveEditUndo(
+                archive, File.Exists(aside) ? aside : null, EntryStamp.Of(archive), outcome.Edited, null);
         }
         catch (Exception ex) when (IsEditFailure(ex))
         {
-            return $"The archive could not be put back: {ex.Message}. It is at {staged}.";
+            return Refuse($"The archive could not be put back: {ex.Message}. It is at {staged}.");
         }
     }
 
     /// <summary>
-    /// Erases a staged original. The only caller is <c>ShellViewModel.RetireUndoable</c>, which is
-    /// what makes the replaced container outlive its undo record by exactly one operation.
+    /// Takes an undone edit back in: the original is set aside again and the edited container
+    /// returns. Refused when the container in place is no longer the original the undo restored.
+    /// </summary>
+    public ArchiveEditOutcome Redo(ArchiveEditUndo undo)
+    {
+        var archive = undo.ArchiveFile;
+        ArchiveEditOutcome Refuse(string why) =>
+            new(archive, null, 0, why, false) { Original = undo.Original, Edited = undo.Edited };
+
+        if (undo.StagedEdited is not { } edited) return Refuse("There is no edit to take back in.");
+        if (!File.Exists(edited)) return Refuse("The edited archive is no longer being held.");
+        if (undo.Original is { } original && File.Exists(archive) && !original.Matches(archive))
+            return Refuse($"{Path.GetFileName(archive)} has changed since the undo, so it was left as it is.");
+
+        var staged = Beside(archive, ReplacedMarker);
+        try
+        {
+            var before = EntryStamp.Of(archive);
+            if (File.Exists(archive)) File.Move(archive, staged);
+            try
+            {
+                File.Move(edited, archive);
+            }
+            catch (Exception)
+            {
+                TryRestore(staged, archive);
+                throw;
+            }
+
+            return new ArchiveEditOutcome(archive, File.Exists(staged) ? staged : null, 0, null, false)
+            {
+                Original = before,
+                Edited = EntryStamp.Of(archive),
+            };
+        }
+        catch (Exception ex) when (IsEditFailure(ex))
+        {
+            return Refuse($"The edit could not be taken back in: {ex.Message}. It is at {edited}.");
+        }
+    }
+
+    /// <summary>
+    /// Erases a staged original, once the edit can no longer be undone — when the undo history
+    /// releases it, or the session ends.
     /// </summary>
     public static void CommitStaging(ArchiveEditOutcome outcome)
     {
@@ -140,6 +215,15 @@ public sealed class ArchiveEditExecutor
         if (!Path.GetFileName(staged).Contains(ReplacedMarker, StringComparison.Ordinal)) return;
 
         TryDelete(staged);
+    }
+
+    /// <summary>Erases a held edited container, once the undone edit can no longer be redone.</summary>
+    public static void CommitStaging(ArchiveEditUndo undo)
+    {
+        if (undo.StagedEdited is not { } edited) return;
+        if (!Path.GetFileName(edited).Contains(EditedMarker, StringComparison.Ordinal)) return;
+
+        TryDelete(edited);
     }
 
     /// <summary>Streams the old container into a new one, applying the edits on the way through.</summary>

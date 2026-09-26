@@ -76,3 +76,30 @@ menu files 08-menu-file-restored
 assert-menu-item Paste
 assert-menu-item Copy as path
 assert-not-launched
+
+# --- Arranged: 7-Zip placed beside Compress, the clipboard group moved below Rename. One layout
+# serves both menus; the tree shows the same order without what it does not offer, and the
+# extensions nobody placed still arrive at @more. ---
+
+menu-layout app:new - app:open app:run-as-admin app:open-new-tab app:open-new-pane app:open-terminal app:open-vscode app:disk-usage app:duplicates app:changes app:compare-panes app:compress clsid:{23170F69-40C1-278A-1000-000100020000} app:extract - app:copy-path app:copy-name app:compare-files app:settle-by-content app:verify-checksums app:checksum - app:rename app:delete app:delete-permanently app:bookmark - app:cut app:copy app:paste @more - app:properties
+select photo.jpg
+menu files 09-menu-file-arranged
+assert-menu-order Compress | 7-Zip | - | Copy as path | - | Rename | Bookmark | - | Cut | Paste | - | Open Git Bash here | TortoiseSVN | - | Properties
+
+menu tree 10-menu-tree-arranged
+assert-menu-order What changed here | 7-Zip | - | Copy as path | - | Delete | Bookmark | - | TortoiseSVN | - | Properties
+
+# The page shows the arrangement, drags draw their line, and a new command lands under the
+# selection with its editor open.
+settings context-menu
+shot 11-settings-context-menu-arranged
+settings context-menu dragging
+shot 12-settings-context-menu-dragging
+settings context-menu new-command
+shot 13-settings-context-menu-new-command
+settings close
+
+menu-layout default
+menu files 14-menu-file-default
+assert-menu-order Compress | - | Copy as path | - | Cut | Paste | - | Rename | Bookmark | - | Open Git Bash here | TortoiseSVN | - | Properties
+assert-not-launched

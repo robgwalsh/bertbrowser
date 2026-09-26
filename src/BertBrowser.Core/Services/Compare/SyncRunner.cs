@@ -91,15 +91,70 @@ public sealed class SyncRunner
         foreach (var failure in deleteUndo.Failed)
             failed.Add(failure.Message);
 
+        var revertedCopies = new List<TransferOutcome>();
         foreach (var copy in outcome.Copies.Reverse())
         {
             var undo = _transfers.UndoCopies(copy, ct);
             restored += undo.Restored;
             foreach (var failure in undo.Failed)
                 failed.Add(failure.Message);
+
+            // Only what really went back, in the shape a redo can run again. Staging is emptied:
+            // the undo has already purged what it emptied, and anything left there belongs to an
+            // item that could not be put back.
+            if (undo.Reverted.Count > 0)
+                revertedCopies.Insert(0, copy with { Completed = undo.Reverted, Skipped = [], Failed = [], StagingDirectories = [] });
         }
 
-        return new SyncUndoResult(restored, failed);
+        var reverted = new SyncOutcome(
+            revertedCopies,
+            outcome.Removals with { Deleted = deleteUndo.Reverted, Failed = [], StagingDirectories = [] },
+            Cancelled: false);
+        return new SyncUndoResult(restored, failed) { Reverted = reverted };
+    }
+
+    /// <summary>
+    /// Does an undone sync again, from what its undo put back: the copies first, then the
+    /// removals, the same order <see cref="Run"/> keeps and for the same reason.
+    /// </summary>
+    /// <remarks>
+    /// Each half is rebuilt by <see cref="TransferRedo"/> and <see cref="DeleteRedo"/>, so a copy
+    /// lands under the name it had, a replaced file is replaced again and nothing else is, and a
+    /// removal goes back where it went.
+    /// </remarks>
+    public SyncOutcome Redo(
+        SyncOutcome reverted, CancellationToken ct = default,
+        IProgress<TransferProgress>? progress = null)
+    {
+        ArgumentNullException.ThrowIfNull(reverted);
+
+        var total = reverted.Copies.Sum(c => c.Completed.Count) + reverted.Removals.Deleted.Count;
+        var done = 0;
+        var cancelled = false;
+
+        var copies = new List<TransferOutcome>();
+        foreach (var copy in reverted.Copies)
+        {
+            if (ct.IsCancellationRequested)
+            {
+                cancelled = true;
+                break;
+            }
+
+            var (plan, resolutions) = TransferRedo.PlanFor(
+                TransferVerb.Copy, copy.DestinationDirectory, copy.Completed, []);
+            var outcome = _transfers.Execute(plan, resolutions, ct, Offset(progress, done, total));
+            copies.Add(outcome);
+            done += plan.Transfers.Count;
+            if (outcome.Cancelled) { cancelled = true; break; }
+        }
+
+        var removals = DeleteOutcome.Empty(reverted.Removals.Permanent);
+        if (!cancelled && reverted.Removals.Deleted.Count > 0 && !ct.IsCancellationRequested)
+            removals = _deletes.Execute(
+                DeleteRedo.PlanFor(reverted.Removals.Deleted), ct, AsDelete(progress, done, total));
+
+        return new SyncOutcome(copies, removals, cancelled || ct.IsCancellationRequested);
     }
 
     /// <summary>Commits what the run set aside, once it can no longer be undone. Until this runs,
@@ -145,4 +200,8 @@ public sealed class SyncRunner
 }
 
 /// <summary>Reversing a sync: how many items came back, and what could not.</summary>
-public sealed record SyncUndoResult(int Restored, IReadOnlyList<string> Failed);
+public sealed record SyncUndoResult(int Restored, IReadOnlyList<string> Failed)
+{
+    /// <summary>The run cut down to exactly what went back — the record a redo runs again.</summary>
+    public SyncOutcome Reverted { get; init; } = SyncOutcome.Empty;
+}

@@ -43,16 +43,17 @@ public sealed class ShellMenuSession : IDisposable
     private bool _disposed;
 
     public ShellMenuSession(
-        IReadOnlyList<ShellMenuEntry> entries,
+        IReadOnlyList<ShellMenuGroup> groups,
         Func<ShellMenuEntry, IntPtr, string?> invoke,
         Action release)
     {
-        Entries = entries;
+        Groups = groups;
         _invoke = invoke;
         _release = release;
     }
 
-    public IReadOnlyList<ShellMenuEntry> Entries { get; }
+    /// <summary>Each extension's entries, tidied, in catalog order; none is empty.</summary>
+    public IReadOnlyList<ShellMenuGroup> Groups { get; }
 
     /// <summary>Runs an entry. Null on success, else a status-bar message — the channel
     /// <see cref="IProcessLauncher.Launch"/> reports on, so the two read alike.</summary>

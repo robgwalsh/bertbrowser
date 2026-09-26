@@ -53,7 +53,7 @@ public sealed class ShellMenuSource : IShellMenuSource
         if (visible.Count == 0) return null;
 
         var owned = new List<IDisposable>();
-        var entries = new List<ShellMenuEntry>();
+        var groups = new List<ShellMenuGroup>();
         ShellSelection? selection = null;
         var selectionTried = false;
 
@@ -63,10 +63,13 @@ public sealed class ShellMenuSource : IShellMenuSource
             {
                 if (VerbFor(extension, families) is not { } verb) continue;
 
-                entries.Add(ShellMenuEntry.Item(
-                    ShellMenuRules.Header(extension.Name),
-                    new VerbCommand(extension, verb),
-                    icon: ShellMenuIcons.FromIconResource(verb.Icon)));
+                AddGroup(extension,
+                [
+                    ShellMenuEntry.Item(
+                        ShellMenuRules.Header(extension.Name),
+                        new VerbCommand(extension, verb),
+                        icon: ShellMenuIcons.FromIconResource(verb.Icon)),
+                ]);
                 continue;
             }
 
@@ -85,20 +88,26 @@ public sealed class ShellMenuSource : IShellMenuSource
             if (handler is null) continue;
 
             owned.Add(handler);
-            entries.AddRange(handler.Query(ShellMenuIcons.FromMenuBitmap));
+            AddGroup(extension, handler.Query(ShellMenuIcons.FromMenuBitmap));
         }
 
-        var tidy = ShellMenuRules.Tidy(entries);
-        if (tidy.Count == 0)
+        if (groups.Count == 0)
         {
             ReleaseAll(owned);
             return null;
         }
 
         return new ShellMenuSession(
-            tidy,
+            groups,
             (entry, owner) => Invoke(entry, owner, targets, context, folder),
             () => ReleaseAll(owned));
+
+        // Tidied per extension, since each group may land anywhere in the menu the user put it.
+        void AddGroup(ShellExtension extension, IReadOnlyList<ShellMenuEntry> entries)
+        {
+            var tidy = ShellMenuRules.Tidy(entries);
+            if (tidy.Count > 0) groups.Add(new ShellMenuGroup(extension.Id, tidy));
+        }
     }
 
     public Task<IReadOnlyList<ShellExtension>> CatalogAsync() => Task.Run(() =>
