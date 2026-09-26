@@ -217,7 +217,9 @@ public partial class MainWindow : ThemedWindow
             App.Services.GetRequiredService<BertBrowser.Core.Data.ChangeLogRepository>(),
             App.Services.GetRequiredService<BertBrowser.App.Services.Indexing.IndexAutoStartService>(),
             App.Services.GetRequiredService<BertBrowser.Core.Services.Mft.IMftIndexService>(),
-            App.Services.GetRequiredService<IShellMenuSource>());
+            App.Services.GetRequiredService<IShellMenuSource>(),
+            _shell.SavedWorkspaces,
+            _shell.SavedSearches);
         vm.ReadIndexerState();
         return vm;
     }
@@ -233,6 +235,10 @@ public partial class MainWindow : ThemedWindow
         var view = new SettingsView(vm);
         view.BackRequested += (_, _) => CloseSettings();
         view.CustomiseThemeRequested += (_, _) => CustomiseTheme();
+        view.WorkspaceRenameRequested += (_, item) => RenameWorkspace(item);
+        view.WorkspaceDeleteRequested += (_, item) => _ = _shell.RemoveWorkspaceAsync(item);
+        view.SavedSearchEditRequested += (_, item) => EditSavedSearch(item);
+        view.SavedSearchDeleteRequested += (_, item) => _ = _shell.RemoveSavedSearchAsync(item);
         vm.Applied += Settings_Applied;
         _lastApplied = AppliedSettings.Of(_settings);
         _settingsView = view;
@@ -241,6 +247,9 @@ public partial class MainWindow : ThemedWindow
         InputBindings.Clear();
         GlobalSearchGroup.IsEnabled = false;
         CompareButton.IsEnabled = false;
+        // Switching would replace panes nobody can see, and the page already lists them all.
+        WorkspaceSwitcher.IsEnabled = false;
+        SavedSearchSwitcher.IsEnabled = false;
 
         BrowserRoot.Visibility = Visibility.Hidden;
         SettingsHost.Content = view;
@@ -272,6 +281,8 @@ public partial class MainWindow : ThemedWindow
         _suspendedBindings = null;
         GlobalSearchGroup.IsEnabled = true;
         CompareButton.ClearValue(IsEnabledProperty);
+        WorkspaceSwitcher.IsEnabled = true;
+        SavedSearchSwitcher.IsEnabled = true;
 
         _layoutHost.ActivePaneView?.FocusActiveTabList();
         return true;
@@ -298,6 +309,8 @@ public partial class MainWindow : ThemedWindow
         // is unchanged. (Custom-command menus rebuild on every open, so they need no refresh.)
         _shell.ShowHiddenItems = _settings.ShowHiddenItems;
         _shell.OpenDrivesInNewPanel = _settings.DrivesOpenTarget == BertBrowser.App.Services.DrivesOpenTarget.NewPanel;
+        _shell.WorkspacesPlacement = _settings.WorkspacesPlacement;
+        _shell.SavedSearchesPlacement = _settings.SavedSearchesPlacement;
 
         // The rest re-lay out every tab or talk to the index helper, so each goes only when its
         // own value moved rather than on every keystroke typed elsewhere on the page.

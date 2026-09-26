@@ -1,34 +1,41 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
-using BertBrowser.Core.Layout;
 using BertBrowser.Core.Models;
+using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.SavedWorkspaces;
 
 namespace BertBrowser.App.ViewModels;
 
-/// <summary>A row in the sidebar's Workspaces section.</summary>
+/// <summary>A saved workspace as the sidebar, the title-bar dropdown and the Settings list show it.
+/// Immutable: a rename or a switch replaces the row, the way the list already did for a save.</summary>
 public sealed class SavedWorkspaceItemViewModel
 {
     public SavedWorkspace Model { get; }
 
     public string Name => Model.Name;
 
-    public string ToolTip
-    {
-        get
-        {
-            var panes = SessionLayoutRules.CountPanes(Model.Layout);
-            var tabs = SessionLayoutRules.Panes(Model.Layout).Sum(p => p.Tabs?.Count ?? 0);
-            return $"{panes} pane{(panes == 1 ? "" : "s")}, {tabs} tab{(tabs == 1 ? "" : "s")}";
-        }
-    }
+    /// <summary>"2 panes, 5 tabs".</summary>
+    public string ShapeText => SavedWorkspaceRules.ShapeText(Model.Layout);
+
+    public string ToolTip => ShapeText;
+
+    /// <summary>Every folder it opens, one per line, for the Settings row's tooltip.</summary>
+    public string FoldersToolTip => string.Join(Environment.NewLine, SavedWorkspaceRules.Folders(Model.Layout));
+
+    /// <summary>The folders on one line, for the Settings row itself — trimmed by the view.</summary>
+    public string FoldersText => string.Join("  ·  ", SavedWorkspaceRules.Folders(Model.Layout));
+
+    public string CreatedText => RelativeTime.Day(Model.CreatedUtc?.ToLocalTime(), DateTime.Now, missing: "Unknown");
+
+    public string LastUsedText => RelativeTime.Day(Model.LastUsedUtc?.ToLocalTime(), DateTime.Now);
 
     public SavedWorkspaceItemViewModel(SavedWorkspace model) => Model = model;
 }
 
-/// <summary>The Workspaces section: pane arrangements the user stored under a name, sorted by
-/// name. Keeps the list in memory so the dialog can check a name for clashes without touching the
-/// database on every keystroke.</summary>
+/// <summary>The saved workspaces, sorted by name. Keeps the list in memory so the dialog can check
+/// a name for clashes without touching the database on every keystroke. One instance, owned by the
+/// shell, backs every place they are shown — sidebar, title bar and Settings — so a rename in one is
+/// already in the others.</summary>
 public sealed partial class SavedWorkspacesViewModel : ObservableObject
 {
     private readonly ISavedWorkspaceService _service;
@@ -69,10 +76,43 @@ public sealed partial class SavedWorkspacesViewModel : ObservableObject
         }
         await _service.SaveAsync(workspace);
 
+        // The row being replaced keeps its dates, as the database does; a new one was created now.
+        var kept = replacing is not null ? Find(replacing)?.Model : null;
+        var stored = workspace with
+        {
+            CreatedUtc = workspace.CreatedUtc ?? kept?.CreatedUtc ?? DateTime.UtcNow,
+            LastUsedUtc = workspace.LastUsedUtc ?? kept?.LastUsedUtc,
+        };
+
         if (replacing is not null) RemoveItem(replacing);
-        InsertSorted(new SavedWorkspaceItemViewModel(workspace));
+        InsertSorted(new SavedWorkspaceItemViewModel(stored));
         HasItems = Items.Count > 0;
         return true;
+    }
+
+    /// <summary>Renames <paramref name="item"/> and nothing else: the layout and both dates stay
+    /// as they were. Returns false when another row already has the name.</summary>
+    public async Task<bool> RenameAsync(SavedWorkspaceItemViewModel item, string newName)
+    {
+        if (string.Equals(item.Name, newName, StringComparison.Ordinal)) return true;
+        if (!await _service.RenameAsync(item.Name, newName)) return false;
+
+        RemoveItem(item.Name);
+        InsertSorted(new SavedWorkspaceItemViewModel(item.Model with { Name = newName }));
+        return true;
+    }
+
+    /// <summary>Records that <paramref name="item"/> was just switched to, and returns the row that
+    /// now stands for it.</summary>
+    public async Task<SavedWorkspaceItemViewModel> MarkUsedAsync(SavedWorkspaceItemViewModel item)
+    {
+        var now = DateTime.UtcNow;
+        await _service.MarkUsedAsync(item.Name, now);
+
+        var index = Items.IndexOf(item);
+        var updated = new SavedWorkspaceItemViewModel(item.Model with { LastUsedUtc = now });
+        if (index >= 0) Items[index] = updated;
+        return updated;
     }
 
     public async Task RemoveAsync(SavedWorkspaceItemViewModel item)

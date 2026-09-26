@@ -16,6 +16,10 @@ settings new-items
 shot 06-new-items
 settings columns
 shot 07-columns
+settings saved-searches
+shot 07a-saved-searches
+settings workspaces
+shot 07b-workspaces
 settings context-menu
 shot 08-context-menu
 settings close

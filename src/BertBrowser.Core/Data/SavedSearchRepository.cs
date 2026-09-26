@@ -16,7 +16,10 @@ public sealed class SavedSearchRepository
         using var conn = _db.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT name, query, scope, scope_path FROM saved_search ORDER BY name COLLATE NOCASE;";
+            """
+            SELECT name, query, scope, scope_path, added_utc, last_used_utc
+            FROM saved_search ORDER BY name COLLATE NOCASE;
+            """;
         using var reader = cmd.ExecuteReader();
         var list = new List<SavedSearch>();
         while (reader.Read())
@@ -25,9 +28,23 @@ public sealed class SavedSearchRepository
                 reader.GetString(0),
                 reader.GetString(1),
                 (SavedSearchScope)reader.GetInt64(2),
-                reader.IsDBNull(3) ? null : reader.GetString(3)));
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                StoredTime.Read(reader, 4),
+                StoredTime.Read(reader, 5)));
         }
         return list;
+    }
+
+    /// <summary>Records that the search was just run. A missing row is not an error: it may have
+    /// been deleted in the meantime.</summary>
+    public void MarkUsed(string name, DateTime utc)
+    {
+        using var conn = _db.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE saved_search SET last_used_utc = @when WHERE name = @name;";
+        cmd.Parameters.AddWithValue("@when", StoredTime.Write(utc));
+        cmd.Parameters.AddWithValue("@name", name);
+        cmd.ExecuteNonQuery();
     }
 
     /// <summary>Creates the search, or replaces the query and scope of the one already stored under

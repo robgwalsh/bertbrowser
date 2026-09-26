@@ -222,6 +222,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "system-follow": SystemFollow(rest); break;
             case "system-slot": SystemSlot(rest); break;
             case "drives-view": DrivesView(rest); break;
+            case "workspaces-placement": PlacementSetting(rest, "workspaces-placement", p => session.Shell.WorkspacesPlacement = p); break;
+            case "saved-searches-placement": PlacementSetting(rest, "saved-searches-placement", p => session.Shell.SavedSearchesPlacement = p); break;
             case "tree-scroll": TreeScroll(rest); break;
             case "list-scroll": ListScroll(rest); break;
             case "reveal": Reveal(rest); break;
@@ -1001,8 +1003,10 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             "files" => FileListMenuItems(background: false),
             "background" => FileListMenuItems(background: true),
             "tree" => TreeMenuItems(),
+            "workspaces" => session.Window.BuildWorkspaceMenuItems(),
+            "saved-searches" => session.Window.BuildSavedSearchMenuItems(),
             var other => throw new FormatException(
-                $"'{other}' is not a menu. Try: columns, flat, files, background, tree."),
+                $"'{other}' is not a menu. Try: columns, flat, files, background, tree, workspaces, saved-searches."),
         });
         _lastMenuHeaders = session.Dispatcher.Invoke(() => Headers(items).ToList());
 
@@ -1608,7 +1612,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
     }
 
     /// <summary>'rename-workspace Old name to New name' — through the same
-    /// <c>SaveWorkspaceAsync(previousName)</c> the dialog's Rename goes through.</summary>
+    /// <c>RenameWorkspaceAsync</c> the dialog's Rename goes through, which keeps the dates.</summary>
     private void RenameWorkspace(string rest)
     {
         var text = Require(rest, "rename-workspace");
@@ -1618,8 +1622,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         var item = FindWorkspace(text[..cut].Trim(), "rename-workspace");
         var newName = text[(cut + 4)..].Trim();
-        var renamed = item.Model with { Name = newName };
-        Await(() => session.Shell.SaveWorkspaceAsync(renamed, previousName: item.Name));
+        Await(() => session.Shell.RenameWorkspaceAsync(item, newName));
     }
 
     private void RemoveWorkspace(string rest)
@@ -2965,6 +2968,23 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         session.Settle();
     }
 
+    /// <summary><c>workspaces-placement</c> and <c>saved-searches-placement</c>, each taking
+    /// sidebar|titlebar|hidden — set on the shell the way their Settings pages set them.</summary>
+    private void PlacementSetting(string rest, string verb, Action<SectionPlacement> apply)
+    {
+        var placement = Require(rest, verb).ToLowerInvariant() switch
+        {
+            "sidebar" => SectionPlacement.Sidebar,
+            "titlebar" => SectionPlacement.TitleBar,
+            "hidden" => SectionPlacement.Hidden,
+            var other => throw new FormatException(
+                $"{verb} wants sidebar, titlebar or hidden, got '{other}'."),
+        };
+
+        Invoke(() => apply(placement));
+        session.Settle();
+    }
+
     private void Sort(string rest)
     {
         var wanted = Require(rest, "sort");
@@ -3180,7 +3200,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         var (page, tail) = Split(rest);
         if (page.Length == 0)
             throw new FormatException("settings needs a page (general, appearance, preview, search-index, " +
-                                      "history, new-items, columns, context-menu) or close.");
+                                      "history, new-items, columns, saved-searches, workspaces, context-menu) or close.");
 
         // "settings tick Show hidden items on": sets a box on the open page by its label, the way a
         // click would. Nothing is saved by this verb — what makes it stick is the page's own
@@ -3287,7 +3307,9 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             // also what CanChooseAutoStart is for.
             autoStart: null,
             session.Services.GetRequiredService<IMftIndexService>(),
-            session.Services.GetRequiredService<IShellMenuSource>());
+            session.Services.GetRequiredService<IShellMenuSource>(),
+            session.Shell.SavedWorkspaces,
+            session.Shell.SavedSearches);
         vm.ReadIndexerState();
         vm.SelectedCategory = vm.Categories.First(c => c.Id == category);
         return vm;

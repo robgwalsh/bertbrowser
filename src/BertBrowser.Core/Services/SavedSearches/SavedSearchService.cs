@@ -9,6 +9,7 @@ public interface ISavedSearchService
     Task SaveAsync(SavedSearch search);
     Task<bool> RenameAsync(string oldName, string newName);
     Task RemoveAsync(string name);
+    Task MarkUsedAsync(string name, DateTime utc);
 }
 
 /// <summary>Async facade over <see cref="SavedSearchRepository"/> so view models never block the
@@ -31,4 +32,7 @@ public sealed class SavedSearchService : ISavedSearchService
 
     public Task RemoveAsync(string name) =>
         Task.Run(() => _repository.Remove(name));
+
+    public Task MarkUsedAsync(string name, DateTime utc) =>
+        Task.Run(() => _repository.MarkUsed(name, utc));
 }

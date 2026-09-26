@@ -32,4 +32,24 @@ public sealed class RelativeTimeTests
         var utc = Now.AddDays(-2);
         Assert.Equal(utc.ToLocalTime().ToString("g"), RelativeTime.Format(utc, Now));
     }
+
+    private static readonly DateTime LocalNow = new(2026, 9, 25, 16, 0, 0);
+
+    [Fact]
+    public void DaySaysNeverForNoTimestamp() =>
+        Assert.Equal("Never", RelativeTime.Day(null, LocalNow));
+
+    [Fact]
+    public void DayNamesTodayAndYesterday()
+    {
+        Assert.Equal("Today 09:05", RelativeTime.Day(new DateTime(2026, 9, 25, 9, 5, 0), LocalNow));
+        Assert.Equal("Yesterday 23:59", RelativeTime.Day(new DateTime(2026, 9, 24, 23, 59, 0), LocalNow));
+    }
+
+    [Fact]
+    public void DayDropsTheYearOnlyWithinThisYear()
+    {
+        Assert.Equal("3 Feb 08:15", RelativeTime.Day(new DateTime(2026, 2, 3, 8, 15, 0), LocalNow));
+        Assert.Equal("3 Feb 2025", RelativeTime.Day(new DateTime(2025, 2, 3, 8, 15, 0), LocalNow));
+    }
 }

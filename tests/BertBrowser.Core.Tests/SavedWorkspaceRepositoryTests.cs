@@ -141,4 +141,41 @@ public sealed class SavedWorkspaceRepositoryTests : IDisposable
         var w = Assert.Single(_repo.GetAll());
         Assert.Equal("Good", w.Name);
     }
+
+    [Fact]
+    public void ANewWorkspaceHasACreationTimeAndHasNeverBeenUsed()
+    {
+        var before = DateTime.UtcNow.AddSeconds(-1);
+        _repo.Save(new SavedWorkspace("Work", OnePane(@"C:\Work")));
+
+        var w = Assert.Single(_repo.GetAll());
+        Assert.NotNull(w.CreatedUtc);
+        Assert.InRange(w.CreatedUtc!.Value, before, DateTime.UtcNow.AddSeconds(1));
+        Assert.Equal(DateTimeKind.Utc, w.CreatedUtc.Value.Kind);
+        Assert.Null(w.LastUsedUtc);
+    }
+
+    [Fact]
+    public void MarkUsedRecordsTheTimeAndSurvivesARename()
+    {
+        _repo.Save(new SavedWorkspace("Work", OnePane(@"C:\Work")));
+        var used = new DateTime(2026, 9, 1, 12, 30, 0, DateTimeKind.Utc);
+
+        _repo.MarkUsed("work", used);
+        _repo.Rename("Work", "Office");
+
+        var w = Assert.Single(_repo.GetAll());
+        Assert.Equal(used, w.LastUsedUtc);
+    }
+
+    [Fact]
+    public void RenameKeepsTheCreationTime()
+    {
+        _repo.Save(new SavedWorkspace("Old", OnePane(@"C:\A")));
+        var created = Assert.Single(_repo.GetAll()).CreatedUtc;
+
+        _repo.Rename("Old", "New");
+
+        Assert.Equal(created, Assert.Single(_repo.GetAll()).CreatedUtc);
+    }
 }

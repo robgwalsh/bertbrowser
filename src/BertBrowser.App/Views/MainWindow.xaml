@@ -127,6 +127,66 @@
             </StackPanel>
 
             <!--
+              The workspace switcher, when Settings puts it here rather than in the sidebar. Docked
+              left, so it sits just after the name and version the window template draws before
+              this content, and the search box keeps centring itself in what is left. Named after
+              the workspace the window last came from, or plain "Workspaces" before there is one.
+            -->
+            <Button x:Name="WorkspaceSwitcher" DockPanel.Dock="Left" Margin="2,0,12,0"
+                    VerticalAlignment="Center" MaxWidth="220"
+                    Style="{StaticResource HeaderDropdownButton}"
+                    Click="WorkspaceSwitcher_Click"
+                    ToolTip="Switch workspace"
+                    Visibility="{Binding ShowWorkspacesInTitleBar, Converter={StaticResource BoolToVisibility}}"
+                    AutomationProperties.AutomationId="WorkspaceSwitcher"
+                    AutomationProperties.Name="Workspaces">
+                <DockPanel>
+                    <Path DockPanel.Dock="Left" Style="{StaticResource IconPath}"
+                          Data="{StaticResource Icon.SplitRight}" Width="13" Height="13" Margin="0,0,7,0"
+                          VerticalAlignment="Center" Fill="{StaticResource Theme.Text.Secondary}"/>
+                    <Path DockPanel.Dock="Right" Style="{StaticResource IconPath}"
+                          Data="{StaticResource Icon.ChevronDown}" Width="11" Height="11" Margin="8,1,0,0"
+                          VerticalAlignment="Center" Fill="{StaticResource Theme.Text.Secondary}"/>
+                    <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Text" Value="{Binding CurrentWorkspaceName}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CurrentWorkspaceName}" Value="{x:Null}">
+                                        <Setter Property="Text" Value="Workspaces"/>
+                                        <Setter Property="Foreground" Value="{StaticResource Theme.Text.Secondary}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </DockPanel>
+            </Button>
+
+            <!-- Saved searches, likewise, when Settings puts them here. After the workspaces so the
+                 two sit side by side when both are up here. Always labelled the same: unlike a
+                 workspace, running a search does not make it "where the window is". -->
+            <Button x:Name="SavedSearchSwitcher" DockPanel.Dock="Left" Margin="0,0,12,0"
+                    VerticalAlignment="Center"
+                    Style="{StaticResource HeaderDropdownButton}"
+                    Click="SavedSearchSwitcher_Click"
+                    ToolTip="Run a saved search"
+                    Visibility="{Binding ShowSavedSearchesInTitleBar, Converter={StaticResource BoolToVisibility}}"
+                    AutomationProperties.AutomationId="SavedSearchSwitcher"
+                    AutomationProperties.Name="Saved searches">
+                <DockPanel>
+                    <Path DockPanel.Dock="Left" Style="{StaticResource IconPath}"
+                          Data="{StaticResource Icon.Search}" Width="13" Height="13" Margin="0,0,7,0"
+                          VerticalAlignment="Center" Fill="{StaticResource Theme.Text.Secondary}"/>
+                    <Path DockPanel.Dock="Right" Style="{StaticResource IconPath}"
+                          Data="{StaticResource Icon.ChevronDown}" Width="11" Height="11" Margin="8,1,0,0"
+                          VerticalAlignment="Center" Fill="{StaticResource Theme.Text.Secondary}"/>
+                    <TextBlock Text="Saved searches" VerticalAlignment="Center"
+                               Foreground="{StaticResource Theme.Text.Secondary}"/>
+                </DockPanel>
+            </Button>
+
+            <!--
               Whole-PC search. It lives up here, once per window, because the per-tab box below
               is folder-local only now — one box, one scope, nothing to choose before typing.
               It is always open: it used to fold into a magnifier button, which saved a little
@@ -407,8 +467,10 @@
                 </Grid.RowDefinitions>
 
                 <!-- Saved searches (between the drives and the bookmarks; sized to content).
-                     A click runs one in the active tab; the menu has the rest. -->
-                <DockPanel Grid.Row="1">
+                     A click runs one in the active tab; the menu has the rest. Only here when
+                     Settings has not moved them to the title bar or hidden them. -->
+                <DockPanel Grid.Row="1"
+                           Visibility="{Binding ShowSavedSearchesInSidebar, Converter={StaticResource BoolToVisibility}}">
                     <Border DockPanel.Dock="Top" BorderBrush="{StaticResource Theme.Border.Subtle}" BorderThickness="0,1,0,0">
                         <TextBlock Text="SAVED SEARCHES" Style="{StaticResource SidebarHeader}"/>
                     </Border>
@@ -469,8 +531,10 @@
                 <!-- Workspaces (between the saved searches and the bookmarks; sized to content).
                      A click switches to one, replacing the current panes/tabs; the menu has the
                      rest. There's no per-tab save equivalent — a workspace is a whole-window
-                     snapshot — so the save trigger sits in the header itself. -->
-                <DockPanel Grid.Row="2">
+                     snapshot — so the save trigger sits in the header itself. Only here when
+                     Settings has not moved the switcher to the title bar or hidden it. -->
+                <DockPanel Grid.Row="2"
+                           Visibility="{Binding ShowWorkspacesInSidebar, Converter={StaticResource BoolToVisibility}}">
                     <Border DockPanel.Dock="Top" BorderBrush="{StaticResource Theme.Border.Subtle}" BorderThickness="0,1,0,0">
                         <DockPanel>
                             <Button DockPanel.Dock="Right" Margin="0,4,8,0" VerticalAlignment="Center"

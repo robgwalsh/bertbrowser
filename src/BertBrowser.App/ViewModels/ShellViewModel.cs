@@ -94,6 +94,52 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         _settings.Save();
     }
 
+    /// <summary>Where the workspace switcher is shown. Mirrors
+    /// <see cref="AppSettings.WorkspacesPlacement"/>; set from the Workspaces page of Settings.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowWorkspacesInSidebar))]
+    [NotifyPropertyChangedFor(nameof(ShowWorkspacesInTitleBar))]
+    private SectionPlacement _workspacesPlacement;
+
+    partial void OnWorkspacesPlacementChanged(SectionPlacement value)
+    {
+        _settings.WorkspacesPlacement = value;
+        _settings.Save();
+    }
+
+    public bool ShowWorkspacesInSidebar => WorkspacesPlacement == SectionPlacement.Sidebar;
+
+    public bool ShowWorkspacesInTitleBar => WorkspacesPlacement == SectionPlacement.TitleBar;
+
+    /// <summary>Where saved searches are offered. Mirrors
+    /// <see cref="AppSettings.SavedSearchesPlacement"/>; set from the Saved searches page of Settings.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowSavedSearchesInSidebar))]
+    [NotifyPropertyChangedFor(nameof(ShowSavedSearchesInTitleBar))]
+    private SectionPlacement _savedSearchesPlacement;
+
+    partial void OnSavedSearchesPlacementChanged(SectionPlacement value)
+    {
+        _settings.SavedSearchesPlacement = value;
+        _settings.Save();
+    }
+
+    public bool ShowSavedSearchesInSidebar => SavedSearchesPlacement == SectionPlacement.Sidebar;
+
+    public bool ShowSavedSearchesInTitleBar => SavedSearchesPlacement == SectionPlacement.TitleBar;
+
+    /// <summary>
+    /// The workspace last switched to or saved in this window, for the title-bar dropdown to name.
+    /// </summary>
+    /// <remarks>
+    /// Where the window came from, not a claim that it still matches: panes change the moment
+    /// anything is opened, and comparing a live layout against a stored one on every navigation
+    /// would cost more than the label is worth. Null until one is chosen, and again once it is
+    /// deleted.
+    /// </remarks>
+    [ObservableProperty]
+    private string? _currentWorkspaceName;
+
     public FolderTreeViewModel Tree { get; }
     public BookmarksViewModel Bookmarks { get; }
     public SavedSearchesViewModel SavedSearches { get; }
@@ -444,6 +490,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         _settings = settings;
         _showHiddenItems = settings.ShowHiddenItems; // seed the field so the ctor doesn't refresh
         _drivesViewMode = settings.DrivesViewMode; // seed the fields so the ctor doesn't re-save
+        _workspacesPlacement = settings.WorkspacesPlacement;
+        _savedSearchesPlacement = settings.SavedSearchesPlacement;
         _openDrivesInNewPanel = settings.DrivesOpenTarget == DrivesOpenTarget.NewPanel;
 
         Tree = new FolderTreeViewModel(fileSystem, dirSizes);
@@ -1068,6 +1116,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             return;
         }
 
+        await SavedSearches.MarkUsedAsync(item);
+
         var tab = inNewTab ? ActivePane.AddTab("", activate: true) : ActiveTab;
         await tab.NavigateToAsync(run.NavigateTo);
 
@@ -1104,17 +1154,43 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     public async Task SaveWorkspaceAsync(BertBrowser.Core.Models.SavedWorkspace workspace, string? previousName)
     {
         if (await SavedWorkspaces.SaveAsync(workspace, previousName))
+        {
+            // A new one is a snapshot of this window, so the window is now "in" it.
+            if (previousName is null || IsCurrentWorkspace(previousName))
+                CurrentWorkspaceName = workspace.Name;
             SetStatus($"Saved workspace \"{workspace.Name}\"");
+        }
         else
+        {
             SetStatus($"There is already a workspace called \"{workspace.Name}\"");
+        }
+    }
+
+    /// <summary>Renames a workspace the dialog validated, keeping its layout and dates.</summary>
+    public async Task RenameWorkspaceAsync(SavedWorkspaceItemViewModel? item, string newName)
+    {
+        if (item is null) return;
+        if (await SavedWorkspaces.RenameAsync(item, newName))
+        {
+            if (IsCurrentWorkspace(item.Name)) CurrentWorkspaceName = newName;
+            SetStatus($"Renamed workspace \"{item.Name}\" to \"{newName}\"");
+        }
+        else
+        {
+            SetStatus($"There is already a workspace called \"{newName}\"");
+        }
     }
 
     public async Task RemoveWorkspaceAsync(SavedWorkspaceItemViewModel? item)
     {
         if (item is null) return;
         await SavedWorkspaces.RemoveAsync(item);
+        if (IsCurrentWorkspace(item.Name)) CurrentWorkspaceName = null;
         SetStatus($"Removed workspace \"{item.Name}\"");
     }
+
+    private bool IsCurrentWorkspace(string name) =>
+        string.Equals(CurrentWorkspaceName, name, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Replaces the current window's panes/tabs with a saved workspace's arrangement.
     /// The stored layout is cloned before pruning: <see cref="SessionLayoutRules.Prune"/> mutates
@@ -1139,6 +1215,8 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             return false;
         }
 
+        await SavedWorkspaces.MarkUsedAsync(item);
+        CurrentWorkspaceName = item.Name;
         SetStatus($"Switched to workspace \"{item.Name}\"");
         return true;
     }

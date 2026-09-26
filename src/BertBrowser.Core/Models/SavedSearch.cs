@@ -20,4 +20,12 @@ public enum SavedSearchScope
 /// <param name="ScopePath">The pinned folder, non-null iff <paramref name="Scope"/> is
 /// <see cref="SavedSearchScope.Folder"/>. A casing-preserving display path, not a path key: this
 /// table is keyed by name and never range-scanned, and navigation wants the real casing.</param>
-public sealed record SavedSearch(string Name, string Query, SavedSearchScope Scope, string? ScopePath);
+/// <param name="CreatedUtc">When it was first saved. Null only for one not yet stored.</param>
+/// <param name="LastUsedUtc">When it was last run; null if it never has been.</param>
+public sealed record SavedSearch(
+    string Name,
+    string Query,
+    SavedSearchScope Scope,
+    string? ScopePath,
+    DateTime? CreatedUtc = null,
+    DateTime? LastUsedUtc = null);

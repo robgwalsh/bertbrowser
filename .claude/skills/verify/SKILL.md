@@ -233,6 +233,8 @@ hidden on|off | thumbnails <0..1> | sort <column-id> | theme <id>
                             (sort takes any catalogue id: Name, Size, Type, Modified, Created,
                             Accessed, Extension, or a canonical name such as
                             System.Image.Dimensions. "date" still means Modified.)
+workspaces-placement | saved-searches-placement sidebar|titlebar|hidden
+                            where that list is offered, as its Settings page sets it
 drives-view tree|cards      the "DRIVES & DEVICES" sidebar section's layout — what clicking its
                             header toggle button does
 list-scroll <px>            scrolls the file list to a vertical offset, in pixels. Worth more than
@@ -267,7 +269,9 @@ flat-cap <n>                lowers how many rows one flat listing shows, so a fi
 shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 settings <page> [dragging]  puts the settings page up in the main window, where the app shows it
                             (it is not a dialog), for a `shot`. Pages: general, appearance,
-                            preview, search-index, history, new-items, columns, context-menu.
+                            preview, search-index, history, new-items, columns, saved-searches,
+                            workspaces,
+                            context-menu.
                             The columns page shows the *saved default*, so put an arrangement in
                             front of it with `columns default` first; `dragging` adds a row's
                             insertion line, placed rather than dragged since a run posts no mouse
@@ -331,7 +335,7 @@ columns width <id> <px>
 columns reset               back to the saved default
 columns default             the header menu's "Set as default for new tabs" — what the settings
                             page reads, and the only way to seed it from a script
-menu columns|flat|files|background|tree [name]
+menu columns|flat|files|background|tree|workspaces|saved-searches [name]
                             PNG of a menu's items — the column header's, the flat view's shape
                             menu behind the toolbar chevron, the file list's for the selection,
                             the file list's over empty space (the folder background), or the

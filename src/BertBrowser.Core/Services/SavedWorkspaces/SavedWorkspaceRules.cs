@@ -1,3 +1,5 @@
+using BertBrowser.Core.Layout;
+
 namespace BertBrowser.Core.Services.SavedWorkspaces;
 
 /// <summary>
@@ -26,4 +28,27 @@ public static class SavedWorkspaceRules
     /// way a saved search's default comes from what was typed, so the default is simply when it
     /// was saved — the user renames if they want something else.</summary>
     public static string DefaultName(DateTime now) => $"Workspace {now:yyyy-MM-dd HH:mm}";
+
+    /// <summary>"2 panes, 5 tabs" — the one-line shape of a layout, for the sidebar's tooltip and
+    /// the Settings list alike.</summary>
+    public static string ShapeText(SessionLayout layout)
+    {
+        var panes = SessionLayoutRules.CountPanes(layout);
+        var tabs = SessionLayoutRules.Panes(layout).Sum(p => p.Tabs?.Count ?? 0);
+        return $"{panes} pane{(panes == 1 ? "" : "s")}, {tabs} tab{(tabs == 1 ? "" : "s")}";
+    }
+
+    /// <summary>Every folder the layout opens, in pane then tab order, each once (ignoring case) —
+    /// two panes on one folder is one folder to the person reading the list.</summary>
+    public static IReadOnlyList<string> Folders(SessionLayout layout)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var folders = new List<string>();
+        foreach (var pane in SessionLayoutRules.Panes(layout))
+        foreach (var tab in pane.Tabs ?? [])
+        {
+            if (tab.Path.Length > 0 && seen.Add(tab.Path)) folders.Add(tab.Path);
+        }
+        return folders;
+    }
 }

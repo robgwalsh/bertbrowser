@@ -679,6 +679,262 @@
                         </ListBox.ItemTemplate>
                     </ListBox>
                 </DockPanel>
+
+                <!--
+                  Saved searches: the Workspaces page's twin, below. Edit rather than Rename, because
+                  the dialog it opens is the sidebar's Edit — name, query and scope together.
+                -->
+                <StackPanel AutomationProperties.AutomationId="SettingsSavedSearchesPage">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedCategory.Id}"
+                                             Value="{x:Static vm:SettingsCategory.SavedSearches}">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <TextBlock Text="Saved searches" Style="{StaticResource PageHeading}" Margin="0,0,0,4"/>
+
+                    <TextBlock Text="Show saved searches" Margin="0,0,0,6"/>
+                    <RadioButton GroupName="SavedSearchesPlacement" Content="In the sidebar"
+                                 Margin="0,0,0,6"
+                                 IsChecked="{Binding SavedSearchesPlacement, Converter={StaticResource EnumEqualsBool}, ConverterParameter=Sidebar}"
+                                 AutomationProperties.AutomationId="SavedSearchesInSidebar"/>
+                    <RadioButton GroupName="SavedSearchesPlacement" Content="In the title bar, beside the app name"
+                                 Margin="0,0,0,6"
+                                 IsChecked="{Binding SavedSearchesPlacement, Converter={StaticResource EnumEqualsBool}, ConverterParameter=TitleBar}"
+                                 AutomationProperties.AutomationId="SavedSearchesInTitleBar"/>
+                    <RadioButton GroupName="SavedSearchesPlacement" Content="Nowhere"
+                                 IsChecked="{Binding SavedSearchesPlacement, Converter={StaticResource EnumEqualsBool}, ConverterParameter=Hidden}"
+                                 AutomationProperties.AutomationId="SavedSearchesHidden"/>
+
+                    <Separator Margin="0,4,0,14"/>
+
+                    <TextBlock Text="Your saved searches" Style="{StaticResource PageHeading}" Margin="0,0,0,8"/>
+
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,0"
+                               Text="Nothing saved yet. Type a search, then press the save button inside the search box."
+                               Visibility="{Binding SavedSearches.HasItems, Converter={StaticResource InverseBoolToVisibility}, FallbackValue=Visible}"
+                               AutomationProperties.AutomationId="SettingsSavedSearchesEmpty"/>
+
+                    <StackPanel Visibility="{Binding SavedSearches.HasItems, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}">
+                        <!-- Column headings; the widths repeat the row template's, as on Workspaces. -->
+                        <Grid Margin="11,0,9,4" TextElement.Foreground="{StaticResource Theme.Text.Secondary}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="110"/>
+                                <ColumnDefinition Width="120"/>
+                                <ColumnDefinition Width="120"/>
+                                <ColumnDefinition Width="60"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Name" FontSize="11"/>
+                            <TextBlock Grid.Column="1" Text="Searches" FontSize="11"/>
+                            <TextBlock Grid.Column="2" Text="Created" FontSize="11"/>
+                            <TextBlock Grid.Column="3" Text="Last run" FontSize="11"/>
+                        </Grid>
+
+                        <ListBox x:Name="SavedSearchList"
+                                 ItemsSource="{Binding SavedSearches.Items}"
+                                 SelectedItem="{Binding SelectedSavedSearch, Mode=TwoWay}"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 PreviewKeyDown="SavedSearchList_KeyDown"
+                                 AutomationProperties.AutomationId="SettingsSavedSearchList"
+                                 AutomationProperties.Name="Saved searches">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                                    <Setter Property="Padding" Value="10,6,8,6"/>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="110"/>
+                                            <ColumnDefinition Width="120"/>
+                                            <ColumnDefinition Width="120"/>
+                                            <ColumnDefinition Width="60"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- The name, and under it the query exactly as it runs. -->
+                                        <StackPanel Grid.Column="0" Margin="0,0,12,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding Query}" FontSize="11" Margin="0,2,0,0"
+                                                       Foreground="{StaticResource Theme.Text.Secondary}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       ToolTip="{Binding Query}"/>
+                                        </StackPanel>
+                                        <!-- A pinned folder is named in the tooltip; the column
+                                             is too narrow for a path. -->
+                                        <TextBlock Grid.Column="1" Text="{Binding ScopeColumnText}" VerticalAlignment="Center"
+                                                   Foreground="{StaticResource Theme.Text.Secondary}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding ScopeText}"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding CreatedText}" VerticalAlignment="Center"
+                                                   Foreground="{StaticResource Theme.Text.Secondary}"/>
+                                        <TextBlock Grid.Column="3" Text="{Binding LastUsedText}" VerticalAlignment="Center"
+                                                   Foreground="{StaticResource Theme.Text.Secondary}"/>
+
+                                        <StackPanel Grid.Column="4" Orientation="Horizontal"
+                                                    HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <Button Style="{StaticResource ToolbarButton}" Width="24" Height="24" Padding="5"
+                                                    Margin="0,0,4,0"
+                                                    ToolTip="Edit name, search and scope (F2)"
+                                                    Click="SavedSearchEdit_Click"
+                                                    AutomationProperties.Name="Edit saved search">
+                                                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Rename}"/>
+                                            </Button>
+                                            <Button Style="{StaticResource ToolbarButton}" Width="24" Height="24" Padding="5"
+                                                    ToolTip="Delete (Del)"
+                                                    Click="SavedSearchDelete_Click"
+                                                    AutomationProperties.Name="Delete saved search">
+                                                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Delete}"/>
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0"
+                                   Text="Deleting a saved search removes only the search — no file it found is touched."/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!--
+                  Workspaces: where the switcher lives, and every saved one in detail. A StackPanel
+                  rather than a filling DockPanel so the list grows to its rows and the page scrolls,
+                  which keeps the header row over the columns it names — a list scrolling on its own
+                  would take a scrollbar's width off the rows and not off the header.
+                  Rename and delete act straight away through the shell, like the sidebar's menu.
+                -->
+                <StackPanel AutomationProperties.AutomationId="SettingsWorkspacesPage">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedCategory.Id}"
+                                             Value="{x:Static vm:SettingsCategory.Workspaces}">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <TextBlock Text="Workspaces" Style="{StaticResource PageHeading}" Margin="0,0,0,4"/>
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,14"
+                               Text="A workspace is your panes and tabs saved under a name, to switch back to in one click. Switching replaces the panes you have open."/>
+
+                    <TextBlock Text="Show the workspace switcher" Margin="0,0,0,6"/>
+                    <RadioButton GroupName="WorkspacesPlacement" Content="In the sidebar"
+                                 Margin="0,0,0,6"
+                                 IsChecked="{Binding WorkspacesPlacement, Converter={StaticResource EnumEqualsBool}, ConverterParameter=Sidebar}"
+                                 AutomationProperties.AutomationId="WorkspacesInSidebar"/>
+                    <RadioButton GroupName="WorkspacesPlacement" Content="In the title bar, beside the app name"
+                                 Margin="0,0,0,6"
+                                 IsChecked="{Binding WorkspacesPlacement, Converter={StaticResource EnumEqualsBool}, ConverterParameter=TitleBar}"
+                                 AutomationProperties.AutomationId="WorkspacesInTitleBar"/>
+                    <RadioButton GroupName="WorkspacesPlacement" Content="Nowhere"
+                                 IsChecked="{Binding WorkspacesPlacement, Converter={StaticResource EnumEqualsBool}, ConverterParameter=Hidden}"
+                                 AutomationProperties.AutomationId="WorkspacesHidden"/>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Nowhere only hides the switcher. Your workspaces are kept, and stay listed below."/>
+
+                    <Separator Margin="0,4,0,14"/>
+
+                    <TextBlock Text="Saved workspaces" Style="{StaticResource PageHeading}" Margin="0,0,0,8"/>
+
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,0"
+                               Text="Nothing saved yet. Use the + beside WORKSPACES in the sidebar, or Save current layout in the title bar's workspace menu."
+                               Visibility="{Binding Workspaces.HasItems, Converter={StaticResource InverseBoolToVisibility}, FallbackValue=Visible}"
+                               AutomationProperties.AutomationId="SettingsWorkspacesEmpty"/>
+
+                    <StackPanel Visibility="{Binding Workspaces.HasItems, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}">
+                        <!-- Column headings. The widths repeat the row template's, and the left
+                             margin is the list's border plus its row padding. -->
+                        <Grid Margin="11,0,9,4" TextElement.Foreground="{StaticResource Theme.Text.Secondary}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="110"/>
+                                <ColumnDefinition Width="120"/>
+                                <ColumnDefinition Width="120"/>
+                                <ColumnDefinition Width="60"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Name" FontSize="11"/>
+                            <TextBlock Grid.Column="1" Text="Layout" FontSize="11"/>
+                            <TextBlock Grid.Column="2" Text="Created" FontSize="11"/>
+                            <TextBlock Grid.Column="3" Text="Last opened" FontSize="11"/>
+                        </Grid>
+
+                        <ListBox x:Name="WorkspaceList"
+                                 ItemsSource="{Binding Workspaces.Items}"
+                                 SelectedItem="{Binding SelectedWorkspace, Mode=TwoWay}"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 PreviewKeyDown="WorkspaceList_KeyDown"
+                                 AutomationProperties.AutomationId="SettingsWorkspaceList"
+                                 AutomationProperties.Name="Saved workspaces">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                                    <Setter Property="Padding" Value="10,6,8,6"/>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="110"/>
+                                            <ColumnDefinition Width="120"/>
+                                            <ColumnDefinition Width="120"/>
+                                            <ColumnDefinition Width="60"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- The name, and under it the folders it opens: what tells
+                                             two similarly named workspaces apart. -->
+                                        <StackPanel Grid.Column="0" Margin="0,0,12,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding FoldersText}" FontSize="11" Margin="0,2,0,0"
+                                                       Foreground="{StaticResource Theme.Text.Secondary}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       ToolTip="{Binding FoldersToolTip}"/>
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" Text="{Binding ShapeText}" VerticalAlignment="Center"
+                                                   Foreground="{StaticResource Theme.Text.Secondary}"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding CreatedText}" VerticalAlignment="Center"
+                                                   Foreground="{StaticResource Theme.Text.Secondary}"/>
+                                        <TextBlock Grid.Column="3" Text="{Binding LastUsedText}" VerticalAlignment="Center"
+                                                   Foreground="{StaticResource Theme.Text.Secondary}"/>
+
+                                        <StackPanel Grid.Column="4" Orientation="Horizontal"
+                                                    HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <Button Style="{StaticResource ToolbarButton}" Width="24" Height="24" Padding="5"
+                                                    Margin="0,0,4,0"
+                                                    ToolTip="Rename (F2)"
+                                                    Click="WorkspaceRename_Click"
+                                                    AutomationProperties.Name="Rename workspace">
+                                                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Rename}"/>
+                                            </Button>
+                                            <Button Style="{StaticResource ToolbarButton}" Width="24" Height="24" Padding="5"
+                                                    ToolTip="Delete (Del)"
+                                                    Click="WorkspaceDelete_Click"
+                                                    AutomationProperties.Name="Delete workspace">
+                                                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Delete}"/>
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0"
+                                   Text="Deleting a workspace removes only its name and layout — no folder or file is touched."/>
+                    </StackPanel>
+                </StackPanel>
+
                 <!-- Custom context menu commands -->
                 <DockPanel>
                     <DockPanel.Style>

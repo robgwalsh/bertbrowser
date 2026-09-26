@@ -19,7 +19,7 @@ public sealed class SavedWorkspaceRepository
         using var conn = _db.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT name, layout_json FROM saved_workspace ORDER BY name COLLATE NOCASE;";
+            "SELECT name, layout_json, added_utc, last_used_utc FROM saved_workspace ORDER BY name COLLATE NOCASE;";
         using var reader = cmd.ExecuteReader();
         var list = new List<SavedWorkspace>();
         while (reader.Read())
@@ -35,7 +35,7 @@ public sealed class SavedWorkspaceRepository
                 continue;
             }
             if (layout is null) continue;
-            list.Add(new SavedWorkspace(name, layout));
+            list.Add(new SavedWorkspace(name, layout, StoredTime.Read(reader, 2), StoredTime.Read(reader, 3)));
         }
         return list;
     }
@@ -84,6 +84,18 @@ public sealed class SavedWorkspaceRepository
         var moved = cmd.ExecuteNonQuery() > 0;
         tx.Commit();
         return moved;
+    }
+
+    /// <summary>Records that the workspace was just switched to. A missing row is not an error:
+    /// it may have been deleted in the meantime.</summary>
+    public void MarkUsed(string name, DateTime utc)
+    {
+        using var conn = _db.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE saved_workspace SET last_used_utc = @when WHERE name = @name;";
+        cmd.Parameters.AddWithValue("@when", StoredTime.Write(utc));
+        cmd.Parameters.AddWithValue("@name", name);
+        cmd.ExecuteNonQuery();
     }
 
     public void Remove(string name)

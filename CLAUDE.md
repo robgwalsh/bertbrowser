@@ -71,7 +71,8 @@ you where and what to watch for.
 | Checksums (hash / verify) | `Core/Services/Checksums/*` (`ChecksumAlgorithms`, `DigestSink`, `IFileDigester`, `ChecksumFile`, `ChecksumPath`, `ChecksumVerify`, `ChecksumRunner`), `Views/ChecksumWindow` |
 | Search query language | `Core/Services/Search/*`, `docs/search-indexing.md` |
 | Content search (`content:`) | `Core/Services/Search/ContentTerm.cs`, `Core/Services/Search/ContentReader.cs` |
-| Saved searches | `Core/Services/SavedSearches/*` (`SavedSearchRules`), `Core/Data/SavedSearchRepository`, `ViewModels/SavedSearchesViewModel`, `Views/SavedSearchDialog` |
+| Saved workspaces (switcher placement, Settings page) | `Core/Services/SavedWorkspaces/*` (`SavedWorkspaceRules`), `Core/Data/SavedWorkspaceRepository`, `ViewModels/SavedWorkspacesViewModel`, `MainWindow.SavedWorkspaces` (title-bar dropdown), the Workspaces page of `SettingsView` |
+| Saved searches (placement, Settings page) | `Core/Services/SavedSearches/*` (`SavedSearchRules`), `Core/Data/SavedSearchRepository`, `ViewModels/SavedSearchesViewModel`, `Views/SavedSearchDialog`, `MainWindow.SavedSearches` (title-bar dropdown), the Saved searches page of `SettingsView` |
 | Elevated MFT indexer | `src/BertBrowser.Indexer`, `Core/Services/Mft/MftIndexClient`, `Core/Ipc/IndexEndpoint`, `Core/Ipc/IndexerPresenceLock` |
 | Indexer banner / sign-in task | `Core/Services/Mft/IndexerBannerRules`, `IndexerAutoStartTask`, `App/Services/Indexing/IndexAutoStartService` |
 | Change timeline ("What changed") | `Core/Services/Changes/*` (`ChangeLogRules`, `ChangeRecorder`, `ChangeLogPolicy`), `Core/Data/ChangeLogRepository`, `Views/ChangeTimelineWindow`, the History page of `SettingsView` |

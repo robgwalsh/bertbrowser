@@ -23,6 +23,19 @@ public enum DrivesOpenTarget
     NewPanel,
 }
 
+/// <summary>Where a list of saved things — workspaces, saved searches — is offered. Settings lists
+/// them whichever is chosen, so Hidden takes the shortcut away without taking away the way back.</summary>
+public enum SectionPlacement
+{
+    /// <summary>The list's own sidebar section, as it always was.</summary>
+    Sidebar,
+
+    /// <summary>A dropdown in the title bar, beside the app's name.</summary>
+    TitleBar,
+
+    Hidden,
+}
+
 public sealed class AppSettings
 {
     public double? WindowLeft { get; set; }
@@ -354,6 +367,14 @@ public sealed class AppSettings
     /// keeps navigating the active tab in place, as it always has. Defaults to a new tab, matching
     /// every other "open elsewhere" action in the app (bookmarks, the tree's own context menu).</summary>
     public DrivesOpenTarget DrivesOpenTarget { get; set; } = DrivesOpenTarget.NewTab;
+
+    /// <summary>Where the workspace switcher lives. Not nullable: "never configured" and the
+    /// sidebar mean the same thing, which is where it was before this was a choice.</summary>
+    public SectionPlacement WorkspacesPlacement { get; set; } = SectionPlacement.Sidebar;
+
+    /// <summary>Where saved searches are offered for running, for the same reason and with the same
+    /// default as <see cref="WorkspacesPlacement"/>.</summary>
+    public SectionPlacement SavedSearchesPlacement { get; set; } = SectionPlacement.Sidebar;
 
     private static string FilePath => AppPaths.SettingsPath;
 

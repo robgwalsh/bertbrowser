@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -112,6 +114,101 @@ public partial class SettingsView : UserControl
 
     private void CustomiseTheme_Click(object sender, RoutedEventArgs e) =>
         CustomiseThemeRequested?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>A workspace's Rename, by button or F2. The host asks for the name, since the dialog
+    /// and the shell call are the same ones the sidebar uses.</summary>
+    public event EventHandler<SavedWorkspaceItemViewModel>? WorkspaceRenameRequested;
+
+    /// <summary>A workspace's Delete, by button or the Delete key.</summary>
+    public event EventHandler<SavedWorkspaceItemViewModel>? WorkspaceDeleteRequested;
+
+    private void WorkspaceRename_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is SavedWorkspaceItemViewModel item)
+            WorkspaceRenameRequested?.Invoke(this, item);
+    }
+
+    private void WorkspaceDelete_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is SavedWorkspaceItemViewModel item)
+            WorkspaceDeleteRequested?.Invoke(this, item);
+    }
+
+    private void WorkspaceList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (_vm.SelectedWorkspace is { } item && _vm.Workspaces is { } workspaces)
+            ListKeyDown(e, WorkspaceList, workspaces.Items,
+                () => WorkspaceRenameRequested?.Invoke(this, item),
+                () => WorkspaceDeleteRequested?.Invoke(this, item));
+    }
+
+    /// <summary>A saved search's Edit, by button or F2 — the sidebar's Edit dialog, which renames
+    /// as well as changing the query and scope.</summary>
+    public event EventHandler<SavedSearchItemViewModel>? SavedSearchEditRequested;
+
+    public event EventHandler<SavedSearchItemViewModel>? SavedSearchDeleteRequested;
+
+    private void SavedSearchEdit_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is SavedSearchItemViewModel item)
+            SavedSearchEditRequested?.Invoke(this, item);
+    }
+
+    private void SavedSearchDelete_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is SavedSearchItemViewModel item)
+            SavedSearchDeleteRequested?.Invoke(this, item);
+    }
+
+    private void SavedSearchList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (_vm.SelectedSavedSearch is { } item && _vm.SavedSearches is { } searches)
+            ListKeyDown(e, SavedSearchList, searches.Items,
+                () => SavedSearchEditRequested?.Invoke(this, item),
+                () => SavedSearchDeleteRequested?.Invoke(this, item));
+    }
+
+    /// <summary>F2 and Delete act on the selected row, as they do on a file. After a delete, focus
+    /// goes to whichever row took the removed one's place, so pressing Delete twice deletes two.</summary>
+    private void ListKeyDown<T>(KeyEventArgs e, ListBox list, ObservableCollection<T> items, Action edit, Action delete)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.None) return;
+
+        switch (e.Key)
+        {
+            case Key.F2:
+                e.Handled = true;
+                edit();
+                break;
+            case Key.Delete:
+                e.Handled = true;
+                ReselectAfterRemoval(list, items, list.SelectedIndex);
+                delete();
+                break;
+        }
+    }
+
+    /// <summary>The delete lands after a database round trip, so the next row is chosen when the
+    /// removed one actually leaves the list rather than on a guess at when that will be.</summary>
+    private void ReselectAfterRemoval<T>(ListBox list, ObservableCollection<T> items, int index)
+    {
+        void OnChanged(object? s, NotifyCollectionChangedEventArgs e)
+        {
+            if (e.Action != NotifyCollectionChangedAction.Remove) return;
+            items.CollectionChanged -= OnChanged;
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (items.Count == 0) return;
+                var next = items[Math.Clamp(index, 0, items.Count - 1)];
+                list.SelectedItem = next;
+                list.UpdateLayout();
+                (list.ItemContainerGenerator.ContainerFromItem(next) as ListBoxItem)?.Focus();
+            }, System.Windows.Threading.DispatcherPriority.Background);
+        }
+
+        items.CollectionChanged += OnChanged;
+    }
+
 
     /// <summary>
     /// The whole property system, for the columns the curated list does not name.

@@ -1,3 +1,4 @@
+using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services.SavedWorkspaces;
 using Xunit;
 
@@ -50,4 +51,26 @@ public sealed class SavedWorkspaceRulesTests
         var now = new DateTime(2026, 3, 5, 14, 30, 0);
         Assert.Equal("Workspace 2026-03-05 14:30", SavedWorkspaceRules.DefaultName(now));
     }
+
+    private static SessionLayout TwoPanes() => new()
+    {
+        Orientation = SplitOrientation.Horizontal,
+        Children =
+        [
+            new SessionLayout { Tabs = [new SessionTab { Path = @"C:\A" }, new SessionTab { Path = @"C:\B" }] },
+            new SessionLayout { Tabs = [new SessionTab { Path = @"c:\a" }, new SessionTab { Path = @"D:\C" }] },
+        ],
+    };
+
+    [Fact]
+    public void ShapeTextCountsPanesAndTabs()
+    {
+        Assert.Equal("2 panes, 4 tabs", SavedWorkspaceRules.ShapeText(TwoPanes()));
+        Assert.Equal("1 pane, 1 tab",
+            SavedWorkspaceRules.ShapeText(new SessionLayout { Tabs = [new SessionTab { Path = @"C:\" }] }));
+    }
+
+    [Fact]
+    public void FoldersAreListedOnceInPaneThenTabOrderIgnoringCase() =>
+        Assert.Equal([@"C:\A", @"C:\B", @"D:\C"], SavedWorkspaceRules.Folders(TwoPanes()));
 }

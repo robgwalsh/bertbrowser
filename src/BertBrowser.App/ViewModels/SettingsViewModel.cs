@@ -113,6 +113,8 @@ public enum SettingsCategory
     History,
     NewItems,
     Columns,
+    SavedSearches,
+    Workspaces,
     ContextMenu,
 }
 
@@ -565,7 +567,9 @@ public sealed partial class SettingsViewModel : ObservableObject
         ChangeLogRepository? changeLog = null,
         IndexAutoStartService? autoStart = null,
         IMftIndexService? mftIndex = null,
-        IShellMenuSource? shellMenus = null)
+        IShellMenuSource? shellMenus = null,
+        SavedWorkspacesViewModel? workspaces = null,
+        SavedSearchesViewModel? savedSearches = null)
     {
         Categories = new[]
         {
@@ -576,6 +580,8 @@ public sealed partial class SettingsViewModel : ObservableObject
             new SettingsCategoryViewModel(SettingsCategory.History, "History", "Icon.Changes"),
             new SettingsCategoryViewModel(SettingsCategory.NewItems, "New items", "Icon.Add"),
             new SettingsCategoryViewModel(SettingsCategory.Columns, "Columns", "Icon.Columns"),
+            new SettingsCategoryViewModel(SettingsCategory.SavedSearches, "Saved searches", "Icon.Search"),
+            new SettingsCategoryViewModel(SettingsCategory.Workspaces, "Workspaces", "Icon.SplitRight"),
             new SettingsCategoryViewModel(SettingsCategory.ContextMenu, "Context menu", "Icon.CustomCommand"),
         };
         _selectedCategory = Categories[0];
@@ -637,10 +643,45 @@ public sealed partial class SettingsViewModel : ObservableObject
 
         _shellMenus = shellMenus;
         ShowShellExtensions = settings.ShowShellExtensions;
+        WorkspacesPlacement = settings.WorkspacesPlacement;
+        Workspaces = workspaces;
+        SavedSearchesPlacement = settings.SavedSearchesPlacement;
+        SavedSearches = savedSearches;
         _ = LoadShellExtensionsAsync();
 
         TrackChanges();
     }
+
+    // --- Workspaces ---
+
+    /// <summary>Where the switcher lives: sidebar, title bar, or nowhere. See
+    /// <c>AppSettings.WorkspacesPlacement</c>.</summary>
+    [ObservableProperty]
+    private SectionPlacement _workspacesPlacement;
+
+    /// <summary>
+    /// The shell's own list, not a copy, so a rename here is already in the sidebar when the page
+    /// closes. Renaming and deleting go through the shell too — they are actions rather than
+    /// preferences, so they never wait on <see cref="Apply"/>'s debounce. Null only at a
+    /// construction site that did not pass one.
+    /// </summary>
+    public SavedWorkspacesViewModel? Workspaces { get; }
+
+    [ObservableProperty]
+    private SavedWorkspaceItemViewModel? _selectedWorkspace;
+
+    // --- Saved searches ---
+    //
+    // The same arrangement as the workspaces above: a placement that Apply writes, and the shell's
+    // own list, edited and deleted through the shell.
+
+    [ObservableProperty]
+    private SectionPlacement _savedSearchesPlacement;
+
+    public SavedSearchesViewModel? SavedSearches { get; }
+
+    [ObservableProperty]
+    private SavedSearchItemViewModel? _selectedSavedSearch;
 
     // --- The app's own context-menu entries ---
 
@@ -919,7 +960,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         nameof(RestoreLastSession), nameof(StartupDefaultPath), nameof(ScrollSpeed), nameof(TileAspect),
         nameof(ShowPreviewPane), nameof(PreviewTextLimitKb), nameof(ContentSearchLimitKb),
         nameof(RecordFileChanges), nameof(FileChangeRetentionHours), nameof(StartIndexerAtLaunch),
-        nameof(ShowShellExtensions),
+        nameof(ShowShellExtensions), nameof(WorkspacesPlacement), nameof(SavedSearchesPlacement),
     ];
 
     private DispatcherTimer? _applyTimer;
@@ -1093,6 +1134,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         // The only search-index value that lives in settings. Sign-in auto-start is the scheduled
         // task itself and was already applied when the box was ticked.
         _settings.StartIndexerAtLaunch = StartIndexerAtLaunch;
+        _settings.WorkspacesPlacement = WorkspacesPlacement;
+        _settings.SavedSearchesPlacement = SavedSearchesPlacement;
         _settings.TileAspectRatio = TileAspect.ToString();
         // Always a list once settings have been saved, never null: from here on the user has
         // configured their columns, and the "never configured" state has nothing left to say.

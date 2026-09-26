@@ -9,6 +9,7 @@ public interface ISavedWorkspaceService
     Task SaveAsync(SavedWorkspace workspace);
     Task<bool> RenameAsync(string oldName, string newName);
     Task RemoveAsync(string name);
+    Task MarkUsedAsync(string name, DateTime utc);
 }
 
 /// <summary>Async facade over <see cref="SavedWorkspaceRepository"/> so view models never block
@@ -31,4 +32,7 @@ public sealed class SavedWorkspaceService : ISavedWorkspaceService
 
     public Task RemoveAsync(string name) =>
         Task.Run(() => _repository.Remove(name));
+
+    public Task MarkUsedAsync(string name, DateTime utc) =>
+        Task.Run(() => _repository.MarkUsed(name, utc));
 }

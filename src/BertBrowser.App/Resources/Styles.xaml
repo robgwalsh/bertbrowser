@@ -237,6 +237,35 @@
         <Setter Property="BorderBrush" Value="{StaticResource Theme.Border.Subtle}"/>
     </Style>
 
+    <!-- A dropdown sitting in the title bar: the whole-PC search field's well, so the two read as
+         one family, with the border lifting on hover and focus the way the field's does on focus.
+         The trigger targets the templated Border, whose own Style sets the brush — a template
+         trigger outranks a style setter, so no local value is needed that would kill either. -->
+    <Style x:Key="HeaderDropdownButton" TargetType="Button">
+        <Setter Property="Foreground" Value="{StaticResource Theme.Text.Primary}"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Field" Style="{StaticResource HeaderFieldBorder}" Padding="8,0,6,0">
+                        <ContentPresenter VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Field" Property="BorderBrush" Value="{StaticResource Theme.Border.Default}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Field" Property="BorderBrush" Value="{StaticResource Theme.Border.Focus}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Field" Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
 
     <!-- ✕ inside the search box; hidden while the box is empty. -->
     <Style x:Key="SearchClearButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">

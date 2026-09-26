@@ -136,4 +136,32 @@ public sealed class SavedSearchRepositoryTests : IDisposable
         Assert.False(_repo.Exists("Gone"));
         Assert.Empty(_repo.GetAll());
     }
+
+    [Fact]
+    public void ANewSearchHasACreationTimeAndHasNeverBeenRun()
+    {
+        var before = DateTime.UtcNow.AddSeconds(-1);
+        _repo.Save(new SavedSearch("Docs", "ext:docx", SavedSearchScope.ThisPc, null));
+
+        var s = Assert.Single(_repo.GetAll());
+        Assert.InRange(s.CreatedUtc!.Value, before, DateTime.UtcNow.AddSeconds(1));
+        Assert.Equal(DateTimeKind.Utc, s.CreatedUtc.Value.Kind);
+        Assert.Null(s.LastUsedUtc);
+    }
+
+    [Fact]
+    public void MarkUsedSurvivesAnEditAndARename()
+    {
+        _repo.Save(new SavedSearch("Docs", "ext:docx", SavedSearchScope.ThisPc, null));
+        var created = Assert.Single(_repo.GetAll()).CreatedUtc;
+        var used = new DateTime(2026, 9, 1, 12, 30, 0, DateTimeKind.Utc);
+
+        _repo.MarkUsed("docs", used);
+        _repo.Save(new SavedSearch("Docs", "ext:pdf", SavedSearchScope.ThisPc, null));
+        _repo.Rename("Docs", "Papers");
+
+        var s = Assert.Single(_repo.GetAll());
+        Assert.Equal(used, s.LastUsedUtc);
+        Assert.Equal(created, s.CreatedUtc);
+    }
 }

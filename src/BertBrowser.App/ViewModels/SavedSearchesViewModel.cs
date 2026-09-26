@@ -1,12 +1,13 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using BertBrowser.Core.Models;
+using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Archives;
 using BertBrowser.Core.Services.SavedSearches;
 
 namespace BertBrowser.App.ViewModels;
 
-/// <summary>A row in the sidebar's Saved searches section.</summary>
+/// <summary>A saved search as the sidebar, the title-bar dropdown and the Settings list show it.</summary>
 public sealed class SavedSearchItemViewModel
 {
     public SavedSearch Model { get; }
@@ -23,6 +24,18 @@ public sealed class SavedSearchItemViewModel
     };
 
     public string ToolTip => $"{Model.Query} — {ScopeText}";
+
+    /// <summary>The scope as the Settings list's column shows it, without the sidebar's "in".</summary>
+    public string ScopeColumnText => Model.Scope switch
+    {
+        SavedSearchScope.Folder => "Pinned folder",
+        SavedSearchScope.ThisPc => "This PC",
+        _ => "Current folder",
+    };
+
+    public string CreatedText => RelativeTime.Day(Model.CreatedUtc?.ToLocalTime(), DateTime.Now, missing: "Unknown");
+
+    public string LastUsedText => RelativeTime.Day(Model.LastUsedUtc?.ToLocalTime(), DateTime.Now);
 
     public SavedSearchItemViewModel(SavedSearch model) => Model = model;
 }
@@ -96,10 +109,28 @@ public sealed partial class SavedSearchesViewModel : ObservableObject
         }
         await _service.SaveAsync(search);
 
+        // An edit keeps the row's dates, as the database does; a new one was created now.
+        var kept = replacing is not null ? Find(replacing)?.Model : null;
+        var stored = search with
+        {
+            CreatedUtc = search.CreatedUtc ?? kept?.CreatedUtc ?? DateTime.UtcNow,
+            LastUsedUtc = search.LastUsedUtc ?? kept?.LastUsedUtc,
+        };
+
         if (replacing is not null) RemoveItem(replacing);
-        InsertSorted(new SavedSearchItemViewModel(search));
+        InsertSorted(new SavedSearchItemViewModel(stored));
         HasItems = Items.Count > 0;
         return true;
+    }
+
+    /// <summary>Records that <paramref name="item"/> was just run, replacing its row in place.</summary>
+    public async Task MarkUsedAsync(SavedSearchItemViewModel item)
+    {
+        var now = DateTime.UtcNow;
+        await _service.MarkUsedAsync(item.Name, now);
+
+        var index = Items.IndexOf(item);
+        if (index >= 0) Items[index] = new SavedSearchItemViewModel(item.Model with { LastUsedUtc = now });
     }
 
     public async Task RemoveAsync(SavedSearchItemViewModel item)
