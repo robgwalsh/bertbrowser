@@ -221,6 +221,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "preview-mode": PreviewViewMode(rest); break;
             case "preview-fit-width": PreviewFitWidth(); break;
             case "preview-fixture": PreviewFixture(rest); break;
+            case "gif-fixture": GifFixture(rest); break;
+            case "gif": Gif(rest); break;
             case "content-fixture": ContentFixture(rest); break;
             case "many-fixture": ManyFixture(rest); break;
             case "sort": Sort(rest); break;
@@ -281,6 +283,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-no-row": AssertRow(rest, expected: false); break;
             case "assert-selected": AssertSelected(rest); break;
             case "assert-preview": AssertPreview(rest); break;
+            case "assert-gif": AssertGif(rest); break;
             case "assert-tabs": AssertTabs(rest); break;
             case "assert-panes": AssertPanes(rest); break;
             case "assert-flattened": AssertFlattened(expected: true); break;
@@ -397,6 +400,164 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         Sandbox.Stamp(root);
         output.WriteLine($"# preview fixture: {root}");
+    }
+
+    /// <summary>
+    /// An animated GIF and a still one, in a <c>Gif</c> folder of their own — its own fixture for
+    /// the reason <see cref="PreviewFixture"/> gives about <c>assert-count</c>.
+    /// </summary>
+    /// <remarks>
+    /// Written byte by byte rather than through <c>GifBitmapEncoder</c>, which cannot place a frame
+    /// anywhere but the origin or ask for a disposal — and a sub-rectangle that clears itself is
+    /// exactly what compositing has to get right. The animation is 64×64:
+    /// frame 0 fills the canvas blue with a red bar (200 ms);
+    /// frame 1 is a green 16×16 square in the middle that clears itself afterwards (200 ms);
+    /// frame 2 is a red 16×16 square at the top right, half transparent, declaring 0 ms — which
+    /// plays at 100 ms, as in every browser.
+    /// </remarks>
+    private void GifFixture(string rest)
+    {
+        var root = _sandbox.RequireInside(rest.Length == 0 ? "Gif" : rest, "gif-fixture");
+        Directory.CreateDirectory(root);
+
+        const byte transparent = 0, red = 1, green = 2, blue = 3;
+        var background = new byte[64 * 64];
+        for (var y = 0; y < 64; y++)
+            for (var x = 0; x < 64; x++)
+                background[y * 64 + x] = x < 12 ? red : blue;
+
+        var square = Enumerable.Repeat(green, 16 * 16).ToArray();
+        var corner = new byte[16 * 16];
+        for (var i = 0; i < corner.Length; i++) corner[i] = (i / 16 + i % 16) % 2 == 0 ? red : transparent;
+
+        WriteGif(Path.Combine(root, "spinner.gif"), 64, 64,
+        [
+            new GifFixtureFrame(0, 0, 64, 64, background, DelayCs: 20, Disposal: 1),
+            new GifFixtureFrame(24, 24, 16, 16, square, DelayCs: 20, Disposal: 2),
+            new GifFixtureFrame(44, 4, 16, 16, corner, DelayCs: 0, Disposal: 1),
+        ]);
+        WriteGif(Path.Combine(root, "still.gif"), 64, 64,
+        [
+            new GifFixtureFrame(0, 0, 64, 64, background, DelayCs: 0, Disposal: 0),
+        ]);
+
+        // Big enough that decoding every frame takes a visible while — what the pane must not
+        // wait for before showing the first one. A green bar sweeping across blue, whole frames.
+        const int bigWidth = 320, bigHeight = 240, bigFrames = 150;
+        var big = new List<GifFixtureFrame>(bigFrames);
+        for (var f = 0; f < bigFrames; f++)
+        {
+            var pixels = new byte[bigWidth * bigHeight];
+            var bar = f * (bigWidth - 20) / (bigFrames - 1);
+            for (var y = 0; y < bigHeight; y++)
+                for (var x = 0; x < bigWidth; x++)
+                    pixels[y * bigWidth + x] = x >= bar && x < bar + 20 ? green : blue;
+            big.Add(new GifFixtureFrame(0, 0, bigWidth, bigHeight, pixels, DelayCs: 4, Disposal: 1));
+        }
+        WriteGif(Path.Combine(root, "big.gif"), bigWidth, bigHeight, big);
+
+        Sandbox.Stamp(root);
+        output.WriteLine($"# gif fixture: {root}");
+    }
+
+    private sealed record GifFixtureFrame(int Left, int Top, int Width, int Height, byte[] Indices, int DelayCs, int Disposal);
+
+    /// <summary>
+    /// A GIF89a with a 128-colour palette, so every LZW code is exactly 8 bits — one byte — and a
+    /// clear code every hundred pixels keeps the dictionary from ever growing past that width.
+    /// Uncompressed in all but name, and readable by any decoder. Index 0 is transparent.
+    /// </summary>
+    private static void WriteGif(string path, int width, int height, IReadOnlyList<GifFixtureFrame> frames)
+    {
+        using var file = File.Create(path);
+        using var w = new BinaryWriter(file);
+
+        w.Write("GIF89a"u8);
+        w.Write((ushort)width);
+        w.Write((ushort)height);
+        w.Write((byte)0xF6);  // global colour table, 128 entries
+        w.Write((byte)0);
+        w.Write((byte)0);
+
+        var palette = new byte[128 * 3];
+        palette[3] = 0xE0; palette[4] = 0x30; palette[5] = 0x30;  // 1 red
+        palette[6] = 0x30; palette[7] = 0xC0; palette[8] = 0x50;  // 2 green
+        palette[9] = 0x30; palette[10] = 0x60; palette[11] = 0xE0; // 3 blue
+        w.Write(palette);
+
+        if (frames.Count > 1)
+        {
+            w.Write([0x21, 0xFF, 0x0B]);
+            w.Write("NETSCAPE2.0"u8);
+            w.Write([0x03, 0x01, 0x00, 0x00, 0x00]);
+        }
+
+        foreach (var frame in frames)
+        {
+            w.Write([0x21, 0xF9, 0x04, (byte)((frame.Disposal << 2) | 1)]);
+            w.Write((ushort)frame.DelayCs);
+            w.Write([0x00, 0x00]);  // transparent index 0, terminator
+
+            w.Write((byte)0x2C);
+            w.Write((ushort)frame.Left);
+            w.Write((ushort)frame.Top);
+            w.Write((ushort)frame.Width);
+            w.Write((ushort)frame.Height);
+            w.Write((byte)0);
+
+            w.Write((byte)7);  // minimum code size: codes start 8 bits wide
+            var codes = new List<byte>();
+            for (var i = 0; i < frame.Indices.Length; i++)
+            {
+                if (i % 100 == 0) codes.Add(128);  // clear
+                codes.Add(frame.Indices[i]);
+            }
+            codes.Add(129);  // end of information
+
+            for (var i = 0; i < codes.Count; i += 255)
+            {
+                var length = Math.Min(255, codes.Count - i);
+                w.Write((byte)length);
+                w.Write(codes.GetRange(i, length).ToArray());
+            }
+            w.Write((byte)0);
+        }
+
+        w.Write((byte)0x3B);
+    }
+
+    /// <summary><c>gif play</c>, <c>gif pause</c>, <c>gif seek 250</c> (milliseconds): the
+    /// animated preview's transport, pressed the way a user would.</summary>
+    private void Gif(string rest)
+    {
+        var parts = Require(rest, "gif").Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        var pane = FindNamed<PreviewPane>("PreviewPane")
+            ?? throw new InvalidOperationException("PreviewPane is not in the visual tree.");
+
+        switch (parts[0].ToLowerInvariant())
+        {
+            case "play" or "pause":
+            {
+                var wantRunning = parts[0].Equals("play", StringComparison.OrdinalIgnoreCase);
+                var button = FindNamed<Button>("GifPlayPause")
+                    ?? throw new InvalidOperationException("GifPlayPause is not in the visual tree.");
+                Invoke(() =>
+                {
+                    if (pane.IsAnimationRunning != wantRunning)
+                        button.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                });
+                break;
+            }
+            case "seek" when parts.Length == 2 && double.TryParse(parts[1], CultureInfo.InvariantCulture, out var ms):
+            {
+                var slider = FindNamed<Slider>("GifSeek")
+                    ?? throw new InvalidOperationException("GifSeek is not in the visual tree.");
+                Invoke(() => slider.Value = ms);
+                break;
+            }
+            default:
+                throw new ArgumentException($"gif: expected 'play', 'pause' or 'seek <ms>', got '{rest}'.");
+        }
     }
 
     /// <summary>
@@ -4260,6 +4421,32 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
             throw new AssertionException($"expected the preview to be '{expected}', it is '{actual}'.");
+    }
+
+    /// <summary><c>assert-gif none</c> (no animation, so no transport), <c>assert-gif playing</c>,
+    /// <c>assert-gif paused</c>, <c>assert-gif frame 2</c> (zero-based).</summary>
+    private void AssertGif(string rest)
+    {
+        var parts = Require(rest, "assert-gif").Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        var pane = FindNamed<PreviewPane>("PreviewPane")
+            ?? throw new InvalidOperationException("PreviewPane is not in the visual tree.");
+        var (animated, running, frame) = session.Dispatcher.Invoke(() =>
+            (session.Tab.Preview.HasAnimation, pane.IsAnimationRunning, pane.AnimationFrame));
+
+        var state = !animated ? "none" : running ? "playing" : "paused";
+        switch (parts[0].ToLowerInvariant())
+        {
+            case "none" or "playing" or "paused" when !state.Equals(parts[0], StringComparison.OrdinalIgnoreCase):
+                throw new AssertionException($"expected the animation to be '{parts[0]}', it is '{state}'.");
+            case "none" or "playing" or "paused":
+                break;
+            case "frame" when parts.Length == 2 && int.TryParse(parts[1], out var expected):
+                if (!animated) throw new AssertionException("expected an animation, there is none.");
+                if (frame != expected) throw new AssertionException($"expected frame {expected}, it is frame {frame}.");
+                break;
+            default:
+                throw new ArgumentException($"assert-gif: expected 'none', 'playing', 'paused' or 'frame <n>', got '{rest}'.");
+        }
     }
 
     private void AssertTabs(string rest)

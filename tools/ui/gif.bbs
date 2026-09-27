@@ -1,0 +1,90 @@
+# An animated GIF in the preview pane: it plays on its own, loops, and has a seek bar that shows
+# each frame as the thumb passes it. A still GIF gets no transport at all.
+#
+# The fixture's frames: 0 is blue with a red bar (0–200 ms), 1 adds a green square that clears
+# itself afterwards (200–400 ms), 2 is a checkered red corner declaring 0 ms, which plays at
+# 100 ms (400–500 ms). So frame 2 over frame 1's cleared square shows blue in the middle again.
+
+tree .
+gif-fixture
+refresh
+go Gif
+preview on
+
+# --- plays as soon as it is selected ---
+
+select spinner.gif
+settle 400
+assert-preview image
+assert-gif playing
+shot 01-playing PreviewPane
+
+# --- held, then scrubbed: each position shows its own frame ---
+
+gif pause
+assert-gif paused
+gif seek 250
+assert-gif frame 1
+shot 02-frame1 PreviewPane
+gif seek 450
+assert-gif frame 2
+shot 03-frame2 PreviewPane
+gif seek 0
+assert-gif frame 0
+
+# A seek while paused stays paused, so the frame chosen is the frame that stays up.
+settle 300
+assert-gif frame 0
+assert-gif paused
+
+# --- and resumes, looping rather than stopping on the last frame ---
+
+gif play
+settle 1200
+assert-gif playing
+
+# --- a big one shows its first frame and plays while the rest are still decoding ---
+#
+# Nothing waits for all 150 frames: the preview is up at "image" within the ordinary settle. A
+# seek to the end while the tail is still decoding holds the last frame there is, and fills in
+# the frame asked for once it lands — without seeking again, and while paused.
+
+select big.gif
+settle 400
+assert-preview image
+assert-gif playing
+shot 06-big PreviewPane
+gif pause
+gif seek 5999
+settle 3000
+assert-gif frame 149
+assert-gif paused
+
+# --- a one-frame GIF is just a picture ---
+
+select still.gif
+settle 400
+assert-preview image
+assert-gif none
+shot 04-still PreviewPane
+
+# --- and back to the animation, which starts over and plays by itself again ---
+
+select spinner.gif
+settle 400
+assert-gif playing
+
+# --- the light theme, for the transport strip ---
+
+gif pause
+gif seek 250
+theme light-plus
+shot 05-light PreviewPane
+theme dark-plus
+
+# Hiding the pane stops the clock; showing it again resumes only what was playing.
+gif play
+preview off
+preview on
+settle 200
+assert-gif playing

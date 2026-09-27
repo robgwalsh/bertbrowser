@@ -6,6 +6,7 @@ using BertBrowser.App.Services;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Archives;
 using BertBrowser.Core.Services.Preview;
+using BertBrowser.Core.Services.Preview.Animation;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -13,6 +14,50 @@ namespace BertBrowser.App.ViewModels;
 
 /// <summary>One line of a text preview, with the colouring for it.</summary>
 public sealed record PreviewLine(int Number, string Text, IReadOnlyList<SyntaxSpan> Spans);
+
+/// <summary>
+/// An animated image whose frames arrive while it plays. Each is a whole frozen picture, so
+/// seeking is a lookup; the first is there before this is handed to the view, the rest follow
+/// from the decoding thread in order.
+/// </summary>
+/// <remarks>
+/// Written by one thread and read by the UI thread: a frame is stored before
+/// <see cref="ReadyCount"/> moves past it, so any frame below the count is safe to show.
+/// </remarks>
+public sealed class PreviewAnimation
+{
+    private readonly BitmapSource?[] _frames;
+    private int _ready;
+    private volatile bool _stopped;
+
+    public PreviewAnimation(AnimationTimeline timeline)
+    {
+        Timeline = timeline;
+        _frames = new BitmapSource?[timeline.FrameCount];
+    }
+
+    public AnimationTimeline Timeline { get; }
+
+    public int ReadyCount => Volatile.Read(ref _ready);
+
+    public bool IsComplete => ReadyCount == _frames.Length;
+
+    /// <summary>Decoding ended early — a frame that would not decode, or the selection moved on —
+    /// so nothing past <see cref="ReadyCount"/> is coming, and playback loops over what there is.</summary>
+    public bool IsStopped => _stopped;
+
+    /// <summary>The frame asked for, or the last one decoded if it has not arrived yet.</summary>
+    public BitmapSource FrameOrEarlier(int frame) => _frames[Math.Clamp(frame, 0, ReadyCount - 1)]!;
+
+    internal void Add(BitmapSource frame)
+    {
+        var index = _ready;
+        _frames[index] = frame;
+        Volatile.Write(ref _ready, index + 1);
+    }
+
+    internal void Stop() => _stopped = true;
+}
 
 /// <summary>
 /// The preview pane for one tab: takes the file list's selection and turns it into something to
@@ -99,6 +144,14 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string? _message;
 
     [ObservableProperty] private ImageSource? _image;
+
+    /// <summary>Set for an animated GIF, alongside <see cref="Image"/> (its first frame). Played by
+    /// the view, which owns the clock — dropped with everything else when the selection moves.</summary>
+    [ObservableProperty] private PreviewAnimation? _animation;
+
+    /// <summary>Under the image when it could not be animated, saying why it is standing still.</summary>
+    [ObservableProperty] private string _imageFooter = "";
+
     [ObservableProperty] private IReadOnlyList<PreviewLine> _lines = [];
     [ObservableProperty] private string _textFooter = "";
     [ObservableProperty] private IReadOnlyList<ArchiveEntry> _archiveEntries = [];
@@ -173,6 +226,8 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
 
     public bool HasMessage => !string.IsNullOrEmpty(Message);
     public bool HasImage => !IsLoading && Image is not null && Kind is PreviewKind.Image or PreviewKind.Document;
+    public bool HasAnimation => HasImage && Animation is not null;
+    public bool HasImageFooter => HasImage && ImageFooter.Length > 0;
     public bool HasText => !IsLoading && Kind is PreviewKind.Text or PreviewKind.Hex && Lines.Count > 0;
     public bool HasArchive => !IsLoading && Kind == PreviewKind.Archive && ArchiveEntries.Count > 0;
     public bool HasFont => !IsLoading && Kind == PreviewKind.Font && FontSpecimen is not null;
@@ -371,6 +426,8 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         Kind = PreviewKind.None;
         IsLoading = false;
         Image = null;
+        Animation = null;
+        ImageFooter = "";
         Lines = [];
         TextForCopy = "";
         TextFooter = "";
@@ -400,6 +457,8 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     {
         Kind = payload.Kind;
         Image = payload.Image;
+        Animation = payload.Animation;
+        ImageFooter = payload.ImageFooter;
         Lines = payload.Lines;
         TextForCopy = payload.TextForCopy;
         TextFooter = payload.TextFooter;
@@ -443,6 +502,8 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     private void Raise()
     {
         OnPropertyChanged(nameof(HasImage));
+        OnPropertyChanged(nameof(HasAnimation));
+        OnPropertyChanged(nameof(HasImageFooter));
         OnPropertyChanged(nameof(HasText));
         OnPropertyChanged(nameof(HasArchive));
         OnPropertyChanged(nameof(HasFont));
@@ -472,6 +533,8 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         public ImageSource? Image { get; init; }
         public int ImageWidth { get; init; }
         public int ImageHeight { get; init; }
+        public PreviewAnimation? Animation { get; init; }
+        public string ImageFooter { get; init; } = "";
         public IReadOnlyList<PreviewLine> Lines { get; init; } = [];
         public string TextForCopy { get; init; } = "";
         public string TextFooter { get; init; } = "";
@@ -501,7 +564,7 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
                 // inside a zip is hexable, because OpenBounded already knows how to reach one.
                 PreviewKind.Hex => BuildHex(path, plan),
 
-                PreviewKind.Image => BuildImage(path, stamp),
+                PreviewKind.Image => BuildImage(path, stamp, ct),
                 PreviewKind.Text => BuildText(path, plan, ct),
                 PreviewKind.Archive => BuildArchive(path),
                 PreviewKind.Font when inArchive =>
@@ -617,7 +680,7 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         return buffer;
     }
 
-    private Payload BuildImage(string path, DateTime stamp)
+    private Payload BuildImage(string path, DateTime stamp, CancellationToken ct)
     {
         using var bytes = ReadFully(path, PreviewClassifier.MaxImageBytes);
         try
@@ -629,16 +692,30 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
             var frame = probe.Frames[0];
             int width = frame.PixelWidth, height = frame.PixelHeight;
 
-            bytes.Position = 0;
-            var image = new BitmapImage();
-            image.BeginInit();
-            image.StreamSource = bytes;
-            image.CacheOption = BitmapCacheOption.OnLoad; // decodes now, so the stream can go
-            if (width > MaxDecodeWidth) image.DecodePixelWidth = MaxDecodeWidth;
-            image.EndInit();
-            image.Freeze();
+            if (probe is GifBitmapDecoder { Frames.Count: > 1 } gif)
+            {
+                var (canvasWidth, canvasHeight) = GifCanvasSize(gif);
+                if (AnimationLimits.Allows(gif.Frames.Count, canvasWidth, canvasHeight))
+                {
+                    var animation = StartAnimation(bytes.ToArray(), canvasWidth, canvasHeight, ct);
+                    return new Payload
+                    {
+                        Kind = PreviewKind.Image,
+                        Image = animation.FrameOrEarlier(0),
+                        Animation = animation,
+                        ImageWidth = canvasWidth,
+                        ImageHeight = canvasHeight,
+                    };
+                }
 
-            return new Payload { Kind = PreviewKind.Image, Image = image, ImageWidth = width, ImageHeight = height };
+                // Too big to hold decoded; the still frame below is the preview it always was.
+                return BuildStill(bytes, width, height) with
+                {
+                    ImageFooter = $"{gif.Frames.Count:N0} frames  ·  too large to animate here",
+                };
+            }
+
+            return BuildStill(bytes, width, height);
         }
         catch (Exception ex) when (ex is NotSupportedException or FileFormatException or ArgumentException or OverflowException or InvalidOperationException)
         {
@@ -646,6 +723,129 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
             // extensions, most often. The shell may still have a handler for it.
             return BuildShell(path, stamp) with { Kind = PreviewKind.Image };
         }
+    }
+
+    /// <summary>The logical screen a GIF's frames are placed on. Taken from the header, and failing
+    /// that from the furthest any frame reaches — a frame's own size is only the part it changes.</summary>
+    private static (int Width, int Height) GifCanvasSize(GifBitmapDecoder gif)
+    {
+        int width = 0, height = 0;
+        try
+        {
+            if (gif.Metadata is { } meta)
+            {
+                width = Convert.ToInt32(meta.GetQuery("/logscrdesc/Width") ?? 0);
+                height = Convert.ToInt32(meta.GetQuery("/logscrdesc/Height") ?? 0);
+            }
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException or ArgumentException or InvalidCastException)
+        {
+        }
+
+        if (width > 0 && height > 0) return (width, height);
+
+        foreach (var frame in gif.Frames)
+        {
+            var meta = frame.Metadata as BitmapMetadata;
+            width = Math.Max(width, GifQuery(meta, "/imgdesc/Left") + frame.PixelWidth);
+            height = Math.Max(height, GifQuery(meta, "/imgdesc/Top") + frame.PixelHeight);
+        }
+        return (width, height);
+    }
+
+    private static int GifQuery(BitmapMetadata? meta, string query)
+    {
+        try
+        {
+            return meta?.GetQuery(query) is { } value ? Convert.ToInt32(value) : 0;
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException or ArgumentException or InvalidCastException or OverflowException)
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Starts decoding a GIF on a thread of its own and returns as soon as the first frame is
+    /// ready, so the pane shows the picture — and starts playing — without waiting for the rest.
+    /// </summary>
+    /// <remarks>
+    /// One thread owns the decoder from start to finish because a <see cref="BitmapDecoder"/> is a
+    /// <c>DispatcherObject</c>: the frames it hands out answer only to the thread that made it.
+    /// <see cref="BitmapCacheOption.None"/>, not <c>OnLoad</c> — <c>OnLoad</c> decodes every frame
+    /// in the constructor, which was the whole wait. Only the delays are read up front (metadata,
+    /// no pixels), because the seek bar needs the full length from the start. Cancelled with the
+    /// preview that asked for it, so moving the selection stops the decoding too.
+    /// </remarks>
+    private static PreviewAnimation StartAnimation(byte[] bytes, int width, int height, CancellationToken ct)
+    {
+        var first = new TaskCompletionSource<PreviewAnimation>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task.Factory.StartNew(() =>
+        {
+            PreviewAnimation? animation = null;
+            try
+            {
+                using var stream = new MemoryStream(bytes, writable: false);
+                var decoder = new GifBitmapDecoder(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.None);
+                var metas = decoder.Frames.Select(f => f.Metadata as BitmapMetadata).ToList();
+
+                animation = new PreviewAnimation(new AnimationTimeline(
+                    metas.Select(m => GifQuery(m, "/grctlext/Delay") * 10).ToList()));
+                var compositor = new GifFrameCompositor(width, height);
+
+                for (var i = 0; i < decoder.Frames.Count; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var frame = decoder.Frames[i];
+                    var meta = metas[i];
+
+                    var converted = new FormatConvertedBitmap(frame, PixelFormats.Bgra32, null, 0);
+                    var stride = frame.PixelWidth * 4;
+                    var pixels = new byte[stride * frame.PixelHeight];
+                    converted.CopyPixels(pixels, stride, 0);
+
+                    var disposal = GifQuery(meta, "/grctlext/Disposal") switch
+                    {
+                        2 => GifDisposal.Clear,
+                        3 => GifDisposal.Restore,
+                        _ => GifDisposal.Keep,
+                    };
+                    var picture = compositor.Next(new GifSubFrame(
+                        GifQuery(meta, "/imgdesc/Left"), GifQuery(meta, "/imgdesc/Top"),
+                        frame.PixelWidth, frame.PixelHeight, pixels, disposal));
+
+                    var bitmap = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, picture, width * 4);
+                    bitmap.Freeze();
+                    animation.Add(bitmap);
+
+                    if (i == 0) first.TrySetResult(animation);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Before the first frame, the caller's own catch decides (the shell fallback, or a
+                // cancellation). After it, whatever decoded is what plays.
+                if (!first.TrySetException(ex)) animation?.Stop();
+            }
+        }, ct, TaskCreationOptions.LongRunning, TaskScheduler.Default)
+            .ContinueWith(t => first.TrySetCanceled(ct), TaskContinuationOptions.OnlyOnCanceled);
+
+        return first.Task.GetAwaiter().GetResult();
+    }
+
+    private static Payload BuildStill(MemoryStream bytes, int width, int height)
+    {
+        bytes.Position = 0;
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.StreamSource = bytes;
+        image.CacheOption = BitmapCacheOption.OnLoad; // decodes now, so the stream can go
+        if (width > MaxDecodeWidth) image.DecodePixelWidth = MaxDecodeWidth;
+        image.EndInit();
+        image.Freeze();
+
+        return new Payload { Kind = PreviewKind.Image, Image = image, ImageWidth = width, ImageHeight = height };
     }
 
     /// <param name="guessing">True when nothing about the file <em>said</em> it was text and this

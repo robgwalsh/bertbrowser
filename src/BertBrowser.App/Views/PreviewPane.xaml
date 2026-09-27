@@ -240,25 +240,55 @@
                  rebuilt when they change: a tiling brush caches its realisation, so recolouring a
                  brush inside one does not repaint it.
                  Laid out fitted to the pane, up or down; zoom and pan are a render transform over
-                 that (see ImageZoom), so a wheel notch never costs a layout pass. -->
-            <Border x:Name="ImageBackdrop" ClipToBounds="True"
-                    MouseLeftButtonDown="Image_MouseDown" MouseMove="Image_MouseMove"
-                    MouseLeftButtonUp="Image_MouseUp" LostMouseCapture="Image_LostCapture"
-                    MouseWheel="Image_MouseWheel" SizeChanged="ImageBackdrop_SizeChanged"
-                    Visibility="{Binding HasImage, Converter={StaticResource BoolToVisibility}}">
-                <Image x:Name="PreviewImage" Source="{Binding Image}"
-                       RenderOptions.BitmapScalingMode="HighQuality"
-                       HorizontalAlignment="Center" VerticalAlignment="Center"
-                       Stretch="Uniform" StretchDirection="Both"
-                       RenderTransformOrigin="0,0" SizeChanged="ImageBackdrop_SizeChanged">
-                    <Image.RenderTransform>
-                        <TransformGroup>
-                            <ScaleTransform x:Name="ImageScale"/>
-                            <TranslateTransform x:Name="ImageOffset"/>
-                        </TransformGroup>
-                    </Image.RenderTransform>
-                </Image>
-            </Border>
+                 that (see ImageZoom), so a wheel notch never costs a layout pass.
+                 An animated GIF plays in this same Image — the view swaps its source frame by
+                 frame (see the animation section) — with a transport strip underneath. -->
+            <DockPanel Visibility="{Binding HasImage, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource PreviewFooterText}"
+                           Text="{Binding ImageFooter}"
+                           Visibility="{Binding HasImageFooter, Converter={StaticResource BoolToVisibility}}"/>
+
+                <Grid x:Name="GifTransport" DockPanel.Dock="Bottom" Margin="6,2,6,4"
+                      AutomationProperties.AutomationId="GifTransport"
+                      Visibility="{Binding HasAnimation, Converter={StaticResource BoolToVisibility}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="GifPlayPause" Grid.Column="0" Style="{StaticResource MediaButton}"
+                            Content="{StaticResource Icon.Pause}" ToolTip="Play or pause (Space)"
+                            AutomationProperties.AutomationId="GifPlayPause"
+                            Click="GifPlayPause_Click"/>
+                    <!-- Pressed anywhere and dragged, it shows each frame under the cursor (SliderScrubber). -->
+                    <Slider x:Name="GifSeek" Grid.Column="1" Margin="4,0" VerticalAlignment="Center"
+                            Minimum="0"
+                            AutomationProperties.AutomationId="GifSeek"
+                            ValueChanged="GifSeek_ValueChanged"/>
+                    <TextBlock x:Name="GifTimeText" Grid.Column="2" VerticalAlignment="Center"
+                               FontSize="11" Margin="4,0,2,0"
+                               Foreground="{StaticResource Theme.Text.Secondary}"/>
+                </Grid>
+
+                <Border x:Name="ImageBackdrop" ClipToBounds="True" Focusable="True" FocusVisualStyle="{x:Null}"
+                        MouseLeftButtonDown="Image_MouseDown" MouseMove="Image_MouseMove"
+                        MouseLeftButtonUp="Image_MouseUp" LostMouseCapture="Image_LostCapture"
+                        MouseWheel="Image_MouseWheel" SizeChanged="ImageBackdrop_SizeChanged"
+                        KeyDown="ImageBackdrop_KeyDown">
+                    <Image x:Name="PreviewImage" Source="{Binding Image}"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Stretch="Uniform" StretchDirection="Both"
+                           RenderTransformOrigin="0,0" SizeChanged="ImageBackdrop_SizeChanged">
+                        <Image.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform x:Name="ImageScale"/>
+                                <TranslateTransform x:Name="ImageOffset"/>
+                            </TransformGroup>
+                        </Image.RenderTransform>
+                    </Image>
+                </Border>
+            </DockPanel>
 
             <!-- Text and code. A RichTextBox rather than a TextBlock so the text can be selected
                  and copied, which Explorer's pane cannot do; the gutter is a single TextBlock
@@ -386,12 +416,11 @@
                             <ColumnDefinition Width="70"/>
                         </Grid.ColumnDefinitions>
 
-                        <!-- Dragging the thumb seeks as it goes (see Seek_ValueChanged), not on release. -->
+                        <!-- Pressed anywhere and dragged, it seeks as it goes (SliderScrubber, Seek_ValueChanged), not on release. -->
                         <Slider x:Name="Seek" Grid.ColumnSpan="6" Margin="2,0,2,2" VerticalAlignment="Center"
-                                Minimum="0" IsMoveToPointEnabled="True"
+                                Minimum="0"
                                 AutomationProperties.AutomationId="MediaSeek"
-                                ValueChanged="Seek_ValueChanged"
-                                Thumb.DragStarted="Seek_DragStarted" Thumb.DragCompleted="Seek_DragCompleted"/>
+                                ValueChanged="Seek_ValueChanged"/>
 
                         <Button x:Name="PlayPause" Grid.Row="1" Grid.Column="0" Style="{StaticResource MediaButton}"
                                 Content="{StaticResource Icon.Pause}" ToolTip="Play or pause (Space in full screen)"

@@ -84,6 +84,7 @@ you where and what to watch for.
 | Default folder handler (shell) | `Core/Services/ShellIntegration/*`, `App/Interop/FolderHandlerRegistry` |
 | Preview pane (incl. hex/raw) | `Core/Services/Preview/*` (`PreviewClassifier`, `TextPreviewReader`, `HexPreviewReader`, `SyntaxTokenizer`) |
 | Video playback in the preview (scrub, next, full screen) | `Core/Services/Preview/MediaPlaylist`, `Views/PreviewPane` (media + full-screen sections; `MediaHost` is lent to a borderless window, hence `UnloadedBehavior="Manual"`), `DirectoryTabView.Preview_NextMediaRequested` |
+| Animated GIFs in the preview (autoplay, loop, scrub) | `Core/Services/Preview/Animation/*` (`AnimationTimeline`, `GifFrameCompositor`, `AnimationLimits`), `PreviewPaneViewModel.StartAnimation` (one thread owns the decoder — it's a `DispatcherObject` — and returns after frame 0; never `BitmapCacheOption.OnLoad`, which decodes every frame first), `Views/PreviewPane` (animation section: frames swapped via `SetCurrentValue` so the `Image` binding and zoom survive; the clock holds at an undecoded frame), `Views/SliderScrubber` (both seek bars: press anywhere and drag, since a `Slider` only drags from its thumb), `tools/ui/gif.bbs` |
 | Archives (zip/7z/tar/rar) | `Core/Services/Archives/*` (`ArchivePath`, `ArchiveReader`, `ArchiveIndexBuilder`) |
 | Settings page | `ViewModels/SettingsViewModel` (`Apply`, `TryLeave`), `Views/SettingsView`, `MainWindow.ShowSettings`/`CloseSettings`, `tools/ui/settings.bbs` |
 | Theming | `Core/Theming/*` (`ThemeCatalog`, `ThemeResolver`), `App/Theming/*` |

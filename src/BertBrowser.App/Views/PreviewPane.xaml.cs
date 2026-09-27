@@ -42,7 +42,17 @@ public partial class PreviewPane : UserControl
         Gutter.FontSize = 12;
 
         _mediaTick.Tick += MediaTick;
+        _scrubTrail.Tick += ScrubTrail_Tick;
+        _animationTick.Tick += AnimationTick;
+
+        var seekScrubber = new SliderScrubber(Seek);
+        seekScrubber.Started += Seek_ScrubStarted;
+        seekScrubber.Completed += Seek_ScrubCompleted;
+        var gifScrubber = new SliderScrubber(GifSeek);
+        gifScrubber.Started += GifSeek_ScrubStarted;
+        gifScrubber.Completed += GifSeek_ScrubCompleted;
         DataContextChanged += OnDataContextChanged;
+        IsVisibleChanged += OnIsVisibleChanged;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
     }
@@ -51,6 +61,7 @@ public partial class PreviewPane : UserControl
     {
         HookCheckerboard();
         HookGutterScrolling();
+        if (_animationPlaying) ResumeAnimationClock();
     }
 
     /// <summary>Raised when the fit-width button is pressed. The pane's own column belongs to
@@ -116,6 +127,7 @@ public partial class PreviewPane : UserControl
         _mediaTick.Stop();
         MediaView.Close();
         SetPlaying(false);
+        PauseAnimationClock();
     }
 
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -134,6 +146,8 @@ public partial class PreviewPane : UserControl
         ExitFullScreen();
         _mediaTick.Stop();
         MediaView.Close();
+        _animation = null;
+        PauseAnimationClock();
         UnhookCheckerboard();
     }
 
@@ -157,6 +171,9 @@ public partial class PreviewPane : UserControl
                 break;
             case nameof(PreviewPaneViewModel.MediaSource):
                 StartOrStopMedia();
+                break;
+            case nameof(PreviewPaneViewModel.Animation):
+                StartOrStopAnimation();
                 break;
             case nameof(PreviewPaneViewModel.StateName):
                 // The selection moved to something that is not media: nothing is left to show full
@@ -297,6 +314,10 @@ public partial class PreviewPane : UserControl
 
     private void Image_MouseDown(object sender, MouseButtonEventArgs e)
     {
+        // So Space reaches ImageBackdrop_KeyDown. Only when there is something to play: otherwise a
+        // click on a still picture would take the keyboard away from the list for nothing.
+        if (_model is { HasAnimation: true }) ImageBackdrop.Focus();
+
         if (e.ClickCount == 2)
         {
             _model?.ToggleFitCommand.Execute(null);
@@ -575,14 +596,19 @@ public partial class PreviewPane : UserControl
     private static string Clock(TimeSpan t) =>
         t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");
 
+    /// <summary>Fires once a throttled scrub has gone quiet, so the frame under a cursor that has
+    /// stopped moving is the one shown — not the last one the throttle happened to let through.</summary>
+    private readonly DispatcherTimer _scrubTrail = new() { Interval = TimeSpan.FromMilliseconds(ScrubIntervalMs) };
+
     /// <summary>
-    /// Every move of the seek bar that is not the tick's is the user's, and seeks: a drag as it
-    /// goes, a click on the track or an arrow key at once.
+    /// Every move of the seek bar that is not the tick's is the user's, and seeks: a scrub as it
+    /// goes, an arrow key at once.
     /// </summary>
     /// <remarks>
-    /// While dragging, the video is paused and <c>ScrubbingEnabled</c> has the decoder paint each
-    /// frame it lands on — the picture follows the thumb. Seeks are throttled to
-    /// <see cref="ScrubIntervalMs"/>; the drag's last position is always applied on release.
+    /// While scrubbing, the video is paused and <c>ScrubbingEnabled</c> has the decoder paint each
+    /// frame it lands on — the picture follows the cursor. Seeks are throttled to
+    /// <see cref="ScrubIntervalMs"/>, with a trailing seek (<see cref="_scrubTrail"/>) so a held
+    /// cursor always catches up; the last position is applied again on release.
     /// </remarks>
     private void Seek_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
@@ -593,26 +619,289 @@ public partial class PreviewPane : UserControl
         if (_seeking)
         {
             var now = Environment.TickCount64;
-            if (now - _lastScrubTick < ScrubIntervalMs) return;
+            if (now - _lastScrubTick < ScrubIntervalMs)
+            {
+                if (!_scrubTrail.IsEnabled) _scrubTrail.Start();
+                return;
+            }
             _lastScrubTick = now;
+            _scrubTrail.Stop();
         }
         MediaView.Position = target;
     }
 
-    private void Seek_DragStarted(object sender, DragStartedEventArgs e)
+    private void ScrubTrail_Tick(object? sender, EventArgs e)
+    {
+        _scrubTrail.Stop();
+        if (!_seeking || MediaView.Source is null) return;
+        _lastScrubTick = Environment.TickCount64;
+        MediaView.Position = TimeSpan.FromSeconds(Seek.Value);
+    }
+
+    private void Seek_ScrubStarted(object? sender, EventArgs e)
     {
         _seeking = true;
+        _lastScrubTick = 0; // the press itself always seeks
         _resumeAfterScrub = _playing;
         if (_playing) MediaView.Pause();
     }
 
-    private void Seek_DragCompleted(object sender, DragCompletedEventArgs e)
+    private void Seek_ScrubCompleted(object? sender, EventArgs e)
     {
         _seeking = false;
+        _scrubTrail.Stop();
         if (MediaView.Source is null) return;
         MediaView.Position = TimeSpan.FromSeconds(Seek.Value);
         UpdateTimeText(MediaView.Position);
         if (_resumeAfterScrub) MediaView.Play();
+    }
+
+    // --- animation ---
+
+    /// <summary>
+    /// Plays an animated GIF by swapping <c>PreviewImage</c>'s source, so zoom, pan and fit apply
+    /// to it exactly as to a still.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The frame shown is always read off a clock — <see cref="_animationClock"/> plus
+    /// <see cref="_animationOffsetMs"/> — never counted by ticks, so a late tick skips ahead rather
+    /// than slowing the animation down. The timer is re-armed each tick for exactly the time left
+    /// on the current frame, and stopped whenever nothing would see it: paused, hidden, unloaded.
+    /// </para>
+    /// <para>
+    /// <c>SetCurrentValue</c>, not an assignment, so the <c>{Binding Image}</c> survives and the
+    /// next selection still arrives through it — and the view model's <c>Image</c> never moves,
+    /// which is what keeps <see cref="OnModelChanged"/> from resetting the zoom on every frame.
+    /// </para>
+    /// </remarks>
+    private readonly DispatcherTimer _animationTick = new();
+    private readonly System.Diagnostics.Stopwatch _animationClock = new();
+    private PreviewAnimation? _animation;
+    private long _animationOffsetMs;
+    private int _animationFrame = -1;
+
+    /// <summary>What the user asked for: playing, or held. The clock can be stopped while this is
+    /// true — the pane was hidden — and resumes when it can be seen again.</summary>
+    private bool _animationPlaying;
+
+    private bool _tickMovingGifSeek;
+    private bool _gifSeeking;
+    private bool _resumeAfterGifScrub;
+
+    private long AnimationPosition => _animationOffsetMs + _animationClock.ElapsedMilliseconds;
+
+    /// <summary>What the harness asserts on: whether the clock is running, and which frame is up
+    /// (-1 with no animation).</summary>
+    public bool IsAnimationRunning => _animationClock.IsRunning;
+    public int AnimationFrame => _animation is null ? -1 : _animationFrame;
+
+    private void StartOrStopAnimation()
+    {
+        PauseAnimationClock();
+        _animation = _model?.Animation;
+        _animationOffsetMs = 0;
+        _animationClock.Reset();
+        _animationFrame = -1;
+
+        if (_animation is null)
+        {
+            _animationPlaying = false;
+            GifTimeText.Text = "";
+            return;
+        }
+
+        var timeline = _animation.Timeline;
+        // Guarded: a smaller Maximum coerces the old GIF's Value, and that change is not a seek.
+        _tickMovingGifSeek = true;
+        GifSeek.Value = 0;
+        // The last millisecond of the loop, not its length: Duration itself wraps back to frame 0,
+        // and a thumb dragged to the very end should hold on the last frame.
+        GifSeek.Maximum = timeline.Duration - 1;
+        _tickMovingGifSeek = false;
+        GifSeek.SmallChange = Math.Max(1, timeline.Duration / timeline.FrameCount);
+        GifSeek.LargeChange = Math.Max(GifSeek.SmallChange, timeline.Duration / 10);
+
+        SetAnimationPlaying(true);
+        ShowAnimationAt(0);
+        ResumeAnimationClock();
+    }
+
+    private void SetAnimationPlaying(bool playing)
+    {
+        _animationPlaying = playing;
+        GifPlayPause.Content = FindResource(playing ? "Icon.Pause" : "Icon.Play");
+    }
+
+    /// <summary>Starts the clock if the user wants it playing and anyone can see it.</summary>
+    private void ResumeAnimationClock()
+    {
+        if (_animation is null || !_animationPlaying || _gifSeeking || !IsVisible) return;
+        _animationClock.Start();
+        ArmAnimationTick();
+    }
+
+    /// <summary>Stops the clock where it is, folding the elapsed time into the offset.</summary>
+    private void PauseAnimationClock()
+    {
+        _animationTick.Stop();
+        if (!_animationClock.IsRunning) return;
+        _animationOffsetMs = AnimationPosition;
+        _animationClock.Reset();
+    }
+
+    private void ArmAnimationTick()
+    {
+        if (_animation is null) return;
+        _animationTick.Stop();
+        _animationTick.Interval = TimeSpan.FromMilliseconds(_animation.Timeline.UntilNextFrame(AnimationPosition));
+        _animationTick.Start();
+    }
+
+    private void AnimationTick(object? sender, EventArgs e)
+    {
+        if (_animation is null)
+        {
+            _animationTick.Stop();
+            return;
+        }
+        if (!_animationClock.IsRunning)
+        {
+            // Held on a frame that had not decoded yet (see ShowAnimationAt): fill it in once it
+            // lands, then stop.
+            _animationTick.Stop();
+            ShowAnimationAt(_animationOffsetMs);
+            return;
+        }
+
+        var timeline = _animation.Timeline;
+
+        // Folded back into one pass now and then, so the offset never grows without bound.
+        if (_animationOffsetMs > timeline.Duration * 1000) _animationOffsetMs = timeline.Wrap(_animationOffsetMs);
+
+        var position = AnimationPosition;
+        var frame = timeline.FrameAt(position);
+        if (frame >= _animation.ReadyCount)
+        {
+            // The clock has caught up with the decoder. If nothing more is coming, loop over
+            // what did decode; otherwise hold at the start of the missing frame until it lands —
+            // buffering, as a video would, rather than skipping frames nobody has seen.
+            _animationOffsetMs = _animation.IsStopped ? 0 : timeline.StartOf(frame);
+            _animationClock.Restart();
+            ShowAnimationAt(_animationOffsetMs);
+            if (!_animation.IsStopped)
+            {
+                _animationTick.Stop();
+                _animationTick.Interval = TimeSpan.FromMilliseconds(15);
+                _animationTick.Start();
+                return;
+            }
+        }
+        else
+        {
+            ShowAnimationAt(position);
+        }
+        ArmAnimationTick();
+    }
+
+    private void ShowAnimationAt(long positionMs)
+    {
+        if (_animation is null) return;
+        var timeline = _animation.Timeline;
+        var position = timeline.Wrap(positionMs);
+        // A frame not decoded yet shows the last one that is; the tick fills it in once it lands —
+        // while playing that is the ordinary tick, while held it is armed here.
+        var wanted = timeline.FrameAt(position);
+        var frame = Math.Min(wanted, _animation.ReadyCount - 1);
+        if (wanted > frame && !_animation.IsStopped && !_animationClock.IsRunning)
+        {
+            _animationTick.Stop();
+            _animationTick.Interval = TimeSpan.FromMilliseconds(30);
+            _animationTick.Start();
+        }
+
+        if (frame != _animationFrame)
+        {
+            _animationFrame = frame;
+            PreviewImage.SetCurrentValue(Image.SourceProperty, _animation.FrameOrEarlier(frame));
+        }
+
+        if (!_gifSeeking)
+        {
+            _tickMovingGifSeek = true;
+            GifSeek.Value = position;
+            _tickMovingGifSeek = false;
+        }
+
+        var text = $"{frame + 1} / {timeline.FrameCount}  ·  {AnimationClockText(position)} / {AnimationClockText(timeline.Duration)}";
+        if (!_animation.IsComplete && !_animation.IsStopped)
+            text += $"  ·  loading {_animation.ReadyCount * 100 / timeline.FrameCount}%";
+        GifTimeText.Text = text;
+    }
+
+    private static string AnimationClockText(long ms) =>
+        TimeSpan.FromMilliseconds(ms).ToString(ms >= 60_000 ? @"m\:ss\.f" : @"s\.f");
+
+    private void ToggleAnimation()
+    {
+        if (_animation is null) return;
+        if (_animationPlaying)
+        {
+            PauseAnimationClock();
+            SetAnimationPlaying(false);
+        }
+        else
+        {
+            SetAnimationPlaying(true);
+            ResumeAnimationClock();
+        }
+    }
+
+    private void GifPlayPause_Click(object sender, RoutedEventArgs e) => ToggleAnimation();
+
+    private void ImageBackdrop_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Space || _animation is null) return;
+        ToggleAnimation();
+        e.Handled = true;
+    }
+
+    /// <summary>Every move of the seek bar that is not the tick's is the user's: a scrub, an arrow
+    /// key. Each shows its frame at once — a frame is a lookup, so unlike the video's seek bar this
+    /// needs no throttle, and the picture keeps up with the cursor.</summary>
+    private void GifSeek_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_tickMovingGifSeek || _animation is null) return;
+
+        var running = _animationClock.IsRunning;
+        PauseAnimationClock();
+        _animationOffsetMs = (long)e.NewValue;
+        ShowAnimationAt(_animationOffsetMs);
+        if (running) ResumeAnimationClock();
+    }
+
+    private void GifSeek_ScrubStarted(object? sender, EventArgs e)
+    {
+        _resumeAfterGifScrub = _animationPlaying;
+        PauseAnimationClock();
+        _gifSeeking = true;
+    }
+
+    private void GifSeek_ScrubCompleted(object? sender, EventArgs e)
+    {
+        _gifSeeking = false;
+        if (_animation is null) return;
+        _animationOffsetMs = (long)GifSeek.Value;
+        ShowAnimationAt(_animationOffsetMs);
+        if (_resumeAfterGifScrub) ResumeAnimationClock();
+    }
+
+    /// <summary>A hidden pane — preview toggled off, another tab in front — stops the clock rather
+    /// than decoding nothing for nobody; showing it again picks up where it was.</summary>
+    private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (IsVisible) ResumeAnimationClock();
+        else PauseAnimationClock();
     }
 
     // --- full screen ---
