@@ -107,6 +107,14 @@ public sealed class AppSettings
     /// list. Off by default: selecting a file should never start a chain of playback on its own.</summary>
     public bool PreviewAutoAdvance { get; set; }
 
+    /// <summary>Whether a video that finishes in the preview pane starts over. The alternative to
+    /// <see cref="PreviewAutoAdvance"/> — at most one of the two is ever on.</summary>
+    public bool PreviewLoop { get; set; }
+
+    /// <summary>Whether selecting a video in the preview pane starts playing it, rather than
+    /// stopping at its poster frame. Off by default for the same reason as auto-advance.</summary>
+    public bool PreviewAutoPlay { get; set; }
+
     /// <summary>The file list's columns, in order, with their widths. Null means the user has never
     /// configured them, which is what ships <c>ColumnCatalog.Defaults()</c>; an empty list means they
     /// stripped it back on purpose and is honoured as such. Same distinction as

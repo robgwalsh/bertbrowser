@@ -129,6 +129,8 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         _archiveReader = archiveReader;
         _passwords = passwords;
         _autoAdvance = settings.PreviewAutoAdvance;
+        _loop = settings.PreviewLoop && !settings.PreviewAutoAdvance;
+        _autoPlay = settings.PreviewAutoPlay;
         _detailsCollapsed = settings.PreviewDetailsCollapsed;
     }
 
@@ -163,9 +165,10 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     /// <summary>The text as one string, for copying; <see cref="Lines"/> is for rendering.</summary>
     public string TextForCopy { get; private set; } = "";
 
-    /// <summary>Set only once the user presses play. Until then the pane shows a poster frame and
-    /// the file is not open — which is also why the harness can photograph a video without ever
-    /// starting a media pipeline.</summary>
+    /// <summary>Set only once the user presses play, or on arrival with <see cref="AutoPlay"/> on.
+    /// Until then the pane shows a poster frame and the file is not open — which is also why the
+    /// harness can photograph a video without ever starting a media pipeline (autoplay is off
+    /// unless a settings file says otherwise).</summary>
     [ObservableProperty] private Uri? _mediaSource;
 
     [ObservableProperty] private bool _canPlayMedia;
@@ -173,7 +176,27 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     /// <summary>Continue to the next video in the list when this one ends. Persisted globally.</summary>
     [ObservableProperty] private bool _autoAdvance;
 
-    partial void OnAutoAdvanceChanged(bool value) => _settings.PreviewAutoAdvance = value;
+    partial void OnAutoAdvanceChanged(bool value)
+    {
+        _settings.PreviewAutoAdvance = value;
+        if (value) Loop = false;
+    }
+
+    /// <summary>Start this video over when it ends. The other answer to "what happens at the end",
+    /// so turning it on turns <see cref="AutoAdvance"/> off and vice versa. Persisted globally.</summary>
+    [ObservableProperty] private bool _loop;
+
+    partial void OnLoopChanged(bool value)
+    {
+        _settings.PreviewLoop = value;
+        if (value) AutoAdvance = false;
+    }
+
+    /// <summary>Play a video as soon as it is selected instead of stopping at its poster frame.
+    /// Persisted globally.</summary>
+    [ObservableProperty] private bool _autoPlay;
+
+    partial void OnAutoPlayChanged(bool value) => _settings.PreviewAutoPlay = value;
 
     /// <summary>The details strip folded down to its header — room given back to a video.</summary>
     [ObservableProperty] private bool _detailsCollapsed;
@@ -270,6 +293,12 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
 
     [RelayCommand]
     private void ToggleAutoAdvance() => AutoAdvance = !AutoAdvance;
+
+    [RelayCommand]
+    private void ToggleLoop() => Loop = !Loop;
+
+    [RelayCommand]
+    private void ToggleAutoPlay() => AutoPlay = !AutoPlay;
 
     [RelayCommand]
     private void ToggleDetails() => DetailsCollapsed = !DetailsCollapsed;
@@ -480,8 +509,11 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
 
         var autoPlay = _playWhenLoaded;
         _playWhenLoaded = null;
-        if (autoPlay is not null && payload.Kind == PreviewKind.Media
-            && string.Equals(autoPlay, _target?.FullPath, StringComparison.OrdinalIgnoreCase))
+        if (payload.Kind != PreviewKind.Media || _target is null) return;
+
+        // Autoplay is for videos: arrowing down a folder of songs should not play each in turn.
+        if ((autoPlay is not null && string.Equals(autoPlay, _target.FullPath, StringComparison.OrdinalIgnoreCase))
+            || (AutoPlay && PreviewClassifier.IsVideo(_target.Name)))
             PlayMedia();
     }
 

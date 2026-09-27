@@ -562,8 +562,14 @@ public partial class PreviewPane : UserControl
     {
         // Rewound rather than closed: pressing play again should not have to reopen the file. With
         // auto-advance on, the tab then selects the next video, whose arrival replaces this one;
-        // at the end of the list nothing comes, and this rewound state is where it stops.
+        // at the end of the list nothing comes, and this rewound state is where it stops. With loop
+        // on it simply carries on from the start.
         MediaView.Position = TimeSpan.Zero;
+        if (_model is { Loop: true })
+        {
+            MediaView.Play();
+            return;
+        }
         MediaView.Pause();
         SetPlaying(false);
         if (_model is { AutoAdvance: true }) _model.PlayNextCommand.Execute(null);

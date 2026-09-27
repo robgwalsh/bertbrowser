@@ -413,11 +413,26 @@
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="70"/>
                         </Grid.ColumnDefinitions>
+                        <Grid.Resources>
+                            <!-- A toggle's state rides on Tag, so the three share one style. -->
+                            <Style x:Key="MediaToggle" TargetType="Button" BasedOn="{StaticResource MediaButton}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="True">
+                                        <Setter Property="Background"
+                                                Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
+                                        <Setter Property="Foreground"
+                                                Value="{StaticResource Theme.Toolbar.CheckedForeground}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Grid.Resources>
 
                         <!-- Pressed anywhere and dragged, it seeks as it goes (SliderScrubber, Seek_ValueChanged), not on release. -->
-                        <Slider x:Name="Seek" Grid.ColumnSpan="6" Margin="2,0,2,2" VerticalAlignment="Center"
+                        <Slider x:Name="Seek" Grid.ColumnSpan="8" Margin="2,0,2,2" VerticalAlignment="Center"
                                 Minimum="0"
                                 AutomationProperties.AutomationId="MediaSeek"
                                 ValueChanged="Seek_ValueChanged"/>
@@ -433,29 +448,28 @@
                         <TextBlock x:Name="TimeText" Grid.Row="1" Grid.Column="2" VerticalAlignment="Center"
                                    FontSize="11" Margin="6,0,6,0" TextTrimming="CharacterEllipsis"
                                    Foreground="{StaticResource Theme.Text.Secondary}"/>
-                        <Button Grid.Row="1" Grid.Column="3" Content="{StaticResource Icon.AutoAdvance}"
+                        <Button Grid.Row="1" Grid.Column="3" Style="{StaticResource MediaToggle}"
+                                Content="{StaticResource Icon.AutoPlay}" Tag="{Binding AutoPlay}"
+                                AutomationProperties.AutomationId="MediaAutoPlay"
+                                ToolTip="Start videos as soon as they are selected"
+                                Command="{Binding ToggleAutoPlayCommand}"/>
+                        <!-- Loop and auto-advance are two answers to one question, so at most one is lit. -->
+                        <Button Grid.Row="1" Grid.Column="4" Style="{StaticResource MediaToggle}"
+                                Content="{StaticResource Icon.LoopOne}" Tag="{Binding Loop}"
+                                AutomationProperties.AutomationId="MediaLoop"
+                                ToolTip="Replay this video when it ends"
+                                Command="{Binding ToggleLoopCommand}"/>
+                        <Button Grid.Row="1" Grid.Column="5" Style="{StaticResource MediaToggle}"
+                                Content="{StaticResource Icon.AutoAdvance}" Tag="{Binding AutoAdvance}"
                                 AutomationProperties.AutomationId="MediaAutoAdvance"
                                 ToolTip="Play the next video when this one ends"
-                                Command="{Binding ToggleAutoAdvanceCommand}">
-                            <Button.Style>
-                                <Style TargetType="Button" BasedOn="{StaticResource MediaButton}">
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding AutoAdvance}" Value="True">
-                                            <Setter Property="Background"
-                                                    Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
-                                            <Setter Property="Foreground"
-                                                    Value="{StaticResource Theme.Toolbar.CheckedForeground}"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Button.Style>
-                        </Button>
-                        <Button x:Name="FullScreenButton" Grid.Row="1" Grid.Column="4" Style="{StaticResource MediaButton}"
+                                Command="{Binding ToggleAutoAdvanceCommand}"/>
+                        <Button x:Name="FullScreenButton" Grid.Row="1" Grid.Column="6" Style="{StaticResource MediaButton}"
                                 Content="{StaticResource Icon.FullScreen}"
                                 AutomationProperties.AutomationId="MediaFullScreen"
                                 ToolTip="Full screen (double-click the video; Esc to leave)"
                                 Click="FullScreen_Click"/>
-                        <Slider Grid.Row="1" Grid.Column="5" VerticalAlignment="Center" Minimum="0" Maximum="1"
+                        <Slider Grid.Row="1" Grid.Column="7" VerticalAlignment="Center" Minimum="0" Maximum="1"
                                 Value="{Binding Volume, ElementName=MediaView, Mode=TwoWay}"
                                 ToolTip="Volume"/>
                     </Grid>
