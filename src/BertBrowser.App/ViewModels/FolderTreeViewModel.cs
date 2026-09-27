@@ -486,7 +486,10 @@ public sealed class FolderTreeViewModel
 
 public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarNode
 {
-    private static readonly DirectoryNodeViewModel Placeholder = new();
+    /// <summary>The "…" row shown under an unexpanded node. One per node, one level deeper than it:
+    /// a shared instance had to have some depth, and depth 0 styled it as a 40px drive tile — so
+    /// expanding a folder grew the tree by a tile, then snapped back once the real rows arrived.</summary>
+    private DirectoryNodeViewModel? _placeholder;
 
     private readonly FolderTreeViewModel? _tree;
     private Task? _populateTask;
@@ -558,10 +561,11 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
     public double? UsedFraction =>
         SizeBytes is { } used && TotalBytes is { } total && total > 0 ? (double)used / total : null;
 
-    private DirectoryNodeViewModel()
+    private DirectoryNodeViewModel(int depth)
     {
         FullPath = "";
         Name = "…";
+        Depth = depth;
     }
 
     /// <summary>Drive-root / general ctor: stats <paramref name="fullPath"/> for its hidden attribute.</summary>
@@ -630,7 +634,7 @@ public sealed partial class DirectoryNodeViewModel : ObservableObject, ISidebarN
         if (!_isPopulated)
         {
             if (ShowHidden ? _hasSubdirectories : _hasVisibleSubdirectories)
-                wanted.Add(Placeholder);
+                wanted.Add(_placeholder ??= new DirectoryNodeViewModel(Depth + 1));
         }
         else
         {
