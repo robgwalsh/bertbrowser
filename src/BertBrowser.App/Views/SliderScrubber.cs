@@ -13,8 +13,14 @@ namespace BertBrowser.App.Views;
 /// thumb to a press on the track, but the thumb never takes the press — so the drag that follows
 /// does nothing until the button is released and pressed again, which is not how any player's seek
 /// bar behaves. This takes the press away from the slider altogether: it captures the mouse, and
-/// every move sets <see cref="RangeBase.Value"/> from the point under the cursor
-/// (<see cref="Track.ValueFromPoint"/>, so the thumb centres on it). Keyboard seeking is left alone.
+/// every move sets <see cref="RangeBase.Value"/> from the point under the cursor, so the thumb
+/// centres on it. Keyboard seeking is left alone.
+/// <para>
+/// Not <see cref="Track.ValueFromPoint"/>: that answers <c>Value + distance from the thumb</c>, and
+/// the thumb's position is only refreshed by the next arrange — so the first move after the press
+/// counted the jump twice, and the thumb overshot the cursor before snapping back. The value here
+/// comes from the track's own length alone.
+/// </para>
 /// </remarks>
 public sealed class SliderScrubber
 {
@@ -79,8 +85,16 @@ public sealed class SliderScrubber
     private void SetFromPoint(MouseEventArgs e)
     {
         if (_track is null) return;
-        var value = _track.ValueFromPoint(e.GetPosition(_track));
-        if (double.IsNaN(value)) return;
-        _slider.Value = Math.Clamp(value, _slider.Minimum, _slider.Maximum);
+        var horizontal = _track.Orientation == Orientation.Horizontal;
+        var point = e.GetPosition(_track);
+        var length = horizontal ? _track.ActualWidth : _track.ActualHeight;
+        var thumb = _track.Thumb is { } t ? (horizontal ? t.ActualWidth : t.ActualHeight) : 0;
+        var travel = length - thumb;
+        if (travel <= 0) return;
+
+        var fraction = Math.Clamp(((horizontal ? point.X : point.Y) - thumb / 2) / travel, 0, 1);
+        // Horizontal runs left-to-right and vertical bottom-up, each unless reversed.
+        if (horizontal == _track.IsDirectionReversed) fraction = 1 - fraction;
+        _slider.Value = _slider.Minimum + fraction * (_slider.Maximum - _slider.Minimum);
     }
 }
