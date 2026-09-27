@@ -18,7 +18,9 @@ An offline Windows 10/11 file browser built for my personal preferences.
 - **Directory sizes** — Show total size on directories, just like files.
 - **Split panes with tabs** - Infinite pane splitting and tabs per pane.
 - **Tree Map browser by filesize** - Visualize recursive directory sizes, easily find whats taking the most space.
+- **Rich Preview Panel** - inline media playback, syntax highlighting in text, and more!
 - **Themes** - Rich theming system, with many pre-loaded themes.
+- **Tools** - Find duplicates, compare files and directories, track file system changes, and more!
 
 ## Install
 
