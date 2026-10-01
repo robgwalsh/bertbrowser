@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using BertBrowser.App.Interop;
 using BertBrowser.App.Services;
 using BertBrowser.App.Services.Indexing;
@@ -23,6 +24,15 @@ public partial class App : Application
     private static bool _hosted;
 
     private static SingleInstance? _instance;
+
+    static App()
+    {
+        // WPF's default hover delay makes the toolbar feel sluggish to explore. Overridden once for
+        // every element rather than per control, so a tooltip added later gets it too. Must run
+        // before the first element's metadata is looked up, hence the static constructor.
+        ToolTipService.InitialShowDelayProperty.OverrideMetadata(
+            typeof(FrameworkElement), new FrameworkPropertyMetadata(250));
+    }
 
     [STAThread]
     private static void Main(string[] args)

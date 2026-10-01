@@ -96,7 +96,6 @@
                     <Path Style="{StaticResource IconPath}" DockPanel.Dock="Left"
                                Data="{StaticResource Icon.Search}" Width="13" Height="13" Margin="8,0,6,0"
                                VerticalAlignment="Center" Fill="{StaticResource Theme.Text.Secondary}"
-                               ToolTipService.InitialShowDelay="300"
                                ToolTip="{StaticResource SearchSyntaxToolTip}"/>
                     <Button DockPanel.Dock="Right" ToolTip="Clear search (Esc)"
                             Command="{Binding ClearSearchCommand}"

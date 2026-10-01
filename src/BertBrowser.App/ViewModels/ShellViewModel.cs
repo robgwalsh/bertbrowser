@@ -69,21 +69,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         _ = RefreshAllTabsAsync();
     }
 
-    /// <summary>How the "DRIVES &amp; DEVICES" sidebar section is laid out. Mirrors
-    /// <see cref="AppSettings.DrivesViewMode"/>; toggled from the header button above it.</summary>
-    [ObservableProperty]
-    private DrivesViewMode _drivesViewMode;
-
-    partial void OnDrivesViewModeChanged(DrivesViewMode value)
-    {
-        _settings.DrivesViewMode = value;
-        _settings.Save();
-    }
-
-    [RelayCommand]
-    private void ToggleDrivesViewMode() =>
-        DrivesViewMode = DrivesViewMode == DrivesViewMode.Tree ? DrivesViewMode.Cards : DrivesViewMode.Tree;
-
     /// <summary>Whether middle-clicking a drive/device opens a new panel instead of a new tab.
     /// Mirrors <see cref="AppSettings.DrivesOpenTarget"/>; set from the Settings dialog.</summary>
     [ObservableProperty]
@@ -491,7 +476,6 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         _settings = settings;
         InitializeUndoHistory();
         _showHiddenItems = settings.ShowHiddenItems; // seed the field so the ctor doesn't refresh
-        _drivesViewMode = settings.DrivesViewMode; // seed the fields so the ctor doesn't re-save
         _workspacesPlacement = settings.WorkspacesPlacement;
         _savedSearchesPlacement = settings.SavedSearchesPlacement;
         _openDrivesInNewPanel = settings.DrivesOpenTarget == DrivesOpenTarget.NewPanel;
@@ -832,28 +816,9 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         SplitPane(ActivePane, orientation, path);
     }
 
-    /// <summary>Opens a drive/device card from the Cards view of the sidebar, in a new tab,
-    /// activated immediately — unlike the tree's own "open in new tab" context menu item, clicking
-    /// a card is the whole point of the click, not a background prefetch. A portable device has no
-    /// navigable path, so it opens in Explorer instead, matching the tree's double-click behavior.
-    /// Middle-clicking a drive/device anywhere in the sidebar is the separate, configurable gesture
-    /// — see <see cref="MiddleClickDriveOrDevice"/>.</summary>
-    public void OpenDriveOrDevice(ISidebarNode node)
-    {
-        if (node is PortableDeviceNodeViewModel device)
-        {
-            OpenPortableDevice(device.Device);
-            return;
-        }
-
-        if (node is DirectoryNodeViewModel dir)
-            OpenInNewTab(dir.FullPath, activate: true);
-    }
-
-    /// <summary>Middle-clicking a drive/device — its card, its ordinary tree row, or its pinned
-    /// header — opens it in a new tab or a new panel per <see cref="OpenDrivesInNewPanel"/>. A
-    /// portable device has no navigable path, so it opens in Explorer instead, same as a plain
-    /// click.</summary>
+    /// <summary>Middle-clicking a drive/device row in the sidebar tree opens it in a new tab or a
+    /// new panel per <see cref="OpenDrivesInNewPanel"/>. A portable device has no navigable path,
+    /// so it opens in Explorer instead.</summary>
     public void MiddleClickDriveOrDevice(ISidebarNode node)
     {
         if (node is PortableDeviceNodeViewModel device)

@@ -363,19 +363,6 @@
                         <ItemsPresenter x:Name="ItemsHost"/>
                     </StackPanel>
                     <ControlTemplate.Triggers>
-                        <!-- Drive/device roots get a taller rectangular tile, flush against its
-                             neighbours and divided from them by a bottom border rather than a
-                             floating boxed card — this must come before the hover/selected
-                             triggers below so they still win when both apply; only its idle
-                             Background would otherwise be overridden. Exactly matches
-                             PinnedRootRow, which shows the very same row once it scrolls out of
-                             view — see the remark there. -->
-                        <DataTrigger Binding="{Binding Depth}" Value="0">
-                            <Setter TargetName="Bd" Property="MinHeight" Value="40"/>
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Theme.Border.Subtle}"/>
-                            <Setter TargetName="Bd" Property="BorderThickness" Value="0,0,0,1"/>
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.Surface.Raised}"/>
-                        </DataTrigger>
                         <Trigger Property="IsExpanded" Value="False">
                             <Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed"/>
                         </Trigger>

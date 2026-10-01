@@ -88,7 +88,6 @@ public partial class MainWindow : ThemedWindow
         _shell.FileCompareRequested += ShowFileCompare;
         _shell.SyncRequested += ShowSyncPreview;
         _shell.PropertyChanged += Shell_TransferProgressChanged;
-        _shell.PropertyChanged += Shell_DrivesViewModeChanged;
 
         Loaded += async (_, _) => await _shell.InitializeAsync();
         Closing += (_, _) =>
@@ -368,16 +367,6 @@ public partial class MainWindow : ThemedWindow
     {
         if (e.PropertyName != nameof(ShellViewModel.TransferProgress)) return;
         if (_shell.TransferProgress is null) _transferDetails?.Close();
-    }
-
-    /// <summary>Cards view has no scroll-driven sticky headers of its own — hide the tree's when
-    /// switching away from it, so a stale one isn't still showing when the tree comes back later.</summary>
-    private void Shell_DrivesViewModeChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName != nameof(ShellViewModel.DrivesViewMode)) return;
-        if (_shell.DrivesViewMode != BertBrowser.App.Services.DrivesViewMode.Cards) return;
-        HidePinnedRow();
-        HidePinnedRootRow();
     }
 
     /// <summary>
@@ -804,7 +793,7 @@ public partial class MainWindow : ThemedWindow
         var scroller = FindDescendant<ScrollViewer>(FolderTree);
         if (scroller is null)
         {
-            container.BringIntoView();
+            BringTreeItemIntoView(container);
             return;
         }
 
@@ -816,36 +805,57 @@ public partial class MainWindow : ThemedWindow
         }
         catch (InvalidOperationException)
         {
-            container.BringIntoView(); // not connected to the visual tree yet
+            BringTreeItemIntoView(container); // not connected to the visual tree yet
         }
     }
 
     private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject =>
         VisualTreeUtil.FindDescendant<T>(root);
 
-    // --- Pinned current-directory header ---
-
-    // The tree row for the currently open directory, and the root-to-node chain used to locate
-    // its container. Kept in sync with the shell's CurrentPath (not the file-list selection) so
-    // the pinned header always tracks the folder being browsed.
-    private IReadOnlyList<DirectoryNodeViewModel> _currentDirChain = Array.Empty<DirectoryNodeViewModel>();
-    private DirectoryNodeViewModel? _currentDirNode;
-
-    /// <summary>Wires the tree's scroll viewer once its template is applied, so the pinned
-    /// header can react to every scroll, expand/collapse, and resize.</summary>
+    /// <summary>Wires the tree's bring-into-view filter once its template is applied.</summary>
     private void FolderTree_Loaded(object sender, RoutedEventArgs e)
     {
-        if (FindDescendant<ScrollViewer>(FolderTree) is { } scroller)
+        // Below the ScrollViewer, whose class handler would otherwise act on the request first.
+        if (FindDescendant<ScrollViewer>(FolderTree) is { } scroller &&
+            FindDescendant<ItemsPresenter>(scroller) is { } items)
         {
-            scroller.ScrollChanged -= FolderTreeScrollChanged; // idempotent across re-raises
-            scroller.ScrollChanged += FolderTreeScrollChanged;
+            items.RequestBringIntoView -= FolderTreeItems_RequestBringIntoView;
+            items.RequestBringIntoView += FolderTreeItems_RequestBringIntoView;
         }
+        FolderTree.PreviewMouseDown -= FolderTree_PreviewInput;
+        FolderTree.PreviewMouseDown += FolderTree_PreviewInput;
+        FolderTree.PreviewKeyDown -= FolderTree_PreviewInput;
+        FolderTree.PreviewKeyDown += FolderTree_PreviewInput;
     }
 
-    private void FolderTreeScrollChanged(object sender, ScrollChangedEventArgs e)
+    // Whether the tree's last input was a key press. Arrowing through the tree must follow the
+    // selection off-screen; a click must never scroll it (the way VS Code's explorer behaves).
+    private bool _treeKeyboardNavigating;
+    private bool _treeExplicitBringIntoView;
+
+    private void FolderTree_PreviewInput(object sender, InputEventArgs e) =>
+        _treeKeyboardNavigating = e is KeyEventArgs;
+
+    /// <summary>Selecting or focusing a row asks the ScrollViewer to bring it into view — for an
+    /// expanded folder, its whole subtree — which is what scrolled the tree when a row was clicked.
+    /// Only keyboard navigation and this window's own deliberate reveals may do that.</summary>
+    private void FolderTreeItems_RequestBringIntoView(object sender, RequestBringIntoViewEventArgs e)
     {
-        UpdatePinnedRow();
-        UpdatePinnedRootRow();
+        if (!_treeKeyboardNavigating && !_treeExplicitBringIntoView)
+            e.Handled = true;
+    }
+
+    private void BringTreeItemIntoView(FrameworkElement container)
+    {
+        _treeExplicitBringIntoView = true;
+        try
+        {
+            container.BringIntoView();
+        }
+        finally
+        {
+            _treeExplicitBringIntoView = false;
+        }
     }
 
     // A reveal enumerates directories off-thread and reflows the tree, so it must not run once per
@@ -885,8 +895,9 @@ public partial class MainWindow : ThemedWindow
         _ = RevealCurrentDirAsync(path);
     }
 
-    /// <summary>Expands the tree down to the current directory, selects it, scrolls it into view,
-    /// and remembers it as the pinned-header target. Best-effort UI sugar — never throws.</summary>
+    /// <summary>Expands the tree's ancestors of the current directory, selects it and scrolls it
+    /// into view, as VS Code's explorer reveals the open file. The folder itself keeps whatever
+    /// expansion it had. Best-effort UI sugar — never throws.</summary>
     private async Task RevealCurrentDirAsync(string path)
     {
         if (path.Length == 0) return;
@@ -901,237 +912,9 @@ public partial class MainWindow : ThemedWindow
             return;
         }
 
-        _currentDirChain = chain;
-        _currentDirNode = chain.Count > 0 ? chain[^1] : null;
-
-        // Expand the current directory itself (RevealPathAsync only expands its ancestors) so its
-        // subfolders show in the tree and there's something for the pinned header to collapse.
-        if (_currentDirNode is not null)
-        {
-            _currentDirNode.IsExpanded = true;
-            await _currentDirNode.EnsurePopulatedAsync(); // children load off-thread; wait before measuring
-        }
-
         // Containers for freshly expanded nodes only exist after a layout pass.
-        _ = Dispatcher.InvokeAsync(() =>
-        {
-            if (chain.Count > 0) ScrollTreeChainIntoView(chain);
-            UpdatePinnedRow();
-            UpdatePinnedRootRow();
-        }, DispatcherPriority.Loaded);
-    }
-
-    /// <summary>Shows the pinned header when the current directory's row has scrolled above the
-    /// tree's viewport (and only while a vertical scrollbar is present), so the user can always
-    /// collapse it. Hides it otherwise.</summary>
-    private void UpdatePinnedRow()
-    {
-        // Cards mode collapses FolderTree, but a collapsed TreeView doesn't necessarily update its
-        // own ScrollViewer's computed properties, so the scroll-visible check below can still pass
-        // and pin a tree row right over the top of a card with the same drive/device. Navigating
-        // within an already-open pane re-runs this (via RevealCurrentDirAsync) independently of
-        // Shell_DrivesViewModeChanged, which only fires once at the moment the mode itself toggles.
-        if (_currentDirNode is null || _currentDirChain.Count == 0 ||
-            _shell.DrivesViewMode != BertBrowser.App.Services.DrivesViewMode.Tree)
-        {
-            HidePinnedRow();
-            return;
-        }
-
-        var scroller = FindDescendant<ScrollViewer>(FolderTree);
-        if (scroller is null || scroller.ComputedVerticalScrollBarVisibility != Visibility.Visible)
-        {
-            HidePinnedRow();
-            return;
-        }
-
-        var container = ContainerForChain(_currentDirChain);
-        if (container is null)
-        {
-            HidePinnedRow();
-            return;
-        }
-
-        double rowTop;
-        try
-        {
-            rowTop = container.TransformToAncestor(scroller).Transform(default).Y;
-        }
-        catch (InvalidOperationException)
-        {
-            HidePinnedRow(); // not connected to the visual tree yet
-            return;
-        }
-
-        // container.ActualHeight spans the row plus its expanded subtree; pin while the header is
-        // above the top but some of the subtree is still on screen below the pinned bar.
-        var subtreeHeight = container.ActualHeight;
-        if (rowTop < 0 && rowTop + subtreeHeight > 0)
-        {
-            PinnedRow.DataContext = _currentDirNode;
-            PinnedRow.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            HidePinnedRow();
-        }
-    }
-
-    private void HidePinnedRow()
-    {
-        PinnedRow.Visibility = Visibility.Collapsed;
-        PinnedRow.DataContext = null;
-    }
-
-    /// <summary>Walks the root-to-node chain to the current directory's realized container
-    /// (virtualization is off, so every expanded node has one after layout).</summary>
-    private TreeViewItem? ContainerForChain(IReadOnlyList<DirectoryNodeViewModel> chain)
-    {
-        ItemsControl parent = FolderTree;
-        TreeViewItem? container = null;
-        foreach (var node in chain)
-        {
-            container = parent.ItemContainerGenerator.ContainerFromItem(node) as TreeViewItem;
-            if (container is null) return null;
-            parent = container;
-        }
-        return container;
-    }
-
-    /// <summary>Clicking the pinned header collapses the current directory and scrolls its
-    /// (now collapsed) row back to the top so it's visible again.</summary>
-    private void PinnedRow_Click(object sender, MouseButtonEventArgs e)
-    {
-        if (_currentDirNode is null) return;
-        _currentDirNode.IsExpanded = false;
-        e.Handled = true;
-        ClearTreeAnchor(); // this click's whole point is to move the row back to the top
-
-        var chain = _currentDirChain;
-        _ = Dispatcher.InvokeAsync(() =>
-        {
-            ScrollTreeChainToTop(chain);
-            UpdatePinnedRow();
-            UpdatePinnedRootRow();
-        }, DispatcherPriority.Loaded);
-    }
-
-    /// <summary>Shows a second sticky header — a drive/device root itself, in the larger card
-    /// style — for whichever expanded root's subtree currently spans the top of the tree's
-    /// viewport, regardless of whether that root is on the active tab's current-directory chain:
-    /// a drive expanded by hand and scrolled through needs its own header exactly like the one
-    /// being browsed does. Sits above <see cref="PinnedRow"/> so the two stack without overlapping
-    /// when both apply (deep folder, its drive scrolled off too). Collapsed when the found root
-    /// *is* the current directory — <see cref="PinnedRow"/> already covers that row, and showing
-    /// both would just duplicate it.</summary>
-    private void UpdatePinnedRootRow()
-    {
-        // See the matching guard in UpdatePinnedRow: a collapsed FolderTree doesn't reliably report
-        // its ScrollViewer as not-visible, so this must check the mode directly too.
-        if (_shell.DrivesViewMode != BertBrowser.App.Services.DrivesViewMode.Tree)
-        {
-            HidePinnedRootRow();
-            return;
-        }
-
-        var scroller = FindDescendant<ScrollViewer>(FolderTree);
-        if (scroller is null || scroller.ComputedVerticalScrollBarVisibility != Visibility.Visible)
-        {
-            HidePinnedRootRow();
-            return;
-        }
-
-        var root = FindScrolledRoot(scroller);
-        if (root is null || ReferenceEquals(root, _currentDirNode))
-        {
-            HidePinnedRootRow();
-            return;
-        }
-
-        PinnedRootRow.DataContext = root;
-        PinnedRootRow.Visibility = Visibility.Visible;
-    }
-
-    /// <summary>Finds whichever top-level, expanded drive/device root's subtree currently spans
-    /// the top of the viewport (scrolled above it, but with some of its own content still visible
-    /// below) — the header that belongs pinned there. Roots are laid out top to bottom with no
-    /// overlap, so at most one ever satisfies this at a given scroll position.</summary>
-    private DirectoryNodeViewModel? FindScrolledRoot(ScrollViewer scroller)
-    {
-        foreach (var candidate in _shell.Tree.TreeRoots.OfType<DirectoryNodeViewModel>())
-        {
-            if (!candidate.IsExpanded) continue;
-
-            var container = ContainerForChain(new[] { candidate });
-            if (container is null) continue;
-
-            double rowTop;
-            try
-            {
-                rowTop = container.TransformToAncestor(scroller).Transform(default).Y;
-            }
-            catch (InvalidOperationException)
-            {
-                continue; // not connected to the visual tree yet
-            }
-
-            var subtreeHeight = container.ActualHeight;
-            if (rowTop < 0 && rowTop + subtreeHeight > 0)
-                return candidate;
-        }
-        return null;
-    }
-
-    private void HidePinnedRootRow()
-    {
-        PinnedRootRow.Visibility = Visibility.Collapsed;
-        PinnedRootRow.DataContext = null;
-    }
-
-    /// <summary>Clicking the pinned drive/device header collapses it (and, transitively, whatever
-    /// is expanded beneath it) and scrolls it back to the top, mirroring <see cref="PinnedRow_Click"/>.</summary>
-    private void PinnedRootRow_Click(object sender, MouseButtonEventArgs e)
-    {
-        if (PinnedRootRow.DataContext is not DirectoryNodeViewModel root) return;
-        root.IsExpanded = false;
-        e.Handled = true;
-        ClearTreeAnchor();
-
-        _ = Dispatcher.InvokeAsync(() =>
-        {
-            ScrollTreeChainToTop(new[] { root });
-            UpdatePinnedRow();
-            UpdatePinnedRootRow();
-        }, DispatcherPriority.Loaded);
-    }
-
-    /// <summary>Middle-clicking the pinned drive/device header opens that drive/device in a new
-    /// tab or a new pane per <see cref="ShellViewModel.MiddleClickDriveOrDevice"/>, same as its
-    /// card in Cards view and its ordinary row in Tree view — left-click here stays the
-    /// collapse/scroll-up gesture in <see cref="PinnedRootRow_Click"/>.</summary>
-    private void PinnedRootRow_MiddleClick(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ChangedButton != MouseButton.Middle) return;
-        if (PinnedRootRow.DataContext is not ISidebarNode node) return;
-        _shell.MiddleClickDriveOrDevice(node);
-        e.Handled = true;
-    }
-
-    /// <summary>Scrolls the tree so the chain's node sits flush at the top of the viewport.</summary>
-    private void ScrollTreeChainToTop(IReadOnlyList<DirectoryNodeViewModel> chain)
-    {
-        var scroller = FindDescendant<ScrollViewer>(FolderTree);
-        var container = ContainerForChain(chain);
-        if (scroller is null || container is null) return;
-
-        try
-        {
-            var rowTop = container.TransformToAncestor(scroller).Transform(default).Y;
-            scroller.ScrollToVerticalOffset(Math.Max(0, scroller.VerticalOffset + rowTop));
-        }
-        catch (InvalidOperationException)
-        {
-        }
+        if (chain.Count > 0)
+            _ = Dispatcher.InvokeAsync(() => ScrollTreeChainIntoView(chain), DispatcherPriority.Loaded);
     }
 
     private void BookmarkRow_MouseUp(object sender, MouseButtonEventArgs e)
@@ -1361,29 +1144,6 @@ public partial class MainWindow : ThemedWindow
             _shell.OpenPortableDevice(device.Device);
     }
 
-    /// <summary>Cards view: clicking a drive/device card is the whole point of the click, so it
-    /// opens immediately (a new tab) rather than merely selecting. Middle-click is the separate,
-    /// configurable gesture — new tab or new panel per <see cref="ShellViewModel.MiddleClickDriveOrDevice"/>
-    /// — same as middle-clicking its row in Tree view.</summary>
-    private void DriveCard_Click(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is not FrameworkElement { DataContext: ISidebarNode node }) return;
-        if (e.ChangedButton == MouseButton.Left)
-            _shell.OpenDriveOrDevice(node);
-        else if (e.ChangedButton == MouseButton.Middle)
-            _shell.MiddleClickDriveOrDevice(node);
-    }
-
-    // The clicked row with its expansion and selection state at mouse-down, captured before
-    // selecting the row navigates to it. Selecting sets the shell's CurrentPath synchronously, and
-    // the resulting RevealCurrentDirAsync auto-expands the current directory — so by mouse-up both
-    // node.IsExpanded and node.IsSelected may already be true. FolderTreeItem_Click reads these
-    // pre-click values rather than the live ones, so a folder the user just opened (or just
-    // navigated to) isn't mistaken for one that was already open and already current.
-    private DirectoryNodeViewModel? _treeItemMouseDownNode;
-    private bool _treeItemExpandedAtMouseDown;
-    private bool _treeItemSelectedAtMouseDown;
-
     // The row the user clicked, pinned to the viewport position it had at the moment of the click:
     // whatever the click sets off (selection, navigation reveal, expand/collapse reflow) the row
     // itself must not move under the cursor. _treeAnchorViewportY is that row top's offset from the
@@ -1395,9 +1155,8 @@ public partial class MainWindow : ThemedWindow
     private double _treeAnchorViewportY;
 
     /// <summary>Middle-click opens a pane of its own to the right instead of navigating — or, for
-    /// a drive/device header (Depth == 0), follows <see cref="ShellViewModel.MiddleClickDriveOrDevice"/>,
-    /// same as clicking its card in Cards view (new tab or new pane per DrivesOpenTarget, not
-    /// always a pane). Wired to the row's <c>PreviewMouseDown</c> rather than
+    /// a drive/device root (Depth == 0), follows <see cref="ShellViewModel.MiddleClickDriveOrDevice"/>
+    /// (new tab or new pane per DrivesOpenTarget, not always a pane). Wired to the row's <c>PreviewMouseDown</c> rather than
     /// <see cref="FolderTreeItem_PreviewMouseDown"/>'s <c>PreviewMouseLeftButtonDown</c>, which
     /// never fires for a middle press. Handling it here (tunnelling, before <c>TreeViewItem</c>
     /// gets it) also stops the row being selected, which would otherwise navigate the active tab
@@ -1416,16 +1175,10 @@ public partial class MainWindow : ThemedWindow
 
     private void FolderTreeItem_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
+        // The second press of a double-click lands on the row the first one anchored; re-anchoring
+        // there is harmless, since nothing has moved it since.
         ClearTreeAnchor();
-        _treeItemMouseDownNode = null;
         if (sender is not FrameworkElement { DataContext: ISidebarNode node }) return;
-
-        if (node is DirectoryNodeViewModel dir)
-        {
-            _treeItemMouseDownNode = dir;
-            _treeItemExpandedAtMouseDown = dir.IsExpanded;
-            _treeItemSelectedAtMouseDown = dir.IsSelected;
-        }
 
         // Mouse-down is the last moment the tree is still in its pre-click layout: this preview
         // event tunnels ahead of the bubbling one where TreeViewItem selects the row (which focuses
@@ -1433,37 +1186,20 @@ public partial class MainWindow : ThemedWindow
         // whatever that scrolled once the input event has been fully processed.
         AnchorTreeRow(node, FindAncestorTreeViewItem(sender as DependencyObject));
         ScheduleTreeAnchorRestore();
-    }
 
-    /// <summary>A single click on a folder row opens or closes it (on top of selecting/navigating),
-    /// so the tree works without having to hit the small chevron. Applies to every folder with
-    /// children, drives included. Which way it goes depends on where the click is taking you:
-    /// clicking an open folder you are <em>already in</em> closes it, but clicking an open folder
-    /// you are navigating <em>to</em> leaves it open — collapsing that one would be undone a beat
-    /// later by the reveal the same click kicks off, which looked like the folder shutting and
-    /// springing back open.</summary>
-    private void FolderTreeItem_Click(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is FrameworkElement { DataContext: DirectoryNodeViewModel node }
-            && node.Children.Count > 0
-            && ReferenceEquals(node, _treeItemMouseDownNode))
+        // A single click only selects (and so navigates); a double-click opens or closes the
+        // folder, drives included. Handled here rather than left to TreeViewItem's own
+        // double-click toggle so the row stays pinned under the cursor through the reflow — and
+        // again when lazily-loaded children arrive. Marking it handled keeps TreeViewItem from
+        // toggling it straight back; MouseDoubleClick (portable devices) still fires, since
+        // Control listens for handled presses too.
+        if (e.ClickCount == 2 && node is DirectoryNodeViewModel { Children.Count: > 0 } dir)
         {
-            var expand = !_treeItemExpandedAtMouseDown;
-            if (expand || _treeItemSelectedAtMouseDown)
-            {
-                // The row is already anchored (mouse-down); the expand/collapse reflows the tree
-                // below it, and again when lazily-loaded children arrive. Re-pin after each so an
-                // offset clamp when collapsing near the bottom — or the reveal-scroll of a click
-                // that also navigates — can't slide the row off the cursor. Every restore targets
-                // the same offset, so the passes never fight.
-                node.IsExpanded = expand;
-
-                ScheduleTreeAnchorRestore();
-                if (expand)
-                    _ = RestoreTreeAnchorAfterPopulateAsync(node);
-            }
+            dir.IsExpanded = !dir.IsExpanded;
+            if (dir.IsExpanded)
+                _ = RestoreTreeAnchorAfterPopulateAsync(dir);
+            e.Handled = true;
         }
-        _treeItemMouseDownNode = null;
     }
 
     private void ScheduleTreeAnchorRestore() =>

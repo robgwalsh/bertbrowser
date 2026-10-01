@@ -230,7 +230,6 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "system-theme": SystemTheme(rest); break;
             case "system-follow": SystemFollow(rest); break;
             case "system-slot": SystemSlot(rest); break;
-            case "drives-view": DrivesView(rest); break;
             case "workspaces-placement": PlacementSetting(rest, "workspaces-placement", p => session.Shell.WorkspacesPlacement = p); break;
             case "saved-searches-placement": PlacementSetting(rest, "saved-searches-placement", p => session.Shell.SavedSearchesPlacement = p); break;
             case "tree-scroll": TreeScroll(rest); break;
@@ -3161,9 +3160,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         session.Settle();
     }
 
-    /// <summary>Scrolls the sidebar's folder tree to a vertical offset, in pixels — the only way
-    /// to exercise its scroll-driven sticky headers (<c>PinnedRow</c>/<c>PinnedRootRow</c>) from a
-    /// script, since nothing here synthesises real mouse-wheel input.</summary>
+    /// <summary>Scrolls the sidebar's folder tree to a vertical offset, in pixels, since nothing
+    /// here synthesises real mouse-wheel input.</summary>
     private void TreeScroll(string rest)
     {
         var offset = double.Parse(Require(rest, "tree-scroll"), CultureInfo.InvariantCulture);
@@ -3248,22 +3246,6 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
 
         if (!ok)
             throw new AssertionException($"expected the list to have {op} {want} realized row(s), got {actual}.");
-    }
-
-    /// <summary>Switches the "DRIVES &amp; DEVICES" sidebar section between its tree and card
-    /// layouts — what clicking the header's toggle button does.</summary>
-    private void DrivesView(string rest)
-    {
-        var mode = Require(rest, "drives-view").ToLowerInvariant() switch
-        {
-            "tree" => DrivesViewMode.Tree,
-            "cards" => DrivesViewMode.Cards,
-            var other => throw new FormatException(
-                $"drives-view wants tree or cards, got '{other}'."),
-        };
-
-        Invoke(() => session.Shell.DrivesViewMode = mode);
-        session.Settle();
     }
 
     /// <summary><c>workspaces-placement</c> and <c>saved-searches-placement</c>, each taking

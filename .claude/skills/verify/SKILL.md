@@ -248,8 +248,6 @@ hidden on|off | thumbnails <0..1> | sort <column-id> | theme <id>
                             System.Image.Dimensions. "date" still means Modified.)
 workspaces-placement | saved-searches-placement sidebar|titlebar|hidden
                             where that list is offered, as its Settings page sets it
-drives-view tree|cards      the "DRIVES & DEVICES" sidebar section's layout — what clicking its
-                            header toggle button does
 list-scroll <px>            scrolls the file list to a vertical offset, in pixels. Worth more than
                             tree-scroll: the thumbnail view scrolls through VirtualizingWrapPanel,
                             this app's own IScrollInfo, so what is on screen after a scroll is code
@@ -260,11 +258,8 @@ reveal <name>               select that row *and* scroll it into view, as openin
                             reaches ScrollIntoView, which in the tile view lands in
                             BringIndexIntoView, where the row has no element yet and the scrolling
                             has to come from the index alone
-tree-scroll <px>            scrolls the sidebar's folder tree to a vertical offset, in pixels —
-                            the only way to exercise PinnedRow/PinnedRootRow's scroll-driven
-                            sticky headers, since nothing here synthesises mouse-wheel input
-                            (PinnedRow itself is Depth-aware: it renders as the drive/device tile
-                            style when pinning a root browsed directly, not just PinnedRootRow)
+tree-scroll <px>            scrolls the sidebar's folder tree to a vertical offset, in pixels,
+                            since nothing here synthesises mouse-wheel input
 preview on|off              the active tab's preview pane, with its debounce and off-thread read
                             waited out (so assert after this, not straight after a `select`)
 preview-mode auto|raw|hex   the pane's view override; sticky across selections, settled the same
@@ -445,7 +440,7 @@ Options: `--out <dir>` · `--sandbox <dir>` · `--state-dir <dir>` · `--keep-st
 `--allow-outside` · `--size WxH` · `--theme <id>` · `--start <path>` · `--index` ·
 `--timeout <sec>` · `--busy-timeout <ms>` · `--keep-going` · `--verbose`
 
-Element names come from the XAML: window-level are `FolderTree`, `GlobalSearchBox`, `PinnedRow`,
+Element names come from the XAML: window-level are `FolderTree`, `GlobalSearchBox`,
 `ThumbSlider`, `PaneHostSite`; per tab (resolved against the *active* tab) are `FileListView`,
 `SearchBox`, `PathBox`, `Breadcrumb`, `DetailsView`, `PreviewPane`; per pane, `TabHost` and
 `ClosePaneButton`.
