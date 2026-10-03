@@ -4,7 +4,7 @@
 [![Unstable](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Frobgwalsh%2Fbertbrowser%2Freleases%2Ftags%2Funstable&query=%24.name&label=unstable&color=d29922)](https://github.com/robgwalsh/bertbrowser/releases/tag/unstable)
 [![Unstable build](https://img.shields.io/github/actions/workflow/status/robgwalsh/bertbrowser/unstable.yml?branch=main&label=build)](https://github.com/robgwalsh/bertbrowser/actions/workflows/unstable.yml)
 
-An offline Windows 10/11 file browser built for my personal preferences.
+A fast and efficient offline Windows 10/11 file browser.
 
 <p>
 <img src="docs/images/split-panes.png" alt="Split panes with recursive folder sizes and thumbnail tiles (Dark+)" width="49.5%">
