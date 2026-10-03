@@ -1,11 +1,8 @@
 # Search indexing
 
-How BertBrowser answers "find every file on this PC whose name contains *foo*" while you are still
-typing. The short version: **it never searches the filesystem.** It searches a SQLite table that was
+BertBrowser provides instant search, filesize treeviews, and other features by maintaining a SQLite table that was
 built by reading NTFS's own master index in one sequential pass, and that is patched in place by the
 volume's change journal from then on.
-
-Everything below is the detail behind that.
 
 ## The three layers
 

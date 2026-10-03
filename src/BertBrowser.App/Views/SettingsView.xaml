@@ -41,25 +41,20 @@
         <Border DockPanel.Dock="Top" Padding="8,6"
                 Background="{StaticResource Theme.Surface.Background}"
                 BorderThickness="0,1,0,1" BorderBrush="{StaticResource Theme.Border.Subtle}">
-            <!-- Close on the right as well as Back on the left: the Settings button that opened
-                 this sits at the right of the title bar, so that is where the pointer already is. -->
+            <!-- Close on the right: the Settings button that opened this sits at the right of the
+                 title bar, so that is where the pointer already is. 12 rather than IconPath's 16,
+                 because the dismiss glyph fills its box edge to edge, as the search boxes' does. -->
             <DockPanel>
                 <Button DockPanel.Dock="Right" Style="{StaticResource ToolbarButton}" Click="Back_Click"
                         VerticalAlignment="Center"
                         ToolTip="Close settings (Esc)"
                         AutomationProperties.AutomationId="SettingsClose"
                         AutomationProperties.Name="Close settings">
-                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Dismiss}"/>
-                </Button>
-                <Button Style="{StaticResource ToolbarButton}" Click="Back_Click"
-                        VerticalAlignment="Center"
-                        ToolTip="Back to your folders (Esc)"
-                        AutomationProperties.AutomationId="SettingsBack"
-                        AutomationProperties.Name="Back">
-                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Back}"/>
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Dismiss}"
+                          Width="12" Height="12"/>
                 </Button>
                 <!-- The bottom margin lifts the text by its descender space, so the middle of the
-                     letters, not the middle of the line box, lines up with the arrow. -->
+                     letters, not the middle of the line box, lines up with the close button. -->
                 <TextBlock Text="Settings" FontSize="16" FontWeight="SemiBold"
                            VerticalAlignment="Center" Margin="8,0,0,2"/>
             </DockPanel>

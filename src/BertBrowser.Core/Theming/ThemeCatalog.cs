@@ -38,6 +38,7 @@ public static class ThemeCatalog
             [T.OverlayBackground] = "#252526",
             [T.OverlayBorder] = "#454545",
             [T.ShadowColor] = "#99000000",
+            [T.Scrim] = "#80000000",
 
             [T.TextPrimary] = "#CCCCCC",
             [T.TextSecondary] = "#9D9D9D",
@@ -196,6 +197,7 @@ public static class ThemeCatalog
             [T.OverlayBackground] = "#FFFFFF",
             [T.OverlayBorder] = "#D4D4D4",
             [T.ShadowColor] = "#29000000",
+            [T.Scrim] = "#4D000000",
 
             [T.TextPrimary] = "#1F1F1F",
             [T.TextSecondary] = "#616161",

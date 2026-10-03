@@ -253,9 +253,8 @@
         </DockPanel>
     </v:ThemedWindow.TitleBarContent>
 
-    <!-- Settings replaces everything below the title bar, not a dialog over it (ShowSettings). The
-         folders are Hidden rather than Collapsed while it is up, so panes keep their layout and
-         scroll positions for the way back. -->
+    <!-- Settings covers everything below the title bar (ShowSettings), at most 1024 wide and
+         centred, with the folders left in place and dimmed behind it (SettingsLayer). -->
     <Grid>
     <DockPanel x:Name="BrowserRoot">
         <!-- Status bar -->
@@ -815,7 +814,17 @@
             </DockPanel>
         </Grid>
     </DockPanel>
-    <ContentControl x:Name="SettingsHost" Focusable="False" IsTabStop="False"/>
+    <!-- Over the folders rather than in place of them: they stay visible, dimmed by the scrim,
+         which also takes every click meant for them. Tab cycles inside the layer, since the panes
+         underneath are still focusable. A Stretch element capped by MaxWidth is centred; the
+         margin leaves a strip of the folders showing above and below it. -->
+    <Grid x:Name="SettingsLayer" Visibility="Collapsed"
+          KeyboardNavigation.TabNavigation="Cycle"
+          KeyboardNavigation.ControlTabNavigation="Cycle"
+          KeyboardNavigation.DirectionalNavigation="Contained">
+        <Border Background="{StaticResource Theme.Scrim.Background}" MouseDown="SettingsScrim_MouseDown"/>
+        <ContentControl x:Name="SettingsHost" MaxWidth="1024" Margin="0,10" Focusable="False" IsTabStop="False"/>
+    </Grid>
     <!-- The command palette, over whichever of the two above is showing. Last, so it is on top;
          Collapsed until asked for, so it costs nothing and takes no input. See CommandPalette.xaml
          for why it is an element here rather than a Popup. -->

@@ -199,7 +199,7 @@ public partial class MainWindow : ThemedWindow
 
     private void Settings_Click(object sender, RoutedEventArgs e) => ShowSettings((SettingsCategory?)null);
 
-    /// <summary>The settings page while it is up, in place of <see cref="BrowserRoot"/>.</summary>
+    /// <summary>The settings page while it is up, over <see cref="BrowserRoot"/>.</summary>
     private SettingsView? _settingsView;
 
     /// <summary>While this is true the keymap silences every shortcut about the folders —
@@ -289,9 +289,16 @@ public partial class MainWindow : ThemedWindow
         WorkspaceSwitcher.IsEnabled = false;
         SavedSearchSwitcher.IsEnabled = false;
 
-        BrowserRoot.Visibility = Visibility.Hidden;
         SettingsHost.Content = view;
+        SettingsLayer.Visibility = Visibility.Visible;
         view.FocusCategories();
+    }
+
+    /// <summary>A click on the dimmed folders around the page means "back to them", as Esc does.</summary>
+    private void SettingsScrim_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        CloseSettings();
     }
 
     /// <summary>
@@ -311,8 +318,8 @@ public partial class MainWindow : ThemedWindow
 
         view.ViewModel.Applied -= Settings_Applied;
         _settingsView = null;
+        SettingsLayer.Visibility = Visibility.Collapsed;
         SettingsHost.Content = null;
-        BrowserRoot.Visibility = Visibility.Visible;
 
         GlobalSearchGroup.IsEnabled = true;
         CompareButton.ClearValue(IsEnabledProperty);

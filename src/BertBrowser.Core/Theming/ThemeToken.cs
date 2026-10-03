@@ -19,6 +19,7 @@ public static class ThemeToken
     public const string OverlayBackground = "Theme.Overlay.Background";
     public const string OverlayBorder = "Theme.Overlay.Border";
     public const string ShadowColor = "Theme.Shadow.Color";
+    public const string Scrim = "Theme.Scrim.Background";
 
     // Text
     public const string TextPrimary = "Theme.Text.Primary";
@@ -213,6 +214,7 @@ public static class ThemeToken
         new(OverlayBackground, GroupSurfaces, "Popup background", "Tooltips and dropdowns.", false),
         new(OverlayBorder, GroupSurfaces, "Popup border", "", false),
         new(ShadowColor, GroupSurfaces, "Shadow", "Drop shadow under popups and the pinned tree row; alpha is the shadow strength.", false),
+        new(Scrim, GroupSurfaces, "Backdrop dim", "Laid over the folders behind the settings page; alpha is how much it dims.", false),
 
         new(TextPrimary, GroupText, "Text", "Default foreground.", true),
         new(TextSecondary, GroupText, "Secondary text", "Sizes, dates, relative folders.", true),

@@ -365,9 +365,10 @@ you where and what to watch for.
   smiley face on the split-pane button, `E8B0` a mouse cursor on "Open in new pane", `E74B` a down
   arrow on "Delete permanently", and one number meant two things twice over (`E8A7` = new tab *and*
   custom command; `E8C8` = Copy *and* Find duplicates).
-- **Settings is a page of the main window, not a dialog, and it applies as you go.** It replaces
-  `BrowserRoot` (everything under the title bar), which is Hidden rather than Collapsed so panes
-  keep their layout, and only `CommandContext.App` shortcuts fire meanwhile, since Backspace or
+- **Settings is a page of the main window, not a dialog, and it applies as you go.** It lies over
+  `BrowserRoot` (everything under the title bar) in `SettingsLayer`, at most 1024 wide and centred
+  over a `Theme.Scrim.Background` that dims the folders and takes their clicks (a click on it closes the
+  page); Tab cycles inside the layer since the panes stay focusable underneath. Only `CommandContext.App` shortcuts fire meanwhile, since Backspace or
   Ctrl+T would act on panes nobody can see. There is no Save: `SettingsViewModel.Apply` writes on a
   400 ms debounce, driven by an *allowlist* of persisted properties so selecting a row or a page
   writes nothing, and it is flushed on Back and on window close. A command or new-file type with a
