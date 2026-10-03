@@ -1,0 +1,157 @@
+# The command palette: everything the app can do, found by name.
+#
+# What this holds down is the shape of the list — that an empty box is not a wall of commands,
+# that the best match is first, that a command which cannot run is still found with its reason —
+# and that choosing a row really runs it. The rules themselves are PaletteRulesTests'; this is
+# the palette in the window, on real data.
+
+tree .
+refresh
+
+# --- Nothing typed: pins, recents, suggestions, then the categories ---
+
+palette
+assert-palette-open
+shot 01-empty
+assert-palette-row # Suggested
+assert-palette-row # All commands
+assert-palette-row tabs:
+assert-palette-row view:
+# Not the catalogue: the box is empty, so nothing is listed that was not asked for or earned.
+assert-no-palette-row Close other tabs
+assert-no-palette-row Reverse sort order
+# With nothing selected the suggestions are about getting somewhere.
+assert-palette-row Edit address
+assert-no-palette-row Rename
+
+# --- Typing: the best match first, and found by other words for it ---
+
+palette type new
+shot 02-typed-new
+assert-palette-order New tab | New folder
+palette type branch
+assert-palette-selected Toggle flat view
+palette type ctrl+b
+assert-palette-selected Toggle flat view
+palette type treemap
+assert-palette-selected Analyse disk usage
+palette type dupl
+assert-palette-row Find duplicates
+
+# A command that cannot run is still found, dimmed, with the reason — rather than seeming not to exist.
+palette type rename
+assert-palette-selected Rename
+assert-palette-hint Nothing is selected
+shot 03-unavailable
+palette pick
+assert-palette-open
+palette close
+assert-palette-closed
+
+# --- Choosing runs it, and it is remembered for this session only ---
+
+palette
+palette type new tab
+palette pick
+assert-palette-closed
+assert-tabs 2
+
+palette
+assert-palette-order # Recent | New tab
+palette close
+
+# With something selected, the suggestions are the things done to a selection.
+select notes.txt
+palette
+assert-palette-row Rename
+assert-palette-row Copy as path
+assert-no-palette-row Edit address
+shot 04-with-selection
+palette close
+deselect
+
+# --- Pins ---
+
+palette
+palette type toggle flat
+palette pin
+palette clear
+assert-palette-order # Pinned | Toggle flat view
+shot 05-pinned
+palette pick
+assert-flat
+palette
+palette type toggle flat
+palette pin
+palette clear
+assert-no-palette-row # Pinned
+palette close
+flat off
+
+# --- A category narrows; choosing its row types its token ---
+
+palette
+palette type view:
+shot 06-category
+assert-palette-row Toggle hidden items
+assert-palette-row Sort by size
+assert-no-palette-row Close tab
+palette type view: sort
+assert-palette-order Sort by name | Sort by size
+assert-no-palette-row Toggle hidden items
+palette type book:
+palette close
+
+# --- Named things ---
+
+save-workspace Projects
+palette
+palette type projects
+assert-palette-selected Projects
+palette type keyboard
+assert-palette-row Keyboard
+palette type dark
+assert-palette-row Dark
+palette close
+
+# --- A path is a destination ---
+
+palette open Docu
+assert-no-palette-row # Go to
+palette close
+
+go Documents
+run nav.goto
+assert-palette-open
+assert-palette-row # Go to
+assert-palette-row Archive
+shot 07-goto
+palette down 3
+palette pick
+assert-palette-closed
+assert-path Archive
+
+# --- On the settings page only what works there can run ---
+
+settings general
+palette
+shot 08-over-settings
+palette type new tab
+assert-palette-hint Not while Settings is open
+palette type keyboard shortcuts
+palette pick
+assert-palette-closed
+settings close
+
+# --- The chord that opens it is live everywhere, and closes it too ---
+
+assert-key Ctrl+Shift+P list app.palette
+assert-key Ctrl+Shift+P text app.palette
+assert-key F1 other app.palette
+key Ctrl+Shift+P
+assert-palette-open
+assert-key Ctrl+T text none
+key Ctrl+Shift+P
+assert-palette-closed
+
+assert-not-launched

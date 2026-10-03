@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.UndoHistory;
+using BertBrowser.App.Services.Commands;
 
 namespace BertBrowser.App.ViewModels;
 
@@ -261,5 +262,6 @@ public sealed partial class UndoEntryViewModel : ObservableObject
 /// something has been undone — with nothing above it, it would divide nothing.</summary>
 public sealed record UndoCursorMarker
 {
-    public string Text => "Undone above — Ctrl+Y redoes · In effect below — Ctrl+Z undoes";
+    public string Text =>
+        $"Undone above — {GestureText.OrName("edit.redo")} redoes · In effect below — {GestureText.OrName("edit.undo")} undoes";
 }

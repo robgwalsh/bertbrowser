@@ -53,7 +53,7 @@ internal sealed class AssertionException(string message) : Exception(message);
 /// <c>copy</c> go through the same transfer engine paste does, without touching it.
 /// </para>
 /// </remarks>
-internal sealed class ScriptRunner(UiSession session, HarnessOptions options, TextWriter output)
+internal sealed partial class ScriptRunner(UiSession session, HarnessOptions options, TextWriter output)
 {
     private readonly Sandbox _sandbox = new(options);
     private readonly DeniedFixture _denied = new();
@@ -312,6 +312,27 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             case "assert-not-launched": AssertNotLaunched(); break;
             case "assert-elevation-offered": AssertElevationOffered(expected: true); break;
             case "assert-no-elevation-offered": AssertElevationOffered(expected: false); break;
+
+            // commands and shortcuts (ScriptRunner.Commands.cs)
+            case "key": Key(rest); break;
+            case "run": Run(rest); break;
+            case "bind": Bind(rest); break;
+            case "unbind": Unbind(rest); break;
+            case "assert-key": AssertKey(rest); break;
+            case "assert-command": AssertCommand(rest); break;
+            case "assert-gesture": AssertGesture(rest); break;
+            case "assert-menu-gesture": AssertMenuGesture(rest); break;
+            case "assert-tooltip": AssertToolTip(rest); break;
+            case "palette": Palette(rest); break;
+            case "assert-palette-row": AssertPaletteRow(rest, expected: true); break;
+            case "assert-no-palette-row": AssertPaletteRow(rest, expected: false); break;
+            case "assert-palette-order": AssertPaletteOrder(rest); break;
+            case "assert-palette-selected": AssertPaletteSelected(rest); break;
+            case "assert-palette-hint": AssertPaletteHint(rest); break;
+            case "assert-palette-open": AssertPaletteOpen(expected: true); break;
+            case "assert-palette-closed": AssertPaletteOpen(expected: false); break;
+            case "assert-key-recorder": AssertKeyRecorder(rest); break;
+            case "assert-key-row": AssertKeyRow(rest); break;
 
             default:
                 throw new FormatException($"'{verb}' is not a command. Run with --help for the list.");
@@ -1202,6 +1223,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         });
         _lastMenuHeaders = session.Dispatcher.Invoke(() => Headers(items).ToList());
         _lastMenuTopLevel = session.Dispatcher.Invoke(() => TopLevel(items).ToList());
+        _lastMenuGestures = session.Dispatcher.Invoke(() => MenuGestures(items).ToList());
 
         var path = Resolve(Named(name.Length == 0 ? $"menu-{kind}" : name, ++_shots));
         session.Dispatcher.Invoke(() =>
@@ -3480,7 +3502,7 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         var (page, tail) = Split(rest);
         if (page.Length == 0)
             throw new FormatException("settings needs a page (general, appearance, preview, search-index, " +
-                                      "history, new-items, columns, saved-searches, workspaces, context-menu) or close.");
+                                      "history, new-items, columns, saved-searches, workspaces, context-menu, keyboard) or close.");
 
         // "settings tick Show hidden items on": sets a box on the open page by its label, the way a
         // click would. Nothing is saved by this verb — what makes it stick is the page's own
@@ -3503,6 +3525,13 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
                 box.IsChecked = state == "on";
             });
             session.Settle();
+            return;
+        }
+
+        // "settings key …": the Keyboard page's recorder, driven through its view model.
+        if (page.Equals("key", StringComparison.OrdinalIgnoreCase))
+        {
+            SettingsKey(tail);
             return;
         }
 
@@ -3603,7 +3632,8 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
             session.Services.GetRequiredService<IMftIndexService>(),
             session.Services.GetRequiredService<IShellMenuSource>(),
             session.Shell.SavedWorkspaces,
-            session.Shell.SavedSearches);
+            session.Shell.SavedSearches,
+            Keymap);
         vm.ReadIndexerState();
         vm.SelectedCategory = vm.Categories.First(c => c.Id == category);
         return vm;
@@ -3687,6 +3717,13 @@ internal sealed class ScriptRunner(UiSession session, HarnessOptions options, Te
         "new-file" => NewItemDialogFor(NewItemKind.File),
 
         "columns" => ColumnAddPanelWindow(),
+
+        // "Select by pattern", over the rows on show and seeded with a pattern that matches some
+        // of them — so the count line it exists for has something to say.
+        "select-pattern" => SelectPatternDialog.Create(
+            session.Tab.FileList.Items.Select(i => new Core.Services.Commands.SelectionRow(
+                i.Name, i.FullPath, i.IsDirectory, i.SizeBytes ?? 0, i.ModifiedUtc, i.CreatedUtc, i.Attributes)).ToList(),
+            select: true, seed: "*.txt OR is:folder"),
 
         "theme-editor" => new ThemeEditorWindow(new AppearanceViewModel(
             session.Services.GetRequiredService<IThemeService>())),

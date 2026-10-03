@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using BertBrowser.App.Interop;
 using BertBrowser.App.Services;
+using BertBrowser.App.Services.Commands;
 using BertBrowser.Core.Cli;
 using BertBrowser.Core.Data;
 using BertBrowser.Core.Layout;
@@ -351,7 +352,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             var panes = AllPanes.Count();
             ExplainNoCompare(panes < 2
                 ? "Comparing needs two panes side by side. Split this one with the split button " +
-                  "above the file list, or Ctrl+Alt+Right, and open the other folder in it."
+                  GestureText.Format("above the file list ({pane.split-right}), and open the other folder in it.")
                 : $"Comparing works between exactly two panes, and there are {panes} open. " +
                   "Close the ones you are not comparing.");
             return;
@@ -1410,7 +1411,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             var status = $"Renamed {outcome.Completed.Count:N0} item(s)";
             if (outcome.Failed.Count > 0)
                 status += $"; {outcome.Failed.Count:N0} failed — {outcome.Failed[0].Message}";
-            else if (outcome.CanUndo) status += " — Ctrl+Z to undo";
+            else if (outcome.CanUndo) status += UndoHint;
             SetStatus(status + elevated);
             return outcome;
         }
@@ -1702,7 +1703,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         // DeleteAsync leaves "Deleted N item(s)" behind, which after a drag into another window
         // reads as though the drag destroyed them. Say what actually happened instead.
         if (outcome.Failed.Count == 0 && outcome.Deleted.Count > 0)
-            SetStatus($"Moved {outcome.Deleted.Count:N0} item(s) out — Ctrl+Z to undo");
+            SetStatus($"Moved {outcome.Deleted.Count:N0} item(s) out{UndoHint}");
     }
 
     private static IEnumerable<string> ParentDirectoriesOf(IEnumerable<string> paths) =>
@@ -1741,7 +1742,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             var status = $"Deleted {outcome.Deleted.Count:N0} item(s)";
             if (outcome.Failed.Count > 0)
                 status += $"; {outcome.Failed.Count:N0} failed — {outcome.Failed[0].Message}";
-            else if (outcome.CanUndo) status += " — Ctrl+Z to undo";
+            else if (outcome.CanUndo) status += UndoHint;
             SetStatus(status + elevated);
             return outcome;
         }
@@ -2193,7 +2194,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         var failed = outcome.FailedCopies.Count + outcome.Removals.Failed.Count;
         if (failed > 0) text += $", {failed:N0} failed — {FirstSyncFailure(outcome)}";
         else if (plans.Refused.Count > 0) text += $", {plans.Refused.Count:N0} refused — {plans.Refused[0]}";
-        else if (outcome.CanUndo) text += " — Ctrl+Z to undo";
+        else if (outcome.CanUndo) text += UndoHint;
         return text;
     }
 
@@ -2755,7 +2756,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
             : $"{verb} {outcome.Completed.Count:N0} item(s)";
         if (outcome.Skipped.Count > 0) text += $", skipped {outcome.Skipped.Count:N0}";
         if (outcome.Failed.Count > 0) text += $", {outcome.Failed.Count:N0} failed — {outcome.Failed[0].Message}";
-        else if (outcome.CanUndo || outcome.CanUndoCopy) text += " — Ctrl+Z to undo";
+        else if (outcome.CanUndo || outcome.CanUndoCopy) text += UndoHint;
         return text;
     }
 

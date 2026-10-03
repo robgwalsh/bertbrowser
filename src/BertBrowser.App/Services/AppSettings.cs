@@ -261,6 +261,30 @@ public sealed class AppSettings
 
     public List<CustomCommandDefinition> CustomCommands { get; set; } = new();
 
+    /// <summary>
+    /// Keyboard shortcuts the user has changed, by command id (<c>tab.new</c>, or <c>custom:&lt;id&gt;</c>
+    /// for one of their own commands), each with the chords it now has. Null means nothing was ever
+    /// changed.
+    /// </summary>
+    /// <remarks>
+    /// Only the changes, never the whole keymap: a command absent from here keeps the shortcut it
+    /// ships with, so a later build's new default still arrives. An empty list is a change too —
+    /// it means the command's shortcut was taken away on purpose. Written only by
+    /// <c>KeymapService</c>, never by the settings page's debounce.
+    /// </remarks>
+    public Dictionary<string, List<string>>? KeyBindings { get; set; }
+
+    /// <summary>
+    /// What the user pinned to the top of the command palette, in the order they pinned it: command
+    /// ids, and the ids of named things (<c>workspace:Work</c>, <c>bookmark:C:\Photos</c>).
+    /// </summary>
+    /// <remarks>
+    /// A preference, not a history — nothing gets here except by pressing Pin — which is why it is
+    /// kept while the palette's "recent" list is not. That one lives only as long as the window
+    /// does, so that no record of what was run is ever written down.
+    /// </remarks>
+    public List<string> PalettePins { get; set; } = new();
+
     /// <summary>Whether other programs' right-click entries — 7-Zip, Git, TortoiseSVN — appear in
     /// the file list's and folder tree's menus.</summary>
     /// <remarks>

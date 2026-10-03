@@ -46,6 +46,10 @@ MSB3021 because a running BertBrowser locks `bin\Debug`, kill it
 & $harness --script C:\Source\bertbrowser\tools\ui\system-theme.bbs   # matching the Windows theme
 & $harness --script C:\Source\bertbrowser\tools\ui\transfer.bbs       # the queue, pause, per-item conflicts
 & $harness --script C:\Source\bertbrowser\tools\ui\merge.bbs          # a folder merged into a folder of the same name
+& $harness --script C:\Source\bertbrowser\tools\ui\keys.bbs           # which command a chord runs, and where it is live
+& $harness --script C:\Source\bertbrowser\tools\ui\palette.bbs        # the command palette
+& $harness --script C:\Source\bertbrowser\tools\ui\keyboard.bbs       # the Keyboard settings page and its recorder
+& $harness --script C:\Source\bertbrowser\tools\ui\commands.bbs       # selection, other-pane, view and sort commands
 & $harness -c "tree .; refresh; shot check" --out $env:TEMP\look      # ad hoc
 
 # The folder tree keeping its selection through a rebuild. Needs a visible sandbox — see the
@@ -274,12 +278,37 @@ flat-cap <n>                lowers how many rows one flat listing shows, so a fi
                             reaches past what a person could do, and it is here because the
                             alternative is fifty thousand real files
 
+key <chord> [in list|text|readonly|other]
+                            what pressing a chord does. **Not a key press** — a run posts no input.
+                            It asks the same KeymapRules.Dispatch the window's key handler asks,
+                            with the focus posed (list unless said), and runs the command it names
+                            through the same registry. Prints `KEY <chord> -> <id|nothing>`
+run <command id>            run a command by its CommandCatalog id (tab.new, file.rename, select.all),
+                            as choosing it in the palette does. Both this and `key` refuse to go
+                            further than the availability check for a command that would open a
+                            window, play media or write the clipboard: they print `WOULD-RUN <id>`,
+                            or `UNAVAILABLE <id> — <reason>` when the rules say no
+bind <command id> <chord>… | bind <command id> none
+                            give a command exactly those shortcuts, taking each from whoever had it
+unbind [command id]         back to the shipped shortcut; bare `unbind` resets them all
+palette [open [seed]] | palette close
+                            the command palette, in the window where it really is — so `shot`
+                            photographs it. `palette open C:\x\` opens it on a path
+palette type <text> | clear | down [n] | up [n] | tab | pin | shortcut | pick | rows
+                            the box and the keys that work in it: `pick` is Enter (and reports
+                            `WOULD-RUN` exactly as `run` does), `tab` carries on into a category or
+                            folder, `shortcut` is "change its shortcut", `rows` prints the list
+settings key select <id> | filter <text> | change | add | press <chord> | reassign | remove |
+             reset | reset-all | find | cancel
+                            the Keyboard page's recorder. `press` is the recorder being offered a
+                            chord — the step after a key event has been turned into one
+
 shot <name> [element]       PNG of the window, or of any x:Name'd element in it
 settings <page> [dragging]  puts the settings page up in the main window, where the app shows it
                             (it is not a dialog), for a `shot`. Pages: general, appearance,
                             preview, search-index, history, new-items, columns, saved-searches,
                             workspaces,
-                            context-menu.
+                            context-menu, keyboard.
                             The columns page shows the *saved default*, so put an arrangement in
                             front of it with `columns default` first; `dragging` adds a row's
                             insertion line (columns and context-menu), placed rather than dragged
@@ -293,7 +322,7 @@ dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, renam
                             theme-editor, disk-usage, duplicates, changes, undo-history, sync-preview,
                             sync-preview-running, search-syntax, saved-search, extract, compress,
                             archive-password, elevation,
-                            columns, flat-large, checksum,
+                            columns, select-pattern, flat-large, checksum,
                             checksum-verify, compare-files, transfer, conflicts
                             (transfer is the queue window — the running job's items on top and
                             everything waiting underneath. It needs a `progress-demo` first, and
@@ -426,6 +455,23 @@ assert-compare-files <substring>
                             the file-comparison window's verdict strip
 assert-duplicate-groups <n> | assert-duplicate-selected <n>
 assert-duplicate-row <name> | assert-no-duplicate-row <name>
+assert-key <chord> <list|text|readonly|other> <command id|none>
+                            which command a chord belongs to with focus there — the rule that used
+                            to be "which control saw the key first"
+assert-command <id> available|unavailable [reason]
+                            whether a command may run right now, and that its reason mentions this
+assert-gesture <id> <chord|none>
+                            the shortcut a menu or tooltip prints for a command
+assert-menu-gesture <item text> <chord|none>
+                            what the last `menu` printed beside an item
+assert-tooltip <Name> <text>
+assert-palette-open | assert-palette-closed
+assert-palette-row <text> | assert-no-palette-row <text> | assert-palette-order <a> | <b> | …
+assert-palette-selected <text> | assert-palette-hint <text>
+                            the palette's list. Headings read `# Pinned`, categories read as their
+                            token (`view:`), so both can be asserted on
+assert-key-row <command name> <chord,chord|none|absent>
+assert-key-recorder <text>  the Keyboard page's list and what its recorder strip is saying
 assert-visible <Name> | assert-hidden <Name> | assert-not-launched
 assert-elevation-offered | assert-no-elevation-offered
                             whether the run offered to retry something as administrator. The
@@ -442,8 +488,7 @@ Options: `--out <dir>` · `--sandbox <dir>` · `--state-dir <dir>` · `--keep-st
 
 Element names come from the XAML: window-level are `FolderTree`, `GlobalSearchBox`,
 `ThumbSlider`, `PaneHostSite`; per tab (resolved against the *active* tab) are `FileListView`,
-`SearchBox`, `PathBox`, `Breadcrumb`, `DetailsView`, `PreviewPane`; per pane, `TabHost` and
-`ClosePaneButton`.
+`SearchBox`, `PathBox`, `Breadcrumb`, `DetailsView`, `PreviewPane`; per pane, `TabHost`.
 
 ## Blocked on purpose
 

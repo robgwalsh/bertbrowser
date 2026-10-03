@@ -118,6 +118,49 @@ public static class LayoutTree
         return Normalize(root);
     }
 
+    /// <summary>
+    /// Exchanges two panes' places, each taking the other's share of the space — so the shape of
+    /// the layout stays put and only what is in it moves. Returns the new root.
+    /// </summary>
+    /// <remarks>
+    /// The leaves themselves change places rather than their values: a leaf is what the view keeps
+    /// a pane's control against, so moving the node is what carries the tabs, the selection and
+    /// the scroll position across with it.
+    /// </remarks>
+    public static ILayoutNode<T> Swap<T>(ILayoutNode<T> root, LayoutLeaf<T> first, LayoutLeaf<T> second)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        ArgumentNullException.ThrowIfNull(first);
+        ArgumentNullException.ThrowIfNull(second);
+
+        if (ReferenceEquals(first, second)) return root;
+
+        // A leaf with no parent is the whole layout, and there is nothing to swap it with.
+        if (FindParent(root, first) is not { } firstParent || FindParent(root, second) is not { } secondParent)
+            return root;
+
+        var firstIndex = firstParent.Children.IndexOf(first);
+        var secondIndex = secondParent.Children.IndexOf(second);
+
+        firstParent.Children[firstIndex] = second;
+        secondParent.Children[secondIndex] = first;
+        (first.Weight, second.Weight) = (second.Weight, first.Weight);
+        return root;
+    }
+
+    /// <summary>Gives every pane in a split the same share, at every level — the layout as it
+    /// would be had nobody dragged a splitter.</summary>
+    public static void Equalise<T>(ILayoutNode<T> root)
+    {
+        if (root is not LayoutSplit<T> split) return;
+
+        foreach (var child in split.Children)
+        {
+            child.Weight = 1;
+            Equalise(child);
+        }
+    }
+
     /// <summary>Every pane, in the order they appear on screen (left to right, top to bottom).
     /// This order is what "focus the next pane" walks.</summary>
     public static IEnumerable<LayoutLeaf<T>> Leaves<T>(ILayoutNode<T> root)

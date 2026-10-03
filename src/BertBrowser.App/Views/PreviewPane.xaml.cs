@@ -517,7 +517,7 @@ public partial class PreviewPane : UserControl
         PlayPause.Content = FindResource(playing ? "Icon.Pause" : "Icon.Play");
     }
 
-    private void TogglePlayback()
+    internal void TogglePlayback()
     {
         if (MediaView.Source is null) return;
         if (_playing) MediaView.Pause();
@@ -917,7 +917,7 @@ public partial class PreviewPane : UserControl
 
     private void FullScreen_Click(object sender, RoutedEventArgs e) => ToggleFullScreen();
 
-    private void ToggleFullScreen()
+    internal void ToggleFullScreen()
     {
         if (_fullScreen is null) EnterFullScreen();
         else ExitFullScreen();

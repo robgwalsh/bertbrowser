@@ -332,6 +332,11 @@ public partial class App : Application
         // Other programs' right-click entries. Behind an interface so the harness can hand the
         // menus a fixed list instead of loading whatever is installed on the machine running it.
         services.AddSingleton<IShellMenuSource, ShellMenuSource>();
+        // The shortcuts in force. A singleton because the window, the settings page and every menu
+        // that prints a gesture have to be reading the same keymap.
+        services.AddSingleton<Services.Commands.KeymapService>();
+        // What the command palette remembers: pins on disk, recents for the life of the window.
+        services.AddSingleton<Services.Commands.PaletteMemory>();
         services.AddSingleton<PaneFactory>();
         services.AddSingleton<ShellViewModel>();
         services.AddSingleton<MainWindow>();

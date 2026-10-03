@@ -175,6 +175,81 @@ public class LayoutTreeTests
         Assert.Null(LayoutTree.FindLeaf(root, "nope"));
     }
 
+    // --- Swap and equalise ---
+
+    [Fact]
+    public void Swap_ExchangesTwoSiblingsAndTheirShares()
+    {
+        var a = Leaf("a");
+        var root = LayoutTree.Split<string>(a, a, SplitOrientation.Vertical, "b", out var b);
+        a.Weight = 3;
+        b.Weight = 1;
+
+        root = LayoutTree.Swap(root, a, b);
+
+        Assert.Equal(["b", "a"], Names(root));
+        // The left slot is still the wide one: the panes moved, the layout did not.
+        Assert.Equal(3, b.Weight);
+        Assert.Equal(1, a.Weight);
+    }
+
+    [Fact]
+    public void Swap_ReachesAcrossNestedSplits()
+    {
+        var a = Leaf("a");
+        var root = LayoutTree.Split<string>(a, a, SplitOrientation.Vertical, "b", out var b);
+        root = LayoutTree.Split(root, b, SplitOrientation.Horizontal, "c", out var c);
+
+        root = LayoutTree.Swap(root, a, c);
+
+        Assert.Equal(["c", "b", "a"], Names(root));
+        AssertWellFormed(root, parentOrientation: null);
+    }
+
+    [Fact]
+    public void Swap_WithItselfOrAsTheOnlyPane_ChangesNothing()
+    {
+        var a = Leaf("a");
+        Assert.Same(a, LayoutTree.Swap<string>(a, a, a));
+
+        var root = LayoutTree.Split<string>(a, a, SplitOrientation.Vertical, "b", out _);
+        LayoutTree.Swap(root, a, a);
+        Assert.Equal(["a", "b"], Names(root));
+    }
+
+    [Fact]
+    public void Swap_Twice_PutsEverythingBack()
+    {
+        var a = Leaf("a");
+        var root = LayoutTree.Split<string>(a, a, SplitOrientation.Vertical, "b", out var b);
+        root = LayoutTree.Split(root, b, SplitOrientation.Horizontal, "c", out var c);
+        a.Weight = 5;
+
+        root = LayoutTree.Swap(root, a, c);
+        root = LayoutTree.Swap(root, a, c);
+
+        Assert.Equal(["a", "b", "c"], Names(root));
+        Assert.Equal(5, a.Weight);
+    }
+
+    [Fact]
+    public void Equalise_GivesEverySiblingTheSameShareAtEveryLevel()
+    {
+        var a = Leaf("a");
+        var root = LayoutTree.Split<string>(a, a, SplitOrientation.Vertical, "b", out var b);
+        root = LayoutTree.Split(root, b, SplitOrientation.Horizontal, "c", out var c);
+        a.Weight = 7;
+        b.Weight = 2;
+        c.Weight = 9;
+
+        LayoutTree.Equalise(root);
+
+        var top = Assert.IsType<LayoutSplit<string>>(root);
+        Assert.All(top.Children, child => Assert.Equal(1, child.Weight));
+        Assert.Equal(b.Weight, c.Weight);
+        AssertWellFormed(root, parentOrientation: null);
+    }
+
     // --- Property test: random split/close sequences never degenerate ---
 
     [Theory]

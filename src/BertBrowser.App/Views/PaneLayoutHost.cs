@@ -68,9 +68,6 @@ internal sealed class PaneLayoutHost : ContentControl
             _views.Remove(pane);
         }
 
-        foreach (var view in _views.Values)
-            view.UpdateClosePaneAvailability();
-
         _ = Dispatcher.InvokeAsync(() => RestoreScrollOffsets(offsets), DispatcherPriority.Loaded);
     }
 

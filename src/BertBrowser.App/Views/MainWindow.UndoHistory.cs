@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using Microsoft.Extensions.DependencyInjection;
+using BertBrowser.App.Services.Commands;
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.UndoHistory;
@@ -112,7 +113,7 @@ public partial class MainWindow
         }
 
         items.Add(new Separator());
-        var show = new MenuItem { Header = "Show history…", InputGestureText = "Ctrl+Alt+Z", Icon = MenuIcon("Icon.Undo") };
+        var show = new MenuItem { Header = "Show history…", InputGestureText = GestureText.For("edit.undo-history"), Icon = MenuIcon("Icon.Undo") };
         show.Click += (_, _) => ShowUndoHistory();
         items.Add(show);
 

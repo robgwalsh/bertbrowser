@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using IconPath = System.Windows.Shapes.Path;
 using BertBrowser.App.Services;
+using BertBrowser.App.Services.Commands;
 
 namespace BertBrowser.App.Views;
 
@@ -29,6 +30,8 @@ internal static class CustomCommandMenu
             Header = definition.Name.Replace("_", "__"),
             Tag = definition,
             Icon = icon,
+            // One of the user's own commands can be given a shortcut on the Keyboard page.
+            InputGestureText = GestureText.For(KeymapService.CustomId(definition.Id)),
         };
         item.Click += (_, _) => run(definition, targets);
         return item;

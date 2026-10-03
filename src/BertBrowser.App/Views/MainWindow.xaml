@@ -12,84 +12,27 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d">
-    <Window.InputBindings>
-        <KeyBinding Key="Back" Command="{Binding ActiveTab.BackCommand}"/>
-        <KeyBinding Key="Left" Modifiers="Alt" Command="{Binding ActiveTab.BackCommand}"/>
-        <KeyBinding Key="Right" Modifiers="Alt" Command="{Binding ActiveTab.ForwardCommand}"/>
-        <KeyBinding Key="Up" Modifiers="Alt" Command="{Binding ActiveTab.UpCommand}"/>
-        <KeyBinding Key="F5" Command="{Binding ActiveTab.RefreshCommand}"/>
-        <!-- Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z and Ctrl+Alt+Z (the undo history) are handled in
-             code-behind, not bound here: a window-level binding would take them away from the
-             search and path boxes, where they must still undo and redo typing. Ctrl+C/X/V and
-             Alt+Enter likewise belong to whichever pane has focus, so they live in DirectoryTabView. -->
-
-        <!-- Tabs. Routed through ActivePane, so they act on the pane the user is working in. -->
-        <KeyBinding Key="T" Modifiers="Ctrl" Command="{Binding ActivePane.NewTabCommand}"/>
-        <KeyBinding Key="W" Modifiers="Ctrl" Command="{Binding ActivePane.CloseTabCommand}"/>
-        <KeyBinding Key="Tab" Modifiers="Ctrl" Command="{Binding ActivePane.NextTabCommand}"/>
-        <KeyBinding Key="Tab" Modifiers="Ctrl+Shift" Command="{Binding ActivePane.PreviousTabCommand}"/>
-        <!-- The parameter is a string because that is all KeyBinding supplies; "8" means "last". -->
-        <KeyBinding Key="D1" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="0"/>
-        <KeyBinding Key="D2" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="1"/>
-        <KeyBinding Key="D3" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="2"/>
-        <KeyBinding Key="D4" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="3"/>
-        <KeyBinding Key="D5" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="4"/>
-        <KeyBinding Key="D6" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="5"/>
-        <KeyBinding Key="D7" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="6"/>
-        <KeyBinding Key="D8" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="7"/>
-        <KeyBinding Key="D9" Modifiers="Ctrl" Command="{Binding ActivePane.ActivateTabAtCommand}" CommandParameter="8"/>
-
-        <!-- Panes. Ctrl+Alt+arrow rather than Ctrl+Shift+arrow, which extends a list selection.
-             Plain Tab stays WPF's focus traversal — it has to keep working inside the search and
-             path boxes — so pane cycling is F6. -->
-        <KeyBinding Key="Right" Modifiers="Ctrl+Alt" Command="{Binding ActivePane.SplitVerticalCommand}"/>
-        <KeyBinding Key="Down" Modifiers="Ctrl+Alt" Command="{Binding ActivePane.SplitHorizontalCommand}"/>
-        <KeyBinding Key="W" Modifiers="Ctrl+Shift" Command="{Binding ActivePane.ClosePaneCommand}"/>
-        <KeyBinding Key="F6" Command="{Binding FocusNextPaneCommand}"/>
-        <KeyBinding Key="F6" Modifiers="Shift" Command="{Binding FocusPreviousPaneCommand}"/>
-
-        <!-- Disk usage. Safe as a window binding rather than a guarded PreviewKeyDown: it cannot
-             collide with typing the way Ctrl+F or Ctrl+Z can. -->
-        <KeyBinding Key="D" Modifiers="Ctrl+Shift" Command="{Binding AnalyseDiskUsageCommand}"/>
-
-        <!-- Duplicates. Same reasoning as Ctrl+Shift+D above; U because D is taken. -->
-        <KeyBinding Key="U" Modifiers="Ctrl+Shift" Command="{Binding FindDuplicatesCommand}"/>
-
-        <!-- What changed. Same reasoning again; H for history. -->
-        <KeyBinding Key="H" Modifiers="Ctrl+Shift" Command="{Binding ShowChangesCommand}"/>
-
-        <!-- Compare this pane with the one beside it, and press it again to stop. F7 because that
-             is where every other two-pane file manager puts it, and a bare function key is safe for
-             the same reason Ctrl+Shift+D is. -->
-        <KeyBinding Key="F7" Command="{Binding CompareWithOtherPaneCommand}"/>
-
-        <!-- Reopen the last tab closed in this pane. -->
-        <KeyBinding Key="T" Modifiers="Ctrl+Shift" Command="{Binding ActivePane.ReopenClosedTabCommand}"/>
-
-        <!-- The preview pane, for the tab that has focus. Safe here for the same reason
-             Ctrl+Shift+D is: P is not a text-editing key, so it cannot be taken away from the
-             search or path box. Explorer's Alt+P is handled in code-behind instead, because an
-             Alt chord arrives as Key.System with the real key in SystemKey. -->
-        <KeyBinding Key="P" Modifiers="Ctrl" Command="{Binding ActiveTab.TogglePreviewCommand}"/>
-
-        <!-- The flat branch view. Ctrl+B is what Directory Opus, XYplorer, Total Commander and
-             Double Commander all bind this to, so it is the one gesture somebody arriving from
-             another file manager already knows. Safe here for the reason Ctrl+P is: B is not a
-             text-editing key, so it cannot be taken away from the search or path box. -->
-        <KeyBinding Key="B" Modifiers="Ctrl" Command="{Binding ActiveTab.ToggleFlatCommand}"/>
-    </Window.InputBindings>
+    <!--
+      No InputBindings: every shortcut is a row of Core's CommandCatalog, resolved against the
+      user's keymap and dispatched from MainWindow.OnPreviewKeyDown (MainWindow.Commands.cs). What
+      the comments that used to sit here explained chord by chord — which keys are safe while
+      somebody types in the search or path box, why Ctrl+Z is not taken from a text box, why the
+      clipboard keys belong to the list — is KeymapRules now, and DefaultKeymapParityTests pins it.
+    -->
 
     <!--
       The window-wide toolbar lives in the title bar rather than in a strip of its own: the address
       bar, search box, progress and error banner are all per directory now and live inside each
       pane's DirectoryTabView. Back/Forward/Up/Refresh moved into that same per-tab row too — see
       DirectoryTabView.xaml — since two panes each need their own navigation, not one that silently
-      acts on whichever pane is active. The KeyBindings above still route through ActiveTab.*Command
-      and are unaffected.
+      acts on whichever pane is active. The navigation shortcuts still act on the active tab
+      (MainWindow.Commands.cs) and are unaffected.
     -->
     <v:ThemedWindow.TitleBarContent>
         <DockPanel Margin="12,0,4,0" TextElement.Foreground="{StaticResource Theme.TitleBar.Foreground}">
-            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+            <!-- The toolbar, docked left so it follows straight on from the name and version the
+                 window template draws before this content. -->
+            <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" Margin="0,0,10,0">
                 <!--
                   Undo and Redo, each a split button in the shape every editor's are: the face takes
                   one step, the chevron lists the history so a click can go back several at once.
@@ -121,35 +64,35 @@
                 <!-- "Show hidden items" lives in the Settings dialog only; it is a preference
                      you set once, not something the caption strip needs a button for. -->
                 <Button Style="{StaticResource ToolbarButton}"
-                        ToolTip="Disk usage treemaps (Ctrl+Shift+D)"
+                        v:Cmd.Tip="Disk usage treemaps ({tools.disk-usage})"
                         Command="{Binding AnalyseDiskUsageCommand}"
                         AutomationProperties.Name="Disk usage">
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.DiskUsage}"/>
                 </Button>
 
                 <Button Style="{StaticResource ToolbarButton}"
-                        ToolTip="Find duplicate files (Ctrl+Shift+U)"
+                        v:Cmd.Tip="Find duplicate files ({tools.duplicates})"
                         Command="{Binding FindDuplicatesCommand}"
                         AutomationProperties.Name="Duplicates">
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Duplicates}"/>
                 </Button>
 
                 <Button Style="{StaticResource ToolbarButton}"
-                        ToolTip="Recent file changes (Ctrl+Shift+H)"
+                        v:Cmd.Tip="Recent file changes ({tools.changes})"
                         Command="{Binding ShowChangesCommand}"
                         AutomationProperties.Name="What changed">
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Changes}"/>
                 </Button>
 
                 <Button x:Name="CompareButton" Style="{StaticResource ToolbarButton}"
-                        ToolTip="Compare this pane with the one beside it (F7)"
+                        v:Cmd.Tip="Compare this pane with the one beside it ({tools.compare})"
                         Command="{Binding CompareWithOtherPaneCommand}"
                         AutomationProperties.Name="Compare folders">
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Compare}"/>
                 </Button>
 
                 <Button Style="{StaticResource ToolbarButton}"
-                        ToolTip="Settings"
+                        v:Cmd.Tip="Settings ({app.settings})"
                         Click="Settings_Click">
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Settings}"/>
                 </Button>
@@ -157,8 +100,8 @@
 
             <!--
               The workspace switcher, when Settings puts it here rather than in the sidebar. Docked
-              left, so it sits just after the name and version the window template draws before
-              this content, and the search box keeps centring itself in what is left. Named after
+              left, so it sits just after the toolbar, and the search box keeps centring itself in
+              what is left. Named after
               the workspace the window last came from, or plain "Workspaces" before there is one.
             -->
             <Button x:Name="WorkspaceSwitcher" DockPanel.Dock="Left" Margin="2,0,12,0"
@@ -221,12 +164,26 @@
               It is always open: it used to fold into a magnifier button, which saved a little
               caption strip and cost a click before every search, in the one place a file
               browser is most often reached for. The query itself belongs to the active tab,
-              since that is the list the hits appear in. Centered in the title bar's remaining
-              space — the last, undocked child, so DockPanel hands it that whole span and its own
-              HorizontalAlignment centers it rather than stretching it edge to edge.
+              since that is the list the hits appear in. The field is centered on the whole title
+              bar, not on the span DockPanel has left over — that span starts after the name and
+              ends before the buttons, so its middle is wherever those happen to leave it. Left
+              aligned here, and CenterGlobalSearch sets the left margin that puts it there.
             -->
-            <StackPanel x:Name="GlobalSearchGroup" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                <Border Style="{StaticResource HeaderFieldBorder}" Width="300">
+            <StackPanel x:Name="TitleBarSearchGroup" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
+                <!-- Everything the app can do, by name. Beside the search field because both are
+                     "find it by typing": this one answers for commands, that one for files. Outside
+                     GlobalSearchGroup, which Settings disables — the palette still works there. -->
+                <!-- Not focusable: the palette hands the keyboard back to whatever had it, and that
+                     must be the file list rather than the button that opened it. -->
+                <Button x:Name="PaletteButton" Style="{StaticResource ToolbarButton}" Focusable="False"
+                        v:Cmd.Tip="Command palette — find any command by name ({app.palette})"
+                        Click="Palette_Click"
+                        AutomationProperties.Name="Command palette">
+                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Palette}"/>
+                </Button>
+
+            <StackPanel x:Name="GlobalSearchGroup" Orientation="Horizontal" VerticalAlignment="Center">
+                <Border x:Name="GlobalSearchField" Style="{StaticResource HeaderFieldBorder}" Width="300">
                         <DockPanel>
                             <Path Style="{StaticResource IconPath}" DockPanel.Dock="Left"
                                        Data="{StaticResource Icon.Search}" Width="13" Height="13" Margin="8,0,6,0"
@@ -262,7 +219,7 @@
                                          AutomationProperties.Name="Search this PC"
                                          Text="{Binding ActiveTab.GlobalSearchText, UpdateSourceTrigger=PropertyChanged}"
                                          KeyDown="GlobalSearchBox_KeyDown"
-                                         ToolTip="Search every indexed drive (Ctrl+Shift+F)"/>
+                                         v:Cmd.Tip="Search every indexed drive ({search.pc})"/>
                                 <TextBlock Text="Search this PC" Foreground="{StaticResource Theme.Text.Placeholder}"
                                            UseLayoutRounding="False"
                                            Margin="4,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
@@ -292,6 +249,7 @@
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Properties}"/>
                 </Button>
             </StackPanel>
+            </StackPanel>
         </DockPanel>
     </v:ThemedWindow.TitleBarContent>
 
@@ -317,7 +275,7 @@
                            Visibility="{Binding UndoDescription, Converter={StaticResource NullToCollapsed}}">
                 <Button Style="{StaticResource LinkButton}" Margin="10,0,0,0"
                         Click="UndoHistoryLink_Click"
-                        ToolTip="Show the undo history (Ctrl+Alt+Z)"
+                        v:Cmd.Tip="Show the undo history ({edit.undo-history})"
                         AutomationProperties.AutomationId="StatusUndo">
                     <TextBlock Text="{Binding UndoDescription}" Foreground="{StaticResource Theme.Text.Link}"/>
                 </Button>
@@ -689,7 +647,18 @@
                      sections, under the same kind of header they have (no rule above it: it is
                      the first thing in the sidebar). -->
             <DockPanel Grid.Row="0">
-            <TextBlock DockPanel.Dock="Top" Text="DRIVES" Style="{StaticResource SidebarHeader}"/>
+            <DockPanel DockPanel.Dock="Top">
+                <Button DockPanel.Dock="Right" Margin="0,4,8,0" VerticalAlignment="Center"
+                        Width="21" Height="21" Padding="4"
+                        Style="{StaticResource ToolbarButton}"
+                        ToolTip="Collapse all"
+                        Click="CollapseFolderTree_Click"
+                        AutomationProperties.AutomationId="CollapseFolderTree"
+                        AutomationProperties.Name="Collapse all">
+                    <Path Style="{StaticResource IconPath}" Width="13" Height="13" Data="{StaticResource Icon.CollapseAll}"/>
+                </Button>
+                <TextBlock Text="DRIVES" Style="{StaticResource SidebarHeader}"/>
+            </DockPanel>
             <!-- Padding's right edge is the scrollbar gutter SidebarTreeStyle draws the bar into;
                  it must match the ScrollBar style's 12px width. -->
             <TreeView x:Name="FolderTree" ItemsSource="{Binding Tree.Roots}" BorderThickness="0"
@@ -847,5 +816,9 @@
         </Grid>
     </DockPanel>
     <ContentControl x:Name="SettingsHost" Focusable="False" IsTabStop="False"/>
+    <!-- The command palette, over whichever of the two above is showing. Last, so it is on top;
+         Collapsed until asked for, so it costs nothing and takes no input. See CommandPalette.xaml
+         for why it is an element here rather than a Popup. -->
+    <v:CommandPalette x:Name="PaletteHost" Visibility="Collapsed"/>
     </Grid>
 </v:ThemedWindow>

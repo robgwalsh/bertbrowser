@@ -7,12 +7,14 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using BertBrowser.App.Services;
+using BertBrowser.App.Services.Commands;
 using BertBrowser.App.ViewModels;
 using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Archives;
 using BertBrowser.Core.Services.Checksums;
 using BertBrowser.Core.Services.Columns;
+using BertBrowser.Core.Services.Commands;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.FlatView;
 using BertBrowser.Core.Services.NewItem;
@@ -154,7 +156,9 @@ public partial class DirectoryTabView : UserControl
     /// "Available" is the tab's own width minus the list's minimum (120, set on its column in
     /// XAML) and the splitter — never the whole window, since the list must keep somewhere to
     /// stand even when the preview asks for everything.</summary>
-    private void PreviewPane_FitWidthRequested(object? sender, EventArgs e)
+    private void PreviewPane_FitWidthRequested(object? sender, EventArgs e) => FitPreviewWidth();
+
+    internal void FitPreviewWidth()
     {
         if (!Tab.IsPreviewVisible) return;
 
@@ -578,14 +582,7 @@ public partial class DirectoryTabView : UserControl
         e.Handled = true;
     }
 
-    private void Breadcrumb_EmptyClick(object sender, MouseButtonEventArgs e)
-    {
-        PathBox.Text = Tab.CurrentPath;
-        BreadcrumbScroller.Visibility = Visibility.Collapsed;
-        PathBox.Visibility = Visibility.Visible;
-        PathBox.Focus();
-        PathBox.SelectAll();
-    }
+    private void Breadcrumb_EmptyClick(object sender, MouseButtonEventArgs e) => EditAddress();
 
     private void PathBox_KeyDown(object sender, KeyEventArgs e)
     {
@@ -636,49 +633,16 @@ public partial class DirectoryTabView : UserControl
 
     // --- Keyboard ---
 
-    protected override void OnPreviewKeyDown(KeyEventArgs e)
-    {
-        // Clipboard shortcuts belong to the list, not to a text box that happens to be in the
-        // same pane — Ctrl+C in the search field must still copy text. (Ctrl+F is handled by the
-        // window, so it reaches the active pane even from the sidebar.)
-        // Ctrl+Shift+C, checked before plain Ctrl+C: the modifier comparison below is exact, so it
-        // would not swallow this, but keeping the more specific gesture first is what stops the
-        // next edit to that condition from doing so.
-        if (FileListView.IsKeyboardFocusWithin &&
-            Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.C)
-        {
-            _shell.CopyPathsCommand.Execute(SelectedFileItems());
-            e.Handled = true;
-        }
-        else if (FileListView.IsKeyboardFocusWithin && Keyboard.Modifiers == ModifierKeys.Control &&
-                 e.Key is Key.C or Key.X or Key.V)
-        {
-            // All three are off inside a container. Cut and paste would write; copy would make a
-            // promise to produce bytes later that an entry cannot keep, since the archive may have
-            // been rewritten by the time anything pastes. Still handled, so the chord is inert
-            // rather than falling through to something else.
-            if (!Tab.FileList.IsInsideArchive)
-            {
-                switch (e.Key)
-                {
-                    case Key.C: _shell.CopySelectionCommand.Execute(SelectedFileItems()); break;
-                    case Key.X: _shell.CutSelectionCommand.Execute(SelectedFileItems()); break;
-                    case Key.V: _shell.PasteCommand.Execute(null); break;
-                }
-            }
-            e.Handled = true;
-        }
-        // Alt combinations arrive as Key.System with the real key in SystemKey.
-        else if (e.Key == Key.System && e.SystemKey == Key.Enter &&
-                 Keyboard.Modifiers == ModifierKeys.Alt &&
-                 FileListView.IsKeyboardFocusWithin &&
-                 SelectedFileItems() is { Count: > 0 } selected)
-        {
-            ShowProperties(selected);
-            e.Handled = true;
-        }
-        base.OnPreviewKeyDown(e);
-    }
+    /// <summary>
+    /// Whether this tab's list has the keyboard, which is what makes the list's own shortcuts live.
+    /// </summary>
+    /// <remarks>
+    /// There is no key handling in this view any more. Clipboard chords, Enter, F2, Del and the
+    /// rest are commands whose context is the file list (<c>CommandContext.FileList</c>), and the
+    /// window's dispatcher runs them only while this is true — which is the rule that used to be
+    /// written out arm by arm here: Ctrl+C in the search field must still copy text.
+    /// </remarks>
+    internal bool IsFileListFocused => FileListView.IsKeyboardFocusWithin;
 
     // --- File list interactions ---
 
@@ -695,6 +659,13 @@ public partial class DirectoryTabView : UserControl
     /// is sitting on, so scrolling for it is pure churn. Multi-selection has no one folder to reveal,
     /// and a rubber-band drag churns the selection every frame, so both skip the tree work.</summary>
     private void FileList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // A command selecting many rows at once mirrors them itself, once, when it is done.
+        if (_bulkSelecting) return;
+        MirrorSelection();
+    }
+
+    private void MirrorSelection()
     {
         // Mirrored out synchronously so the shell and the window's key handlers never have to reach
         // into this view to find what is selected.
@@ -797,47 +768,6 @@ public partial class DirectoryTabView : UserControl
 
         if (FileListView.SelectedItem is FileItemViewModel item)
             Tab.Open(item, RunAsAdminHeld);
-    }
-
-    /// <summary>Enter opens the selected item, like double-click; Ctrl+Shift+Enter opens it as
-    /// administrator. F2 renames the selection and Delete removes it, as everywhere else in
-    /// Windows. Shift+Delete is the Explorer convention for erasing outright instead of setting
-    /// aside.</summary>
-    private void FileList_KeyDown(object sender, KeyEventArgs e)
-    {
-        // The plain-Enter arm needs its modifier guard or it swallows Ctrl+Shift+Enter first.
-        if (e.Key == Key.Enter
-            && Keyboard.Modifiers is ModifierKeys.None or (ModifierKeys.Control | ModifierKeys.Shift)
-            && FileListView.SelectedItem is FileItemViewModel item)
-        {
-            Tab.Open(item, RunAsAdminHeld);
-            e.Handled = true;
-        }
-        // Each of the three write verbs carries the archive guard as well as its modifier guard.
-        // The menu hides them there too, but a keybinding must not be able to route around a menu —
-        // and each still marks the key handled, so the chord does nothing rather than falling
-        // through to type-ahead and jumping the selection to a file beginning with "n".
-        else if (e.Key == Key.F2 && Keyboard.Modifiers == ModifierKeys.None)
-        {
-            _ = RenameSelectionAsync();
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Delete && Keyboard.Modifiers is ModifierKeys.None or ModifierKeys.Shift)
-        {
-            // Shift is ignored inside a container, for the reason the menu item is hidden there.
-            _ = DeleteSelectionAsync(
-                permanent: Keyboard.Modifiers == ModifierKeys.Shift && !Tab.FileList.IsInsideArchive);
-            e.Handled = true;
-        }
-        else if (e.Key == Key.N && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift)
-                 && !Tab.FileList.IsInsideArchive)
-        {
-            // Explorer's shortcut. It belongs on the list rather than in the window's InputBindings
-            // because it acts on the focused pane's directory, and it needs its modifier guard
-            // like every other arm here.
-            _ = CreateInCurrentFolderAsync(NewItemKind.Folder);
-            e.Handled = true;
-        }
     }
 
     // --- Type-ahead selection ---
@@ -962,147 +892,45 @@ public partial class DirectoryTabView : UserControl
         // own go through BuiltInMenu.Show below, so both answers count.
         var hidden = BuiltInMenu.Hidden(_settings);
         BuiltInMenu.Apply(menu, hidden);
+        BuiltInMenu.ApplyGestures(menu);
 
         var selection = SelectedFileItems();
 
-        // Inside an archive nothing has a path an executor can act on, so everything that writes to
-        // disk by path is off. The same guard the flattened-search rules use, for the same reason,
-        // and the dangerous ones are guarded at the service too — a keybinding must not be able to
-        // route around a menu.
-        //
-        // Copy is off with them, and that one is worth stating: Ctrl+C is a promise to produce
-        // bytes *later*, and an entry cannot keep it — the container may have been rewritten by the
-        // time anyone pastes. Explorer keeps the promise by extracting to temp on the keystroke,
-        // which writes gigabytes for a keypress. Extract is the honest verb and it gets its own
-        // menu item.
-        var inArchive = Tab.FileList.IsInsideArchive;
+        // Which items are on, and what each says for this selection, is FileVerbRules' to decide —
+        // so a shortcut and the command palette get the same answer this menu does. Open and
+        // Properties are left alone: on empty space they have always been there and done nothing.
+        var verbs = VerbSnapshot(selection);
+        var inArchive = verbs.InArchive;
 
-        CopyMenuItem.IsEnabled = CutMenuItem.IsEnabled = selection.Count > 0 && !inArchive;
-        CopyPathMenuItem.IsEnabled = CopyNameMenuItem.IsEnabled = selection.Count > 0;
-        CopyPathMenuItem.Header = selection.Count > 1 ? "Copy as paths" : "Copy as path";
-        CopyNameMenuItem.Header = selection.Count > 1 ? "Copy names" : "Copy name";
+        Offer(NewMenuItem, FileVerb.New, verbs, hidden);
+        Offer(RunAsAdminMenuItem, FileVerb.RunAsAdmin, verbs, hidden);
+        Offer(OpenInNewTabMenuItem, FileVerb.OpenInNewTab, verbs, hidden);
+        Offer(OpenInNewPaneMenuItem, FileVerb.OpenInNewPane, verbs, hidden);
+        Offer(OpenInTerminalMenuItem, FileVerb.OpenInTerminal, verbs, hidden);
+        Offer(OpenInVSCodeMenuItem, FileVerb.OpenInVSCode, verbs, hidden);
+        Offer(DiskUsageMenuItem, FileVerb.DiskUsage, verbs, hidden);
+        Offer(DuplicatesMenuItem, FileVerb.Duplicates, verbs, hidden);
+        Offer(ChangesMenuItem, FileVerb.Changes, verbs, hidden);
+        Offer(CompareMenuItem, FileVerb.ComparePanes, verbs, hidden);
+        Offer(CompressMenuItem, FileVerb.Compress, verbs, hidden);
+        Offer(ExtractHereMenuItem, FileVerb.ExtractHere, verbs, hidden);
+        Offer(ExtractToMenuItem, FileVerb.ExtractTo, verbs, hidden);
+        Offer(CopyPathMenuItem, FileVerb.CopyPath, verbs, hidden);
+        Offer(CopyNameMenuItem, FileVerb.CopyName, verbs, hidden);
+        Offer(CompareFilesMenuItem, FileVerb.CompareFiles, verbs, hidden);
+        Offer(SettleByContentMenuItem, FileVerb.SettleByContent, verbs, hidden);
+        Offer(VerifyChecksumsMenuItem, FileVerb.VerifyChecksums, verbs, hidden);
+        Offer(ChecksumMenuItem, FileVerb.Checksum, verbs, hidden);
+        Offer(CutMenuItem, FileVerb.Cut, verbs, hidden);
+        Offer(CopyMenuItem, FileVerb.Copy, verbs, hidden);
+        Offer(PasteMenuItem, FileVerb.Paste, verbs, hidden);
+        Offer(RenameMenuItem, FileVerb.Rename, verbs, hidden);
+        Offer(DeleteMenuItem, FileVerb.Delete, verbs, hidden);
+        Offer(DeletePermanentlyMenuItem, FileVerb.DeletePermanently, verbs, hidden);
+        Offer(BookmarkMenuItem, FileVerb.Bookmark, verbs, hidden);
 
-        // Real files only: a checksum answers for a file's bytes, a folder has none of its own, and
-        // an entry inside a container has no path the digester can open. Not offered on an empty
-        // selection either — digesting a whole folder is a different, much slower verb.
-        var realFiles = selection.Count(i => !i.IsDirectory);
-        ChecksumMenuItem.IsEnabled = realFiles > 0 && realFiles == selection.Count && !inArchive;
-        ChecksumMenuItem.Header = realFiles > 1 ? $"Checksums of {realFiles:N0} files…" : "Checksum…";
-
-        // Verifying is a verb about a folder, so it follows the folder verbs' rule rather than the
-        // selection's — a checksum file describes what is around it.
-        VerifyChecksumsMenuItem.IsEnabled = !inArchive;
-
-        // Exactly two real files. Deliberately not conditional on a folder comparison being under
-        // way: "are these two the same?" is the general question, and the comparison session is only
-        // one of the ways of arriving at it.
-        CompareFilesMenuItem.IsEnabled = selection.Count == 2 && realFiles == 2 && !inArchive;
-
-        // Only while a folder comparison is up: this asks it to re-judge these rows by their bytes,
-        // and there is nothing to re-judge otherwise. Hidden rather than greyed, because a disabled
-        // item nobody can explain is worse than an absent one.
-        var comparing = _shell.CompareSession is not null;
-        BuiltInMenu.Show(SettleByContentMenuItem, comparing, hidden);
-        SettleByContentMenuItem.IsEnabled = comparing && realFiles > 0 && !inArchive;
-        SettleByContentMenuItem.Header = realFiles > 1 ? "Settle these by content" : "Settle by content";
-        PasteMenuItem.IsEnabled = FileClipboard.HasFiles() && !inArchive;
-
-        // "Open in new tab/pane" only makes sense for folders.
-        var folders = selection.Count(i => i.IsDirectory);
-        OpenInNewTabMenuItem.IsEnabled = OpenInNewPaneMenuItem.IsEnabled = folders > 0;
-        OpenInNewTabMenuItem.Header = folders > 1 ? $"Open {folders} folders in new tabs" : "Open in new tab";
-
-        // Both act on the selection or, with nothing selected, on the folder being shown — so an
-        // empty-space right-click opens this folder rather than doing nothing. Off inside a
-        // container: an entry's path is virtual and names nothing another program can open.
-        OpenInTerminalMenuItem.IsEnabled = OpenInVSCodeMenuItem.IsEnabled = LaunchTarget() is not null;
-
-        // One folder, since the view analyses a single root. With nothing selected this still
-        // offers itself and analyses the folder being shown, which is the useful reading of an
-        // empty-space right-click.
-        DiskUsageMenuItem.IsEnabled = selection.Count == 0 || (selection.Count == 1 && folders == 1);
-        // Duplicates reads whole files by path, which an entry does not have. Disk usage does not:
-        // every size inside a container is already exact, so it stays on — see the Archives section.
-        DuplicatesMenuItem.IsEnabled = DiskUsageMenuItem.IsEnabled && !inArchive;
-        // The change log is keyed by real paths, and an entry inside a container has none.
-        ChangesMenuItem.IsEnabled = DuplicatesMenuItem.IsEnabled;
-
-        // Not keyed on the selection at all, and never disabled: it compares the two panes, so what
-        // it needs is that there be two, and pressing it is how you find that out — a greyed row
-        // with no explanation is exactly the thing this feature answers with a modal instead. The
-        // header flips because pressing it again is how a comparison is stopped, and a menu that
-        // still said "Compare" would be lying about what it does.
-        CompareMenuItem.Header = _shell.CompareSession is null
-            ? "Compare with other pane"
-            : "Stop comparing";
-
-        // Extract shows from either side of the container: on a single selected archive out here,
-        // or on the selection (or everything, with nothing selected) in there. It is the one write
-        // verb that is *more* available inside an archive than outside one.
-        var extractable = inArchive ||
-            (selection.Count == 1 && !selection[0].IsDirectory &&
-             ArchiveFormats.IsArchiveName(selection[0].Name));
-
-        BuiltInMenu.Show(ExtractHereMenuItem, extractable, hidden);
-        BuiltInMenu.Show(ExtractToMenuItem, extractable, hidden);
-
-        // Compressing reads files by path, so it needs real ones — off inside a container and off
-        // over a search result, where "the folder being shown" is not a folder. A flat branch view
-        // is flattened too but does have one, so it keeps this: IsSearchResult, not IsFlattened.
-        CompressMenuItem.IsEnabled =
-            !inArchive && !Tab.FileList.IsSearchResult && Tab.CurrentPath.Length > 0;
-        CompressMenuItem.Header = selection.Count > 1
-            ? $"Compress {selection.Count:N0} items…"
-            : "Compress…";
-        ExtractHereMenuItem.Header = inArchive && selection.Count > 0
-            ? $"Extract {selection.Count:N0} item(s) here"
-            : "Extract here";
-
-        // Only ever one file: "run this folder as administrator" means nothing, and a whole
-        // selection of programs started elevated at once is not something to offer from a menu.
-        // Only where there is something to elevate. A runas verb is registered per file type —
-        // exefile has one, txtfile does not and never will — so offering it on a type without one
-        // produces ERROR_NO_ASSOCIATION and nothing else. Where there is no verb but the file has a
-        // handler, that handler is what gets elevated (a .sln opens VSLauncher as administrator);
-        // greyed out means neither was available. See RunAsVerbRules.Decide.
-        RunAsAdminMenuItem.IsEnabled =
-            selection.Count == 1 &&
-            Interop.RunAsVerbRegistry.CanRunElevated(
-                selection[0].FullPath, selection[0].IsDirectory, inArchive);
-
-        // Rename and Delete stay on inside a container, but they mean something different in
-        // there: the container is rewritten beside itself and swapped in. Whether that is possible
-        // at all depends on the format and the archive's own shape, and the planner is what knows —
-        // so the menu offers it and the refusal, when there is one, arrives by name.
-        //
-        // Renaming several at once is not offered in there: a rewrite writes each entry exactly
-        // once, so the staging trick that makes a rotating batch work on disk has nowhere to happen.
-        RenameMenuItem.IsEnabled = selection.Count == 1 || (selection.Count > 1 && !inArchive);
-        RenameMenuItem.Header = selection.Count > 1 ? $"Rename {selection.Count} items…" : "Rename…";
-
-        DeleteMenuItem.IsEnabled = selection.Count > 0;
-
-        // Shift+Delete has no meaning in there: an entry has no Recycle Bin and no staging of its
-        // own, so there is no second, more destructive thing for it to mean.
-        DeletePermanentlyMenuItem.IsEnabled = selection.Count > 0 && !inArchive;
-        DeleteMenuItem.Header = selection.Count > 1 ? $"Delete {selection.Count} items…" : "Delete…";
-
-        // Bookmarking is refused at BookmarkService too, and that is the important half: a virtual
-        // path in the bookmark table would sort strictly inside the archive's own containing folder
-        // under PathKey.IsUnder, and poison every subtree query over it.
-        BookmarkMenuItem.IsEnabled = selection.Count > 0 && !inArchive;
-        // "Remove bookmark" only when every selected item is already bookmarked.
-        var allBookmarked = selection.Count > 0 && selection.All(i => _shell.Bookmarks.IsBookmarked(i.FullPath));
-        BookmarkMenuItem.Header = allBookmarked ? "Remove bookmark" : "Bookmark";
-
-        // New acts on the folder being shown, so it needs one — and a search result is not one:
-        // creating into the search root would produce an item that may not match the query and so
-        // would not appear, which reads as a failure. That objection is exactly what does not apply
-        // to a flat branch view, where a new child of the root is in the listing by definition.
-        NewMenuItem.IsEnabled =
-            !Tab.FileList.IsSearchResult && !inArchive && Tab.CurrentPath.Length > 0;
         NewItemMenu.Rebuild(NewMenuItem, NewFileTypesSeparator, _settings,
-            template => _ = CreateInCurrentFolderAsync(NewItemKind.File, template));
+            template => RunNew(NewItemKind.File, template));
 
         // Other programs' entries: off inside a container, where nothing has a path another program can open. With nothing
         // selected the target is the folder's background — and a search result has no folder, so
@@ -1158,11 +986,12 @@ public partial class DirectoryTabView : UserControl
         });
     }
 
-    private void ContextNewFolder_Click(object sender, RoutedEventArgs e) =>
-        _ = CreateInCurrentFolderAsync(NewItemKind.Folder);
+    // Every click below goes through RunVerb, which asks FileVerbRules again: a menu can sit open
+    // while the listing changes under it, and the same entry point serves keys and the palette.
 
-    private void ContextNewEmptyFile_Click(object sender, RoutedEventArgs e) =>
-        _ = CreateInCurrentFolderAsync(NewItemKind.File);
+    private void ContextNewFolder_Click(object sender, RoutedEventArgs e) => RunNew(NewItemKind.Folder);
+
+    private void ContextNewEmptyFile_Click(object sender, RoutedEventArgs e) => RunNew(NewItemKind.File);
 
     /// <summary>Creates a folder or file in the directory this tab is showing. The selection is
     /// deliberately not consulted: New makes something beside what is here, never inside it.</summary>
@@ -1189,33 +1018,21 @@ public partial class DirectoryTabView : UserControl
             MessageDialog.Show(owner, failed.Message, "New", MessageDialogKind.Warning);
     }
 
-    private void ContextOpen_Click(object sender, RoutedEventArgs e)
-    {
-        if (FileListView.SelectedItem is FileItemViewModel item)
-            Tab.OpenItemCommand.Execute(item);
-    }
+    private void ContextOpen_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.Open);
 
-    private void ContextRunAsAdmin_Click(object sender, RoutedEventArgs e)
-    {
-        if (FileListView.SelectedItem is FileItemViewModel item)
-            Tab.Open(item, elevated: true);
-    }
+    private void ContextRunAsAdmin_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.RunAsAdmin);
 
     /// <summary>Opening a whole selection of folders is capped: a stray Ctrl+A would otherwise
     /// turn one menu click into hundreds of directory loads.</summary>
     private const int MaxFoldersOpenedAtOnce = 10;
 
-    private void ContextOpenInNewTab_Click(object sender, RoutedEventArgs e)
-    {
-        foreach (var folder in SelectedFolders())
-            _shell.OpenInNewTab(folder.FullPath);
-    }
+    private void ContextOpenInNewTab_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.OpenInNewTab);
 
     private void ContextOpenInPaneRight_Click(object sender, RoutedEventArgs e) =>
-        OpenSelectedFolderInPane(SplitOrientation.Vertical);
+        RunOpenInPane(SplitOrientation.Vertical);
 
     private void ContextOpenInPaneBelow_Click(object sender, RoutedEventArgs e) =>
-        OpenSelectedFolderInPane(SplitOrientation.Horizontal);
+        RunOpenInPane(SplitOrientation.Horizontal);
 
     private void OpenSelectedFolderInPane(SplitOrientation orientation)
     {
@@ -1247,32 +1064,12 @@ public partial class DirectoryTabView : UserControl
         return Tab.CurrentPath is { Length: > 0 } directory ? (directory, true) : null;
     }
 
-    private void ContextOpenTerminal_Click(object sender, RoutedEventArgs e)
-    {
-        if (LaunchTarget() is { } target)
-            _shell.OpenInTerminal(target.FullPath, target.IsDirectory);
-    }
+    private void ContextOpenTerminal_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.OpenInTerminal);
 
-    /// <summary>A selected folder, or — with nothing selected — the folder being shown.</summary>
-    private void ContextDiskUsage_Click(object sender, RoutedEventArgs e)
-    {
-        var target = FileListView.SelectedItem is FileItemViewModel { IsDirectory: true } item
-            ? item.FullPath
-            : Tab.CurrentPath;
+    private void ContextDiskUsage_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.DiskUsage);
 
-        _shell.OpenDiskUsage(target is { Length: > 0 } ? target : null);
-    }
+    private void ContextChanges_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.Changes);
 
-    private void ContextChanges_Click(object sender, RoutedEventArgs e)
-    {
-        var target = FileListView.SelectedItem is FileItemViewModel { IsDirectory: true } item
-            ? item.FullPath
-            : Tab.CurrentPath;
-
-        _shell.OpenChanges(target is { Length: > 0 } ? target : null);
-    }
-
-    /// <summary>A selected folder, or — with nothing selected — the folder being shown.</summary>
     /// <summary>
     /// Extract, from either side of the container: a selected archive out in the folder that holds
     /// it, or the selection inside one out to somewhere chosen.
@@ -1290,7 +1087,7 @@ public partial class DirectoryTabView : UserControl
     /// through, and the cache treats an index read <em>with</em> a password as superseding one read
     /// without — so there is no special "unlocked" path, only a re-read that now succeeds.
     /// </remarks>
-    private void Unlock_Click(object sender, RoutedEventArgs e) => _ = UnlockAsync();
+    private void Unlock_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.UnlockArchive);
 
     private async Task UnlockAsync()
     {
@@ -1316,7 +1113,7 @@ public partial class DirectoryTabView : UserControl
     private bool _unlockRefused;
 
     /// <summary>Compress the selection, or the whole folder when nothing is selected.</summary>
-    private void ContextCompress_Click(object sender, RoutedEventArgs e) => _ = CompressAsync();
+    private void ContextCompress_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.Compress);
 
     private async Task CompressAsync()
     {
@@ -1340,11 +1137,9 @@ public partial class DirectoryTabView : UserControl
             sources, dialog.ArchivePath, dialog.Format, dialog.Level);
     }
 
-    private void ContextExtractHere_Click(object sender, RoutedEventArgs e) =>
-        _ = ExtractAsync(askWhere: false);
+    private void ContextExtractHere_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.ExtractHere);
 
-    private void ContextExtractTo_Click(object sender, RoutedEventArgs e) =>
-        _ = ExtractAsync(askWhere: true);
+    private void ContextExtractTo_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.ExtractTo);
 
     private async Task ExtractAsync(bool askWhere)
     {
@@ -1400,47 +1195,23 @@ public partial class DirectoryTabView : UserControl
             : (null, []);
     }
 
-    private void ContextDuplicates_Click(object sender, RoutedEventArgs e)
-    {
-        var target = FileListView.SelectedItem is FileItemViewModel { IsDirectory: true } item
-            ? item.FullPath
-            : Tab.CurrentPath;
+    private void ContextDuplicates_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.Duplicates);
 
-        _shell.OpenDuplicates(target is { Length: > 0 } ? target : null);
-    }
+    private void ContextCompare_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.ComparePanes);
 
-    /// <summary>
-    /// Compares this pane with the one beside it. Deliberately routed through the shell's command
-    /// rather than acting on the selection: the pair is decided by which panes are on screen, and a
-    /// selected folder has nothing to do with it.
-    /// </summary>
-    private void ContextCompare_Click(object sender, RoutedEventArgs e)
-    {
-        _shell.CompareWithOtherPaneCommand.Execute(null);
-    }
+    private void ContextOpenVSCode_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.OpenInVSCode);
 
-    private void ContextOpenVSCode_Click(object sender, RoutedEventArgs e)
-    {
-        if (LaunchTarget() is { } target)
-            _shell.OpenInVSCode(target.FullPath, target.IsDirectory);
-    }
+    private void ContextCopy_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.Copy);
 
-    private void ContextCopy_Click(object sender, RoutedEventArgs e) =>
-        _shell.CopySelectionCommand.Execute(SelectedFileItems());
+    private void ContextCut_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.Cut);
 
-    private void ContextCut_Click(object sender, RoutedEventArgs e) =>
-        _shell.CutSelectionCommand.Execute(SelectedFileItems());
+    private void ContextPaste_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.Paste);
 
-    private void ContextPaste_Click(object sender, RoutedEventArgs e) =>
-        _shell.PasteCommand.Execute(null);
+    private void ContextCopyPath_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.CopyPath);
 
-    private void ContextCopyPath_Click(object sender, RoutedEventArgs e) =>
-        _shell.CopyPathsCommand.Execute(SelectedFileItems());
+    private void ContextCopyName_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.CopyName);
 
-    private void ContextCopyName_Click(object sender, RoutedEventArgs e) =>
-        _shell.CopyNamesCommand.Execute(SelectedFileItems());
-
-    private void ContextRename_Click(object sender, RoutedEventArgs e) => _ = RenameSelectionAsync();
+    private void ContextRename_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.Rename);
 
     /// <summary>Renames the selection, in the order the list shows it — which is the order a
     /// numbered rename counts in, so "Holiday 1" is the one nearest the top.</summary>
@@ -1527,11 +1298,10 @@ public partial class DirectoryTabView : UserControl
         return true;
     }
 
-    private void ContextDelete_Click(object sender, RoutedEventArgs e) =>
-        _ = DeleteSelectionAsync(permanent: false);
+    private void ContextDelete_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.Delete);
 
     private void ContextDeletePermanently_Click(object sender, RoutedEventArgs e) =>
-        _ = DeleteSelectionAsync(permanent: true);
+        RunVerb(FileVerb.DeletePermanently);
 
     /// <summary>
     /// Renaming one entry inside a container, which means rewriting the whole container.
@@ -1600,7 +1370,7 @@ public partial class DirectoryTabView : UserControl
             var confirmed = MessageDialog.Show(
                 owner2,
                 $"Remove {what} from this archive?\n\n" +
-                "The whole archive is rewritten to do it. Ctrl+Z puts the original back.",
+                $"The whole archive is rewritten to do it. {GestureText.OrName("edit.undo")} puts the original back.",
                 "Archive", MessageDialogKind.Warning, showCancel: true);
 
             if (confirmed)
@@ -1638,13 +1408,11 @@ public partial class DirectoryTabView : UserControl
             "Delete", MessageDialogKind.Warning);
     }
 
-    private void ContextBookmark_Click(object sender, RoutedEventArgs e)
-    {
-        var entries = SelectedFileItems().Select(i => (i.FullPath, i.IsDirectory)).ToList();
-        _ = _shell.ToggleBookmarksAsync(entries);
-    }
+    private void ContextBookmark_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.Bookmark);
 
-    private void ContextChecksum_Click(object sender, RoutedEventArgs e)
+    private void ContextChecksum_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.Checksum);
+
+    private void ChecksumSelection()
     {
         var paths = SelectedFileItems().Where(i => !i.IsDirectory).Select(i => i.FullPath).ToList();
 
@@ -1659,13 +1427,18 @@ public partial class DirectoryTabView : UserControl
         _shell.OpenChecksums(paths);
     }
 
-    private void ContextCompareFiles_Click(object sender, RoutedEventArgs e)
+    private void ContextCompareFiles_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.CompareFiles);
+
+    private void CompareSelectedFiles()
     {
         if (SelectedFileItems() is [{ IsDirectory: false } left, { IsDirectory: false } right])
             _shell.OpenFileCompare(left.FullPath, right.FullPath);
     }
 
-    private void ContextSettleByContent_Click(object sender, RoutedEventArgs e)
+    private void ContextSettleByContent_Click(object sender, RoutedEventArgs e) =>
+        RunVerb(FileVerb.SettleByContent);
+
+    private void SettleSelectionByContent()
     {
         if (_shell.CompareSession is not { } session) return;
 
@@ -1673,7 +1446,10 @@ public partial class DirectoryTabView : UserControl
         if (paths.Count > 0) _ = session.SettleByContentAsync(paths);
     }
 
-    private void ContextVerifyChecksums_Click(object sender, RoutedEventArgs e)
+    private void ContextVerifyChecksums_Click(object sender, RoutedEventArgs e) =>
+        RunVerb(FileVerb.VerifyChecksums);
+
+    private void VerifyChecksums()
     {
         var folder = Tab.CurrentPath;
 
@@ -1690,11 +1466,7 @@ public partial class DirectoryTabView : UserControl
             _shell.OpenChecksumVerify(dialog.FileName);
     }
 
-    private void ContextProperties_Click(object sender, RoutedEventArgs e)
-    {
-        if (SelectedFileItems() is { Count: > 0 } selection)
-            ShowProperties(selection);
-    }
+    private void ContextProperties_Click(object sender, RoutedEventArgs e) => RunVerb(FileVerb.Properties);
 
     private void ShowProperties(IReadOnlyList<FileItemViewModel> items)
     {

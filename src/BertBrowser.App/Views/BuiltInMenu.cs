@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using BertBrowser.App.Services;
+using BertBrowser.App.Services.Commands;
 using BertBrowser.Core.Services.ShellMenu;
 
 namespace BertBrowser.App.Views;
@@ -23,6 +24,23 @@ internal static class BuiltInMenu
     {
         foreach (var item in ContextMenuComposer.BuiltInItems(menu))
             Show(item, show: true, hidden);
+    }
+
+    /// <summary>
+    /// Prints each entry's shortcut beside it, from the keymap in force. For the file list's menu
+    /// only: the folder tree's has always shown none, because the list's keys do not act on the
+    /// tree. Run on every opening, so a rebind is in the menu the next time it is opened.
+    /// </summary>
+    public static void ApplyGestures(ContextMenu menu)
+    {
+        foreach (var item in ContextMenuComposer.BuiltInItems(menu))
+        {
+            // An item naming its own command (Extract here, Extract to — two under one id) wins
+            // over the row's, and has been filled in by Cmd.Id already.
+            if (Cmd.GetId(item) is not null) continue;
+            if (item.Tag is string id && BuiltInMenuItems.Find(id)?.CommandId is { } command)
+                item.InputGestureText = GestureText.For(command);
+        }
     }
 
     /// <summary>Shows the item when the menu wants it and the user has not unticked it.</summary>

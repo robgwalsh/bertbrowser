@@ -1,0 +1,167 @@
+# The keymap: every shortcut is a command, looked up by chord and gated by what has focus.
+#
+# `key` is not a key press — a run posts no input. It asks the same KeymapRules.Dispatch the
+# window's key handler asks, with the focus posed, and runs what it names through the same
+# registry. So this proves which command a chord belongs to, where it is live, and whether the
+# command may run; it cannot prove WPF delivers the key, which only a person at a keyboard can.
+
+tree .
+refresh
+
+# --- The window's shortcuts still do what they did ---
+
+key Ctrl+T
+assert-tabs 2
+key Ctrl+W
+assert-tabs 1
+key Ctrl+Alt+Right
+assert-panes 2
+key Ctrl+Shift+W
+assert-panes 1
+
+enter Documents
+assert-path Documents
+key Backspace
+assert-not-inside-archive
+assert-row Documents
+key Alt+Right
+assert-path Documents
+key Alt+Up
+assert-row Documents
+
+key Ctrl+B
+assert-flat
+key Ctrl+B
+assert-not-flat
+
+# --- Where a chord is live is a rule, not an accident of which control saw the key first ---
+
+# Backspace navigates from the list and the tree, and never while somebody is typing.
+assert-key Backspace list nav.back
+assert-key Backspace other nav.back
+assert-key Backspace text none
+
+# The clipboard, Enter, F2 and Del are the list's alone.
+assert-key Ctrl+C list edit.copy
+assert-key Ctrl+C text none
+assert-key Ctrl+C other none
+assert-key F2 list file.rename
+assert-key F2 other none
+assert-key Del list file.delete
+assert-key Enter list file.open
+
+# Undo stays out of every text control, the preview's read-only one included.
+assert-key Ctrl+Z list edit.undo
+assert-key Ctrl+Z text none
+assert-key Ctrl+Z readonly none
+
+# A chord no text box uses is live everywhere.
+assert-key Ctrl+T text tab.new
+assert-key F5 text nav.refresh
+assert-key Ctrl+F text search.folder
+
+# --- A command that cannot run says why, and a key cannot route around that ---
+
+assert-command file.rename unavailable Nothing is selected
+select notes.txt
+assert-command file.rename available
+assert-command file.compare-files unavailable exactly two
+select notes.txt, report.md
+assert-command file.compare-files available
+deselect
+
+assert-command edit.undo unavailable nothing to undo
+assert-command pane.close unavailable only pane
+assert-command tab.reopen available
+
+# Inside an archive, everything that writes by path is off — by menu, by key and by name.
+preview-fixture Preview
+go Preview
+enter sample.zip
+assert-inside-archive
+select readme.txt
+assert-command edit.copy unavailable archive
+assert-command edit.cut unavailable archive
+assert-command file.new-folder unavailable archive
+assert-command file.compress unavailable archive
+assert-command file.bookmark unavailable archive
+assert-command file.checksum unavailable archive
+assert-command file.open-terminal unavailable archive
+# Rename and delete stay on in there — they rewrite the container — but rename takes one item.
+assert-command file.rename available
+assert-command file.delete available
+assert-command file.extract-here available
+select readme.txt, src
+assert-command file.rename unavailable one item at a time
+# The chord is still the command's, so it is swallowed rather than falling through to type-ahead.
+assert-key Ctrl+Shift+N list file.new-folder
+key Ctrl+Shift+N
+assert-inside-archive
+deselect
+up
+assert-not-inside-archive
+
+# --- The settings page silences everything about the folders ---
+
+settings general
+assert-key Ctrl+T other none
+assert-key Backspace other none
+assert-key F5 list none
+settings close
+assert-key Ctrl+T other tab.new
+
+# --- Rebinding ---
+
+assert-gesture view.flat Ctrl+B
+bind view.flat Ctrl+K
+assert-gesture view.flat Ctrl+K
+assert-key Ctrl+B list none
+key Ctrl+K
+assert-flat
+key Ctrl+K
+assert-not-flat
+
+# Giving a chord to another command takes it from whoever had it.
+bind tab.duplicate Ctrl+T
+assert-key Ctrl+T list tab.duplicate
+assert-gesture tab.new none
+
+# Taking a shortcut away is a change too, and Reset undoes it.
+bind nav.refresh none
+assert-key F5 list none
+unbind nav.refresh
+assert-key F5 list nav.refresh
+
+# --- What is printed follows what is bound ---
+
+# The menu and the tooltips read the keymap in force, so nothing on screen goes on claiming a key
+# that no longer does the thing.
+select plain.txt
+menu files 01-menu-shipped
+assert-menu-gesture Rename F2
+assert-menu-gesture Delete… Del
+assert-menu-gesture Copy as path Ctrl+Shift+C
+assert-menu-gesture Folder Ctrl+Shift+N
+assert-menu-gesture Bookmark none
+assert-tooltip PreviewPaneToggle Ctrl+P
+
+bind file.rename F9
+bind file.bookmark Ctrl+D
+bind view.preview Ctrl+Shift+V
+bind file.new-folder none
+menu files 02-menu-rebound
+assert-menu-gesture Rename F9
+assert-menu-gesture Bookmark Ctrl+D
+assert-menu-gesture Folder none
+assert-tooltip PreviewPaneToggle Ctrl+Shift+V
+assert-key F2 list none
+assert-key F9 list file.rename
+deselect
+
+unbind
+assert-tooltip PreviewPaneToggle Ctrl+P
+assert-gesture view.flat Ctrl+B
+assert-key Ctrl+T list tab.new
+assert-gesture tab.duplicate Ctrl+Shift+K
+
+assert-not-launched

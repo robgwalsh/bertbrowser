@@ -131,3 +131,27 @@ ExitFullScreen    | Full Screen Minimize    | full_screen_minimize    | 20
 # strip will move.
 ChevronDown       | Chevron Down            | chevron_down            | 20
 ChevronUp         | Chevron Up              | chevron_up              | 20
+
+# The Drives header's button that folds every expanded drive and folder back up.
+CollapseAll       | Arrow Collapse All      | arrow_collapse_all      | 20
+
+# The command palette and the Keyboard settings page. Palette is a lightning bolt -- "do something,
+# quickly" -- rather than a magnifier, which already means searching for files in two boxes on the
+# same title bar. Pin and PinOff are the row's own toggle: an outline to pin, a struck one to unpin.
+Palette           | Flash                   | flash                   | 20
+Keyboard          | Keyboard                | keyboard                | 20
+Pin               | Pin                     | pin                     | 20
+PinOff            | Pin Off                 | pin_off                 | 20
+
+# What the palette's rows are about, for the kinds of command that had no picture because they had
+# no button: places to go, an open tab, what is selected, the order of the list, and hidden items.
+Folder            | Folder                  | folder                  | 20
+Home              | Home                    | home                    | 20
+Desktop           | Desktop                 | desktop                 | 20
+Download          | Arrow Download          | arrow_download          | 20
+Drive             | Hard Drive              | hard_drive              | 20
+Tab               | Tab Desktop             | tab_desktop             | 20
+SelectAll         | Select All On           | select_all_on           | 20
+Sort              | Arrow Sort              | arrow_sort              | 20
+Hidden            | Eye Off                 | eye_off                 | 20
+Thumbnails        | Grid                    | grid                    | 20

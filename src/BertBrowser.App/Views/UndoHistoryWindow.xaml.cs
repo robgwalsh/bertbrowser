@@ -59,21 +59,24 @@ public partial class UndoHistoryWindow : ThemedWindow
     /// Commits everything the history holds, after saying how much that is. Asked first because it
     /// is the one action here that cannot be taken back.
     /// </summary>
-    private void Clear_Click(object sender, RoutedEventArgs e)
+    private void Clear_Click(object sender, RoutedEventArgs e) => ConfirmAndClear(_shell, _confirm);
+
+    /// <summary>The one Clear, for this window's button and the command alike.</summary>
+    internal static void ConfirmAndClear(ShellViewModel shell, IUserConfirm confirm)
     {
-        var held = _shell.History.Held;
+        var held = shell.History.Held;
         var what = held.Bytes > 0
             ? $" BertBrowser is holding {(held.Complete ? "" : "at least ")}{ByteSizeFormatter.Format(held.Bytes)} " +
               "of replaced and deleted files for them, which will be removed for good."
             : "";
 
-        if (_confirm.Ask(
+        if (confirm.Ask(
                 $"Clear the undo history? None of these actions can be undone or redone afterwards.{what} " +
                 "Items sent to the Recycle Bin stay there.",
                 "Clear undo history",
                 "Clear history"))
         {
-            _ = _shell.ClearUndoHistoryAsync();
+            _ = shell.ClearUndoHistoryAsync();
         }
     }
 }

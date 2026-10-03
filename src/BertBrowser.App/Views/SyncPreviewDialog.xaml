@@ -60,7 +60,7 @@
             <Button Grid.Column="1" Content="Cancel" MinWidth="88" Margin="16,0,0,0"
                     VerticalAlignment="Center"
                     Command="{Binding Progress.CancelCommand}"
-                    ToolTip="Stop the sync. What has already been copied stays, and Ctrl+Z still puts it back."/>
+                    v:Cmd.Tip="Stop the sync. What has already been copied stays, and {edit.undo} still puts it back."/>
         </Grid>
 
         <!-- The destructive option, kept at the bottom next to the button that acts on it and off
@@ -76,7 +76,7 @@
                       Content="Also delete items that are only on the right"/>
             <TextBlock Margin="22,2,0,0" FontSize="11" TextWrapping="Wrap"
                        Foreground="{StaticResource Theme.Text.Muted}"
-                       Text="Ctrl+Z puts the whole sync back, and they go to the Recycle Bin on any volume that has one."/>
+                       v:Cmd.Text="{}{edit.undo} puts the whole sync back, and they go to the Recycle Bin on any volume that has one."/>
         </StackPanel>
 
         <!-- Read-only once the run starts: what is ticked is what is being carried out, and the

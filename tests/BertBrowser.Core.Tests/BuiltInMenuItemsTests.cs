@@ -1,3 +1,4 @@
+using BertBrowser.Core.Services.Commands;
 using BertBrowser.Core.Services.ShellMenu;
 using Xunit;
 
@@ -26,8 +27,24 @@ public class BuiltInMenuItemsTests
     {
         Assert.All(BuiltInMenuItems.All.Where(i => i.Icon is not null),
             i => Assert.StartsWith("Icon.", i.Icon));
-        Assert.Equal("Ctrl+X", BuiltInMenuItems.Find("CUT")?.Gesture);
+        Assert.Equal("edit.cut", BuiltInMenuItems.Find("CUT")?.CommandId);
         Assert.Null(BuiltInMenuItems.Find("no-such-item"));
+    }
+
+    [Fact]
+    public void Every_command_a_row_names_is_in_the_catalogue()
+    {
+        // The menu prints the shortcut of the command a row names; a row naming one that does not
+        // exist would print nothing, for ever, and nobody would be told.
+        Assert.All(BuiltInMenuItems.All.Where(i => i.CommandId is not null),
+            i => Assert.True(CommandCatalog.IsKnown(i.CommandId!), $"{i.Id} names {i.CommandId}"));
+    }
+
+    [Fact]
+    public void Group_rows_name_no_single_command()
+    {
+        Assert.All(new[] { "new", "open-new-pane", "extract" },
+            id => Assert.Null(BuiltInMenuItems.Find(id)!.CommandId));
     }
 
     [Fact]

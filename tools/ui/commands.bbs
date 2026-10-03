@@ -1,0 +1,146 @@
+# The commands that had no button before there was a palette: selection, the other pane, view
+# modes, sorting. Each is run by id, the way choosing it in the palette runs it.
+#
+# `run` goes through the same registry a key press does, so a command that is unavailable here is
+# unavailable to the keyboard and the palette too — and says why.
+
+tree .
+refresh
+shot 01-start
+
+# --- Selection ---
+
+assert-selected 0
+run select.all
+assert-selected 8
+run select.none
+assert-selected 0
+select notes.txt
+run select.invert
+assert-selected 7
+run select.files
+assert-selected 5
+run select.folders
+assert-selected 3
+run select.none
+
+# The chords are the list's, and Ctrl+A stays the text box's while somebody types.
+assert-key Ctrl+A list select.all
+assert-key Ctrl+A text none
+assert-key Ctrl+I list select.invert
+assert-key Num+ list select.pattern
+assert-key Num+ other none
+# A dialog, so a run reports it rather than opening one nobody could dismiss.
+key Num+
+dialog select-pattern 02-select-pattern
+
+# --- View ---
+
+run view.sort-size
+run view.sort-reverse
+run view.sort-name
+shot 03-sorted-by-name
+run view.toggle-thumbnails
+assert-command view.thumbnails unavailable already
+run view.thumbs-larger
+shot 04-thumbnails
+run view.details
+assert-command view.details unavailable already
+assert-command view.thumbs-smaller unavailable details
+
+assert-no-row .hidden-notes.txt
+key Ctrl+H
+assert-row .hidden-notes.txt
+key Ctrl+H
+assert-no-row .hidden-notes.txt
+
+# --- The other pane ---
+
+assert-command pane.swap unavailable no other pane
+assert-command pane.copy-to-other unavailable Nothing is selected
+select notes.txt
+assert-command pane.copy-to-other unavailable no other pane
+deselect
+
+# With one pane, "open this folder in the other pane" makes the other pane.
+enter Documents
+key Ctrl+Shift+O
+assert-panes 2
+shot 05-two-panes
+
+# Focus stayed where it was; the new pane shows the same folder. Send it somewhere else.
+pane 2
+go .
+pane 1
+assert-path Documents
+
+# Copy and move across, through the same planner a drop uses — so undo works.
+select-all
+assert-selected 4
+key Ctrl+Shift+F5
+settle 500
+pane 2
+refresh
+assert-row letter.txt
+assert-row draft.md
+shot 06-copied-across
+pane 1
+
+run pane.swap
+shot 07-swapped
+run pane.swap
+run pane.equalise
+
+# Not during a comparison: its left and right are fixed when it starts, and Sync writes to "the
+# right side" — swapping the panes would point that at the other folder.
+pane 2
+go Pictures
+pane 1
+compare
+assert-command pane.swap unavailable Stop comparing first
+assert-command tab.move-to-other-pane unavailable Stop comparing first
+compare-end
+assert-command pane.swap available
+
+# A tab sent next door takes its folder with it.
+newtab .
+assert-tabs 2
+run tab.move-to-other-pane
+assert-tabs 2
+pane 1
+assert-tabs 1
+closepane
+assert-panes 1
+
+# --- Go ---
+
+go Documents
+run nav.drive-root
+assert-command nav.drive-root unavailable already
+back
+assert-path Documents
+assert-command nav.containing-folder unavailable search results or a flat view
+
+# In a flat view the row's real folder is one command away.
+up
+flat files
+assert-flat files
+select report.md
+assert-command nav.containing-folder available
+run nav.containing-folder
+settle 400
+assert-not-flat
+assert-row report.md
+assert-selected 1
+
+# --- Tabs ---
+
+newtab Documents
+newtab Pictures
+tab 1
+assert-command tab.move-left unavailable first tab
+run tab.move-right
+run tab.close-right
+assert-tabs 2
+
+assert-not-launched

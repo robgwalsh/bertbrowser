@@ -29,19 +29,19 @@
             <!-- Navigation. Per tab, not per window: two panes each act on their own history and
                  their own directory, not on whichever pane last had focus. -->
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,4,0">
-                <Button Style="{StaticResource ToolbarButton}" ToolTip="Back (Alt+Left)"
+                <Button Style="{StaticResource ToolbarButton}" v:Cmd.Tip="Back ({nav.back})"
                         Command="{Binding BackCommand}">
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Back}"/>
                 </Button>
-                <Button Style="{StaticResource ToolbarButton}" ToolTip="Forward (Alt+Right)"
+                <Button Style="{StaticResource ToolbarButton}" v:Cmd.Tip="Forward ({nav.forward})"
                         Command="{Binding ForwardCommand}">
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Forward}"/>
                 </Button>
-                <Button Style="{StaticResource ToolbarButton}" ToolTip="Up (Alt+Up)"
+                <Button Style="{StaticResource ToolbarButton}" v:Cmd.Tip="Up ({nav.up})"
                         Command="{Binding UpCommand}">
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Up}"/>
                 </Button>
-                <Button Style="{StaticResource ToolbarButton}" ToolTip="Refresh (F5)"
+                <Button Style="{StaticResource ToolbarButton}" v:Cmd.Tip="Refresh ({nav.refresh})"
                         Command="{Binding RefreshCommand}">
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Refresh}"/>
                 </Button>
@@ -124,7 +124,7 @@
                                  AutomationProperties.Name="Search this folder"
                                  Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                                  KeyDown="SearchBox_KeyDown"
-                                 ToolTip="Search this folder and everything under it (Ctrl+F). Filters: ext: size: dm: path: is: re: in: content:, plus OR and !"/>
+                                 v:Cmd.Tip="Search this folder and everything under it ({search.folder}). Filters: ext: size: dm: path: is: re: in: content:, plus OR and !"/>
                         <TextBlock Text="Search this folder" Foreground="{StaticResource Theme.Text.Placeholder}" Margin="4,0,0,0"
                                    UseLayoutRounding="False"
                                    VerticalAlignment="Center" IsHitTestVisible="False">
@@ -159,7 +159,7 @@
             -->
             <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="6,0,0,0">
                 <Button x:Name="FlatViewToggle"
-                        ToolTip="Flat view — everything under this folder (Ctrl+B)"
+                        v:Cmd.Tip="Flat view — everything under this folder ({view.flat})"
                         Command="{Binding ToggleFlatCommand}"
                         AutomationProperties.AutomationId="FlatViewToggle"
                         AutomationProperties.Name="Flat view">
@@ -197,7 +197,7 @@
                 </Button>
 
                 <Button x:Name="PreviewPaneToggle" Margin="6,0,0,0"
-                        ToolTip="Preview pane (Ctrl+P)"
+                        v:Cmd.Tip="Preview pane ({view.preview})"
                         Command="{Binding TogglePreviewCommand}"
                         AutomationProperties.AutomationId="PreviewPaneToggle"
                         AutomationProperties.Name="Preview pane">
@@ -293,7 +293,6 @@
                       PreviewMouseRightButtonDown="FileList_PreviewMouseRightButtonDown"
                       SelectionChanged="FileList_SelectionChanged"
                       TextInput="FileList_TextInput"
-                      KeyDown="FileList_KeyDown"
                       PreviewMouseWheel="Scroll_PreviewMouseWheel"
                       ContextMenuOpening="FileList_ContextMenuOpening">
                 <ListView.ItemContainerStyle>
@@ -309,14 +308,14 @@
                              same menu, gets it without needing its own affordance. -->
                         <MenuItem x:Name="NewMenuItem" Tag="new" Header="New">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Add}"/></MenuItem.Icon>
-                            <MenuItem Header="Folder" InputGestureText="Ctrl+Shift+N"
+                            <MenuItem Header="Folder" v:Cmd.Id="file.new-folder"
                                       Click="ContextNewFolder_Click">
                                 <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.NewFolder}"/></MenuItem.Icon>
                             </MenuItem>
                             <!-- The configured file types are built here at ContextMenuOpening. -->
                             <Separator x:Name="NewFileTypesSeparator"/>
                             <Separator/>
-                            <MenuItem Header="Empty file…" Click="ContextNewEmptyFile_Click">
+                            <MenuItem Header="Empty file…" v:Cmd.Id="file.new-file" Click="ContextNewEmptyFile_Click">
                                 <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.NewFile}"/></MenuItem.Icon>
                             </MenuItem>
                         </MenuItem>
@@ -328,7 +327,7 @@
                              on a key you are not holding while you read it is the wrong place to
                              hide "with full access to this computer". -->
                         <MenuItem x:Name="RunAsAdminMenuItem" Tag="run-as-admin" Header="Run as administrator"
-                                  InputGestureText="Ctrl+Shift+Enter" Click="ContextRunAsAdmin_Click">
+                                  Click="ContextRunAsAdmin_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Shield}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="OpenInNewTabMenuItem" Tag="open-new-tab" Header="Open in new tab"
@@ -337,8 +336,8 @@
                         </MenuItem>
                         <MenuItem x:Name="OpenInNewPaneMenuItem" Tag="open-new-pane" Header="Open in new pane">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.OpenInNewPane}"/></MenuItem.Icon>
-                            <MenuItem Header="To the right" Click="ContextOpenInPaneRight_Click"/>
-                            <MenuItem Header="Below" Click="ContextOpenInPaneBelow_Click"/>
+                            <MenuItem Header="To the right" v:Cmd.Id="file.open-pane-right" Click="ContextOpenInPaneRight_Click"/>
+                            <MenuItem Header="Below" v:Cmd.Id="file.open-pane-below" Click="ContextOpenInPaneBelow_Click"/>
                         </MenuItem>
                         <MenuItem x:Name="OpenInTerminalMenuItem" Tag="open-terminal" Header="Open in Terminal"
                                   Click="ContextOpenTerminal_Click">
@@ -351,42 +350,42 @@
                         <!-- Folders only: a single file's size is already in the Size column, so
                              analysing one would only ever restate it. -->
                         <MenuItem x:Name="DiskUsageMenuItem" Tag="disk-usage" Header="Analyse disk usage…"
-                                  InputGestureText="Ctrl+Shift+D" Click="ContextDiskUsage_Click">
+                                  Click="ContextDiskUsage_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.DiskUsage}"/></MenuItem.Icon>
                         </MenuItem>
                         <!-- Folders only, for the same reason: one file cannot be a duplicate of
                              itself, so a single selected file has nothing to search. -->
                         <MenuItem x:Name="DuplicatesMenuItem" Tag="duplicates" Header="Find duplicates…"
-                                  InputGestureText="Ctrl+Shift+U" Click="ContextDuplicates_Click">
+                                  Click="ContextDuplicates_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Duplicates}"/></MenuItem.Icon>
                         </MenuItem>
                         <!-- Folders only, like the two above: a file's own history is its folder's
                              history filtered, and the window filters. -->
                         <MenuItem x:Name="ChangesMenuItem" Tag="changes" Header="What changed here…"
-                                  InputGestureText="Ctrl+Shift+H" Click="ContextChanges_Click">
+                                  Click="ContextChanges_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Changes}"/></MenuItem.Icon>
                         </MenuItem>
                         <!-- Nothing to do with the selection: it compares the folder this pane is
                              showing against the one beside it, which is why it takes no items and
                              is only disabled when there is no second pane. -->
                         <MenuItem x:Name="CompareMenuItem" Tag="compare-panes" Header="Compare with other pane"
-                                  InputGestureText="F7" Click="ContextCompare_Click">
+                                  Click="ContextCompare_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Compare}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="CompressMenuItem" Tag="compress" Header="Compress…"
                                   Click="ContextCompress_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Archive}"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem x:Name="ExtractHereMenuItem" Tag="extract" Header="Extract here"
+                        <MenuItem x:Name="ExtractHereMenuItem" Tag="extract" Header="Extract here" v:Cmd.Id="file.extract-here"
                                   Click="ContextExtractHere_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.MoveToFolder}"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem x:Name="ExtractToMenuItem" Tag="extract" Header="Extract to…"
+                        <MenuItem x:Name="ExtractToMenuItem" Tag="extract" Header="Extract to…" v:Cmd.Id="file.extract-to"
                                   Click="ContextExtractTo_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.MoveToFolder}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="CopyPathMenuItem" Tag="copy-path" Header="Copy as path"
-                                  InputGestureText="Ctrl+Shift+C" Click="ContextCopyPath_Click">
+                                  Click="ContextCopyPath_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Copy}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="CopyNameMenuItem" Tag="copy-name" Header="Copy name" Click="ContextCopyName_Click"/>
@@ -405,34 +404,34 @@
                         <MenuItem x:Name="ChecksumMenuItem" Tag="checksum" Header="Checksum…" Click="ContextChecksum_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Checksum}"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem x:Name="CutMenuItem" Tag="cut" Header="Cut" InputGestureText="Ctrl+X" Click="ContextCut_Click">
+                        <MenuItem x:Name="CutMenuItem" Tag="cut" Header="Cut" Click="ContextCut_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Cut}"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem x:Name="CopyMenuItem" Tag="copy" Header="Copy" InputGestureText="Ctrl+C" Click="ContextCopy_Click">
+                        <MenuItem x:Name="CopyMenuItem" Tag="copy" Header="Copy" Click="ContextCopy_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Copy}"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem x:Name="PasteMenuItem" Tag="paste" Header="Paste" InputGestureText="Ctrl+V" Click="ContextPaste_Click">
+                        <MenuItem x:Name="PasteMenuItem" Tag="paste" Header="Paste" Click="ContextPaste_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Paste}"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem x:Name="RenameMenuItem" Tag="rename" Header="Rename…" InputGestureText="F2"
+                        <MenuItem x:Name="RenameMenuItem" Tag="rename" Header="Rename…"
                                   Click="ContextRename_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Rename}"/></MenuItem.Icon>
                         </MenuItem>
                         <!-- Both spelled out rather than one entry that changes with Shift: a menu
                              whose meaning depends on a key you are not holding while you read it is
                              the wrong place to hide "cannot be undone". -->
-                        <MenuItem x:Name="DeleteMenuItem" Tag="delete" Header="Delete…" InputGestureText="Del"
+                        <MenuItem x:Name="DeleteMenuItem" Tag="delete" Header="Delete…"
                                   Click="ContextDelete_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Delete}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="DeletePermanentlyMenuItem" Tag="delete-permanently" Header="Delete permanently…"
-                                  InputGestureText="Shift+Del" Click="ContextDeletePermanently_Click">
+                                  Click="ContextDeletePermanently_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.DeletePermanent}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="BookmarkMenuItem" Tag="bookmark" Header="Bookmark" Click="ContextBookmark_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Bookmark}"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem Tag="properties" Header="Properties…" InputGestureText="Alt+Enter" Click="ContextProperties_Click">
+                        <MenuItem Tag="properties" Header="Properties…" Click="ContextProperties_Click">
                             <MenuItem.Icon><Path Style="{StaticResource MenuIconPath}" Data="{StaticResource Icon.Properties}"/></MenuItem.Icon>
                         </MenuItem>
                     </ContextMenu>

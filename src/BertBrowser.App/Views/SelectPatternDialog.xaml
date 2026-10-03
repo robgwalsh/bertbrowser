@@ -1,0 +1,32 @@
+<v:ThemedWindow x:Class="BertBrowser.App.Views.SelectPatternDialog"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:v="clr-namespace:BertBrowser.App.Views"
+                Title="Select by pattern" Width="440" SizeToContent="Height" MinHeight="150"
+                ResizeMode="NoResize"
+                WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+                Background="{StaticResource Theme.Surface.Background}"
+                TextElement.Foreground="{StaticResource Theme.Text.Primary}">
+    <DockPanel Margin="16">
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="Cancel" MinWidth="88" Margin="0,0,8,0" IsCancel="True"/>
+            <Button x:Name="OkButton" Content="Select" MinWidth="88" IsDefault="True"
+                    Style="{StaticResource PrimaryButton}" Click="Ok_Click"/>
+        </StackPanel>
+
+        <StackPanel>
+            <TextBlock x:Name="PromptText" Text="Select the items here that match" Margin="0,0,0,6"/>
+            <TextBox x:Name="PatternBox" TextChanged="Pattern_TextChanged"
+                     AutomationProperties.AutomationId="SelectPattern"/>
+
+            <!-- One line that is either the count or the reason, so the dialog does not change
+                 height under the caret as a pattern is typed. -->
+            <TextBlock x:Name="ResultText" Margin="0,8,0,0" TextWrapping="Wrap"
+                       Foreground="{StaticResource Theme.Text.Secondary}"/>
+            <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" FontSize="11"
+                       Foreground="{StaticResource Theme.Text.Muted}"
+                       Text="The search box's own language: *.jpg · ext:png;gif · size:&gt;1mb · dm:today · is:folder · re:^IMG_\d+ · and OR, ! and brackets."/>
+        </StackPanel>
+    </DockPanel>
+</v:ThemedWindow>

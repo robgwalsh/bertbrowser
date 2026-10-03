@@ -90,6 +90,13 @@ public class ThemedWindow : Window
     /// </summary>
     private int _contentBlockDepth;
 
+    /// <summary>
+    /// Whether a dialog this window owns is up. The window still <em>receives keys</em> then —
+    /// <see cref="WndProc"/> keeps its handle enabled so the title bar goes on working — so
+    /// anything that acts on a key press has to ask this first.
+    /// </summary>
+    protected bool IsContentBlocked => _contentBlockDepth > 0;
+
     public ThemedWindow()
     {
         // WPF looks an implicit style up under the element's *exact* runtime type and never walks

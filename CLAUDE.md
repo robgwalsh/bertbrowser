@@ -86,6 +86,8 @@ you where and what to watch for.
 | Video playback in the preview (scrub, next, full screen) | `Core/Services/Preview/MediaPlaylist`, `Views/PreviewPane` (media + full-screen sections; `MediaHost` is lent to a borderless window, hence `UnloadedBehavior="Manual"`), `DirectoryTabView.Preview_NextMediaRequested` |
 | Animated GIFs in the preview (autoplay, loop, scrub) | `Core/Services/Preview/Animation/*` (`AnimationTimeline`, `GifFrameCompositor`, `AnimationLimits`), `PreviewPaneViewModel.StartAnimation` (one thread owns the decoder — it's a `DispatcherObject` — and returns after frame 0; never `BitmapCacheOption.OnLoad`, which decodes every frame first), `Views/PreviewPane` (animation section: frames swapped via `SetCurrentValue` so the `Image` binding and zoom survive; the clock holds at an undecoded frame), `Views/SliderScrubber` (both seek bars: press anywhere and drag, since a `Slider` only drags from its thumb), `tools/ui/gif.bbs` |
 | Archives (zip/7z/tar/rar) | `Core/Services/Archives/*` (`ArchivePath`, `ArchiveReader`, `ArchiveIndexBuilder`) |
+| Commands / keyboard shortcuts | `Core/Services/Commands/*` (`CommandCatalog`, `KeyChord`, `KeymapRules`, `FileVerbRules`), `Services/Commands/*` (`CommandRegistry`, `KeymapService`, `GestureText`, `KeyChordInterop`), `MainWindow.Commands` (handlers + the one key dispatcher), `DirectoryTabView.Verbs`/`.Actions`, `Views/Cmd` (XAML gesture text), the Keyboard page of `SettingsView` (`SettingsViewModel.Keyboard`), `tools/ui/keys.bbs`, `keyboard.bbs`, `commands.bbs` |
+| Command palette | `Core/Services/Commands/PaletteRules`, `CommandMatcher`, `GoToRules`, `PaletteSuggestions`, `ViewModels/CommandPaletteViewModel`, `Views/CommandPalette`, `MainWindow.Palette` (what it can run), `Services/Commands/PaletteMemory`, `tools/ui/palette.bbs` |
 | Settings page | `ViewModels/SettingsViewModel` (`Apply`, `TryLeave`), `Views/SettingsView`, `MainWindow.ShowSettings`/`CloseSettings`, `tools/ui/settings.bbs` |
 | Theming | `Core/Theming/*` (`ThemeCatalog`, `ThemeResolver`), `App/Theming/*` |
 | Matching the Windows theme | `Core/Theming/SystemThemeRules`, `SystemAppearance`, `App/Theming/ISystemAppearance` |
@@ -168,6 +170,32 @@ you where and what to watch for.
   handler for `Directory` and `Drive`, so *anything* that shell-opens a folder starts a second copy
   which grants its foreground rights over — and the running copy landed on top of full-screen video,
   with no pattern the user could see, because the trigger belonged to another process.
+- **Every shortcut is a `CommandCatalog` row, and there is one key handler.** No `KeyBinding`, no
+  `KeyDown` switch: `MainWindow.OnPreviewKeyDown` turns the key into a `KeyChord`,
+  `KeymapRules.Dispatch` says whose it is given what has focus, and `CommandRegistry.TryExecute`
+  runs it. A catalogue id with no handler (or the reverse) throws when the window is built. The
+  dispatcher sees a key *before* the focused control — the old window bindings saw it after, which
+  is what quietly kept Backspace from navigating mid-word — so that protection is now a rule about
+  the *chord* (`FiresInEditableText`, pinned chord-by-chord in `DefaultKeymapParityTests`), not
+  about the command: once keys can be rebound nobody knows what will be sitting on Backspace.
+  Consequences that are easy to undo: a claimed chord is marked handled **even when its command is
+  unavailable**, or it falls through to type-ahead; keys reach the window behind a modal
+  (`IsContentBlocked`) and from inside a menu or popup (`InPopup` — a popup routes through what
+  opened it), and both must stand the dispatcher down; the Keyboard page's recorder stands it down
+  too (`Recording`). A held key runs its command once unless `KeymapRules.RepeatsWhenHeld` says
+  it is a step — a KeyBinding repeated everything, and a repeated "copy to the other pane" queues
+  the same files per repeat. File verbs are gated in **one** place, `FileVerbRules` via
+  `DirectoryTabView.RunVerb`, which the menu, a key and the palette all go through — the menu
+  greying an item is a courtesy, that is the guard. Text that names a key asks `GestureText` (or
+  `v:Cmd.Id`/`Cmd.Tip`/`Cmd.Text` in XAML), never a literal: `"Ctrl+Z"` in a string is wrong the
+  first time somebody rebinds it. `KeymapService` is the keymap's only writer and writes at once,
+  not on the settings page's debounce.
+- **The palette's empty state is never the catalogue.** Pinned, then this session's recents, then
+  `PaletteSuggestions` for what is selected, then one row per category — `PaletteRules`, with the
+  ordering in `PaletteRulesTests`. Recents live in memory only (`PaletteMemory`): a list of what was
+  run is a history, and a persisted one would owe the opt-in switch every history feature here has.
+  Pins are a preference and are saved. Unavailable commands stay listed with their reason. The
+  palette is an in-tree overlay, not a `Popup`, so `shot` can photograph it.
 - **The app is `asInvoker`.** Only the two elevated helper exes (Indexer, Elevator) touch an
   administrator token. Don't reintroduce `requireAdministrator` on the app to fix an access-denied
   error — that's now expected behavior (a folder the app can't read, Explorer can't either).
@@ -339,7 +367,7 @@ you where and what to watch for.
   custom command; `E8C8` = Copy *and* Find duplicates).
 - **Settings is a page of the main window, not a dialog, and it applies as you go.** It replaces
   `BrowserRoot` (everything under the title bar), which is Hidden rather than Collapsed so panes
-  keep their layout, and the window's `InputBindings` are set aside meanwhile, since Backspace or
+  keep their layout, and only `CommandContext.App` shortcuts fire meanwhile, since Backspace or
   Ctrl+T would act on panes nobody can see. There is no Save: `SettingsViewModel.Apply` writes on a
   400 ms debounce, driven by an *allowlist* of persisted properties so selecting a row or a page
   writes nothing, and it is flushed on Back and on window close. A command or new-file type with a

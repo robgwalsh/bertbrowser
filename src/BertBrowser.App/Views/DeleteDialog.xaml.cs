@@ -6,6 +6,7 @@ using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Theming;
 using CommunityToolkit.Mvvm.ComponentModel;
+using BertBrowser.App.Services.Commands;
 
 namespace BertBrowser.App.Views;
 
@@ -103,17 +104,18 @@ public partial class DeleteDialog : ThemedWindow
     {
         if (plan.Permanent) return "";
 
-        const string held =
-            "Ctrl+Z puts these back. They are held until the next move, rename or delete — or " +
+        var undo = GestureText.OrName("edit.undo");
+        var held =
+            $"{undo} puts these back. They are held until the next move, rename or delete — or " +
             "until BertBrowser closes — and then removed for good.";
 
         if (plan.Mode != DeleteMode.Recycle) return held;
 
         if (!plan.HasStagedFallback)
-            return "Ctrl+Z puts these back. They also stay in your Recycle Bin until you empty it.";
+            return $"{undo} puts these back. They also stay in your Recycle Bin until you empty it.";
 
         var staged = plan.Deletions.Count(d => d.Disposition == DeleteDisposition.Stage);
-        return "Ctrl+Z puts these back. They stay in your Recycle Bin until you empty it — except " +
+        return $"{undo} puts these back. They stay in your Recycle Bin until you empty it — except " +
             $"{staged:N0} on a drive with no Recycle Bin, which BertBrowser holds only until the " +
             "next move, rename or delete.";
     }

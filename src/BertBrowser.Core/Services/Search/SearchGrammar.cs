@@ -37,7 +37,12 @@ public static class SearchGrammar
     /// the rename engine's. <c>(a+)+$</c> is three keystrokes away in any search box.</summary>
     private static readonly TimeSpan RegexBudget = TimeSpan.FromMilliseconds(250);
 
-    public static SearchQueryParse Parse(string? text)
+    /// <param name="requireNarrow">
+    /// Whether the query has to be narrow enough to run over a disk — the floor below. False for
+    /// a caller that judges a listing already on screen (select by pattern), where <c>*</c> or
+    /// <c>is:readonly</c> on its own is an ordinary thing to ask.
+    /// </param>
+    public static SearchQueryParse Parse(string? text, bool requireNarrow = true)
     {
         if (string.IsNullOrWhiteSpace(text))
             return new SearchQueryParse(null, null);
@@ -76,7 +81,7 @@ public static class SearchGrammar
         // The floor: something has to narrow the disk down. Two literal characters of text —
         // summed across the query, so "a b" clears it exactly as it always did — or a filter
         // specific enough to stand alone. A bare "a" clears neither, and nor does "is:dir".
-        if (root.LiteralChars < 2 && !root.HasFilter)
+        if (requireNarrow && root.LiteralChars < 2 && !root.HasFilter)
             return new SearchQueryParse(null, null);
 
         return new SearchQueryParse(new SearchQuery(root, text), null);

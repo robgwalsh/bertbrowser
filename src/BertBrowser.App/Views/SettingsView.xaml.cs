@@ -48,6 +48,24 @@ public partial class SettingsView : UserControl
         // wherever the selection is, and a command picked on the left is edited on the right.
         _vm.PropertyChanged += (_, e) =>
         {
+            // The Keyboard page's selection can be made from outside the list — the palette's
+            // "change shortcut", or finding a command by its key — and the row has to be on screen
+            // for the recorder strip under it to make sense.
+            if (e.PropertyName == nameof(SettingsViewModel.SelectedKeyRow) && _vm.SelectedKeyRow is { } key &&
+                KeyboardPage.IsVisible)
+            {
+                KeyList.ScrollIntoView(key);
+                return;
+            }
+
+            // A chord that is somebody else's: the answer is a button, so put the keyboard on it.
+            if (e.PropertyName == nameof(SettingsViewModel.CanReassignKey) && _vm.CanReassignKey)
+            {
+                Dispatcher.BeginInvoke(() => ReassignKeyButton.Focus(),
+                    System.Windows.Threading.DispatcherPriority.Loaded);
+                return;
+            }
+
             if (!ContextMenuPage.IsVisible) return;
             if (e.PropertyName == nameof(SettingsViewModel.SelectedCommand) && _vm.SelectedCommand is not null)
                 Dispatcher.BeginInvoke(() => CommandEditor.BringIntoView(),
@@ -128,6 +146,91 @@ public partial class SettingsView : UserControl
         if (e.Key != Key.Escape || e.Handled || Keyboard.Modifiers != ModifierKeys.None) return;
         e.Handled = true;
         BackRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    // --- Keyboard page ---
+
+    /// <summary>
+    /// While the Keyboard page is listening, the next key press <em>is</em> the answer: it is
+    /// turned into a chord and offered to the recorder, and nothing else sees it. Tunnelling, so
+    /// it is taken before the list, the filter box or a button can act on it — and the window's
+    /// own dispatcher has already stood aside (<c>FocusState.Recording</c>).
+    /// </summary>
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        // An offer to reassign is waiting on its button, which has the keyboard: Esc declines it
+        // rather than leaving the page with the question unanswered.
+        if (_vm.CanReassignKey && e.Key == Key.Escape && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            _vm.CancelKeyCapture();
+            e.Handled = true;
+            return;
+        }
+
+        if (_vm.IsCapturingKey)
+        {
+            // Alt+F4 still closes the window: it can never be a shortcut, and a page that swallowed
+            // it would be a page the keyboard cannot leave.
+            if (e.Key == Key.System && e.SystemKey == Key.F4 && Keyboard.Modifiers == ModifierKeys.Alt)
+            {
+                base.OnPreviewKeyDown(e);
+                return;
+            }
+
+            // A key still held from the press that was just taken is not a second answer.
+            if (e.IsRepeat)
+            {
+                e.Handled = true;
+                return;
+            }
+
+            // Bare Esc backs out, which is why it can never be a shortcut (KeymapRules.Refuse).
+            if (e.Key == Key.Escape && Keyboard.Modifiers == ModifierKeys.None)
+                _vm.CancelKeyCapture();
+            // A modifier on its way down is not a chord yet; keep listening.
+            else if (Services.Commands.KeyChordInterop.FromEvent(e) is { } chord)
+                _vm.OfferChord(chord);
+
+            e.Handled = true;
+            return;
+        }
+
+        base.OnPreviewKeyDown(e);
+    }
+
+    /// <summary>Enter changes the selected command's shortcut and Del removes it — the list's own
+    /// two keys, the way F2 and Del are the saved-search list's.</summary>
+    private void KeyList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.None) return;
+
+        if (e.Key == Key.Enter && _vm.ChangeKeyCommand.CanExecute(null))
+        {
+            _vm.ChangeKeyCommand.Execute(null);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Delete && _vm.RemoveKeysCommand.CanExecute(null))
+        {
+            _vm.RemoveKeysCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
+    private void KeyList_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (VisualTreeUtil.FindAncestor<ListBoxItem>(e.OriginalSource as DependencyObject) is null) return;
+        if (_vm.ChangeKeyCommand.CanExecute(null)) _vm.ChangeKeyCommand.Execute(null);
+    }
+
+    /// <summary>Brings the Keyboard page's selected command into view and puts the keyboard on
+    /// the list — for arriving from the command palette's "change shortcut".</summary>
+    internal void FocusKeyRow()
+    {
+        if (_vm.SelectedKeyRow is not { } row) return;
+
+        KeyList.UpdateLayout();
+        KeyList.ScrollIntoView(row);
+        (KeyList.ItemContainerGenerator.ContainerFromItem(row) as ListBoxItem)?.Focus();
     }
 
     private void CustomiseTheme_Click(object sender, RoutedEventArgs e) =>

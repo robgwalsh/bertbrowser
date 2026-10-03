@@ -22,6 +22,8 @@ settings workspaces
 shot 07b-workspaces
 settings context-menu
 shot 08-context-menu
+settings keyboard
+shot 08a-keyboard
 settings close
 shot 09-back-to-folders
 

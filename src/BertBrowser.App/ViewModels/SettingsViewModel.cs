@@ -129,6 +129,7 @@ public enum SettingsCategory
     SavedSearches,
     Workspaces,
     ContextMenu,
+    Keyboard,
 }
 
 /// <summary>One choice on the History page's undo limits.</summary>
@@ -221,6 +222,26 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     /// <summary>The navigation list on the left; exactly one page is shown at a time.</summary>
     public IReadOnlyList<SettingsCategoryViewModel> Categories { get; }
+
+    /// <summary>
+    /// The pages, in the order the settings list shows them. Static because the command palette
+    /// lists them too — "Settings: Keyboard" is a place to go — and it must not need a settings view
+    /// model, with everything one loads, to know what they are called.
+    /// </summary>
+    public static IReadOnlyList<SettingsCategoryViewModel> AllCategories { get; } =
+    [
+        new(SettingsCategory.General, "General", "Icon.Settings"),
+        new(SettingsCategory.Appearance, "Appearance", "Icon.Appearance"),
+        new(SettingsCategory.Preview, "Preview", "Icon.PreviewPane"),
+        new(SettingsCategory.SearchIndex, "Search index", "Icon.Indexing"),
+        new(SettingsCategory.History, "History", "Icon.Changes"),
+        new(SettingsCategory.NewItems, "New items", "Icon.Add"),
+        new(SettingsCategory.Columns, "Columns", "Icon.Columns"),
+        new(SettingsCategory.SavedSearches, "Saved searches", "Icon.Search"),
+        new(SettingsCategory.Workspaces, "Workspaces", "Icon.SplitRight"),
+        new(SettingsCategory.ContextMenu, "Context menu", "Icon.CustomCommand"),
+        new(SettingsCategory.Keyboard, "Keyboard", "Icon.Keyboard"),
+    ];
 
     [ObservableProperty]
     private SettingsCategoryViewModel _selectedCategory;
@@ -552,21 +573,10 @@ public sealed partial class SettingsViewModel : ObservableObject
         IMftIndexService? mftIndex = null,
         IShellMenuSource? shellMenus = null,
         SavedWorkspacesViewModel? workspaces = null,
-        SavedSearchesViewModel? savedSearches = null)
+        SavedSearchesViewModel? savedSearches = null,
+        Services.Commands.KeymapService? keymap = null)
     {
-        Categories = new[]
-        {
-            new SettingsCategoryViewModel(SettingsCategory.General, "General", "Icon.Settings"),
-            new SettingsCategoryViewModel(SettingsCategory.Appearance, "Appearance", "Icon.Appearance"),
-            new SettingsCategoryViewModel(SettingsCategory.Preview, "Preview", "Icon.PreviewPane"),
-            new SettingsCategoryViewModel(SettingsCategory.SearchIndex, "Search index", "Icon.Indexing"),
-            new SettingsCategoryViewModel(SettingsCategory.History, "History", "Icon.Changes"),
-            new SettingsCategoryViewModel(SettingsCategory.NewItems, "New items", "Icon.Add"),
-            new SettingsCategoryViewModel(SettingsCategory.Columns, "Columns", "Icon.Columns"),
-            new SettingsCategoryViewModel(SettingsCategory.SavedSearches, "Saved searches", "Icon.Search"),
-            new SettingsCategoryViewModel(SettingsCategory.Workspaces, "Workspaces", "Icon.SplitRight"),
-            new SettingsCategoryViewModel(SettingsCategory.ContextMenu, "Context menu", "Icon.CustomCommand"),
-        };
+        Categories = AllCategories;
         _selectedCategory = Categories[0];
 
         Appearance = new AppearanceViewModel(theme);
@@ -637,6 +647,9 @@ public sealed partial class SettingsViewModel : ObservableObject
         SavedSearchesPlacement = settings.SavedSearchesPlacement;
         SavedSearches = savedSearches;
         _ = LoadShellCatalogAsync();
+
+        _keymap = keymap;
+        LoadKeyRows();
 
         TrackChanges();
     }

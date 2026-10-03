@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using BertBrowser.App.Services;
+using BertBrowser.App.Services.Commands;
 using BertBrowser.Core.Services.Archives;
 using BertBrowser.Core.Services.Compare;
 using BertBrowser.Core.Services.Delete;
@@ -87,6 +88,17 @@ public sealed partial class ShellViewModel
     // --- stepping ---
 
     /// <summary>Reverses the last operation still in effect.</summary>
+    /// <summary>What a status line adds after something undoable. Asked of the keymap each time,
+    /// because Undo can be rebound — or left with no key at all.</summary>
+    private static string UndoHint =>
+        GestureText.For("edit.undo") is { Length: > 0 } gesture ? $" — {gesture} to undo" : " — this can be undone";
+
+    /// <summary>"Ctrl+Z: undo moving 3 items", or the sentence alone when the command has no key.</summary>
+    private static string Described(string commandId, string what) =>
+        GestureText.For(commandId) is { Length: > 0 } gesture
+            ? $"{gesture}: {what}"
+            : char.ToUpperInvariant(what[0]) + what[1..];
+
     [RelayCommand(CanExecute = nameof(CanUndo))]
     private Task UndoAsync() =>
         _undo.NextUndo is { } entry ? UndoToAsync(entry) : Task.CompletedTask;
@@ -224,10 +236,10 @@ public sealed partial class ShellViewModel
         if (_undo is null) return;
 
         UndoDescription = _undo.NextUndo is { } undo
-            ? $"Ctrl+Z: undo {UndoText.AsObject(undo.Record.Description)}"
+            ? Described("edit.undo", $"undo {UndoText.AsObject(undo.Record.Description)}")
             : "";
         RedoDescription = _undo.NextRedo is { } redo
-            ? $"Ctrl+Y: redo {UndoText.AsObject(redo.Record.Description)}"
+            ? Described("edit.redo", $"redo {UndoText.AsObject(redo.Record.Description)}")
             : "";
 
         UndoCommand.NotifyCanExecuteChanged();

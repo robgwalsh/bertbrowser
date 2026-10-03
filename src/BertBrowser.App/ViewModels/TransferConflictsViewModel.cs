@@ -3,6 +3,7 @@ using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Transfer;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using BertBrowser.App.Services.Commands;
 
 namespace BertBrowser.App.ViewModels;
 
@@ -222,7 +223,7 @@ public sealed partial class TransferConflictsViewModel : ObservableObject
                 ? " One is the same file on both sides and is set to skip."
                 : $" {identical:N0} are the same file on both sides and are set to skip.";
 
-        ReplaceHint = "Replace keeps the incoming copy. What it displaces is set aside, and Ctrl+Z "
+        ReplaceHint = $"Replace keeps the incoming copy. What it displaces is set aside, and {GestureText.OrName("edit.undo")} "
             + "restores both sides until you do something else.";
     }
 

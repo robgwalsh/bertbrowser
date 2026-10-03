@@ -1,0 +1,122 @@
+# The Keyboard settings page: every command with the keys that run it, and a recorder that takes a
+# new shortcut by having it pressed.
+#
+# `settings key press <chord>` is the recorder being offered a chord — the step after a key event
+# has been turned into one — so this covers what the page decides: what is refused, what is
+# somebody else's, and that an assignment reaches the keymap, the menus and the palette at once.
+
+tree .
+refresh
+
+settings keyboard
+shot 01-keyboard
+assert-key-row New tab Ctrl+T
+assert-key-row Back Backspace,Alt+Left
+assert-key-row Duplicate tab Ctrl+Shift+K
+assert-key-row Close other tabs none
+
+# --- Filtering: by name, by category, by shortcut ---
+
+settings key filter flat
+assert-key-row Toggle flat view Ctrl+B
+assert-key-row New tab absent
+settings key filter ctrl+shift
+assert-key-row Search this PC Ctrl+Shift+F
+assert-key-row New tab absent
+shot 02-filtered-by-shortcut
+settings key filter
+
+# --- Changing one ---
+
+settings key select view.flat
+settings key change
+assert-key-recorder Press the new shortcut for
+shot 03-recording
+
+# A key that types is refused, and the recorder goes on listening.
+settings key press B
+assert-key-recorder can’t be used
+settings key press Ctrl+K
+assert-key-row Toggle flat view Ctrl+K
+assert-gesture view.flat Ctrl+K
+
+# --- A chord that is somebody else's is offered, never taken silently ---
+
+settings key select tab.close-others
+settings key change
+settings key press Ctrl+T
+assert-key-recorder already runs
+# The recorder has stopped listening, so the keyboard can reach the Reassign button.
+assert-key-recorder Reassign it to
+shot 04-conflict
+# Nothing has moved yet.
+assert-key-row New tab Ctrl+T
+settings key reassign
+assert-key-row Close other tabs Ctrl+T
+assert-key-row New tab none
+shot 05-reassigned
+
+# --- A second shortcut, taking one away, and putting it back ---
+
+settings key select tab.new
+settings key add
+settings key press Ctrl+N
+assert-key-row New tab Ctrl+N
+settings key add
+settings key press Ctrl+Shift+Y
+assert-key-row New tab Ctrl+N,Ctrl+Shift+Y
+
+settings key select nav.refresh
+settings key remove
+assert-key-row Refresh none
+settings key reset
+assert-key-row Refresh F5
+
+# --- Find by key ---
+
+settings key find
+settings key press Ctrl+K
+assert-key-row Toggle flat view Ctrl+K
+assert-key-row Refresh absent
+settings key filter
+
+# --- The settings survive the page, and Reset all undoes them ---
+
+settings close
+# Checked out here rather than on the page: while Settings is up, every shortcut about the
+# folders is silenced, the rebound ones included.
+assert-key Ctrl+K list view.flat
+assert-key Ctrl+B list none
+assert-key Ctrl+T list tab.close-others
+assert-key Ctrl+N list tab.new
+select notes.txt
+menu files 06-menu-after-rebinding
+palette
+palette type toggle flat
+assert-palette-selected Toggle flat view
+shot 07-palette-shows-new-shortcut
+palette close
+
+settings keyboard
+settings key reset-all
+assert-key-row New tab Ctrl+T
+assert-key-row Toggle flat view Ctrl+B
+assert-key-row Close other tabs none
+settings close
+assert-key Ctrl+T list tab.new
+assert-key Ctrl+B list view.flat
+
+# --- From the palette: "change shortcut" lands here, already listening ---
+
+palette
+palette type new tab
+palette shortcut
+assert-palette-closed
+assert-key-recorder Press the new shortcut for “New tab”
+shot 08-from-the-palette
+settings key press Ctrl+Shift+Y
+assert-key-row New tab Ctrl+Shift+Y
+settings key reset-all
+settings close
+
+assert-not-launched

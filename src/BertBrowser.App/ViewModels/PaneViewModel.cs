@@ -16,9 +16,6 @@ public interface IPaneHost
     void ClosePane(PaneViewModel pane);
     void ActivatePane(PaneViewModel pane);
 
-    /// <summary>False when this is the last pane: the window always shows one.</summary>
-    bool CanClosePane { get; }
-
     /// <summary>Told when a pane's visible directory changes, so the shell can drive the folder
     /// tree from the active pane only.</summary>
     void NotifyLocation(PaneViewModel pane, DirectoryTabViewModel tab);
@@ -239,8 +236,6 @@ public sealed partial class PaneViewModel : ObservableObject
 
     [RelayCommand]
     private void ClosePane() => _host.ClosePane(this);
-
-    public bool CanClosePane => _host.CanClosePane;
 
     /// <summary>Releases every tab in the pane. Called when the pane itself is closed.</summary>
     public void Dispose()

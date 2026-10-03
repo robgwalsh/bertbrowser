@@ -52,11 +52,14 @@ public partial class MainWindow : ThemedWindow
 
     private TransferProgressWindow? _transferDetails;
 
-    public MainWindow(ShellViewModel shell, BertBrowser.App.Services.AppSettings settings)
+    public MainWindow(
+        ShellViewModel shell, BertBrowser.App.Services.AppSettings settings,
+        BertBrowser.App.Services.Commands.KeymapService keymap)
     {
         InitializeComponent();
         _shell = shell;
         _settings = settings;
+        _keymap = keymap;
         DataContext = shell;
 
         // In the caption we draw ourselves, and in the taskbar and Alt-Tab with it. Set here rather
@@ -65,6 +68,9 @@ public partial class MainWindow : ThemedWindow
 
         _layoutHost = new PaneLayoutHost(shell, settings);
         PaneHostSite.Child = _layoutHost;
+
+        // Throws if the catalogue and the handlers disagree, which is the point of building it here.
+        Commands = BuildCommands();
 
         // Attached once, not per pane: the tree is shared, so N file-list controllers each hooking
         // its Drop would carry the same transfer out once per open pane.
@@ -89,6 +95,10 @@ public partial class MainWindow : ThemedWindow
         _shell.SyncRequested += ShowSyncPreview;
         _shell.PropertyChanged += Shell_TransferProgressChanged;
 
+        // Every layout pass rather than a list of size changes: the span the field sits in moves
+        // with the window, the title, and either title-bar dropdown being shown.
+        LayoutUpdated += (_, _) => CenterGlobalSearch();
+
         Loaded += async (_, _) => await _shell.InitializeAsync();
         Closing += (_, _) =>
         {
@@ -101,6 +111,29 @@ public partial class MainWindow : ThemedWindow
             // rather than leaving hidden staging folders behind.
             _shell.ReleaseUndoHistory();
         };
+    }
+
+    /// <summary>
+    /// Puts the middle of the whole-PC search field on the middle of the title bar, as far as the
+    /// span between the title and the buttons allows — in a narrow window it stops at whichever
+    /// neighbour it would otherwise run under. The answer is worked out from the slot the group
+    /// was handed, never from where the group is now, so setting the margin cannot feed back.
+    /// </summary>
+    private void CenterGlobalSearch()
+    {
+        if (TitleBarSearchGroup.Parent is not UIElement host || !TitleBarSearchGroup.IsDescendantOf(this))
+            return;
+
+        var slot = LayoutInformation.GetLayoutSlot(TitleBarSearchGroup);
+        var slotLeft = host.TranslatePoint(slot.Location, this).X;
+        var fieldLeft = GlobalSearchField.TranslatePoint(default, TitleBarSearchGroup).X;
+
+        var wanted = (ActualWidth - GlobalSearchField.ActualWidth) / 2 - fieldLeft - slotLeft;
+        var room = Math.Max(0, slot.Width - TitleBarSearchGroup.ActualWidth);
+        var left = Math.Round(Math.Clamp(wanted, 0, room));
+
+        if (Math.Abs(TitleBarSearchGroup.Margin.Left - left) < 0.5) return;
+        TitleBarSearchGroup.Margin = new Thickness(left, 0, 0, 0);
     }
 
     private void ApplyWindowSettings()
@@ -169,11 +202,13 @@ public partial class MainWindow : ThemedWindow
     /// <summary>The settings page while it is up, in place of <see cref="BrowserRoot"/>.</summary>
     private SettingsView? _settingsView;
 
-    /// <summary>The window's shortcuts, set aside while settings is up: Backspace, Ctrl+T, F5 and
-    /// the rest would otherwise act on panes nobody can see.</summary>
-    private InputBinding[]? _suspendedBindings;
-
+    /// <summary>While this is true the keymap silences every shortcut about the folders —
+    /// Backspace, Ctrl+T, F5 and the rest would otherwise act on panes nobody can see. See
+    /// <c>KeymapRules.Dispatch</c>.</summary>
     internal bool IsSettingsOpen => _settingsView is not null;
+
+    /// <summary>The page's view model while it is up, for the UI harness.</summary>
+    internal SettingsViewModel? OpenSettings => _settingsView?.ViewModel;
 
     /// <summary>What <see cref="Settings_Applied"/> last pushed through the shell, taken when the
     /// page opens, so each write only redoes the parts whose values actually moved.</summary>
@@ -181,14 +216,15 @@ public partial class MainWindow : ThemedWindow
 
     private sealed record AppliedSettings(
         string? TileAspect, string Columns, bool RecordFileChanges, int RetentionHours,
-        BertBrowser.Core.Services.UndoHistory.UndoBudget UndoBudget)
+        BertBrowser.Core.Services.UndoHistory.UndoBudget UndoBudget, string CustomCommands)
     {
         public static AppliedSettings Of(BertBrowser.App.Services.AppSettings settings) => new(
             settings.TileAspectRatio,
             string.Join("|", (settings.FileListColumns ?? []).Select(c => $"{c.Id}:{c.Width}")),
             settings.RecordFileChanges,
             settings.FileChangeRetentionHours,
-            settings.EffectiveUndoBudget());
+            settings.EffectiveUndoBudget(),
+            string.Join("|", settings.CustomCommands.Select(c => c.Id)));
     }
 
     /// <summary>Opens settings in place of the folders; <paramref name="page"/> opens it on a page
@@ -222,7 +258,8 @@ public partial class MainWindow : ThemedWindow
             App.Services.GetRequiredService<BertBrowser.Core.Services.Mft.IMftIndexService>(),
             App.Services.GetRequiredService<IShellMenuSource>(),
             _shell.SavedWorkspaces,
-            _shell.SavedSearches);
+            _shell.SavedSearches,
+            _keymap);
         vm.ReadIndexerState();
         return vm;
     }
@@ -246,8 +283,6 @@ public partial class MainWindow : ThemedWindow
         _lastApplied = AppliedSettings.Of(_settings);
         _settingsView = view;
 
-        _suspendedBindings = [.. InputBindings.Cast<InputBinding>()];
-        InputBindings.Clear();
         GlobalSearchGroup.IsEnabled = false;
         CompareButton.IsEnabled = false;
         // Switching would replace panes nobody can see, and the page already lists them all.
@@ -279,9 +314,6 @@ public partial class MainWindow : ThemedWindow
         SettingsHost.Content = null;
         BrowserRoot.Visibility = Visibility.Visible;
 
-        foreach (var binding in _suspendedBindings ?? [])
-            InputBindings.Add(binding);
-        _suspendedBindings = null;
         GlobalSearchGroup.IsEnabled = true;
         CompareButton.ClearValue(IsEnabledProperty);
         WorkspaceSwitcher.IsEnabled = true;
@@ -333,6 +365,11 @@ public partial class MainWindow : ThemedWindow
         if (applied.UndoBudget != _lastApplied?.UndoBudget)
             _ = _shell.SetUndoBudgetAsync(applied.UndoBudget);
 
+        // The user's own commands can be given shortcuts, so one arriving or leaving changes what
+        // the keymap can bind — and nothing else on the page does.
+        if (applied.CustomCommands != _lastApplied?.CustomCommands)
+            _keymap.Refresh();
+
         _lastApplied = applied;
         // "Start the indexer when BertBrowser launches" only matters next launch, and the
         // sign-in task applied itself the moment its box was ticked. Neither needs re-applying
@@ -345,9 +382,11 @@ public partial class MainWindow : ThemedWindow
     /// status bar is bound to, so the window is a second view of one transfer rather than a second
     /// copy of its state.
     /// </summary>
-    private void TransferDetails_Click(object sender, RoutedEventArgs e)
+    private void TransferDetails_Click(object sender, RoutedEventArgs e) => ShowTransferDetails();
+
+    private void ShowTransferDetails()
     {
-        if (_shell.TransferProgress is not { } progress) return;
+        if (_shell.TransferProgress is null) return;
 
         if (_transferDetails is { IsLoaded: true })
         {
@@ -683,69 +722,6 @@ public partial class MainWindow : ThemedWindow
         ScrollSpeed.HandlePreviewMouseWheel(sender, e, _settings);
     }
 
-    /// <summary>Only the genuinely window-wide shortcut lives here. Everything that acts on a
-    /// directory — navigation, clipboard, properties, focusing the search box — belongs to the pane
-    /// that has focus, and is handled in <see cref="DirectoryTabView"/> or bound through
-    /// <c>ActivePane</c> in XAML.</summary>
-    protected override void OnPreviewKeyDown(KeyEventArgs e)
-    {
-        // Every shortcut below acts on the panes, which the settings page is standing in for.
-        if (IsSettingsOpen)
-        {
-            base.OnPreviewKeyDown(e);
-            return;
-        }
-
-        // Focusing search is window-wide so it works from the sidebar too. Ctrl+F is the active
-        // pane's folder-local box; Ctrl+Shift+F opens the header's whole-PC one, which would
-        // otherwise be reachable only with the mouse.
-        if (e.Key == Key.F && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
-        {
-            _shell.FocusGlobalSearchCommand.Execute(null);
-            e.Handled = true;
-        }
-        else if ((e.Key == Key.F || e.Key == Key.E) && Keyboard.Modifiers == ModifierKeys.Control)
-        {
-            _layoutHost.ActivePaneView?.FocusSearchBox();
-            e.Handled = true;
-        }
-        // Undo and redo through the history. Skipped while any text box has focus so the keys still
-        // undo and redo typing there — and there is one search box and one path box per open tab
-        // now, so the test has to be about the focused element rather than about named controls.
-        // Ctrl+Alt+Z opens the history; guarded the same way because Ctrl+Alt is AltGr, and on
-        // some layouts AltGr+Z types a letter.
-        else if (e.Key == Key.Z && Keyboard.Modifiers == ModifierKeys.Control &&
-            Keyboard.FocusedElement is not TextBoxBase)
-        {
-            if (_shell.UndoCommand.CanExecute(null))
-                _shell.UndoCommand.Execute(null);
-            e.Handled = true;
-        }
-        else if (((e.Key == Key.Y && Keyboard.Modifiers == ModifierKeys.Control) ||
-                  (e.Key == Key.Z && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))) &&
-            Keyboard.FocusedElement is not TextBoxBase)
-        {
-            if (_shell.RedoCommand.CanExecute(null))
-                _shell.RedoCommand.Execute(null);
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Z && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Alt) &&
-            Keyboard.FocusedElement is not TextBoxBase)
-        {
-            ShowUndoHistory();
-            e.Handled = true;
-        }
-        // Explorer's preview-pane chord, for the muscle memory. It cannot be a KeyBinding the way
-        // Ctrl+P is: an Alt chord arrives as Key.System with the real key in SystemKey, which is
-        // the same shape Alt+Enter is handled in over in DirectoryTabView.
-        else if (e.Key == Key.System && e.SystemKey == Key.P && Keyboard.Modifiers == ModifierKeys.Alt)
-        {
-            _shell.ActiveTab.TogglePreviewCommand.Execute(null);
-            e.Handled = true;
-        }
-        base.OnPreviewKeyDown(e);
-    }
-
     /// <summary>Expands the tree down to a folder and scrolls it into view. Revealing runs the
     /// enumeration and per-child disk probes off the UI thread, so this awaits rather than
     /// blocking. Best-effort UI sugar — a failure to reveal must never crash the async-void
@@ -827,6 +803,8 @@ public partial class MainWindow : ThemedWindow
         FolderTree.PreviewKeyDown -= FolderTree_PreviewInput;
         FolderTree.PreviewKeyDown += FolderTree_PreviewInput;
     }
+
+    private void CollapseFolderTree_Click(object sender, RoutedEventArgs e) => _shell.Tree.CollapseAll();
 
     // Whether the tree's last input was a key press. Arrowing through the tree must follow the
     // selection off-screen; a click must never scroll it (the way VS Code's explorer behaves).

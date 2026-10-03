@@ -81,6 +81,28 @@ public sealed class FolderTreeViewModel
             Roots.Add(new PortableDeviceNodeViewModel(device));
     }
 
+    /// <summary>Folds every drive and folder back up. Children stay loaded, so reopening one costs
+    /// no rescan. Walks the loaded children rather than the visible ones, so a subtree hidden by
+    /// "Show hidden items" does not come back expanded when the setting does.</summary>
+    public void CollapseAll()
+    {
+        foreach (var root in Roots)
+        {
+            root.IsExpanded = false;
+            if (root is DirectoryNodeViewModel dir)
+                CollapseLoaded(dir);
+        }
+    }
+
+    private static void CollapseLoaded(DirectoryNodeViewModel node)
+    {
+        foreach (var child in node.LoadedChildren)
+        {
+            child.IsExpanded = false;
+            CollapseLoaded(child);
+        }
+    }
+
     internal SubdirectoryPresence ProbeSubdirectories(string path) => _fileSystem.ProbeSubdirectories(path);
 
     // --- Sizes shown beside each name ---

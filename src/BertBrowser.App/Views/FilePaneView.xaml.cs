@@ -45,7 +45,6 @@ public partial class FilePaneView : UserControl
         foreach (var tab in Pane.Tabs)
             AddTabView(tab);
         UpdateVisibleTab();
-        ClosePaneButton.IsEnabled = Pane.CanClosePane;
     }
 
     /// <summary>Gives back every subscription this pane and its tab views hold. Called when the
@@ -66,10 +65,6 @@ public partial class FilePaneView : UserControl
     public void FocusActiveTabList() => ActiveTabView?.FocusList();
 
     public void FocusSearchBox() => ActiveTabView?.FocusSearchBox();
-
-    /// <summary>Refreshes the close button's availability; the last pane can't be closed, and which
-    /// pane is last changes as others open and close.</summary>
-    public void UpdateClosePaneAvailability() => ClosePaneButton.IsEnabled = Pane.CanClosePane;
 
     // --- Tab hosting ---
 

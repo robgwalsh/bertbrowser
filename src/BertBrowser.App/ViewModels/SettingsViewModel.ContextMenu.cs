@@ -37,7 +37,8 @@ public sealed partial class MenuRowViewModel : ObservableObject
         new(MenuRowKind.BuiltIn, MenuLayoutRules.BuiltInToken(item.Id), item.Name)
         {
             IconKey = item.Icon,
-            Gesture = item.Gesture ?? "",
+            // What the menu itself will print: the shortcut in force, not the one it shipped with.
+            Gesture = item.CommandId is { } command ? Services.Commands.GestureText.For(command) : "",
             Detail = PlacesNote(item),
         };
 
