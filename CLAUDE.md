@@ -95,7 +95,7 @@ you where and what to watch for.
 | Icons | `tools/icon/icons.txt` (the mapping) → `Resources/Icons.xaml` (generated), `IconPath`/`MenuIconPath`/`IconContent` in `Styles.xaml`, `tools/icon/IconSheet` |
 | Columns (file list) | `Core/Services/Columns/*` (`ColumnCatalog`, `ColumnLayoutRules`, `ColumnCandidates`), `Interop/ShellProperties`, `Views/ColumnAddPanel` |
 | Tabs / panes / layout | `App/ViewModels/DirectoryTabViewModel`, `PaneViewModel`, `ShellViewModel`, `Core/Layout/LayoutTree.cs` |
-| Flat branch view (Ctrl+B) | `Core/Services/FlatView/FlatViewRules`, `SearchService.ListSubtreeAsync`, `DirectoryTabViewModel.FlatView`, `FileListViewModel.IsFlatBrowse` |
+| Flat branch view (Ctrl+B) | `Core/Services/FlatView/FlatViewRules`, `SearchService.ListSubtreeAsync`, `DirectoryTabViewModel.IsFlatView`, `FileListViewModel.IsFlatBrowse` |
 | Thumbnail tiles / scrolling | `Views/VirtualizingWrapPanel`, `ThumbnailTemplateSelector`, `ThumbPanel`/`ThumbTileTemplate` in `Styles.xaml`, `tools/ui/tiles.bbs` |
 | UI test harness | `tools/BertBrowser.Harness`, `tools/ui/*.bbs`, `.claude/skills/verify` |
 

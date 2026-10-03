@@ -268,8 +268,8 @@ preview on|off              the active tab's preview pane, with its debounce and
                             waited out (so assert after this, not straight after a `select`)
 preview-mode auto|raw|hex   the pane's view override; sticky across selections, settled the same
                             way (`raw` is PreviewMode.Text — spelled the way the button is)
-flat off|files|all          the active tab's flat branch view — everything under this folder in one
-                            list, files only or files and folders. Through the same command Ctrl+B
+flat on|off                 the active tab's flat branch view — every file under this folder in one
+                            list, no folder rows. Through the same command Ctrl+B
                             and the toolbar button use, so a script exercises one code path, and
                             settled. Unlike a search it survives navigation, which is what makes it
                             a mode; inside an open archive it lists the container's tree instead
@@ -373,9 +373,8 @@ columns width <id> <px>
 columns reset               back to the saved default
 columns default             the header menu's "Set as default for new tabs" — what the settings
                             page reads, and the only way to seed it from a script
-menu columns|flat|files|background|tree|workspaces|saved-searches|undo|undo-range|redo [name]
-                            PNG of a menu's items — the column header's, the flat view's shape
-                            menu behind the toolbar chevron, the file list's for the selection,
+menu columns|files|background|tree|workspaces|saved-searches|undo|undo-range|redo [name]
+                            PNG of a menu's items — the column header's, the file list's for the selection,
                             the file list's over empty space (the folder background), or the
                             folder tree's — for the current folder's row when `tree-expand` has
                             got the tree that far, else for the first drive. They are rendered
@@ -409,8 +408,8 @@ assert-realized under|over <n>
                             how many rows the list has actually built. The only way a script can
                             tell virtualized from merely fast: a thumbnail view of eight hundred
                             files must hold a screenful of containers, not eight hundred
-assert-flat [off|files|all] | assert-not-flat
-                            which flat branch view the tab is in; bare `assert-flat` means any.
+assert-flat [on|off] | assert-not-flat
+                            whether the tab is in a flat branch view; bare `assert-flat` means on.
                             Distinct from assert-flattened, which asks whether the rows come from
                             many folders — a search makes that true too, and the two differing is
                             the whole reason the tab carries both flags

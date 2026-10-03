@@ -621,7 +621,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
                 created.FileList.RestoreColumns(tabs[i].Columns);
                 // Before the navigation is queued, and assigned rather than commanded: the tab has
                 // no path yet, so the first load is the one that should already come back flat.
-                created.FlatView = tabs[i].Flat;
+                created.IsFlatView = tabs[i].IsFlat;
                 pending.Add(new PendingNavigation(created, tabs[i].Path, i == visibleIndex));
             }
 
@@ -680,7 +680,7 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
                 Path = t.CurrentPath,
                 SortBy = t.FileList.SortBy,
                 SortDescending = t.FileList.SortDescending,
-                Flat = t.FlatView,
+                IsFlat = t.IsFlatView,
                 // Null unless this tab's columns were actually arranged, so an untouched tab keeps
                 // following the saved default rather than freezing today's copy of it.
                 Columns = t.FileList.ColumnsCustomized

@@ -152,10 +152,7 @@
               and a fill carries the state without putting a colour that no test is holding still.
 
               Flat comes first because it is about the list, where the preview pane is about the
-              pane beside it. Its chevron is a button of its own rather than a split-button
-              template: the two do different things (toggle, choose a shape), and a control where
-              one half toggles and the other opens a menu is a thing to explain rather than a thing
-              to look at.
+              pane beside it.
             -->
             <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="6,0,0,0">
                 <Button x:Name="FlatViewToggle"
@@ -174,26 +171,6 @@
                         </Style>
                     </Button.Style>
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.FlatView}"/>
-                </Button>
-
-                <Button x:Name="FlatViewModeButton" Style="{StaticResource ToolbarButton}"
-                        Width="14" Padding="0" ToolTip="What a flat view shows"
-                        Click="FlatViewMode_Click"
-                        AutomationProperties.AutomationId="FlatViewModeButton"
-                        AutomationProperties.Name="Flat view options">
-                    <!-- Drawn rather than named, like the folder tree's expander: a chevron is
-                         chrome pointing at the control beside it, not a picture of anything. -->
-                    <Path Data="M 0,0 L 3.5,3.5 L 7,0"
-                          Stroke="{StaticResource Theme.Text.Secondary}" StrokeThickness="1.2"
-                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    <Button.ContextMenu>
-                        <ContextMenu x:Name="FlatViewModeMenu">
-                            <MenuItem x:Name="FlatFilesItem" Header="Files only"
-                                      IsCheckable="True" Click="FlatFiles_Click"/>
-                            <MenuItem x:Name="FlatAllItem" Header="Files and folders"
-                                      IsCheckable="True" Click="FlatAll_Click"/>
-                        </ContextMenu>
-                    </Button.ContextMenu>
                 </Button>
 
                 <Button x:Name="PreviewPaneToggle" Margin="6,0,0,0"

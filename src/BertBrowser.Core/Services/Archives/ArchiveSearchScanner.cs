@@ -33,7 +33,7 @@ public static class ArchiveSearchScanner
     /// inside an open container. It costs nothing here: this walk was always the whole subtree with
     /// a filter over it, and the container's index is already in memory.
     /// </param>
-    /// <param name="includeDirectories">False lists files only, as the flat view's default does.
+    /// <param name="includeDirectories">False lists files only, as the flat view does.
     /// The walk still descends — what is emitted and what is recursed into are separate.</param>
     public static IReadOnlyList<SearchHit> Search(
         ArchiveIndex index,

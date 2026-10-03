@@ -8,7 +8,6 @@ using BertBrowser.Core.Layout;
 using BertBrowser.Core.Services;
 using BertBrowser.Core.Services.Columns;
 using BertBrowser.Core.Services.Commands;
-using BertBrowser.Core.Services.FlatView;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Preview;
 using BertBrowser.Core.Services.Transfer;
@@ -285,8 +284,6 @@ public partial class MainWindow
         // --- View ---
         Bound("view.preview", () => tab().TogglePreviewCommand, "");
         Bound("view.flat", () => tab().ToggleFlatCommand, "");
-        Add("view.flat-files", () => _ = tab().SetFlatModeAsync(FlatViewMode.Files));
-        Add("view.flat-all", () => _ = tab().SetFlatModeAsync(FlatViewMode.All));
         // The same property the settings page's box sets; the shell saves it and refreshes every
         // tab. Browser context, so it cannot be pressed under that page and race its own write.
         Add("view.hidden", () => _shell.ShowHiddenItems = !_shell.ShowHiddenItems);
@@ -438,7 +435,7 @@ public partial class MainWindow
         // Both have to go, or the folder would arrive already filtered or already flattened and
         // the row would be shown among the same neighbours it had a moment ago.
         if (tab.ActiveSearchText.Length > 0) await tab.ClearSearchCommand.ExecuteAsync(null);
-        if (tab.IsFlatView) await tab.SetFlatModeAsync(FlatViewMode.Off);
+        await tab.SetFlatViewAsync(false);
 
         await tab.RevealFileAsync(item.FullPath);
     }

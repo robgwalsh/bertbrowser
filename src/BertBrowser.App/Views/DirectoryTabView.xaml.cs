@@ -16,7 +16,6 @@ using BertBrowser.Core.Services.Checksums;
 using BertBrowser.Core.Services.Columns;
 using BertBrowser.Core.Services.Commands;
 using BertBrowser.Core.Services.Delete;
-using BertBrowser.Core.Services.FlatView;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Preview;
 using BertBrowser.Core.Services.Rename;
@@ -206,33 +205,6 @@ public partial class DirectoryTabView : UserControl
         SearchBox.SelectAll();
     }
 
-    // --- Flat branch view ---
-
-    /// <summary>
-    /// Opens the flat view's shape menu.
-    /// </summary>
-    /// <remarks>
-    /// Opened here rather than declared as the button's own context menu opening on right-click:
-    /// this is a chevron, and a chevron that needs a right-click is a chevron nobody presses.
-    /// </remarks>
-    private void FlatViewMode_Click(object sender, RoutedEventArgs e)
-    {
-        FlatFilesItem.IsChecked = Tab.FlatView != FlatViewMode.All;
-        FlatAllItem.IsChecked = Tab.FlatView == FlatViewMode.All;
-
-        FlatViewModeMenu.PlacementTarget = FlatViewModeButton;
-        FlatViewModeMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
-        FlatViewModeMenu.IsOpen = true;
-    }
-
-    // Choosing a shape turns the view on with it, rather than only recording a preference for the
-    // next time: the menu hangs off a button that is about looking at this folder now.
-    private void FlatFiles_Click(object sender, RoutedEventArgs e) =>
-        _ = Tab.SetFlatModeAsync(FlatViewMode.Files);
-
-    private void FlatAll_Click(object sender, RoutedEventArgs e) =>
-        _ = Tab.SetFlatModeAsync(FlatViewMode.All);
-
     // --- View mode ---
 
     private bool? _thumbnailViewApplied;
@@ -318,18 +290,6 @@ public partial class DirectoryTabView : UserControl
     /// <summary>The column header's menu, for the UI harness to photograph. Built through the same
     /// property a right-click uses, so a capture cannot drift from what the app shows.</summary>
     internal ContextMenu ColumnMenuForHarness => ColumnMenu.Menu;
-
-    /// <summary>The flat view's shape menu, with its check marks already set — the same preparation
-    /// a real click does, so a capture cannot show a state the button never puts on screen.</summary>
-    internal ContextMenu FlatViewMenuForHarness
-    {
-        get
-        {
-            FlatFilesItem.IsChecked = Tab.FlatView != FlatViewMode.All;
-            FlatAllItem.IsChecked = Tab.FlatView == FlatViewMode.All;
-            return FlatViewModeMenu;
-        }
-    }
 
     private ColumnHeaderMenu ColumnMenu => _columnMenu ??= new ColumnHeaderMenu(
         read: () => Tab.FileList.ColumnLayout,

@@ -123,8 +123,8 @@ assert-command nav.containing-folder unavailable search results or a flat view
 
 # In a flat view the row's real folder is one command away.
 up
-flat files
-assert-flat files
+flat on
+assert-flat
 select report.md
 assert-command nav.containing-folder available
 run nav.containing-folder

@@ -14,8 +14,8 @@
 
 many-fixture 800
 go Many
-flat all
-assert-count 808
+flat on
+assert-count 800
 
 # --- Details first, as the baseline: the same rows, the panel WPF supplies ---
 
@@ -25,8 +25,8 @@ shot 01-details
 # --- Tiles ---
 
 thumbnails 0.5
-assert-count 808
-# The whole point: 808 rows, a screenful of containers.
+assert-count 800
+# The whole point: 800 rows, a screenful of containers.
 assert-realized under 200
 shot 02-tiles-top
 
@@ -55,11 +55,11 @@ shot 06-tiles-revealed
 # --- Resizing the tiles re-flows every line, and the panel has to believe the new size ---
 
 thumbnails 1
-assert-count 808
+assert-count 800
 assert-realized under 200
 shot 07-tiles-large
 
 thumbnails 0
-assert-count 808
+assert-count 800
 assert-not-launched
 state

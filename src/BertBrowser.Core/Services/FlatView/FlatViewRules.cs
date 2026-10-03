@@ -2,28 +2,6 @@ using BertBrowser.Core.Models;
 
 namespace BertBrowser.Core.Services.FlatView;
 
-/// <summary>
-/// What a tab's flat branch view is showing.
-/// </summary>
-/// <remarks>
-/// A mode rather than a bool because the two shapes answer different questions, and both are worth
-/// having: <see cref="Files"/> is the one that makes a tree of nested media browsable, since a
-/// folder row in a flat list is one more thing between you and what you were looking for;
-/// <see cref="All"/> is "the subtree, listed", and keeps the things folder rows carry — a drop
-/// target, and a cached recursive size.
-/// </remarks>
-public enum FlatViewMode
-{
-    /// <summary>An ordinary one-level directory listing.</summary>
-    Off,
-
-    /// <summary>Every file under the folder, at every depth. No folder rows.</summary>
-    Files,
-
-    /// <summary>Every file and folder under the folder, at every depth.</summary>
-    All,
-}
-
 /// <summary>Whether to list a subtree flat straight away, or ask first.</summary>
 /// <param name="Confirm">True when the user should be asked before anything is listed.</param>
 /// <param name="Message">What to ask, in words. Empty when there is nothing to ask.</param>
@@ -61,26 +39,22 @@ public static class FlatViewRules
     /// the disk. The rows come from a live walk for exactly that reason.
     /// </para>
     /// </param>
-    public static FlatViewPreflight Decide(
-        string displayPath, DirSizeResult? estimate, FlatViewMode mode, int cap)
+    public static FlatViewPreflight Decide(string displayPath, DirSizeResult? estimate, int cap)
     {
-        if (mode == FlatViewMode.Off || estimate is null) return FlatViewPreflight.Run;
+        if (estimate is null) return FlatViewPreflight.Run;
 
-        var count = mode == FlatViewMode.All
-            ? (long)estimate.FileCount + estimate.DirCount
-            : estimate.FileCount;
-
+        // Files only, because that is all a flat view lists — its folders are walked, never shown.
+        var count = estimate.FileCount;
         if (count <= cap) return FlatViewPreflight.Run;
 
         // "at least", because an incomplete row is a floor: the size pass could not reach part of
         // the tree, so the real number is this one or larger, never smaller.
         var floor = estimate.Incomplete ? "at least " : "";
-        var what = mode == FlatViewMode.All ? "files and folders" : "files";
 
         return new FlatViewPreflight(
             Confirm: true,
             Message:
-                $"\"{displayPath}\" holds {floor}{count:N0} {what}. " +
+                $"\"{displayPath}\" holds {floor}{count:N0} files. " +
                 $"A flat view lists the first {cap:N0} of them, which will take a moment.",
             ConfirmLabel: $"Show {cap:N0}");
     }

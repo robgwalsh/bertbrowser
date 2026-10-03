@@ -126,8 +126,8 @@ shot compare-after-undo
 # A comparison pairs two one-level listings by name. A flat branch view is rows from all over the
 # tree, so there is nothing to pair — the same reason a search ends one, and the guard is the same
 # flag. Only the wording branches, so the person is told what they actually just did.
-flat files
-assert-flat files
+flat on
+assert-flat
 assert-no-column CompareStatus
 flat off
 compare

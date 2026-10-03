@@ -41,7 +41,7 @@ public sealed class PaneFactory(
         tab.FileList.SortDescending = source.FileList.SortDescending;
         // Assigned rather than set through the command: the copy has no path yet, and the load it
         // is about to be given will read this.
-        tab.FlatView = source.FlatView;
+        tab.IsFlatView = source.IsFlatView;
         // Only when the source really arranged them; otherwise the copy keeps following the default
         // the way the original does.
         if (source.FileList.ColumnsCustomized)

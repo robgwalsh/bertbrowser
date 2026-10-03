@@ -49,14 +49,16 @@ public interface ISearchService
     /// freshness gate of that strength; it is not built. The no-crawl half is the other promise:
     /// pressing Ctrl+B must not quietly enrol a subtree in the index.
     /// </para>
+    /// <para>
+    /// Files only: a folder row is one more thing between you and what you were looking for. The
+    /// walk still descends into every folder it does not show.
+    /// </para>
     /// </remarks>
-    /// <param name="includeDirectories">False lists files only — the default the flat view starts
-    /// from, since a folder row is one more thing between you and what you were looking for.</param>
     /// <param name="cap">How many rows to stop at, reporting <c>Truncated</c>. Passed in rather than
     /// taken from <see cref="SearchService.MaxFlatEntries"/> here, so a test can reach the truncated
     /// case without writing fifty thousand files.</param>
     Task<SearchOutcome> ListSubtreeAsync(
-        string rootPath, bool includeDirectories, int cap, CancellationToken ct,
+        string rootPath, int cap, CancellationToken ct,
         IProgress<IReadOnlyList<SearchHit>>? liveBatches = null, bool includeHidden = false);
 
     /// <summary>
@@ -342,7 +344,7 @@ public sealed class SearchService : ISearchService, IDisposable
 
     /// <inheritdoc/>
     public async Task<SearchOutcome> ListSubtreeAsync(
-        string rootPath, bool includeDirectories, int cap, CancellationToken ct,
+        string rootPath, int cap, CancellationToken ct,
         IProgress<IReadOnlyList<SearchHit>>? liveBatches = null, bool includeHidden = false)
     {
         // Refused here rather than trusted to the caller, for the reason SearchAsync gives at
@@ -356,7 +358,7 @@ public sealed class SearchService : ISearchService, IDisposable
 
         var outcome = await Task.Run(
             () => LiveScan(rootPath, query: null, cap, ct, liveBatches, includeHidden,
-                includeDirectories),
+                includeDirectories: false),
             ct).ConfigureAwait(false);
 
         // RefreshPending is LiveScan's answer to "is a crawl going to improve on this?" — and here

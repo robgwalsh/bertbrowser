@@ -79,25 +79,20 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     /// <remarks>
     /// <para>
     /// Per tab, like the preview pane, and it diverges from that pattern in three ways worth
-    /// naming. There is <b>no global on/off default</b> in <c>AppSettings</c>: a new tab should
-    /// never open flat, so the only thing that travels is which of the two flat shapes you last
-    /// chose (<see cref="AppSettings.FlatViewIncludesFolders"/>). It <b>survives navigation</b> —
+    /// naming. There is <b>no global default</b> in <c>AppSettings</c>: a new tab should never
+    /// open flat. It <b>survives navigation</b> —
     /// <see cref="ClearSearchState"/> deliberately does not touch it — because that is what a
     /// branch view is for and what every other file manager's does. And it <b>is</b> written into
     /// the session, which the preview pane is not, so a tab comes back the way it was left.
     /// </para>
     /// <para>
-    /// Assigning it does not itself reload: a session restore sets the mode on a tab that has no
+    /// Assigning it does not itself reload: a session restore sets it on a tab that has no
     /// path yet, and a load kicked from there would race the navigation that is about to happen.
     /// <see cref="RefreshViewAsync"/> reads it, and the commands below are what ask for a refresh.
     /// </para>
     /// </remarks>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsFlatView))]
-    private FlatViewMode _flatView;
-
-    /// <summary>Whether flat is on at all — what the toolbar button's pressed state binds to.</summary>
-    public bool IsFlatView => FlatView != FlatViewMode.Off;
+    private bool _isFlatView;
 
     /// <summary>
     /// How many rows one flat listing shows.
@@ -109,22 +104,14 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     /// </remarks>
     internal int FlatEntryCap { get; set; } = SearchService.MaxFlatEntries;
 
-    /// <summary>The shape a bare Ctrl+B turns on, remembered across tabs and launches.</summary>
-    private FlatViewMode PreferredFlatMode =>
-        _settings.FlatViewIncludesFolders ? FlatViewMode.All : FlatViewMode.Files;
-
     [RelayCommand]
-    private async Task ToggleFlatAsync() =>
-        await SetFlatModeAsync(IsFlatView ? FlatViewMode.Off : PreferredFlatMode);
+    private async Task ToggleFlatAsync() => await SetFlatViewAsync(!IsFlatView);
 
-    /// <summary>Switches to a named mode — what the toggle's menu invokes, and what a script drives.</summary>
-    public async Task SetFlatModeAsync(FlatViewMode mode)
+    /// <summary>Turns flat on or off and reloads — what the commands invoke, and what a script drives.</summary>
+    public async Task SetFlatViewAsync(bool on)
     {
-        if (mode != FlatViewMode.Off)
-            _settings.FlatViewIncludesFolders = mode == FlatViewMode.All;
-
-        if (FlatView == mode) return;
-        FlatView = mode;
+        if (IsFlatView == on) return;
+        IsFlatView = on;
         await RefreshViewAsync();
     }
 
@@ -657,19 +644,17 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     /// </remarks>
     private async Task RunFlatListingAsync(CancellationToken ct)
     {
-        var mode = FlatView;
-
         // Asked before anything is cleared, so declining leaves the listing that was on screen
         // exactly where it was. The estimate is one primary-key lookup in dir_size_cache — the same
         // number the Size column shows for this folder — and it is only ever an estimate: it decides
         // whether to ask a question, never what the rows say.
         var preflight = FlatViewRules.Decide(
-            CurrentPath, _dirSizes.Get(CurrentPath), mode, FlatEntryCap);
+            CurrentPath, _dirSizes.Get(CurrentPath), FlatEntryCap);
 
         if (preflight.Confirm &&
             !_confirm.Ask(preflight.Message, "Flat view", preflight.ConfirmLabel))
         {
-            FlatView = FlatViewMode.Off;
+            IsFlatView = false;
             return;
         }
 
@@ -689,7 +674,7 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
             var hits = await Task.Run(() => ArchiveSearchScanner.Search(
                 _archives.ReadArchive(here.ArchiveFile), here.ArchiveFile, here.EntryPath,
                 query: null, FlatEntryCap, ct,
-                includeDirectories: mode == FlatViewMode.All), ct);
+                includeDirectories: false), ct);
 
             if (ct.IsCancellationRequested) return;
             FileList.AppendSearchHits(hits);
@@ -704,12 +689,11 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
             {
                 if (ct.IsCancellationRequested) return;
                 FileList.AppendSearchHits(batch);
-                StatusText = $"{FileList.Items.Count:N0} item(s) so far under {folder}…";
+                StatusText = $"{FileList.Items.Count:N0} file(s) so far under {folder}…";
             });
 
             outcome = await _searchService.ListSubtreeAsync(
-                CurrentPath, includeDirectories: mode == FlatViewMode.All, FlatEntryCap,
-                ct, progress, IncludeHidden);
+                CurrentPath, FlatEntryCap, ct, progress, IncludeHidden);
         }
 
         if (ct.IsCancellationRequested) return;
@@ -733,9 +717,8 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
               "Open a folder further in, or search to narrow it."
             : null;
 
-        var what = mode == FlatViewMode.All ? "item(s)" : "file(s)";
         var truncated = outcome.Truncated ? $" (first {FlatEntryCap:N0})" : "";
-        StatusText = $"{outcome.Hits.Count:N0} {what} under {CurrentPath}{truncated}";
+        StatusText = $"{outcome.Hits.Count:N0} file(s) under {CurrentPath}{truncated}";
     }
 
     private async Task RunSearchCoreAsync(CancellationToken ct)

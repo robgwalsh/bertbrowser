@@ -48,9 +48,9 @@ public sealed class SubtreeListingTests : IDisposable
     }
 
     private Task<SearchOutcome> List(
-        bool includeDirectories = true, bool includeHidden = false,
+        bool includeHidden = false,
         int cap = 1000, IProgress<IReadOnlyList<SearchHit>>? batches = null) =>
-        _service.ListSubtreeAsync(_rootDir, includeDirectories, cap, CancellationToken.None, batches, includeHidden);
+        _service.ListSubtreeAsync(_rootDir, cap, CancellationToken.None, batches, includeHidden);
 
     private sealed class FakeWatchers : IIndexWatcherService
     {
@@ -74,7 +74,7 @@ public sealed class SubtreeListingTests : IDisposable
         CreateFile(@"Sub\middle.txt");
         CreateFile(@"Sub\Deep\bottom.txt");
 
-        var outcome = await List(includeDirectories: false);
+        var outcome = await List();
 
         // The whole point: a one-level listing can only ever show top.txt.
         Assert.Equal(
@@ -90,27 +90,21 @@ public sealed class SubtreeListingTests : IDisposable
         CreateFile("top.txt");
         CreateFile(@"Sub\Deep\bottom.txt");
 
-        var hits = (await List(includeDirectories: false)).Hits.ToDictionary(h => h.Name);
+        var hits = (await List()).Hits.ToDictionary(h => h.Name);
 
         Assert.Equal("", hits["top.txt"].RelativeDirDisplay);
         Assert.Equal(Path.Combine("Sub", "Deep"), hits["bottom.txt"].RelativeDirDisplay);
     }
 
     [Fact]
-    public async Task FilesOnlyStillDescendsIntoTheFoldersItDoesNotShow()
+    public async Task DescendsIntoTheFoldersItDoesNotShow()
     {
         CreateFile(@"Sub\Deep\bottom.txt");
 
-        var files = await List(includeDirectories: false);
-        var all = await List(includeDirectories: true);
+        var files = await List();
 
         Assert.Equal(["bottom.txt"], files.Hits.Select(h => h.Name));
         Assert.DoesNotContain(files.Hits, h => h.IsDirectory);
-
-        // Same walk, same file, and the folders it went through as well.
-        Assert.Contains(all.Hits, h => h is { Name: "Sub", IsDirectory: true });
-        Assert.Contains(all.Hits, h => h is { Name: "Deep", IsDirectory: true });
-        Assert.Contains(all.Hits, h => h.Name == "bottom.txt");
     }
 
     [Fact]
@@ -123,8 +117,8 @@ public sealed class SubtreeListingTests : IDisposable
         var dir = Path.Combine(_rootDir, "Private");
         File.SetAttributes(dir, File.GetAttributes(dir) | FileAttributes.Hidden);
 
-        var without = await List(includeDirectories: false, includeHidden: false);
-        var with = await List(includeDirectories: false, includeHidden: true);
+        var without = await List(includeHidden: false);
+        var with = await List(includeHidden: true);
 
         Assert.Equal(["visible.txt"], without.Hits.Select(h => h.Name));
         Assert.Contains(with.Hits, h => h.Name == "secret.txt");
@@ -136,7 +130,7 @@ public sealed class SubtreeListingTests : IDisposable
     {
         for (var i = 0; i < 12; i++) CreateFile($"file{i:00}.txt");
 
-        var outcome = await List(includeDirectories: false, cap: 5);
+        var outcome = await List(cap: 5);
 
         Assert.True(outcome.Truncated);
         Assert.Equal(5, outcome.Hits.Count);
@@ -150,7 +144,7 @@ public sealed class SubtreeListingTests : IDisposable
         for (var i = 0; i < 30; i++) CreateFile($"Sub{i % 3}\\file{i:00}.txt");
 
         var progress = new CollectingProgress();
-        var outcome = await List(includeDirectories: false, batches: progress);
+        var outcome = await List(batches: progress);
 
         Assert.Equal(
             outcome.Hits.Select(h => h.DisplayPath).Order(),
@@ -165,7 +159,7 @@ public sealed class SubtreeListingTests : IDisposable
         CreateFile("kept.txt");
         CreateFile(Path.Combine(DeleteExecutor.TrashFolderName, "gone.txt"));
 
-        var hits = (await List(includeDirectories: false, includeHidden: true)).Hits;
+        var hits = (await List(includeHidden: true)).Hits;
 
         Assert.Contains(hits, h => h.Name == "kept.txt");
         Assert.DoesNotContain(hits, h => h.Name == "gone.txt");
@@ -180,7 +174,7 @@ public sealed class SubtreeListingTests : IDisposable
         var zip = CreateFile("bundle.zip");
 
         var outcome = await _service.ListSubtreeAsync(
-            Path.Combine(zip, "inside"), includeDirectories: true, cap: 1000, CancellationToken.None);
+            Path.Combine(zip, "inside"), cap: 1000, CancellationToken.None);
 
         Assert.NotNull(outcome.Problem);
         Assert.Empty(outcome.Hits);

@@ -14,44 +14,34 @@ assert-not-flat
 assert-not-flattened
 assert-count 8
 
-# --- Files only: the default, and the one the media case wants ---
+# --- Every file at every depth, and no folder rows ---
 
-flat files
-assert-flat files
+flat on
+assert-flat
 assert-flattened
 assert-column RelativePath
 assert-row old.txt
 assert-no-row Documents
 assert-count 12
 assert-status under
-shot 01-flat-files
-
-# --- Files and folders: the same walk, emitting what it walked through ---
-
-flat all
-assert-flat all
-assert-row old.txt
-assert-row Documents
-assert-count 16
-shot 02-flat-all
-menu flat
+shot 01-flat
 
 # It has a folder being shown, unlike a search result, so New is live and targets the flat root.
 # That is exactly the objection that makes New off during a search.
-newfolder FlatChild
-assert-row FlatChild
-assert-exists FlatChild
+newfile FlatChild.txt
+assert-row FlatChild.txt
+assert-exists FlatChild.txt
 
 # --- A mode, not a gesture: navigating keeps it ---
 
 go Documents
-assert-flat all
+assert-flat
 # still recursive, now from one level down
 assert-row old.txt
 # and scoped to where we are
 assert-no-row notes.txt
 back
-assert-flat all
+assert-flat
 assert-row notes.txt
 
 # --- A live search wins; clearing it comes back to the flat listing, not the one-level one ---
@@ -60,20 +50,20 @@ search old
 assert-flattened
 assert-row old.txt
 clear-search
-assert-flat all
+assert-flat
 assert-row notes.txt
 assert-row old.txt
 
 # --- The headline case: a whole tree of media as tiles at once ---
 
 thumbnails 0.5
-shot 03-flat-thumbnails
+shot 02-flat-thumbnails
 thumbnails 0
 
 # --- Survives the session round trip, the way sort and columns do ---
 
 session
-assert-flat all
+assert-flat
 assert-row old.txt
 
 # --- The ceiling. A dozen files cannot reach 50,000, so lower it and take the same path. ---
@@ -83,13 +73,13 @@ assert-row old.txt
 
 flat off
 flat-cap 4
-flat files
+flat on
 assert-count 4
 assert-status first
-shot 04-flat-truncated
+shot 03-flat-truncated
 
 # And the question the real ceiling asks before it ever gets here, worded by the same rule.
-dialog flat-large 05-flat-large-folder
+dialog flat-large 04-flat-large-folder
 
 flat off
 flat-cap 50000

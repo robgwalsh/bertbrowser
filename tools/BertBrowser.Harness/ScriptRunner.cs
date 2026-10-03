@@ -1209,7 +1209,6 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
         var items = session.Dispatcher.Invoke<IReadOnlyList<FrameworkElement>>(() => kind.ToLowerInvariant() switch
         {
             "columns" => ColumnMenuItems(),
-            "flat" => FlatMenuItems(),
             "files" => FileListMenuItems(background: false),
             "background" => FileListMenuItems(background: true),
             "tree" => TreeMenuItems(),
@@ -1219,7 +1218,7 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
             "undo-range" => session.Window.BuildUndoMenuItems(poseHover: 2),
             "redo" => session.Window.BuildRedoMenuItems(),
             var other => throw new FormatException(
-                $"'{other}' is not a menu. Try: columns, flat, files, background, tree, workspaces, saved-searches, undo, undo-range, redo."),
+                $"'{other}' is not a menu. Try: columns, files, background, tree, workspaces, saved-searches, undo, undo-range, redo."),
         });
         _lastMenuHeaders = session.Dispatcher.Invoke(() => Headers(items).ToList());
         _lastMenuTopLevel = session.Dispatcher.Invoke(() => TopLevel(items).ToList());
@@ -1353,26 +1352,11 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
             FileCount: 1_642_880, DirCount: 96_411, Incomplete: false, DateTime.UtcNow);
 
         var decision = FlatViewRules.Decide(
-            session.Tab.CurrentPath, estimate, FlatViewMode.Files,
-            Core.Services.SearchService.MaxFlatEntries);
+            session.Tab.CurrentPath, estimate, Core.Services.SearchService.MaxFlatEntries);
 
         return MessageDialog.Create(
             decision.Message, "Flat view", MessageDialogKind.Warning,
             showCancel: true, confirmLabel: decision.ConfirmLabel);
-    }
-
-    /// <summary>The flat view's shape menu, detached the way the column menu's items are — a click
-    /// on that chevron is the only way to see it, and a script never clicks.</summary>
-    private List<MenuItem> FlatMenuItems()
-    {
-        var view = FindNamed<FrameworkElement>("FileListView");
-        var tabView = VisualTreeUtil.FindAncestor<DirectoryTabView>(view)
-            ?? throw new AssertionException("The file list is not inside a DirectoryTabView.");
-
-        var menu = tabView.FlatViewMenuForHarness;
-        var items = menu.Items.OfType<MenuItem>().ToList();
-        menu.Items.Clear();
-        return items;
     }
 
     /// <summary>Puts a photographed menu's items back, set by the two menus below that are declared
@@ -3109,27 +3093,18 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
     }
 
     /// <summary>
-    /// The active tab's flat branch view: <c>off</c>, <c>files</c> or <c>all</c>.
+    /// The active tab's flat branch view: <c>on</c> or <c>off</c>.
     /// </summary>
     /// <remarks>
     /// Through the view model's own method rather than by assigning the property, so a script takes
-    /// the path the toolbar button, its menu and Ctrl+B all take — including the refresh, which is
-    /// the part that would silently do nothing if it were skipped. The listing raises
-    /// <c>IsLoading</c> before the first await returns, so <c>Settle</c> cannot photograph the
-    /// listing that was there before.
+    /// the path the toolbar button and Ctrl+B take — including the refresh, which is the part that
+    /// would silently do nothing if it were skipped. The listing raises <c>IsLoading</c> before the
+    /// first await returns, so <c>Settle</c> cannot photograph the listing that was there before.
     /// </remarks>
     private void Flat(string rest)
     {
-        var mode = Require(rest, "flat").ToLowerInvariant() switch
-        {
-            "off" or "no" or "false" => FlatViewMode.Off,
-            "files" or "on" or "yes" or "true" => FlatViewMode.Files,
-            "all" or "folders" => FlatViewMode.All,
-            var other => throw new FormatException(
-                $"flat: expected off, files or all, got '{other}'."),
-        };
-
-        Invoke(() => _ = session.Tab.SetFlatModeAsync(mode));
+        var on = Switch(rest, "flat");
+        Invoke(() => _ = session.Tab.SetFlatViewAsync(on));
         session.Settle();
     }
 
@@ -4093,7 +4068,7 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
             ("flattened", Bool(tab.FileList.IsFlattened)),
             // Beside it, because the point of the two flags is that they differ: a search sets the
             // first alone, Ctrl+B sets both.
-            ("flat", Quote(tab.FlatView.ToString())),
+            ("flat", Bool(tab.IsFlatView)),
             ("notice", Quote(tab.FileList.NoticeMessage ?? "")),
             ("columns", Quote(string.Join(", ", tab.FileList.ResolvedColumns.Select(c => c.Id)))),
             ("insideArchive", Bool(tab.FileList.IsInsideArchive)),
@@ -4497,7 +4472,7 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
     }
 
     /// <summary>
-    /// Which flat branch view the tab is in — <c>assert-flat</c> with no argument means "any".
+    /// Whether the tab is in a flat branch view — <c>assert-flat</c> with no argument means "on".
     /// </summary>
     /// <remarks>
     /// Separate from <c>assert-flattened</c> on purpose: that one asks whether the rows come from
@@ -4506,22 +4481,12 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
     /// </remarks>
     private void AssertFlat(string rest)
     {
-        var actual = session.Dispatcher.Invoke(() => session.Tab.FlatView);
-        var word = rest.Trim().ToLowerInvariant();
+        var actual = session.Dispatcher.Invoke(() => session.Tab.IsFlatView);
+        var expected = rest.Trim().Length == 0 || Switch(rest, "assert-flat");
 
-        var ok = word switch
-        {
-            "" or "on" => actual != FlatViewMode.Off,
-            "off" => actual == FlatViewMode.Off,
-            "files" => actual == FlatViewMode.Files,
-            "all" or "folders" => actual == FlatViewMode.All,
-            _ => throw new FormatException(
-                $"assert-flat: expected nothing, off, files or all, got '{word}'."),
-        };
-
-        if (!ok)
+        if (actual != expected)
             throw new AssertionException(
-                $"expected the flat view to be {(word.Length == 0 ? "on" : word)}, got {actual}.");
+                $"expected the flat view to be {(expected ? "on" : "off")}, got {(actual ? "on" : "off")}.");
     }
 
     /// <summary>

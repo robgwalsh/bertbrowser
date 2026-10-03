@@ -376,8 +376,8 @@ far as the user is concerned, and search saying otherwise reads as a delete that
 
 ### Not a query: the flat branch view
 
-Ctrl+B lists everything under the current folder in one list, and it borrows this machinery without
-being a search. `SearchService.ListSubtreeAsync` runs the same `LiveScan` with a **null query**,
+Ctrl+B lists every file under the current folder in one list — no folder rows, though the walk
+still descends into them — and it borrows this machinery without being a search. `SearchService.ListSubtreeAsync` runs the same `LiveScan` with a **null query**,
 where null means *every entry* — deliberately not a query that matches everything, which
 `SearchGrammar` refuses to build and which would have put a permanent member into the
 `Matches`/`WriteSql` agreement contract on behalf of a caller that is not asking a question.
@@ -386,8 +386,8 @@ where null means *every entry* — deliberately not a query that matches everyth
 and that is the wrong trade for a browse surface: "here is what is under this folder" has to be true
 rather than fast, and index rows can be a rebuild behind. `FolderCompareService.UsesIndex` drew the
 same line first. The one thing the index does answer is the *estimate* behind the prompt that
-appears before flattening an enormous folder — `dir_size_cache` already stores `file_count` and
-`dir_count` per directory, so that is a single primary-key lookup, and a count that is slightly
+appears before flattening an enormous folder — `dir_size_cache` already stores `file_count` per
+directory, so that is a single primary-key lookup, and a count that is slightly
 stale only decides whether a question gets asked.
 
 ### Reading the files: `content:`
@@ -582,8 +582,8 @@ the canonical path.
 | `SizeTextTests`, `DateShorthandTests` | The literal parsers; the clock is injected, and the units are pinned to `ByteSizeFormatter`'s |
 | `FsIndexRepositoryTests` | Range scans, truncation, ancestor path reconstruction, rename/delete subtree rewrites, the vanish sweep, and both new columns' round trip — including a row left at the migration's `''` created date, which must read back as unknown rather than throw |
 | `SearchServiceTests` | Fresh / stale / unindexed routing and live-scan streaming |
-| `SubtreeListingTests` | The flat branch view's listing: descendants at every depth, the relative dir the Folder column shows, that files-only still descends, hidden subtrees, the cap, that nothing streamed is missing from the final list — and the two promises, that an archive root is refused and that listing enrols nothing in the index |
-| `FlatViewRulesTests` | When a flat view asks before listing, and the words: the threshold either side, folders counting only when shown, an incomplete row reading as a floor, and a missing row meaning go ahead |
+| `SubtreeListingTests` | The flat branch view's listing: descendants at every depth, the relative dir the Folder column shows, that it still descends into the folders it does not show, hidden subtrees, the cap, that nothing streamed is missing from the final list — and the two promises, that an archive root is refused and that listing enrols nothing in the index |
+| `FlatViewRulesTests` | When a flat view asks before listing, and the words: the threshold either side, folders never counting, an incomplete row reading as a floor, and a missing row meaning go ahead |
 | `IndexCrawlerTests`, `IndexWatcherApplyTests` | The fallback crawler and watcher apply path |
 | `MftIndexHostTests` | One helper across two sessions: the replay a late-joining app depends on, that a second `Start` does not index twice, and that a lost pipe and a `Shutdown` are told apart |
 | `MftIndexClientTests` | Attaching without prompting, launching only when nothing is listening, that an attach finding nothing says *nothing*, and that `Dispose` leaves the helper running while `Stop` does not |

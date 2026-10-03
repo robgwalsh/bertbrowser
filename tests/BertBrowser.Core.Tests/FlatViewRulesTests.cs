@@ -21,7 +21,7 @@ public sealed class FlatViewRulesTests
         // A missing dir_size_cache row means *unknown*, never zero — the same rule that makes a
         // folder's size render blank. Nothing is known, so there is nothing to ask about: this is
         // what every network share and non-NTFS volume takes.
-        Assert.False(FlatViewRules.Decide("D:\\Media", null, FlatViewMode.Files, Cap).Confirm);
+        Assert.False(FlatViewRules.Decide("D:\\Media", null, Cap).Confirm);
     }
 
     [Theory]
@@ -30,12 +30,12 @@ public sealed class FlatViewRulesTests
     [InlineData(Cap - 1)]
     [InlineData(Cap)]      // exactly the cap fits, so nothing is lost and nothing is asked
     public void AtOrUnderTheCapItJustRuns(int files) =>
-        Assert.False(FlatViewRules.Decide("D:\\Media", Size(files, 0), FlatViewMode.Files, Cap).Confirm);
+        Assert.False(FlatViewRules.Decide("D:\\Media", Size(files, 0), Cap).Confirm);
 
     [Fact]
     public void OverTheCapItAsksFirst()
     {
-        var decision = FlatViewRules.Decide("D:\\Media", Size(Cap + 1, 0), FlatViewMode.Files, Cap);
+        var decision = FlatViewRules.Decide("D:\\Media", Size(Cap + 1, 0), Cap);
 
         Assert.True(decision.Confirm);
         Assert.Contains("50,001 files", decision.Message);
@@ -44,29 +44,17 @@ public sealed class FlatViewRulesTests
     }
 
     [Fact]
-    public void FoldersCountTowardsTheCeilingOnlyWhenTheyAreShown()
-    {
-        var estimate = Size(files: 40_000, dirs: 20_000);
-
-        // 40,000 files fit; 60,000 files and folders do not.
-        Assert.False(FlatViewRules.Decide("D:\\Media", estimate, FlatViewMode.Files, Cap).Confirm);
-
-        var both = FlatViewRules.Decide("D:\\Media", estimate, FlatViewMode.All, Cap);
-        Assert.True(both.Confirm);
-        Assert.Contains("60,000 files and folders", both.Message);
-    }
+    public void FoldersDoNotCountTowardsTheCeiling() =>
+        // A flat view lists no folder rows, so 40,000 files fit however many folders hold them.
+        Assert.False(FlatViewRules.Decide("D:\\Media", Size(files: 40_000, dirs: 20_000), Cap).Confirm);
 
     [Fact]
     public void AnIncompleteRowIsAFloorAndSaysSo()
     {
         // The size pass could not reach part of the tree, so the real number is this or larger.
         var decision = FlatViewRules.Decide(
-            "D:\\Media", Size(Cap + 1, 0, incomplete: true), FlatViewMode.Files, Cap);
+            "D:\\Media", Size(Cap + 1, 0, incomplete: true), Cap);
 
         Assert.Contains("at least 50,001 files", decision.Message);
     }
-
-    [Fact]
-    public void OffNeverAsks() =>
-        Assert.False(FlatViewRules.Decide("D:\\Media", Size(9_000_000, 0), FlatViewMode.Off, Cap).Confirm);
 }

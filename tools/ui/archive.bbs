@@ -60,12 +60,10 @@ clear-search
 
 # And the flat branch view, which in here is free: ArchiveIndex is already the whole container as
 # a tree, so this is a walk over something in memory. util.js is two levels down.
-flat files
-assert-flat files
+flat on
+assert-flat
 assert-row util.js
 assert-no-row src
-flat all
-assert-row src
 flat off
 assert-not-flat
 
