@@ -6,14 +6,38 @@
 
 A fast and efficient offline Windows 10/11 file browser.
 
-<p>
-<img src="docs/images/split-panes.png" alt="Split panes with recursive folder sizes and thumbnail tiles (Dark+)" width="49.5%">
-<img src="docs/images/search.png" alt="Query language with content search (Synthwave)" width="49.5%">
-<img src="docs/images/compare.png" alt="Comparing two folders side by side (Light+)" width="49.5%">
-<img src="docs/images/preview-pane.png" alt="Preview pane with syntax highlighting (Monokai)" width="49.5%">
-<img src="docs/images/disk-usage.png" alt="Disk usage treemap (Dracula)" width="49.5%">
-<img src="docs/images/command-palette.png" alt="Command palette (Cobalt2)" width="49.5%">
-</p>
+<table>
+<tr>
+<td width="50%" align="center" valign="top">
+<a href="docs/images/split-panes.png?raw=true"><img src="docs/images/split-panes.png" alt="Split panes with recursive folder sizes and thumbnail tiles (Dark+)"></a>
+<br><sub>Split panes with recursive folder sizes and thumbnail tiles (Dark+)</sub>
+</td>
+<td width="50%" align="center" valign="top">
+<a href="docs/images/search.png?raw=true"><img src="docs/images/search.png" alt="Query language with content search (Synthwave)"></a>
+<br><sub>Query language with content search (Synthwave)</sub>
+</td>
+</tr>
+<tr>
+<td align="center" valign="top">
+<a href="docs/images/compare.png?raw=true"><img src="docs/images/compare.png" alt="Comparing two folders side by side (Light+)"></a>
+<br><sub>Comparing two folders side by side (Light+)</sub>
+</td>
+<td align="center" valign="top">
+<a href="docs/images/preview-pane.png?raw=true"><img src="docs/images/preview-pane.png" alt="Preview pane with syntax highlighting (Monokai)"></a>
+<br><sub>Preview pane with syntax highlighting (Monokai)</sub>
+</td>
+</tr>
+<tr>
+<td align="center" valign="top">
+<a href="docs/images/disk-usage.png?raw=true"><img src="docs/images/disk-usage.png" alt="Disk usage treemap (Dracula)"></a>
+<br><sub>Disk usage treemap (Dracula)</sub>
+</td>
+<td align="center" valign="top">
+<a href="docs/images/command-palette.png?raw=true"><img src="docs/images/command-palette.png" alt="Command palette (Cobalt2)"></a>
+<br><sub>Command palette (Cobalt2)</sub>
+</td>
+</tr>
+</table>
 
 - **Offline** - BertBrowser does not connect to the Internet except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates.
 - **[Fast global search](docs/search-indexing.md)** - MFT indexing and USN journal tracking for fastest possible performance.
