@@ -287,6 +287,9 @@ public sealed class UndoRecordTests : IDisposable
     {
         File_("new", "src", "a.txt");
         File_("old", "dst", "a.txt");
+        // Same length, and name tunnelling hands the copy the original's creation time, so two
+        // writes inside one clock tick would make the restored original pass for the copy.
+        File.SetLastWriteTimeUtc(P("src", "a.txt"), DateTime.UtcNow.AddHours(-1));
         var outcome = Transfer(TransferVerb.Copy, P("dst"), ConflictResolution.Overwrite, P("src", "a.txt"));
 
         var first = _transfers.UndoCopies(outcome);

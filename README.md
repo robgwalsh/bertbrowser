@@ -6,21 +6,24 @@
 
 An offline Windows 10/11 file browser built for my personal preferences.
 
-<table>
-<tr>
-<td width="57%"><img src="docs/images/main_screenshot.png" alt="Routes page" width="100%"></td>
-<td width="43%"><img src="docs/images/preview2.png" alt="Tools page" width="100%"></td>
-</tr>
-</table>
+<p>
+<img src="docs/images/split-panes.png" alt="Split panes with recursive folder sizes and thumbnail tiles (Dark+)" width="32.5%">
+<img src="docs/images/search.png" alt="Query language with content search (Synthwave)" width="32.5%">
+<img src="docs/images/compare.png" alt="Comparing two folders side by side (Light+)" width="32.5%">
+<img src="docs/images/preview-pane.png" alt="Preview pane with syntax highlighting (Monokai)" width="32.5%">
+<img src="docs/images/disk-usage.png" alt="Disk usage treemap (Dracula)" width="32.5%">
+<img src="docs/images/command-palette.png" alt="Command palette (Cobalt2)" width="32.5%">
+</p>
 
 - **Offline** - BertBrowser does not connect to the Internet except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates.
 - **[Fast global search](docs/search-indexing.md)** - MFT indexing and USN journal tracking for fastest possible performance.
 - **Directory sizes** — Show total size on directories, just like files.
 - **Split panes with tabs** - Infinite pane splitting and tabs per pane.
 - **Tree Map browser by filesize** - Visualize recursive directory sizes, easily find whats taking the most space.
-- **Rich Preview Panel** - inline media playback, syntax highlighting in text, and more!
-- **Themes** - Rich theming system, with many pre-loaded themes.
+- **Rich Preview Panel** - Inline media playback, syntax highlighting in text, hex viewer
 - **Tools** - Find duplicates, compare files and directories, track file system changes, and more!
+- **Customizable** - Customizable command palette, context menus, browser columns; saved workspaces and searches
+- **Themes** - Rich theming system, with many pre-loaded themes
 
 ## Install
 
