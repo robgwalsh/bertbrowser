@@ -7,12 +7,12 @@
 An offline Windows 10/11 file browser built for my personal preferences.
 
 <p>
-<img src="docs/images/split-panes.png" alt="Split panes with recursive folder sizes and thumbnail tiles (Dark+)" width="32.5%">
-<img src="docs/images/search.png" alt="Query language with content search (Synthwave)" width="32.5%">
-<img src="docs/images/compare.png" alt="Comparing two folders side by side (Light+)" width="32.5%">
-<img src="docs/images/preview-pane.png" alt="Preview pane with syntax highlighting (Monokai)" width="32.5%">
-<img src="docs/images/disk-usage.png" alt="Disk usage treemap (Dracula)" width="32.5%">
-<img src="docs/images/command-palette.png" alt="Command palette (Cobalt2)" width="32.5%">
+<img src="docs/images/split-panes.png" alt="Split panes with recursive folder sizes and thumbnail tiles (Dark+)" width="49.5%">
+<img src="docs/images/search.png" alt="Query language with content search (Synthwave)" width="49.5%">
+<img src="docs/images/compare.png" alt="Comparing two folders side by side (Light+)" width="49.5%">
+<img src="docs/images/preview-pane.png" alt="Preview pane with syntax highlighting (Monokai)" width="49.5%">
+<img src="docs/images/disk-usage.png" alt="Disk usage treemap (Dracula)" width="49.5%">
+<img src="docs/images/command-palette.png" alt="Command palette (Cobalt2)" width="49.5%">
 </p>
 
 - **Offline** - BertBrowser does not connect to the Internet except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates.
