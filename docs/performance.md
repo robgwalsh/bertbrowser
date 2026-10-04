@@ -32,7 +32,7 @@ $bench = "tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe"
 | Power plan | High performance |
 | Corpus | synthetic, scale 1 (100,000 rows) |
 | Job | default |
-| Recorded | 2026-10-03 at `f88bb1bd4` (uncommitted changes) |
+| Recorded | 2026-10-04 at `19d071442` (uncommitted changes) |
 
 ### Tier A — Core micro-benchmarks (BenchmarkDotNet)
 
@@ -189,6 +189,21 @@ $bench = "tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe"
 | `ui.transfer-2k.copy.2k` | 1.40 s | 1.45 s | — | — | — | 5 |
 | `ui.transfer-2k.delete.2k` | 486 ms | 508 ms | — | — | — | 5 |
 | `ui.transfer-2k.transfer` | — | — | 166 MB | 12.5 MB | 0 | 5 |
+
+### Tier C — Startup of the real executable
+
+| Mark | Median | p95 | Min | n |
+|---|---:|---:|---:|---:|
+| `startup.main` | 75.4 ms | 80.0 ms | 73.7 ms | 9 |
+| `startup.velopackDone` | 102 ms | 107 ms | 101 ms | 9 |
+| `startup.instanceClaimed` | 106 ms | 110 ms | 104 ms | 9 |
+| `startup.servicesBuilt` | 370 ms | 377 ms | 364 ms | 9 |
+| `startup.migrated` | 405 ms | 412 ms | 398 ms | 9 |
+| `startup.themeReady` | 419 ms | 427 ms | 412 ms | 9 |
+| `startup.windowShown` | 1.03 s | 1.06 s | 1.02 s | 9 |
+| `startup.contentRendered` | 1.05 s | 1.07 s | 1.03 s | 9 |
+| `startup.firstListing` | 1.14 s | 1.19 s | 1.14 s | 9 |
+| `startup.processLifetime` | 1.41 s | 1.46 s | 1.40 s | 9 |
 
 ## What the numbers do and do not mean
 

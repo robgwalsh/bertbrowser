@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "generatedUtc": "2026-10-03T05:19:36.8112924Z",
+  "generatedUtc": "2026-10-04T21:12:21.410655Z",
   "tool": "BertBrowser.Bench 1.0.0",
   "git": {
-    "sha": "f88bb1bd467216b7d38bf4c82ab47eb068e6890d",
+    "sha": "19d071442aa66d9de5fe46e97252a55d079c11b5",
     "branch": "main",
     "dirty": true
   },
@@ -24,7 +24,8 @@
     "real": false,
     "tiers": [
       "A",
-      "B"
+      "B",
+      "C"
     ]
   },
   "benchmarks": [
@@ -2558,6 +2559,226 @@
         "gen1PerKOps": 142.85714285714286,
         "gen2PerKOps": 0,
         "tolerancePct": 0
+      }
+    },
+    {
+      "id": "startup.contentRendered",
+      "tier": "C",
+      "parameters": {
+        "launches": "10",
+        "discarded": "1",
+        "startFolder": "Startup(500)",
+        "parked": "true",
+        "app": "src\\BertBrowser.App\\bin\\Release\\net10.0-windows\\BertBrowser.exe",
+        "instance": "first"
+      },
+      "n": 9,
+      "time": {
+        "unit": "ms",
+        "mean": 1046.0139222222222,
+        "median": 1045.9779,
+        "p95": 1070.386,
+        "stdDev": 12.177148589959144,
+        "min": 1032.2924,
+        "max": 1070.386
+      }
+    },
+    {
+      "id": "startup.firstListing",
+      "tier": "C",
+      "parameters": {
+        "launches": "10",
+        "discarded": "1",
+        "startFolder": "Startup(500)",
+        "parked": "true",
+        "app": "src\\BertBrowser.App\\bin\\Release\\net10.0-windows\\BertBrowser.exe",
+        "instance": "first"
+      },
+      "n": 9,
+      "time": {
+        "unit": "ms",
+        "mean": 1151.167877777778,
+        "median": 1144.1949,
+        "p95": 1190.6869,
+        "stdDev": 18.500685529310623,
+        "min": 1135.0553,
+        "max": 1190.6869
+      }
+    },
+    {
+      "id": "startup.instanceClaimed",
+      "tier": "C",
+      "parameters": {
+        "launches": "10",
+        "discarded": "1",
+        "startFolder": "Startup(500)",
+        "parked": "true",
+        "app": "src\\BertBrowser.App\\bin\\Release\\net10.0-windows\\BertBrowser.exe",
+        "instance": "first"
+      },
+      "n": 9,
+      "time": {
+        "unit": "ms",
+        "mean": 106.23652222222222,
+        "median": 105.78389999999999,
+        "p95": 110.0127,
+        "stdDev": 1.8317795451266627,
+        "min": 104.1308,
+        "max": 110.0127
+      }
+    },
+    {
+      "id": "startup.main",
+      "tier": "C",
+      "parameters": {
+        "launches": "10",
+        "discarded": "1",
+        "startFolder": "Startup(500)",
+        "parked": "true",
+        "app": "src\\BertBrowser.App\\bin\\Release\\net10.0-windows\\BertBrowser.exe",
+        "instance": "first"
+      },
+      "n": 9,
+      "time": {
+        "unit": "ms",
+        "mean": 75.73093333333333,
+        "median": 75.36139999999999,
+        "p95": 80.04809999999999,
+        "stdDev": 1.8779032742662756,
+        "min": 73.68419999999999,
+        "max": 80.04809999999999
+      }
+    },
+    {
+      "id": "startup.migrated",
+      "tier": "C",
+      "parameters": {
+        "launches": "10",
+        "discarded": "1",
+        "startFolder": "Startup(500)",
+        "parked": "true",
+        "app": "src\\BertBrowser.App\\bin\\Release\\net10.0-windows\\BertBrowser.exe",
+        "instance": "first"
+      },
+      "n": 9,
+      "time": {
+        "unit": "ms",
+        "mean": 404.06007777777774,
+        "median": 404.80469999999997,
+        "p95": 412.0049,
+        "stdDev": 4.115928804588877,
+        "min": 398.2273,
+        "max": 412.0049
+      }
+    },
+    {
+      "id": "startup.processLifetime",
+      "tier": "C",
+      "parameters": {
+        "launches": "10",
+        "discarded": "1",
+        "startFolder": "Startup(500)",
+        "parked": "true",
+        "app": "src\\BertBrowser.App\\bin\\Release\\net10.0-windows\\BertBrowser.exe",
+        "instance": "first"
+      },
+      "n": 9,
+      "time": {
+        "unit": "ms",
+        "mean": 1418.4349222222222,
+        "median": 1412.2167,
+        "p95": 1457.8641,
+        "stdDev": 19.395514926767092,
+        "min": 1399.4558,
+        "max": 1457.8641
+      }
+    },
+    {
+      "id": "startup.servicesBuilt",
+      "tier": "C",
+      "parameters": {
+        "launches": "10",
+        "discarded": "1",
+        "startFolder": "Startup(500)",
+        "parked": "true",
+        "app": "src\\BertBrowser.App\\bin\\Release\\net10.0-windows\\BertBrowser.exe",
+        "instance": "first"
+      },
+      "n": 9,
+      "time": {
+        "unit": "ms",
+        "mean": 369.38042222222225,
+        "median": 369.8461,
+        "p95": 376.8886,
+        "stdDev": 3.8850179992432903,
+        "min": 363.8949,
+        "max": 376.8886
+      }
+    },
+    {
+      "id": "startup.themeReady",
+      "tier": "C",
+      "parameters": {
+        "launches": "10",
+        "discarded": "1",
+        "startFolder": "Startup(500)",
+        "parked": "true",
+        "app": "src\\BertBrowser.App\\bin\\Release\\net10.0-windows\\BertBrowser.exe",
+        "instance": "first"
+      },
+      "n": 9,
+      "time": {
+        "unit": "ms",
+        "mean": 417.83902222222224,
+        "median": 418.551,
+        "p95": 426.5927,
+        "stdDev": 4.344063718103631,
+        "min": 411.8634,
+        "max": 426.5927
+      }
+    },
+    {
+      "id": "startup.velopackDone",
+      "tier": "C",
+      "parameters": {
+        "launches": "10",
+        "discarded": "1",
+        "startFolder": "Startup(500)",
+        "parked": "true",
+        "app": "src\\BertBrowser.App\\bin\\Release\\net10.0-windows\\BertBrowser.exe",
+        "instance": "first"
+      },
+      "n": 9,
+      "time": {
+        "unit": "ms",
+        "mean": 102.8175111111111,
+        "median": 102.2524,
+        "p95": 106.5569,
+        "stdDev": 1.762526706495851,
+        "min": 100.812,
+        "max": 106.5569
+      }
+    },
+    {
+      "id": "startup.windowShown",
+      "tier": "C",
+      "parameters": {
+        "launches": "10",
+        "discarded": "1",
+        "startFolder": "Startup(500)",
+        "parked": "true",
+        "app": "src\\BertBrowser.App\\bin\\Release\\net10.0-windows\\BertBrowser.exe",
+        "instance": "first"
+      },
+      "n": 9,
+      "time": {
+        "unit": "ms",
+        "mean": 1034.4685222222222,
+        "median": 1034.2937,
+        "p95": 1058.6742,
+        "stdDev": 12.060943555623815,
+        "min": 1020.0947,
+        "max": 1058.6742
       }
     },
     {
