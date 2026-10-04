@@ -64,6 +64,8 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
     {
         var failed = false;
 
+        RecordHostedStartup();
+
         foreach (var raw in options.Commands)
         {
             var line = Strip(raw);
@@ -333,6 +335,14 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
             case "assert-palette-closed": AssertPaletteOpen(expected: false); break;
             case "assert-key-recorder": AssertKeyRecorder(rest); break;
             case "assert-key-row": AssertKeyRow(rest); break;
+
+            // benchmarking (ScriptRunner.Bench.cs)
+            case "time": Time(rest); break;
+            case "mem": Mem(rest); break;
+            case "assert-mem": AssertMem(rest); break;
+            case "settle-thumbnails": SettleThumbnails(rest); break;
+            case "settle-preview": SettlePreview(); break;
+            case "bench-fixture": BenchFixture(rest); break;
 
             default:
                 throw new FormatException($"'{verb}' is not a command. Run with --help for the list.");
@@ -3222,14 +3232,7 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
         var (op, tail) = Split(rest);
         var want = int.Parse(Require(tail, "assert-realized"), CultureInfo.InvariantCulture);
 
-        var actual = session.Dispatcher.Invoke(() =>
-        {
-            var list = FindNamed<ListView>("FileListView");
-            if (list is null) return -1;
-            return VisualTreeUtil.FindDescendant<VirtualizingPanel>(list) is { } panel
-                ? panel.Children.Count
-                : -1;
-        });
+        var actual = RealizedRowCount();
 
         if (actual < 0)
             throw new AssertionException("the file list has no virtualizing panel — nothing is virtualized.");

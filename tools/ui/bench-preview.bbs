@@ -1,0 +1,23 @@
+# Tier B: the preview pane — an image, code with syntax colouring, two megabytes of text, and the
+# same two megabytes as hex.
+#
+# A selection does not load the preview; a debounce does, a little later, off-thread. So each sample
+# chains the selection with `settle-preview`, which waits for that load to start and finish, and the
+# number is "clicked to shown" rather than "clicked".
+
+preview-fixture
+write Preview/Big.txt 2000000
+write-binary Preview/Big.bin 2000000
+go Preview
+preview on
+time preview.png select sample.png; settle-preview
+assert-preview image
+time preview.code select Sample.cs; settle-preview
+assert-preview text
+time preview.text2mb select Big.txt; settle-preview
+assert-preview text
+time preview.hex2mb select Big.bin; preview-mode hex; settle-preview
+assert-preview hex
+preview-mode auto
+mem preview
+assert-not-launched

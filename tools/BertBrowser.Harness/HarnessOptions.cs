@@ -89,6 +89,17 @@ internal sealed class HarnessOptions
 
     public bool Verbose { get; init; }
 
+    /// <summary>
+    /// Where <c>time</c> and <c>mem</c> samples are appended as JSON lines, for
+    /// <c>BertBrowser.Bench ui</c> to aggregate. Null means they are printed and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// A second channel rather than parsing stdout: the console is for a person, and a verbose run
+    /// interleaves it with notes. With this set the session's own startup — entry to first listing —
+    /// is recorded too, as <c>startup.hosted</c>.
+    /// </remarks>
+    public string? BenchOut { get; init; }
+
     /// <summary>Exit codes, so a caller can tell a failed assertion from a broken environment.</summary>
     public static class Exit
     {
@@ -120,6 +131,7 @@ internal sealed class HarnessOptions
           --timeout <sec>     watchdog, in seconds      (default: 120)
           --busy-timeout <ms> longest allowed listing   (default: 30000)
           --keep-going        do not stop at the first failure
+          --bench-out <file>  append `time`/`mem` samples as JSON lines (BertBrowser.Bench ui reads it)
           --verbose
           --help
 
@@ -146,6 +158,7 @@ internal sealed class HarnessOptions
         var index = false;
         var indexDeclined = false;
         var verbose = false;
+        string? benchOut = null;
         var width = 1400;
         var height = 900;
 
@@ -176,6 +189,7 @@ internal sealed class HarnessOptions
                     case "--busy-timeout": busyTimeout = int.Parse(Next("--busy-timeout")); break;
                     case "--keep-going": keepGoing = true; break;
                     case "--verbose": verbose = true; break;
+                    case "--bench-out": benchOut = Path.GetFullPath(Next("--bench-out")); break;
 
                     case "--help" or "-h" or "/?":
                         output.WriteLine(Usage);
@@ -241,6 +255,7 @@ internal sealed class HarnessOptions
             Index = index,
             IndexDeclined = indexDeclined,
             Verbose = verbose,
+            BenchOut = benchOut,
         };
     }
 

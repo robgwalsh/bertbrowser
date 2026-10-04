@@ -37,6 +37,9 @@ public partial class App : Application
     [STAThread]
     private static void Main(string[] args)
     {
+        // A no-op unless a benchmark run set BERTBROWSER_STARTUP_TRACE; see StartupTrace.
+        StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.Main);
+
         // Must run before any WPF code: handles Velopack install/update/uninstall
         // hooks and exits the process when invoked as one.
         VelopackApp.Build()
@@ -48,10 +51,13 @@ public partial class App : Application
             // deliberately touches nothing but the registry: the process exits straight after.
             .OnBeforeUninstallFastCallback(_ => FolderHandlerRegistry.TryUnregister())
             .Run();
+        StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.VelopackDone);
 
         // After Velopack, whose hooks exit the process and must not be gated behind an instance
         // check — and before anything else, so a second launch costs no WPF, no DI and no database.
         _instance = SingleInstance.Claim();
+        StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.InstanceClaimed);
+        StartupTrace.Instance(_instance.IsFirst);
         if (!_instance.IsFirst && _instance.TryHandOff(CommandLine.Parse(args)))
         {
             _instance.Dispose();
@@ -79,11 +85,14 @@ public partial class App : Application
         if (_hosted) return;
 
         Services = BuildServices();
+        StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.ServicesBuilt);
 
         Services.GetRequiredService<Db>().Migrate();
+        StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.Migrated);
 
         // Before any window exists, so the first frame is already in the chosen theme.
         Services.GetRequiredService<IThemeService>().Initialize();
+        StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.ThemeReady);
 
         // Start path priority: command-line argument, then last visited, then user profile.
         var settings = Services.GetRequiredService<AppSettings>();
@@ -117,7 +126,9 @@ public partial class App : Application
         }
 
         var window = Services.GetRequiredService<MainWindow>();
+        StartupTrace.Observe(window, shell);
         window.Show();
+        StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.WindowShown);
 
         // Anything the first target could not cover — extra paths, /select, --new-tab — once there
         // is a window to open it in.
@@ -125,6 +136,11 @@ public partial class App : Application
             _ = shell.OpenRequestAsync(RemainingAfterStart(startup, shell.StartPath));
 
         ListenForOtherInstances(window, shell);
+
+        // A benchmark launch stops here. Everything below acts on the machine rather than on this
+        // process's scratch data directory — and the index attach in particular would find the
+        // user's real helper and push "recording off" at it. See StartupTrace.
+        if (StartupTrace.Enabled) return;
 
         // The backstop behind the uninstall hook: if this app owns the shell's folder verb and the
         // registration has gone stale — an install moved, a write interrupted part-way — put a live

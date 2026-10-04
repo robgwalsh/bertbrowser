@@ -1,0 +1,9 @@
+# Tier B: the hosted startup alone.
+#
+# Nothing to do here: with --bench-out set, the harness records how long UiSession.Start took —
+# building the service graph, migrating a fresh database, showing the window and listing the first
+# folder — as `startup.hosted` before the first command runs. This script exists so `ui` has a
+# scenario whose only sample is that one.
+
+state
+assert-not-launched

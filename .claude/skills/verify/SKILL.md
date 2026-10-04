@@ -30,6 +30,11 @@ tests against real files under `%TEMP%`. Deterministic, fast, no UI.
 **Is the question about the interface?** Layout, theming, what a dialog looks like, whether the tree
 reveals, what the status bar says, how tabs and panes arrange — that is the harness.
 
+**Is the question about speed?** `tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe run
+--filter *PathKey*` for a Core path, `… ui --scenario listing-10k` for what a user feels — not a
+stopwatch in a script. The harness's `time` verb exists, but only the Bench tool turns its samples into
+something a baseline can be compared with. See `bench/README.md`.
+
 ## Running it
 
 ```powershell
@@ -478,12 +483,30 @@ assert-elevation-offered | assert-no-elevation-offered
                             recording prompt accumulates over a run
 assert-preview <kind>       image | document | text | hex | archive | font | media | loading | none
 
+time <name> <verb> [args][; <verb> [args]…]
+                            run the verb(s) under a stopwatch and print "BENCH <name> <ms>". Each
+                            verb keeps its own settle, so the sample is "issued to quiet"; chain a
+                            `select` with `settle-preview` to time a preview as a person sees it
+mem [name]                  "MEM {json}": managed heap after a full collection, working set, private
+                            bytes, items, realized rows, retained thumbnails
+assert-mem managed|workingset under <mb>
+settle-thumbnails [ms]      wait until no icon or thumbnail request is queued at the shell gates, then
+                            settle — Settle deliberately does not wait for pictures; a tile scenario
+                            says so when it needs to (prints "SETTLED-THUMBS <ms>")
+settle-preview              wait for the preview pane's debounced load to start and finish
+bench-fixture <files> <dirs> [dir]
+                            that many empty files, straight in (dirs=0) or round-robin over that many
+                            subfolders; named by index so a search has a known hit count. For the
+                            bench-*.bbs scenarios; `many-fixture` is still the tile one
+
 echo <text> | sleep <ms> | settle [ms]      '#' at the start of a line is a comment
 ```
 
 Options: `--out <dir>` · `--sandbox <dir>` · `--state-dir <dir>` · `--keep-state` ·
 `--allow-outside` · `--size WxH` · `--theme <id>` · `--start <path>` · `--index` ·
-`--timeout <sec>` · `--busy-timeout <ms>` · `--keep-going` · `--verbose`
+`--timeout <sec>` · `--busy-timeout <ms>` · `--keep-going` · `--verbose` ·
+`--bench-out <file>` (append `time`/`mem` samples as JSON lines, plus the session's own startup as
+`startup.hosted`; what `BertBrowser.Bench ui` reads)
 
 Element names come from the XAML: window-level are `FolderTree`, `GlobalSearchBox`,
 `ThumbSlider`, `PaneHostSite`; per tab (resolved against the *active* tab) are `FileListView`,

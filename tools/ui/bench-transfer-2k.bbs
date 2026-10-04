@@ -1,0 +1,19 @@
+#! files=2000 dirs=0
+# Tier B: copying two thousand files into a sibling folder and deleting them again, through the real
+# planner, executor and progress surface. The files are empty, so this is per-file overhead — the
+# plan, the probe, the copy call, the stamp, the undo record — rather than bytes moved.
+
+bench-fixture 2000 0 Src
+mkdir Dst
+go Src
+assert-count 2000
+select-all
+time copy.2k copy to Dst
+assert-exists Dst/f00000.jpg
+go Dst
+assert-count 2000
+select-all
+time delete.2k delete-permanent
+assert-count 0
+mem transfer
+assert-not-launched

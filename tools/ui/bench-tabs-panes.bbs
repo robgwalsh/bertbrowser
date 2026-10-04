@@ -1,0 +1,20 @@
+#! files=5000 dirs=0
+# Tier B: the chrome — a new tab, a split, switching, and closing — each over a 5,000-row folder, so
+# the cost of building a second pane's tree, list and columns is measured with a listing in it.
+
+bench-fixture 5000 0 A
+bench-fixture 5000 0 B
+go A
+assert-count 5000
+time tab.new newtab B
+assert-tabs 2
+time tab.switch tab 1
+time pane.split split right B
+assert-panes 2
+time pane.switch pane 1
+time pane.close pane 2; closepane
+assert-panes 1
+time tab.close closetab
+assert-tabs 1
+mem tabs
+assert-not-launched

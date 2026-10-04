@@ -145,6 +145,13 @@ channel, the release it publishes to, and no winget.
 | Deltas | yes | yes |
 | winget | yes | no |
 
+The unstable workflow also carries a `bench` job, beside the build rather than in front of it: it
+runs the Core benchmarks (`tools/BertBrowser.Bench run --ci`) and compares **allocations only**
+against `bench/baselines/ci-windows-latest.json`, since a shared runner's wall clock is noise. A
+regression turns the run red without withholding the build. The results are an artifact
+(`bench-results-<run>`); when no baseline is committed the job writes `candidate-baseline.json` into
+it and passes, and committing that file is how the gate is turned on. See `bench/README.md`.
+
 **The two cannot reach each other**, which is the property worth protecting, and it is guarded twice
 over. A release copy passes `prerelease: false`, so the unstable pre-release is not even in the list
 of releases it considers; and Velopack asks each release in that list for

@@ -351,6 +351,11 @@ Against a real 1,646 MB index — 1,912,992 rows, 1,601,024 of them with a lengt
 for every one of them, and **no temp B-tree anywhere**. A regular expression is the slow one and
 visibly so: it cannot stop early, so it always reads the whole scope.
 
+Kept as the reference measurement that shaped the design. The same seven queries now run as
+`core.fsindex.search(…)` and `core.fsindex.searchglobal(…)` in `tools/BertBrowser.Bench`, against a
+synthetic index by default and this machine's own under `--real`; `docs/performance.md` carries the
+current numbers, and a regression is judged against the baseline there, not against this table.
+
 ### Rebuilding display paths
 
 Since full display paths are not stored, each hit's path is reassembled: `LookupAncestorNames`
@@ -446,6 +451,10 @@ every ceiling is denominated in files and bytes rather than terms, a second `con
 nothing, and there is no case-sensitivity option because there is nothing to buy with one. The whole
 tree extrapolates to about 19 s warm, which is why this streams, reports progress, and stops on Esc
 while keeping what it found.
+
+As above, this is the reference measurement; the scan runs as `core.content.scaninmemory2k` (the
+scanner alone) and `core.content.scandisk2k` (with real reads) in `tools/BertBrowser.Bench`, and
+`docs/performance.md` has the current numbers.
 
 **Two refusals rather than wrong answers.** `content:` with `in:archives`, and `content:` typed while
 standing inside a container, are both refused by name. The reason is worth keeping: an archive entry

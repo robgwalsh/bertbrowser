@@ -325,9 +325,26 @@ public sealed partial class FileItemViewModel : ObservableObject
 
     private static readonly SemaphoreSlim ThumbnailGate = new(4);
 
+    private static int _pendingIcons;
+    private static int _pendingThumbnails;
+
+    /// <summary>
+    /// Shell calls queued behind or inside <see cref="IconGate"/>, across every list in the window.
+    /// </summary>
+    /// <remarks>
+    /// For the UI harness, whose <c>Settle</c> waits on listings and metadata but not on these gates
+    /// — most scripts have no reason to wait for pictures. A timed tile scenario does, and
+    /// <c>settle-thumbnails</c> pumps until both counts are zero. Nothing in the app reads them.
+    /// </remarks>
+    internal static int PendingIcons => Volatile.Read(ref _pendingIcons);
+
+    /// <summary>The same count for <see cref="ThumbnailGate"/>.</summary>
+    internal static int PendingThumbnails => Volatile.Read(ref _pendingThumbnails);
+
     private async Task LoadIconAsync()
     {
         ImageSource? image;
+        Interlocked.Increment(ref _pendingIcons);
         await IconGate.WaitAsync().ConfigureAwait(true);
         try
         {
@@ -336,6 +353,7 @@ public sealed partial class FileItemViewModel : ObservableObject
         finally
         {
             IconGate.Release();
+            Interlocked.Decrement(ref _pendingIcons);
         }
 
         _icon = image;
@@ -414,6 +432,7 @@ public sealed partial class FileItemViewModel : ObservableObject
         var generation = _thumbnailGeneration;
 
         ImageSource? image;
+        Interlocked.Increment(ref _pendingThumbnails);
         await ThumbnailGate.WaitAsync().ConfigureAwait(true);
         try
         {
@@ -422,6 +441,7 @@ public sealed partial class FileItemViewModel : ObservableObject
         finally
         {
             ThumbnailGate.Release();
+            Interlocked.Decrement(ref _pendingThumbnails);
         }
 
         if (image is null) return;                       // keep the icon placeholder

@@ -96,6 +96,13 @@ internal sealed class UiSession : IDisposable
     /// <summary>How many times the window had to be pushed back out of the foreground.</summary>
     public int ForegroundCorrections => _guard.Corrections;
 
+    /// <summary>
+    /// How long <see cref="Start"/> took, from its first line to the first listing being settled —
+    /// the hosted equivalent of launching the app, and the sample <c>--bench-out</c> records as
+    /// <c>startup.hosted</c>.
+    /// </summary>
+    public double StartupMilliseconds { get; private set; }
+
     /// <summary>Where the window was parked. Far enough out that no monitor arrangement reaches it.</summary>
     private const int Offscreen = -32000;
 
@@ -104,6 +111,8 @@ internal sealed class UiSession : IDisposable
     /// </summary>
     public static UiSession Start(HarnessOptions options, TextWriter log)
     {
+        var startup = Stopwatch.StartNew();
+
         // Set before anything touches the database: AppPaths reads it when its static initialiser
         // runs, so a run cannot inherit the user's search index, settings or themes — nor write to
         // them.
@@ -296,6 +305,7 @@ internal sealed class UiSession : IDisposable
         }
 
         session.WaitForFirstListing();
+        session.StartupMilliseconds = startup.Elapsed.TotalMilliseconds;
 
         var after = Native.Foreground();
         if (after.Handle != before.Handle)

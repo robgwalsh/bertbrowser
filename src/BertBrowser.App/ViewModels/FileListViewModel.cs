@@ -795,6 +795,10 @@ public sealed partial class FileListViewModel : ObservableObject
     /// <summary>Rows holding a bitmap, oldest request first — the order the trim releases in.</summary>
     private readonly LinkedList<FileItemViewModel> _thumbnailHolders = new();
 
+    /// <summary>How many rows hold a decoded bitmap right now. Read by the UI harness's <c>mem</c>
+    /// verb, so a tile scenario can show the cap holding; nothing in the app reads it.</summary>
+    internal int RetainedThumbnailCount => _thumbnailHolders.Count;
+
     /// <summary>Held once rather than built per row: <see cref="Adopt"/> runs on every row of every
     /// listing, and a flat view has tens of thousands of them.</summary>
     private readonly Action<FileItemViewModel> _onThumbnailRequested;

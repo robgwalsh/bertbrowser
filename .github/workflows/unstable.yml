@@ -128,3 +128,45 @@ jobs:
             --releaseName "${{ steps.ver.outputs.version }}" `
             --tag unstable --targetCommitish ${{ github.sha }}
           if ($LASTEXITCODE -ne 0) { exit 1 }
+
+  # The Core benchmarks (tools/BertBrowser.Bench, Tier A), gated on allocations only. A shared
+  # runner's wall clock is noise and is reported in the job summary, never judged; the bytes a
+  # benchmark allocates are deterministic and a regression there fails this job.
+  #
+  # A separate job beside the build on purpose: an allocation regression turns the run red without
+  # withholding the unstable build, and a broken benchmark can never block shipping. Tiers B and C
+  # (the UI harness and the real executable) stay local — no GPU, and a timing on a shared runner
+  # means nothing. See bench/README.md for the baseline's lifecycle; the first run after it goes
+  # missing writes a candidate into the artifact and passes.
+  bench:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build bertbrowser.sln -c Release
+
+      # In-process, so nothing is generated and built on the runner; allocation counts are the same
+      # either way. The short job is three warm-up and three measured iterations per benchmark.
+      - name: Benchmarks (Tier A, short job)
+        shell: pwsh
+        run: >
+          dotnet tools/BertBrowser.Bench/bin/Release/net10.0/BertBrowser.Bench.dll run
+          --ci --toolchain inprocess --scale 1
+          --machine-key ci-windows-latest --out bench-results/current.json
+
+      - name: Compare allocations against the committed baseline
+        shell: pwsh
+        run: >
+          dotnet tools/BertBrowser.Bench/bin/Release/net10.0/BertBrowser.Bench.dll compare --ci
+          --baseline bench/baselines/ci-windows-latest.json --current bench-results/current.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-results-${{ github.run_number }}
+          path: bench-results/

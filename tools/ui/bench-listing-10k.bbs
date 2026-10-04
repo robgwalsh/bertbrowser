@@ -1,0 +1,15 @@
+#! files=10000 dirs=0
+# Tier B: opening a folder of ten thousand files, then the three navigations that re-list it.
+#
+# `time` runs the verb it wraps exactly as the verb runs on its own — `go` awaits the navigation and
+# then Settle waits out the listing and the metadata hydration — so each sample is "issued to quiet".
+
+bench-fixture 10000 0 Flat
+time list go Flat
+assert-count 10000
+time refresh refresh
+time up up
+time back back
+assert-count 10000
+mem listing
+assert-not-launched

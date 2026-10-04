@@ -71,6 +71,21 @@ against `BertBrowser 1.1.2`. Your data in `%USERPROFILE%\.bertbrowser` is untouc
 running the [stable installer](https://github.com/robgwalsh/bertbrowser/releases/latest/download/BertBrowser-win-Setup.exe)
 over the top puts you back.
 
+## Performance
+
+`tools/BertBrowser.Bench` comprehensively benchmarks all aspects of BertBrowser performance.
+Results are compared against a committed per-machine baseline, CI gates allocations on every 
+push, and [docs/performance.md](docs/performance.md) is generated from the baselines.
+
+```powershell
+$bench = "tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe"
+& $bench run --filter *FsIndex*          # a Core area, BenchmarkDotNet
+& $bench ui --scenario listing-10k       # a UI scenario, five fresh processes
+& $bench compare --baseline bench\baselines\<key>.json --current bench-results\current.json
+```
+
+See [bench/README.md](bench/README.md).
+
 ## Building and running
 
 ```powershell
@@ -124,6 +139,7 @@ Delete the folder to reset the app completely.
 - `src/BertBrowser.App` — the WPF shell (MVVM via CommunityToolkit.Mvvm, DI via Microsoft.Extensions.DependencyInjection).
 - `tests/BertBrowser.Core.Tests` — xUnit tests for Core; they run against real temp SQLite databases and directory trees.
 - `tools/BertBrowser.Harness` — hosts the real window offscreen and scripts it; `tools/ui/*.bbs` are the scripts.
+- `tools/BertBrowser.Bench` — the benchmark tool; `bench/baselines/` holds what it is compared against.
 
 See [CLAUDE.md](CLAUDE.md) for a deeper architecture walkthrough (path-key invariants, migrations, the size-scan algorithm).
 

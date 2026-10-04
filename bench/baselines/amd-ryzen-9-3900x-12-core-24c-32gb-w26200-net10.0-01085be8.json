@@ -1,0 +1,3394 @@
+{
+  "schemaVersion": 1,
+  "generatedUtc": "2026-10-03T05:19:36.8112924Z",
+  "tool": "BertBrowser.Bench 1.0.0",
+  "git": {
+    "sha": "f88bb1bd467216b7d38bf4c82ab47eb068e6890d",
+    "branch": "main",
+    "dirty": true
+  },
+  "machine": {
+    "key": "amd-ryzen-9-3900x-12-core-24c-32gb-w26200-net10.0-01085be8",
+    "cpu": "AMD Ryzen 9 3900X 12-Core Processor",
+    "logicalCores": 24,
+    "ramGb": 32,
+    "osBuild": 26200,
+    "runtime": "10.0.10",
+    "powerPlan": "High performance",
+    "appRunning": false,
+    "indexerRunning": false
+  },
+  "run": {
+    "job": "default",
+    "scale": 1,
+    "real": false,
+    "tiers": [
+      "A",
+      "B"
+    ]
+  },
+  "benchmarks": [
+    {
+      "id": "core.archive.build100k(dupes=False)",
+      "tier": "A",
+      "parameters": {
+        "Dupes": "False",
+        "scale": "1"
+      },
+      "n": 39,
+      "time": {
+        "unit": "ns",
+        "mean": 187182235.8974359,
+        "median": 186740400,
+        "p95": 196540665,
+        "stdDev": 6487548.932489113,
+        "min": 179524250,
+        "max": 203902950
+      },
+      "memory": {
+        "allocatedBytes": 93992536,
+        "gen0PerKOps": 11000,
+        "gen1PerKOps": 5000,
+        "gen2PerKOps": 1000,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.archive.build100k(dupes=True)",
+      "tier": "A",
+      "parameters": {
+        "Dupes": "True",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 183868449.99999997,
+        "median": 183762016.6666667,
+        "p95": 185452013.33333334,
+        "stdDev": 1067541.843832523,
+        "min": 182069400,
+        "max": 185981633.33333334
+      },
+      "memory": {
+        "allocatedBytes": 94791064,
+        "gen0PerKOps": 11000,
+        "gen1PerKOps": 4666.666666666666,
+        "gen2PerKOps": 666.6666666666666,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.archiveread.readplain7z",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 12,
+      "time": {
+        "unit": "ns",
+        "mean": 188526.0538736979,
+        "median": 188773.5107421875,
+        "p95": 189533.29345703125,
+        "stdDev": 905.6216417817532,
+        "min": 186902.34375,
+        "max": 189575
+      },
+      "memory": {
+        "allocatedBytes": 211174,
+        "gen0PerKOps": 24.90234375,
+        "gen1PerKOps": 7.8125,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.changelog.prunenothing",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 13,
+      "time": {
+        "unit": "ns",
+        "mean": 34424859.48717949,
+        "median": 34360180,
+        "p95": 34792040,
+        "stdDev": 225834.11518456799,
+        "min": 34180660,
+        "max": 34984240
+      },
+      "memory": {
+        "allocatedBytes": 3984,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.changelog.querylasthour",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 30531.897583007812,
+        "median": 30508.242797851562,
+        "p95": 30884.41650390625,
+        "stdDev": 229.91388151021587,
+        "min": 30214.352416992188,
+        "max": 31074.716186523438
+      },
+      "memory": {
+        "allocatedBytes": 3520,
+        "gen0PerKOps": 0.3662109375,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.changelog.record5k",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 94,
+      "time": {
+        "unit": "ns",
+        "mean": 34346143.61702128,
+        "median": 33404200,
+        "p95": 40816540,
+        "stdDev": 2821943.222093999,
+        "min": 31226900,
+        "max": 41228600
+      },
+      "memory": {
+        "allocatedBytes": 6808632,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.content.scandisk2k",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 135257982.22222224,
+        "median": 135343200,
+        "p95": 136507343.33333334,
+        "stdDev": 983420.9507266192,
+        "min": 133755333.33333333,
+        "max": 136671866.66666666
+      },
+      "memory": {
+        "allocatedBytes": 152126379,
+        "gen0PerKOps": 11333.333333333332,
+        "gen1PerKOps": 1666.6666666666665,
+        "gen2PerKOps": 0,
+        "tolerancePct": 5
+      }
+    },
+    {
+      "id": "core.content.scaninmemory2k",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 13,
+      "time": {
+        "unit": "ns",
+        "mean": 5541687.740384615,
+        "median": 5529140.625,
+        "p95": 5585718.125,
+        "stdDev": 23921.133803274137,
+        "min": 5517003.125,
+        "max": 5600918.75
+      },
+      "memory": {
+        "allocatedBytes": 821104,
+        "gen0PerKOps": 93.75,
+        "gen1PerKOps": 78.125,
+        "gen2PerKOps": 0,
+        "tolerancePct": 5
+      }
+    },
+    {
+      "id": "core.crawler.crawl",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 312399140,
+        "median": 312802700,
+        "p95": 317228190,
+        "stdDev": 5769821.180789377,
+        "min": 294651400,
+        "max": 324064600
+      },
+      "memory": {
+        "allocatedBytes": 47588048,
+        "gen0PerKOps": 6000,
+        "gen1PerKOps": 3000,
+        "gen2PerKOps": 1000,
+        "tolerancePct": 5
+      }
+    },
+    {
+      "id": "core.db.open",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 17,
+      "time": {
+        "unit": "ns",
+        "mean": 3922.5093841552734,
+        "median": 3928.0445098876953,
+        "p95": 4014.857864379883,
+        "stdDev": 79.71651352291514,
+        "min": 3774.436569213867,
+        "max": 4059.767532348633
+      },
+      "memory": {
+        "allocatedBytes": 1424,
+        "gen0PerKOps": 0.1678466796875,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.db.openwithoutpragmas",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 163.43786398569742,
+        "median": 162.7232789993286,
+        "p95": 167.63243675231934,
+        "stdDev": 2.4848170182285823,
+        "min": 161.22660636901855,
+        "max": 168.16415786743164
+      },
+      "memory": {
+        "allocatedBytes": 168,
+        "gen0PerKOps": 0.02002716064453125,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.delete.plan1000(mode=Permanent)",
+      "tier": "A",
+      "parameters": {
+        "Mode": "Permanent",
+        "scale": "1"
+      },
+      "n": 13,
+      "time": {
+        "unit": "ns",
+        "mean": 15806916.826923076,
+        "median": 15808550,
+        "p95": 15889364.375,
+        "stdDev": 64195.44628041796,
+        "min": 15663781.25,
+        "max": 15890684.375
+      },
+      "memory": {
+        "allocatedBytes": 13325536,
+        "gen0PerKOps": 1562.5,
+        "gen1PerKOps": 375,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.delete.plan1000(mode=Recycle)",
+      "tier": "A",
+      "parameters": {
+        "Mode": "Recycle",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 16409554.375,
+        "median": 16385006.25,
+        "p95": 16647658.125,
+        "stdDev": 150658.34056854702,
+        "min": 16169015.625,
+        "max": 16655187.5
+      },
+      "memory": {
+        "allocatedBytes": 13325536,
+        "gen0PerKOps": 1562.5,
+        "gen1PerKOps": 375,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.diff.compare10k",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 13,
+      "time": {
+        "unit": "ns",
+        "mean": 1792899.6844951923,
+        "median": 1779752.734375,
+        "p95": 1850934.2578125,
+        "stdDev": 28977.29367971872,
+        "min": 1765269.3359375,
+        "max": 1862329.1015625
+      },
+      "memory": {
+        "allocatedBytes": 5112684,
+        "gen0PerKOps": 597.65625,
+        "gen1PerKOps": 597.65625,
+        "gen2PerKOps": 398.4375,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.digest.append64mb(algorithm=Crc32)",
+      "tier": "A",
+      "parameters": {
+        "Algorithm": "Crc32",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 5328363.072916667,
+        "median": 5316142.1875,
+        "p95": 5369261.640625,
+        "stdDev": 25396.521685587497,
+        "min": 5297819.53125,
+        "max": 5382404.6875
+      },
+      "memory": {
+        "allocatedBytes": 120,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.digest.append64mb(algorithm=Md5)",
+      "tier": "A",
+      "parameters": {
+        "Algorithm": "Md5",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 106537272,
+        "median": 106971520,
+        "p95": 107040120,
+        "stdDev": 535890.595007174,
+        "min": 105888900,
+        "max": 107043480
+      },
+      "memory": {
+        "allocatedBytes": 333,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.digest.append64mb(algorithm=Sha1)",
+      "tier": "A",
+      "parameters": {
+        "Algorithm": "Sha1",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 88593720.23809525,
+        "median": 88641016.66666666,
+        "p95": 88816830.83333333,
+        "stdDev": 184599.36235068872,
+        "min": 88267116.66666667,
+        "max": 88921166.66666667
+      },
+      "memory": {
+        "allocatedBytes": 349,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.digest.append64mb(algorithm=Sha256)",
+      "tier": "A",
+      "parameters": {
+        "Algorithm": "Sha256",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 32225280,
+        "median": 32215837.5,
+        "p95": 32303662.5,
+        "stdDev": 52497.98556934624,
+        "min": 32163000,
+        "max": 32344525
+      },
+      "memory": {
+        "allocatedBytes": 382,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.digest.append64mb(algorithm=Sha512)",
+      "tier": "A",
+      "parameters": {
+        "Algorithm": "Sha512",
+        "scale": "1"
+      },
+      "n": 17,
+      "time": {
+        "unit": "ns",
+        "mean": 112444676.47058824,
+        "median": 111707200,
+        "p95": 115364296,
+        "stdDev": 2297283.380149642,
+        "min": 110130900,
+        "max": 115663240
+      },
+      "memory": {
+        "allocatedBytes": 573,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.dirsize.getmany(n=2000)",
+      "tier": "A",
+      "parameters": {
+        "N": "2000",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 10224171.54017857,
+        "median": 10213863.28125,
+        "p95": 10282390.9375,
+        "stdDev": 34168.31792042421,
+        "min": 10186160.9375,
+        "max": 10293554.6875
+      },
+      "memory": {
+        "allocatedBytes": 1378053,
+        "gen0PerKOps": 140.625,
+        "gen1PerKOps": 62.5,
+        "gen2PerKOps": 15.625,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.dirsize.getmany(n=50)",
+      "tier": "A",
+      "parameters": {
+        "N": "50",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 138445.15462239584,
+        "median": 138675.9521484375,
+        "p95": 139108.20068359375,
+        "stdDev": 639.9895206291341,
+        "min": 137091.6015625,
+        "max": 139132.6904296875
+      },
+      "memory": {
+        "allocatedBytes": 34304,
+        "gen0PerKOps": 3.90625,
+        "gen1PerKOps": 0.244140625,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.dirsizewrite.upsertmany10k",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 96,
+      "time": {
+        "unit": "ns",
+        "mean": 31944151.041666668,
+        "median": 29352050,
+        "p95": 44256750,
+        "stdDev": 5096574.242577476,
+        "min": 27386900,
+        "max": 47588900
+      },
+      "memory": {
+        "allocatedBytes": 7671192,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.duplicate.scandisk",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 38271321.42857143,
+        "median": 38272542.85714286,
+        "p95": 38540897.14285714,
+        "stdDev": 174910.7255003072,
+        "min": 37994178.571428575,
+        "max": 38561457.14285714
+      },
+      "memory": {
+        "allocatedBytes": 359411,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 5
+      }
+    },
+    {
+      "id": "core.duplicate.scaninmemory10k",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 40,
+      "time": {
+        "unit": "ns",
+        "mean": 7051015.2734375,
+        "median": 7006156.640625,
+        "p95": 7567045.078125,
+        "stdDev": 247299.4822443634,
+        "min": 6676223.4375,
+        "max": 7644721.09375
+      },
+      "memory": {
+        "allocatedBytes": 5487161,
+        "gen0PerKOps": 750,
+        "gen1PerKOps": 335.9375,
+        "gen2PerKOps": 109.375,
+        "tolerancePct": 5
+      }
+    },
+    {
+      "id": "core.filelistdiff.compute10k",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 13,
+      "time": {
+        "unit": "ns",
+        "mean": 4769381.790865385,
+        "median": 4769007.8125,
+        "p95": 4775255.15625,
+        "stdDev": 4494.856208927021,
+        "min": 4761779.6875,
+        "max": 4778934.375
+      },
+      "memory": {
+        "allocatedBytes": 1931975,
+        "gen0PerKOps": 242.1875,
+        "gen1PerKOps": 117.1875,
+        "gen2PerKOps": 117.1875,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.filesystem.listdirectory",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 6813664.84375,
+        "median": 6769344.53125,
+        "p95": 6965177.8125,
+        "stdDev": 92825.48006230152,
+        "min": 6671619.53125,
+        "max": 6981415.625
+      },
+      "memory": {
+        "allocatedBytes": 3142836,
+        "gen0PerKOps": 367.1875,
+        "gen1PerKOps": 359.375,
+        "gen2PerKOps": 171.875,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.filesystem.listdirectoryarchiveaware",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 18,
+      "time": {
+        "unit": "ns",
+        "mean": 6848836.848958333,
+        "median": 6784491.40625,
+        "p95": 7108768.0859375,
+        "stdDev": 138294.42234283395,
+        "min": 6732125,
+        "max": 7182081.25
+      },
+      "memory": {
+        "allocatedBytes": 3143476,
+        "gen0PerKOps": 367.1875,
+        "gen1PerKOps": 359.375,
+        "gen2PerKOps": 171.875,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.foldercompare.compare100k",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 28895064.583333332,
+        "median": 28994484.375,
+        "p95": 29173360.9375,
+        "stdDev": 274115.7135423055,
+        "min": 28267450,
+        "max": 29419815.625
+      },
+      "memory": {
+        "allocatedBytes": 29799336,
+        "gen0PerKOps": 1687.5,
+        "gen1PerKOps": 687.5,
+        "gen2PerKOps": 656.25,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.foldercompare.filecontent64mb",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 12,
+      "time": {
+        "unit": "ns",
+        "mean": 26475142.708333332,
+        "median": 26483450,
+        "p95": 26554490.9375,
+        "stdDev": 53331.796127823196,
+        "min": 26403131.25,
+        "max": 26567928.125
+      },
+      "memory": {
+        "allocatedBytes": 703,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindex.search(query=dm:2026-09-15)",
+      "tier": "A",
+      "parameters": {
+        "Query": "dm:2026-09-15",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 9631196.25,
+        "median": 9653426.5625,
+        "p95": 9757306.09375,
+        "stdDev": 99308.19481532065,
+        "min": 9508107.8125,
+        "max": 9763314.0625
+      },
+      "memory": {
+        "allocatedBytes": 659418,
+        "gen0PerKOps": 78.125,
+        "gen1PerKOps": 46.875,
+        "gen2PerKOps": 15.625,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindex.search(query=ext:txt)",
+      "tier": "A",
+      "parameters": {
+        "Query": "ext:txt",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 10082066.5625,
+        "median": 10062443.75,
+        "p95": 10156944.21875,
+        "stdDev": 55826.13702617321,
+        "min": 9982134.375,
+        "max": 10172378.125
+      },
+      "memory": {
+        "allocatedBytes": 2616896,
+        "gen0PerKOps": 312.5,
+        "gen1PerKOps": 296.875,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindex.search(query=re:^img_)",
+      "tier": "A",
+      "parameters": {
+        "Query": "re:^img_",
+        "scale": "1"
+      },
+      "n": 13,
+      "time": {
+        "unit": "ns",
+        "mean": 45740451.04895104,
+        "median": 45744090.90909091,
+        "p95": 45818270.90909091,
+        "stdDev": 60062.02459167036,
+        "min": 45633572.72727273,
+        "max": 45824881.81818182
+      },
+      "memory": {
+        "allocatedBytes": 9960120,
+        "gen0PerKOps": 1181.8181818181818,
+        "gen1PerKOps": 272.72727272727275,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindex.search(query=report ext:cs size:\u003E1kb)",
+      "tier": "A",
+      "parameters": {
+        "Query": "report ext:cs size:\u003E1kb",
+        "scale": "1"
+      },
+      "n": 12,
+      "time": {
+        "unit": "ns",
+        "mean": 7522520.182291667,
+        "median": 7524966.40625,
+        "p95": 7544941.640625,
+        "stdDev": 19149.209154159056,
+        "min": 7475300.78125,
+        "max": 7549021.09375
+      },
+      "memory": {
+        "allocatedBytes": 41344,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindex.search(query=report)",
+      "tier": "A",
+      "parameters": {
+        "Query": "report",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 9966206.361607144,
+        "median": 9967422.65625,
+        "p95": 10015078.046875,
+        "stdDev": 35050.55266735128,
+        "min": 9928406.25,
+        "max": 10052917.1875
+      },
+      "memory": {
+        "allocatedBytes": 580280,
+        "gen0PerKOps": 62.5,
+        "gen1PerKOps": 46.875,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindex.search(query=size:\u003E100gb)",
+      "tier": "A",
+      "parameters": {
+        "Query": "size:\u003E100gb",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 6156624.114583333,
+        "median": 6121089.0625,
+        "p95": 6358858.515625,
+        "stdDev": 107286.42235876578,
+        "min": 6022969.53125,
+        "max": 6376059.375
+      },
+      "memory": {
+        "allocatedBytes": 4624,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindex.search(query=size:\u003E100mb)",
+      "tier": "A",
+      "parameters": {
+        "Query": "size:\u003E100mb",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 8224609.583333333,
+        "median": 8212143.75,
+        "p95": 8311278.28125,
+        "stdDev": 66613.2675508921,
+        "min": 8089709.375,
+        "max": 8338553.125
+      },
+      "memory": {
+        "allocatedBytes": 451240,
+        "gen0PerKOps": 46.875,
+        "gen1PerKOps": 31.25,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindex.searchglobal(query=dm:2026-09-15)",
+      "tier": "A",
+      "parameters": {
+        "Query": "dm:2026-09-15",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 49772427.85714286,
+        "median": 49772385,
+        "p95": 49871193,
+        "stdDev": 65254.53007305275,
+        "min": 49671620,
+        "max": 49880670
+      },
+      "memory": {
+        "allocatedBytes": 3639592,
+        "gen0PerKOps": 400,
+        "gen1PerKOps": 300,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindex.searchglobal(query=ext:txt)",
+      "tier": "A",
+      "parameters": {
+        "Query": "ext:txt",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 12299605.729166666,
+        "median": 12300935.9375,
+        "p95": 12336933.75,
+        "stdDev": 26057.881702538194,
+        "min": 12244778.125,
+        "max": 12346079.6875
+      },
+      "memory": {
+        "allocatedBytes": 3478128,
+        "gen0PerKOps": 406.25,
+        "gen1PerKOps": 390.625,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindex.searchglobal(query=re:^img_)",
+      "tier": "A",
+      "parameters": {
+        "Query": "re:^img_",
+        "scale": "1"
+      },
+      "n": 16,
+      "time": {
+        "unit": "ns",
+        "mean": 122949841.25,
+        "median": 122320370,
+        "p95": 126266450,
+        "stdDev": 2375179.151435038,
+        "min": 120320480,
+        "max": 126349340
+      },
+      "memory": {
+        "allocatedBytes": 28116856,
+        "gen0PerKOps": 3200,
+        "gen1PerKOps": 400,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindex.searchglobal(query=report ext:cs size:\u003E1kb)",
+      "tier": "A",
+      "parameters": {
+        "Query": "report ext:cs size:\u003E1kb",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 35218933.33333333,
+        "median": 35198493.333333336,
+        "p95": 35344654.666666664,
+        "stdDev": 72755.89964623644,
+        "min": 35114346.666666664,
+        "max": 35350646.666666664
+      },
+      "memory": {
+        "allocatedBytes": 263200,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindex.searchglobal(query=report)",
+      "tier": "A",
+      "parameters": {
+        "Query": "report",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 49978440,
+        "median": 49983572.72727273,
+        "p95": 50180335.45454545,
+        "stdDev": 145589.23977780459,
+        "min": 49769290.90909091,
+        "max": 50298972.72727273
+      },
+      "memory": {
+        "allocatedBytes": 3006032,
+        "gen0PerKOps": 272.72727272727275,
+        "gen1PerKOps": 181.8181818181818,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindex.searchglobal(query=size:\u003E100gb)",
+      "tier": "A",
+      "parameters": {
+        "Query": "size:\u003E100gb",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 28942233.70535714,
+        "median": 28938728.125,
+        "p95": 29023543.90625,
+        "stdDev": 61830.14955179724,
+        "min": 28793365.625,
+        "max": 29058731.25
+      },
+      "memory": {
+        "allocatedBytes": 4048,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindex.searchglobal(query=size:\u003E100mb)",
+      "tier": "A",
+      "parameters": {
+        "Query": "size:\u003E100mb",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 44770972.02380954,
+        "median": 44789212.5,
+        "p95": 44894312.916666664,
+        "stdDev": 113472.70934032425,
+        "min": 44457450,
+        "max": 44979858.333333336
+      },
+      "memory": {
+        "allocatedBytes": 2635336,
+        "gen0PerKOps": 250,
+        "gen1PerKOps": 166.66666666666666,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindexmaintenance.renamesubtree",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 18,
+      "time": {
+        "unit": "ns",
+        "mean": 46181277.777777776,
+        "median": 46321800,
+        "p95": 47406990,
+        "stdDev": 934369.9069461388,
+        "min": 44074100,
+        "max": 47439800
+      },
+      "memory": {
+        "allocatedBytes": 6816,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindexmaintenance.sweepvanished50k",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 227776364.2857143,
+        "median": 227920100,
+        "p95": 231477055,
+        "stdDev": 2775430.2582197515,
+        "min": 223597850,
+        "max": 232209150
+      },
+      "memory": {
+        "allocatedBytes": 2656,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindexscan.duplicatecandidates",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 9231805.520833334,
+        "median": 9192459.375,
+        "p95": 9410155.78125,
+        "stdDev": 121281.39850249648,
+        "min": 9094406.25,
+        "max": 9435059.375
+      },
+      "memory": {
+        "allocatedBytes": 51224,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindexscan.findcoveringroot",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 25091.660563151043,
+        "median": 25102.703857421875,
+        "p95": 25169.881591796875,
+        "stdDev": 61.49939270101933,
+        "min": 24959.945678710938,
+        "max": 25175.128173828125
+      },
+      "memory": {
+        "allocatedBytes": 3928,
+        "gen0PerKOps": 0.457763671875,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindexscan.hassizedata",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 13,
+      "time": {
+        "unit": "ns",
+        "mean": 17256.847440279445,
+        "median": 17266.11328125,
+        "p95": 17426.468505859375,
+        "stdDev": 110.30961999369043,
+        "min": 17055.166625976562,
+        "max": 17430.731201171875
+      },
+      "memory": {
+        "allocatedBytes": 2792,
+        "gen0PerKOps": 0.30517578125,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindexscan.subtree",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 38038554.08163266,
+        "median": 38091100,
+        "p95": 38289364.28571428,
+        "stdDev": 287560.6165394881,
+        "min": 37118350,
+        "max": 38310535.71428572
+      },
+      "memory": {
+        "allocatedBytes": 11440881,
+        "gen0PerKOps": 1571.4285714285716,
+        "gen1PerKOps": 1000,
+        "gen2PerKOps": 571.4285714285714,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.fsindexwrite.upsert20k",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 176189714.2857143,
+        "median": 175983800,
+        "p95": 177886340,
+        "stdDev": 1339722.1594030622,
+        "min": 174131300,
+        "max": 177932100
+      },
+      "memory": {
+        "allocatedBytes": 29340456,
+        "gen0PerKOps": 3000,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.gif.next60frames",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 30,
+      "time": {
+        "unit": "ns",
+        "mean": 2512557.2916666665,
+        "median": 2489578.515625,
+        "p95": 2657862.109375,
+        "stdDev": 73479.1294319518,
+        "min": 2416881.640625,
+        "max": 2667246.875
+      },
+      "memory": {
+        "allocatedBytes": 24888469,
+        "gen0PerKOps": 5226.5625,
+        "gen1PerKOps": 5226.5625,
+        "gen2PerKOps": 5226.5625,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.glob.wildcardmatch10k",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 100,
+      "time": {
+        "unit": "ns",
+        "mean": 298961.146484375,
+        "median": 301963.427734375,
+        "p95": 326928.51318359375,
+        "stdDev": 20616.81578765105,
+        "min": 249724.90234375,
+        "max": 330329.150390625
+      },
+      "memory": {
+        "allocatedBytes": 0,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.hash.hashfile64mb",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 44367072.61904763,
+        "median": 44349395.83333333,
+        "p95": 44808561.25,
+        "stdDev": 245858.8955512345,
+        "min": 44112850,
+        "max": 44839008.333333336
+      },
+      "memory": {
+        "allocatedBytes": 2829,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.hash.hashprefix64k",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 9801787.083333334,
+        "median": 9799926.5625,
+        "p95": 9852363.28125,
+        "stdDev": 34928.45129967048,
+        "min": 9744662.5,
+        "max": 9860779.6875
+      },
+      "memory": {
+        "allocatedBytes": 80008,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 2
+      }
+    },
+    {
+      "id": "core.mft.addandbuild",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 25,
+      "time": {
+        "unit": "ns",
+        "mean": 9841563.5625,
+        "median": 9895432.8125,
+        "p95": 10285515.625,
+        "stdDev": 256871.6485331409,
+        "min": 9273014.0625,
+        "max": 10306967.1875
+      },
+      "memory": {
+        "allocatedBytes": 8916828,
+        "gen0PerKOps": 1078.125,
+        "gen1PerKOps": 1015.625,
+        "gen2PerKOps": 296.875,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.mft.parserecords1k",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 23,
+      "time": {
+        "unit": "ns",
+        "mean": 259445.73815387228,
+        "median": 260597.7294921875,
+        "p95": 267851.2548828125,
+        "stdDev": 6536.626102992994,
+        "min": 242529.8095703125,
+        "max": 271138.8427734375
+      },
+      "memory": {
+        "allocatedBytes": 1088464,
+        "gen0PerKOps": 129.8828125,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.mft.resolveall",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 34,
+      "time": {
+        "unit": "ns",
+        "mean": 3290669.7380514704,
+        "median": 3298497.4609375,
+        "p95": 3411214.4921875,
+        "stdDev": 104669.86691488062,
+        "min": 2942893.9453125,
+        "max": 3419768.9453125
+      },
+      "memory": {
+        "allocatedBytes": 3087411,
+        "gen0PerKOps": 406.25,
+        "gen1PerKOps": 285.15625,
+        "gen2PerKOps": 70.3125,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.pathkey.canonicalizedeep",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 261.71860059102374,
+        "median": 262.2304439544678,
+        "p95": 269.2340564727783,
+        "stdDev": 4.8326071473205285,
+        "min": 253.8074493408203,
+        "max": 269.36349868774414
+      },
+      "memory": {
+        "allocatedBytes": 192,
+        "gen0PerKOps": 0.02288818359375,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.pathkey.canonicalizeshort",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 151.031703154246,
+        "median": 151.2306571006775,
+        "p95": 152.58785009384155,
+        "stdDev": 1.4172300413624264,
+        "min": 147.45980501174927,
+        "max": 153.4347653388977
+      },
+      "memory": {
+        "allocatedBytes": 72,
+        "gen0PerKOps": 0.00858306884765625,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.pathkey.canonicalizetrailing",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 13,
+      "time": {
+        "unit": "ns",
+        "mean": 246.32035402151254,
+        "median": 246.33049964904785,
+        "p95": 247.13656425476074,
+        "stdDev": 0.52361037461733,
+        "min": 245.61805725097656,
+        "max": 247.14818000793457
+      },
+      "memory": {
+        "allocatedBytes": 352,
+        "gen0PerKOps": 0.041961669921875,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.pathkey.isunderloop",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 9295573.325892856,
+        "median": 9287165.625,
+        "p95": 9362417.109375,
+        "stdDev": 37980.18424232875,
+        "min": 9232345.3125,
+        "max": 9368446.875
+      },
+      "memory": {
+        "allocatedBytes": 8816000,
+        "gen0PerKOps": 1046.875,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.pathkey.prefixbounds",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 209.34587876001993,
+        "median": 210.58529615402222,
+        "p95": 212.63635635375977,
+        "stdDev": 2.711764148460945,
+        "min": 205.1280379295349,
+        "max": 213.26802968978882
+      },
+      "memory": {
+        "allocatedBytes": 256,
+        "gen0PerKOps": 0.030517578125,
+        "gen1PerKOps": 0.0002384185791015625,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.preview.readhex5000rows",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 3401126.796875,
+        "median": 3399714.84375,
+        "p95": 3421344.8828125,
+        "stdDev": 12014.088903791146,
+        "min": 3385348.828125,
+        "max": 3427079.6875
+      },
+      "memory": {
+        "allocatedBytes": 5520201,
+        "gen0PerKOps": 644.53125,
+        "gen1PerKOps": 292.96875,
+        "gen2PerKOps": 144.53125,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.preview.readtext1mb",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 18,
+      "time": {
+        "unit": "ns",
+        "mean": 2716727.756076389,
+        "median": 2711054.4921875,
+        "p95": 2797941.9140625,
+        "stdDev": 57068.90647165565,
+        "min": 2649698.4375,
+        "max": 2846392.578125
+      },
+      "memory": {
+        "allocatedBytes": 5088699,
+        "gen0PerKOps": 960.9375,
+        "gen1PerKOps": 960.9375,
+        "gen2PerKOps": 960.9375,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.rename.planliteral1000",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 2314202.3307291665,
+        "median": 2335542.7734375,
+        "p95": 2346610.1953125,
+        "stdDev": 31804.201089839513,
+        "min": 2271306.8359375,
+        "max": 2351814.2578125
+      },
+      "memory": {
+        "allocatedBytes": 1926536,
+        "gen0PerKOps": 226.5625,
+        "gen1PerKOps": 78.125,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.rename.plannumbered1000",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 2340250.4817708335,
+        "median": 2327211.9140625,
+        "p95": 2371614.921875,
+        "stdDev": 20563.70413959343,
+        "min": 2318906.8359375,
+        "max": 2378510.7421875
+      },
+      "memory": {
+        "allocatedBytes": 2089336,
+        "gen0PerKOps": 246.09375,
+        "gen1PerKOps": 74.21875,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.compile(query=content:todo OR ext:md)",
+      "tier": "A",
+      "parameters": {
+        "Query": "content:todo OR ext:md",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 103.8968813419342,
+        "median": 103.248530626297,
+        "p95": 105.58902025222778,
+        "stdDev": 1.0112360233253654,
+        "min": 103.0379593372345,
+        "max": 106.12086653709412
+      },
+      "memory": {
+        "allocatedBytes": 512,
+        "gen0PerKOps": 0.06115436553955078,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.compile(query=dm:2026-09-15)",
+      "tier": "A",
+      "parameters": {
+        "Query": "dm:2026-09-15",
+        "scale": "1"
+      },
+      "n": 12,
+      "time": {
+        "unit": "ns",
+        "mean": 179.23328479131064,
+        "median": 179.5321822166443,
+        "p95": 180.44053077697754,
+        "stdDev": 1.1916118687284598,
+        "min": 176.79007053375244,
+        "max": 180.47215938568115
+      },
+      "memory": {
+        "allocatedBytes": 840,
+        "gen0PerKOps": 0.10037422180175781,
+        "gen1PerKOps": 0.0002384185791015625,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.compile(query=ext:txt)",
+      "tier": "A",
+      "parameters": {
+        "Query": "ext:txt",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 88.31361373265584,
+        "median": 88.32104206085205,
+        "p95": 89.22336459159851,
+        "stdDev": 0.541428252131056,
+        "min": 87.43855953216553,
+        "max": 89.26275968551636
+      },
+      "memory": {
+        "allocatedBytes": 504,
+        "gen0PerKOps": 0.06020069122314453,
+        "gen1PerKOps": 0.00011920928955078125,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.compile(query=re:^img_)",
+      "tier": "A",
+      "parameters": {
+        "Query": "re:^img_",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 24.624548426696233,
+        "median": 24.642284214496613,
+        "p95": 24.750554263591766,
+        "stdDev": 0.1468505186492459,
+        "min": 24.150294065475464,
+        "max": 24.758872389793396
+      },
+      "memory": {
+        "allocatedBytes": 200,
+        "gen0PerKOps": 0.02390146255493164,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.compile(query=report OR draft OR final ext:docx;pdf;txt size:\u003E1kb !archive dm:2024 path:source is:file)",
+      "tier": "A",
+      "parameters": {
+        "Query": "report OR draft OR final ext:docx;pdf;txt size:\u003E1kb !archive dm:2024 path:source is:file",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 672.808027267456,
+        "median": 673.1312274932861,
+        "p95": 680.0310182571411,
+        "stdDev": 6.060854047561154,
+        "min": 658.8343620300293,
+        "max": 683.4542274475098
+      },
+      "memory": {
+        "allocatedBytes": 3352,
+        "gen0PerKOps": 0.400543212890625,
+        "gen1PerKOps": 0.00476837158203125,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.compile(query=report ext:cs size:\u003E1kb)",
+      "tier": "A",
+      "parameters": {
+        "Query": "report ext:cs size:\u003E1kb",
+        "scale": "1"
+      },
+      "n": 13,
+      "time": {
+        "unit": "ns",
+        "mean": 213.2972790644719,
+        "median": 213.56005668640137,
+        "p95": 213.90759468078613,
+        "stdDev": 1.12629051945061,
+        "min": 209.61003303527832,
+        "max": 214.01419639587402
+      },
+      "memory": {
+        "allocatedBytes": 1048,
+        "gen0PerKOps": 0.1251697540283203,
+        "gen1PerKOps": 0.000476837158203125,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.compile(query=report)",
+      "tier": "A",
+      "parameters": {
+        "Query": "report",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 67.08442290623982,
+        "median": 67.16655492782593,
+        "p95": 68.30068469047546,
+        "stdDev": 0.8861328837218124,
+        "min": 65.182363986969,
+        "max": 68.62586736679077
+      },
+      "memory": {
+        "allocatedBytes": 456,
+        "gen0PerKOps": 0.05447864532470703,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.compile(query=size:\u003E100gb)",
+      "tier": "A",
+      "parameters": {
+        "Query": "size:\u003E100gb",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 94.28695951189313,
+        "median": 94.17344927787781,
+        "p95": 95.16631364822388,
+        "stdDev": 0.5157494305488347,
+        "min": 93.52113008499146,
+        "max": 95.17731666564941
+      },
+      "memory": {
+        "allocatedBytes": 656,
+        "gen0PerKOps": 0.07832050323486328,
+        "gen1PerKOps": 0.0002384185791015625,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.compile(query=size:\u003E100mb)",
+      "tier": "A",
+      "parameters": {
+        "Query": "size:\u003E100mb",
+        "scale": "1"
+      },
+      "n": 12,
+      "time": {
+        "unit": "ns",
+        "mean": 93.74311963717143,
+        "median": 93.71644854545593,
+        "p95": 94.50053989887238,
+        "stdDev": 0.8457741546011758,
+        "min": 91.456139087677,
+        "max": 94.51124668121338
+      },
+      "memory": {
+        "allocatedBytes": 656,
+        "gen0PerKOps": 0.07832050323486328,
+        "gen1PerKOps": 0.0002384185791015625,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.matches10k(query=content:todo OR ext:md)",
+      "tier": "A",
+      "parameters": {
+        "Query": "content:todo OR ext:md",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 119605.52019391741,
+        "median": 119674.04174804688,
+        "p95": 120383.14453125,
+        "stdDev": 624.4281496199955,
+        "min": 118101.15966796875,
+        "max": 120514.794921875
+      },
+      "memory": {
+        "allocatedBytes": 0,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.matches10k(query=dm:2026-09-15)",
+      "tier": "A",
+      "parameters": {
+        "Query": "dm:2026-09-15",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 24630.328151157923,
+        "median": 24626.03302001953,
+        "p95": 24664.484100341797,
+        "stdDev": 19.041491022814494,
+        "min": 24607.730102539062,
+        "max": 24674.578857421875
+      },
+      "memory": {
+        "allocatedBytes": 0,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.matches10k(query=ext:txt)",
+      "tier": "A",
+      "parameters": {
+        "Query": "ext:txt",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 69844.8095703125,
+        "median": 69874.90234375,
+        "p95": 70060.23559570312,
+        "stdDev": 159.85497566696887,
+        "min": 69593.9453125,
+        "max": 70124.45068359375
+      },
+      "memory": {
+        "allocatedBytes": 0,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.matches10k(query=re:^img_)",
+      "tier": "A",
+      "parameters": {
+        "Query": "re:^img_",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 694180.7291666666,
+        "median": 694434.375,
+        "p95": 695592.158203125,
+        "stdDev": 1172.323809417132,
+        "min": 691823.92578125,
+        "max": 695690.52734375
+      },
+      "memory": {
+        "allocatedBytes": 0,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.matches10k(query=report OR draft OR final ext:docx;pdf;txt size:\u003E1kb !archive dm:2024 path:source is:file)",
+      "tier": "A",
+      "parameters": {
+        "Query": "report OR draft OR final ext:docx;pdf;txt size:\u003E1kb !archive dm:2024 path:source is:file",
+        "scale": "1"
+      },
+      "n": 41,
+      "time": {
+        "unit": "ns",
+        "mean": 862345.586413872,
+        "median": 850692.28515625,
+        "p95": 919017.3828125,
+        "stdDev": 30804.47926970474,
+        "min": 830987.109375,
+        "max": 922789.55078125
+      },
+      "memory": {
+        "allocatedBytes": 0,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.matches10k(query=report ext:cs size:\u003E1kb)",
+      "tier": "A",
+      "parameters": {
+        "Query": "report ext:cs size:\u003E1kb",
+        "scale": "1"
+      },
+      "n": 45,
+      "time": {
+        "unit": "ns",
+        "mean": 307382.4934895833,
+        "median": 305858.056640625,
+        "p95": 325677.294921875,
+        "stdDev": 11023.978057802875,
+        "min": 292990.478515625,
+        "max": 336511.328125
+      },
+      "memory": {
+        "allocatedBytes": 0,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.matches10k(query=report)",
+      "tier": "A",
+      "parameters": {
+        "Query": "report",
+        "scale": "1"
+      },
+      "n": 100,
+      "time": {
+        "unit": "ns",
+        "mean": 302228.91015625,
+        "median": 309231.2744140625,
+        "p95": 328601.6015625,
+        "stdDev": 23588.307276602616,
+        "min": 250974.51171875,
+        "max": 332488.4765625
+      },
+      "memory": {
+        "allocatedBytes": 0,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.matches10k(query=size:\u003E100gb)",
+      "tier": "A",
+      "parameters": {
+        "Query": "size:\u003E100gb",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 9574.815266927084,
+        "median": 9576.565551757812,
+        "p95": 9582.888488769531,
+        "stdDev": 10.16078060398059,
+        "min": 9541.493225097656,
+        "max": 9584.988403320312
+      },
+      "memory": {
+        "allocatedBytes": 0,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.matches10k(query=size:\u003E100mb)",
+      "tier": "A",
+      "parameters": {
+        "Query": "size:\u003E100mb",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 9646.890665690104,
+        "median": 9648.333740234375,
+        "p95": 9654.837493896484,
+        "stdDev": 6.294754932000707,
+        "min": 9633.572387695312,
+        "max": 9654.87060546875
+      },
+      "memory": {
+        "allocatedBytes": 0,
+        "gen0PerKOps": 0,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.parse(query=content:todo OR ext:md)",
+      "tier": "A",
+      "parameters": {
+        "Query": "content:todo OR ext:md",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 456.8223826090495,
+        "median": 456.9556713104248,
+        "p95": 464.3835735321045,
+        "stdDev": 5.46303562348043,
+        "min": 449.74536895751953,
+        "max": 465.1829242706299
+      },
+      "memory": {
+        "allocatedBytes": 1432,
+        "gen0PerKOps": 0.17118453979492188,
+        "gen1PerKOps": 0.000476837158203125,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.parse(query=dm:2026-09-15)",
+      "tier": "A",
+      "parameters": {
+        "Query": "dm:2026-09-15",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 600.2866236368815,
+        "median": 601.3912200927734,
+        "p95": 602.8767108917236,
+        "stdDev": 2.5987310704786957,
+        "min": 595.8223342895508,
+        "max": 603.5699844360352
+      },
+      "memory": {
+        "allocatedBytes": 720,
+        "gen0PerKOps": 0.0858306884765625,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.parse(query=ext:txt)",
+      "tier": "A",
+      "parameters": {
+        "Query": "ext:txt",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 247.4963092803955,
+        "median": 247.13544845581055,
+        "p95": 249.89235877990723,
+        "stdDev": 1.4631975132630612,
+        "min": 245.75848579406738,
+        "max": 250.87008476257324
+      },
+      "memory": {
+        "allocatedBytes": 896,
+        "gen0PerKOps": 0.1068115234375,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.parse(query=re:^img_)",
+      "tier": "A",
+      "parameters": {
+        "Query": "re:^img_",
+        "scale": "1"
+      },
+      "n": 13,
+      "time": {
+        "unit": "ns",
+        "mean": 903.208145728478,
+        "median": 906.081485748291,
+        "p95": 907.0652008056641,
+        "stdDev": 5.32968908330336,
+        "min": 893.8753128051758,
+        "max": 907.5192451477051
+      },
+      "memory": {
+        "allocatedBytes": 2288,
+        "gen0PerKOps": 0.2727508544921875,
+        "gen1PerKOps": 0.0019073486328125,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.parse(query=report OR draft OR final ext:docx;pdf;txt size:\u003E1kb !archive dm:2024 path:source is:file)",
+      "tier": "A",
+      "parameters": {
+        "Query": "report OR draft OR final ext:docx;pdf;txt size:\u003E1kb !archive dm:2024 path:source is:file",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 2080.2679697672525,
+        "median": 2079.254913330078,
+        "p95": 2090.1414108276367,
+        "stdDev": 6.551836339012652,
+        "min": 2069.1673278808594,
+        "max": 2090.753173828125
+      },
+      "memory": {
+        "allocatedBytes": 4952,
+        "gen0PerKOps": 0.591278076171875,
+        "gen1PerKOps": 0.00762939453125,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.parse(query=report ext:cs size:\u003E1kb)",
+      "tier": "A",
+      "parameters": {
+        "Query": "report ext:cs size:\u003E1kb",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 584.3163967132568,
+        "median": 584.253740310669,
+        "p95": 588.0669927597046,
+        "stdDev": 2.2857913779563765,
+        "min": 581.6742897033691,
+        "max": 588.8158798217773
+      },
+      "memory": {
+        "allocatedBytes": 1608,
+        "gen0PerKOps": 0.19168853759765625,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.parse(query=report)",
+      "tier": "A",
+      "parameters": {
+        "Query": "report",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 152.71847929273332,
+        "median": 152.90961265563965,
+        "p95": 153.17773342132568,
+        "stdDev": 0.8253420486273075,
+        "min": 149.88410472869873,
+        "max": 153.19335460662842
+      },
+      "memory": {
+        "allocatedBytes": 712,
+        "gen0PerKOps": 0.08511543273925781,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.parse(query=size:\u003E100gb)",
+      "tier": "A",
+      "parameters": {
+        "Query": "size:\u003E100gb",
+        "scale": "1"
+      },
+      "n": 12,
+      "time": {
+        "unit": "ns",
+        "mean": 278.3157507578532,
+        "median": 278.37111949920654,
+        "p95": 279.21791076660156,
+        "stdDev": 0.7332656143937287,
+        "min": 276.8669605255127,
+        "max": 279.3668746948242
+      },
+      "memory": {
+        "allocatedBytes": 800,
+        "gen0PerKOps": 0.095367431640625,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchgrammar.parse(query=size:\u003E100mb)",
+      "tier": "A",
+      "parameters": {
+        "Query": "size:\u003E100mb",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 287.0876141956874,
+        "median": 287.4403715133667,
+        "p95": 288.57811212539673,
+        "stdDev": 1.5154580145897993,
+        "min": 283.80274772644043,
+        "max": 289.40253257751465
+      },
+      "memory": {
+        "allocatedBytes": 800,
+        "gen0PerKOps": 0.095367431640625,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.searchservice.listsubtree(cap=1000)",
+      "tier": "A",
+      "parameters": {
+        "Cap": "1000",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 6649763.392857143,
+        "median": 6642198.4375,
+        "p95": 6709701.40625,
+        "stdDev": 35368.59358247173,
+        "min": 6605329.6875,
+        "max": 6724137.5
+      },
+      "memory": {
+        "allocatedBytes": 3697304,
+        "gen0PerKOps": 437.5,
+        "gen1PerKOps": 296.875,
+        "gen2PerKOps": 0,
+        "tolerancePct": 5
+      }
+    },
+    {
+      "id": "core.searchservice.listsubtree(cap=100000)",
+      "tier": "A",
+      "parameters": {
+        "Cap": "100000",
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 161014762.5,
+        "median": 160941712.5,
+        "p95": 161604978.75,
+        "stdDev": 317562.0164674683,
+        "min": 160631950,
+        "max": 161649650
+      },
+      "memory": {
+        "allocatedBytes": 79533278,
+        "gen0PerKOps": 10500,
+        "gen1PerKOps": 3500,
+        "gen2PerKOps": 1500,
+        "tolerancePct": 5
+      }
+    },
+    {
+      "id": "core.textdecode.decode(kind=binary)",
+      "tier": "A",
+      "parameters": {
+        "Kind": "binary",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 2658.583526611328,
+        "median": 2659.722900390625,
+        "p95": 2672.4390411376953,
+        "stdDev": 9.287218948006604,
+        "min": 2644.266891479492,
+        "max": 2673.488998413086
+      },
+      "memory": {
+        "allocatedBytes": 48,
+        "gen0PerKOps": 0.003814697265625,
+        "gen1PerKOps": 0,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.textdecode.decode(kind=latin1)",
+      "tier": "A",
+      "parameters": {
+        "Kind": "latin1",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 2061644.7135416667,
+        "median": 2062733.59375,
+        "p95": 2087802.1484375,
+        "stdDev": 18521.40090181762,
+        "min": 2028966.796875,
+        "max": 2090767.578125
+      },
+      "memory": {
+        "allocatedBytes": 2991314,
+        "gen0PerKOps": 484.375,
+        "gen1PerKOps": 484.375,
+        "gen2PerKOps": 484.375,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.textdecode.decode(kind=utf16)",
+      "tier": "A",
+      "parameters": {
+        "Kind": "utf16",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 1242188.6458333333,
+        "median": 1244125.1953125,
+        "p95": 1258783.671875,
+        "stdDev": 13564.53706871224,
+        "min": 1206101.7578125,
+        "max": 1260931.25
+      },
+      "memory": {
+        "allocatedBytes": 1942676,
+        "gen0PerKOps": 398.4375,
+        "gen1PerKOps": 398.4375,
+        "gen2PerKOps": 398.4375,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.textdecode.decode(kind=utf8)",
+      "tier": "A",
+      "parameters": {
+        "Kind": "utf8",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 2524329.4791666665,
+        "median": 2524878.90625,
+        "p95": 2544029.4140625,
+        "stdDev": 14085.224413257374,
+        "min": 2504875.390625,
+        "max": 2546140.625
+      },
+      "memory": {
+        "allocatedBytes": 2993193,
+        "gen0PerKOps": 500,
+        "gen1PerKOps": 500,
+        "gen2PerKOps": 500,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.tokenize.tokenize1mb(language=CSharp)",
+      "tier": "A",
+      "parameters": {
+        "Language": "CSharp",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 10073409.791666666,
+        "median": 10083373.4375,
+        "p95": 10128066.09375,
+        "stdDev": 51959.54061309228,
+        "min": 9946884.375,
+        "max": 10148695.3125
+      },
+      "memory": {
+        "allocatedBytes": 20459899,
+        "gen0PerKOps": 1093.75,
+        "gen1PerKOps": 718.75,
+        "gen2PerKOps": 718.75,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.tokenize.tokenize1mb(language=Json)",
+      "tier": "A",
+      "parameters": {
+        "Language": "Json",
+        "scale": "1"
+      },
+      "n": 15,
+      "time": {
+        "unit": "ns",
+        "mean": 9353758.645833334,
+        "median": 9346729.6875,
+        "p95": 9473379.53125,
+        "stdDev": 75327.56553584678,
+        "min": 9233798.4375,
+        "max": 9484473.4375
+      },
+      "memory": {
+        "allocatedBytes": 18837571,
+        "gen0PerKOps": 781.25,
+        "gen1PerKOps": 671.875,
+        "gen2PerKOps": 671.875,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.transfer.expandmerge4000",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 14,
+      "time": {
+        "unit": "ns",
+        "mean": 1801019.82421875,
+        "median": 1802566.11328125,
+        "p95": 1810949.365234375,
+        "stdDev": 10195.378590804403,
+        "min": 1769224.21875,
+        "max": 1811813.28125
+      },
+      "memory": {
+        "allocatedBytes": 2103128,
+        "gen0PerKOps": 250,
+        "gen1PerKOps": 248.046875,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "core.transfer.plan1000",
+      "tier": "A",
+      "parameters": {
+        "scale": "1"
+      },
+      "n": 12,
+      "time": {
+        "unit": "ns",
+        "mean": 72046742.85714287,
+        "median": 72048507.14285713,
+        "p95": 72182086.42857142,
+        "stdDev": 111120.80591182456,
+        "min": 71872214.28571428,
+        "max": 72182628.57142857
+      },
+      "memory": {
+        "allocatedBytes": 55677680,
+        "gen0PerKOps": 6571.428571428572,
+        "gen1PerKOps": 142.85714285714286,
+        "gen2PerKOps": 0,
+        "tolerancePct": 0
+      }
+    },
+    {
+      "id": "ui.flat-20k.flat",
+      "tier": "B",
+      "parameters": {
+        "files": "20000",
+        "dirs": "200",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 181235712,
+        "privateBytes": 100007936,
+        "managedHeapBytes": 14107248,
+        "realizedRows": 34,
+        "items": 200,
+        "retainedThumbnails": 0
+      }
+    },
+    {
+      "id": "ui.flat-20k.flat.off",
+      "tier": "B",
+      "parameters": {
+        "files": "20000",
+        "dirs": "200",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 105.85588,
+        "median": 108.0403,
+        "p95": 117.6475,
+        "stdDev": 10.026772720172724,
+        "min": 90.7425,
+        "max": 117.6475
+      }
+    },
+    {
+      "id": "ui.flat-20k.flat.on",
+      "tier": "B",
+      "parameters": {
+        "files": "20000",
+        "dirs": "200",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 487.37778,
+        "median": 493.5669,
+        "p95": 509.0514,
+        "stdDev": 22.605400073809793,
+        "min": 448.9325,
+        "max": 509.0514
+      }
+    },
+    {
+      "id": "ui.flat-20k.flat.sort.name",
+      "tier": "B",
+      "parameters": {
+        "files": "20000",
+        "dirs": "200",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 122.32042000000001,
+        "median": 126.4664,
+        "p95": 133.8752,
+        "stdDev": 14.024623670601649,
+        "min": 97.8753,
+        "max": 133.8752
+      }
+    },
+    {
+      "id": "ui.flat-20k.flat.sort.size",
+      "tier": "B",
+      "parameters": {
+        "files": "20000",
+        "dirs": "200",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 136.02015999999998,
+        "median": 140.4396,
+        "p95": 143.9409,
+        "stdDev": 10.491754781875148,
+        "min": 118.178,
+        "max": 143.9409
+      }
+    },
+    {
+      "id": "ui.listing-10k.back",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 150.24154000000001,
+        "median": 148.4885,
+        "p95": 167.1272,
+        "stdDev": 13.189646795801618,
+        "min": 135.2004,
+        "max": 167.1272
+      }
+    },
+    {
+      "id": "ui.listing-10k.list",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 269.69908,
+        "median": 267.616,
+        "p95": 276.944,
+        "stdDev": 4.579869611353592,
+        "min": 265.9721,
+        "max": 276.944
+      }
+    },
+    {
+      "id": "ui.listing-10k.listing",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 175919104,
+        "privateBytes": 95203328,
+        "managedHeapBytes": 19463240,
+        "realizedRows": 34,
+        "items": 10000,
+        "retainedThumbnails": 0
+      }
+    },
+    {
+      "id": "ui.listing-10k.refresh",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 254.62794,
+        "median": 254.9515,
+        "p95": 263.6952,
+        "stdDev": 6.928707724604924,
+        "min": 246.7166,
+        "max": 263.6952
+      }
+    },
+    {
+      "id": "ui.listing-10k.up",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 44.611760000000004,
+        "median": 34.1251,
+        "p95": 70.6443,
+        "stdDev": 16.2446742647552,
+        "min": 33.5769,
+        "max": 70.6443
+      }
+    },
+    {
+      "id": "ui.preview.preview",
+      "tier": "B",
+      "parameters": {
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 229314560,
+        "privateBytes": 132493312,
+        "managedHeapBytes": 35783072,
+        "realizedRows": 10,
+        "items": 10,
+        "retainedThumbnails": 0
+      }
+    },
+    {
+      "id": "ui.preview.preview.code",
+      "tier": "B",
+      "parameters": {
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 263.48256,
+        "median": 262.4781,
+        "p95": 273.2656,
+        "stdDev": 9.48592433861878,
+        "min": 250.6625,
+        "max": 273.2656
+      }
+    },
+    {
+      "id": "ui.preview.preview.hex2mb",
+      "tier": "B",
+      "parameters": {
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 2904.32104,
+        "median": 2974.7794,
+        "p95": 3015.5677,
+        "stdDev": 183.82550706904908,
+        "min": 2577.1764,
+        "max": 3015.5677
+      }
+    },
+    {
+      "id": "ui.preview.preview.png",
+      "tier": "B",
+      "parameters": {
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 264.71136,
+        "median": 259.1535,
+        "p95": 282.8631,
+        "stdDev": 12.166383992912595,
+        "min": 252.6948,
+        "max": 282.8631
+      }
+    },
+    {
+      "id": "ui.preview.preview.text2mb",
+      "tier": "B",
+      "parameters": {
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 2027.19962,
+        "median": 1980.0954,
+        "p95": 2138.9338,
+        "stdDev": 92.85700965399425,
+        "min": 1945.1836,
+        "max": 2138.9338
+      }
+    },
+    {
+      "id": "ui.search-local.search",
+      "tier": "B",
+      "parameters": {
+        "files": "20000",
+        "dirs": "200",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 173158400,
+        "privateBytes": 89780224,
+        "managedHeapBytes": 14251496,
+        "realizedRows": 34,
+        "items": 200,
+        "retainedThumbnails": 0
+      }
+    },
+    {
+      "id": "ui.search-local.search.clear",
+      "tier": "B",
+      "parameters": {
+        "files": "20000",
+        "dirs": "200",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 109.93306,
+        "median": 115.3866,
+        "p95": 116.6009,
+        "stdDev": 12.64106762809218,
+        "min": 87.4074,
+        "max": 116.6009
+      }
+    },
+    {
+      "id": "ui.search-local.search.ext",
+      "tier": "B",
+      "parameters": {
+        "files": "20000",
+        "dirs": "200",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 342.01316,
+        "median": 330.5943,
+        "p95": 383.059,
+        "stdDev": 36.24835453386816,
+        "min": 301.9884,
+        "max": 383.059
+      }
+    },
+    {
+      "id": "ui.search-local.search.regex",
+      "tier": "B",
+      "parameters": {
+        "files": "20000",
+        "dirs": "200",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 387.04985999999997,
+        "median": 384.2911,
+        "p95": 418.3635,
+        "stdDev": 18.82168547415454,
+        "min": 367.5857,
+        "max": 418.3635
+      }
+    },
+    {
+      "id": "ui.search-local.search.word",
+      "tier": "B",
+      "parameters": {
+        "files": "20000",
+        "dirs": "200",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 578.60898,
+        "median": 639.387,
+        "p95": 697.9565,
+        "stdDev": 121.03602154225412,
+        "min": 403.9084,
+        "max": 697.9565
+      }
+    },
+    {
+      "id": "ui.sort-select-10k.select.all",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 9732.70378,
+        "median": 9730.0665,
+        "p95": 9762.688,
+        "stdDev": 23.611773621373942,
+        "min": 9702.0649,
+        "max": 9762.688
+      }
+    },
+    {
+      "id": "ui.sort-select-10k.select.none",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 17.97228,
+        "median": 17.8446,
+        "p95": 18.4005,
+        "stdDev": 0.2726308254765049,
+        "min": 17.7062,
+        "max": 18.4005
+      }
+    },
+    {
+      "id": "ui.sort-select-10k.sort",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 192659456,
+        "privateBytes": 105496576,
+        "managedHeapBytes": 20868048,
+        "realizedRows": 34,
+        "items": 10000,
+        "retainedThumbnails": 0
+      }
+    },
+    {
+      "id": "ui.sort-select-10k.sort.modified",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 97.2462,
+        "median": 97.5798,
+        "p95": 98.5256,
+        "stdDev": 1.107192756479196,
+        "min": 95.946,
+        "max": 98.5256
+      }
+    },
+    {
+      "id": "ui.sort-select-10k.sort.name",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 237.53897999999998,
+        "median": 236.6818,
+        "p95": 242.0466,
+        "stdDev": 4.17866029392197,
+        "min": 231.6746,
+        "max": 242.0466
+      }
+    },
+    {
+      "id": "ui.sort-select-10k.sort.size",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 120.82656,
+        "median": 121.1925,
+        "p95": 122.1113,
+        "stdDev": 1.1360257910804654,
+        "min": 119.396,
+        "max": 122.1113
+      }
+    },
+    {
+      "id": "ui.sort-select-10k.sort.type",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 119.69033999999999,
+        "median": 120.0082,
+        "p95": 121.1408,
+        "stdDev": 1.5385431869141684,
+        "min": 117.1489,
+        "max": 121.1408
+      }
+    },
+    {
+      "id": "ui.startup.startup.hosted",
+      "tier": "B",
+      "parameters": {
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 945.3194799999999,
+        "median": 953.4819,
+        "p95": 958.669,
+        "stdDev": 16.058874746911734,
+        "min": 926.4973,
+        "max": 958.669
+      }
+    },
+    {
+      "id": "ui.tabs-panes.pane.close",
+      "tier": "B",
+      "parameters": {
+        "files": "5000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 68.90832,
+        "median": 71.4526,
+        "p95": 72.7922,
+        "stdDev": 7.056107592150221,
+        "min": 56.3538,
+        "max": 72.7922
+      }
+    },
+    {
+      "id": "ui.tabs-panes.pane.split",
+      "tier": "B",
+      "parameters": {
+        "files": "5000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 215.69009999999997,
+        "median": 221.5466,
+        "p95": 240.0387,
+        "stdDev": 23.905296690168903,
+        "min": 175.5939,
+        "max": 240.0387
+      }
+    },
+    {
+      "id": "ui.tabs-panes.pane.switch",
+      "tier": "B",
+      "parameters": {
+        "files": "5000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 1.35124,
+        "median": 1.3506,
+        "p95": 1.4919,
+        "stdDev": 0.11817543314919564,
+        "min": 1.2064,
+        "max": 1.4919
+      }
+    },
+    {
+      "id": "ui.tabs-panes.tab.close",
+      "tier": "B",
+      "parameters": {
+        "files": "5000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 31.006279999999997,
+        "median": 31.0154,
+        "p95": 32.0575,
+        "stdDev": 0.8729579382765231,
+        "min": 29.8397,
+        "max": 32.0575
+      }
+    },
+    {
+      "id": "ui.tabs-panes.tab.new",
+      "tier": "B",
+      "parameters": {
+        "files": "5000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 293.54456,
+        "median": 291.0833,
+        "p95": 305.1733,
+        "stdDev": 6.9608587672786415,
+        "min": 286.7953,
+        "max": 305.1733
+      }
+    },
+    {
+      "id": "ui.tabs-panes.tab.switch",
+      "tier": "B",
+      "parameters": {
+        "files": "5000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 5.8376,
+        "median": 6.2128,
+        "p95": 6.5297,
+        "stdDev": 1.041336960354332,
+        "min": 4.0248,
+        "max": 6.5297
+      }
+    },
+    {
+      "id": "ui.tabs-panes.tabs",
+      "tier": "B",
+      "parameters": {
+        "files": "5000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 188641280,
+        "privateBytes": 107593728,
+        "managedHeapBytes": 26809072,
+        "realizedRows": 34,
+        "items": 5000,
+        "retainedThumbnails": 0
+      }
+    },
+    {
+      "id": "ui.tiles-5k.tiles",
+      "tier": "B",
+      "parameters": {
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 210894848,
+        "privateBytes": 124416000,
+        "managedHeapBytes": 16841032,
+        "realizedRows": 34,
+        "items": 5000,
+        "retainedThumbnails": 36
+      }
+    },
+    {
+      "id": "ui.tiles-5k.tiles.back",
+      "tier": "B",
+      "parameters": {
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 91.40952,
+        "median": 83.8312,
+        "p95": 108.4907,
+        "stdDev": 13.979700550691353,
+        "min": 77.6428,
+        "max": 108.4907
+      }
+    },
+    {
+      "id": "ui.tiles-5k.tiles.large",
+      "tier": "B",
+      "parameters": {
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 128.45074,
+        "median": 127.3062,
+        "p95": 133.9799,
+        "stdDev": 4.632233863699018,
+        "min": 123.8818,
+        "max": 133.9799
+      }
+    },
+    {
+      "id": "ui.tiles-5k.tiles.on",
+      "tier": "B",
+      "parameters": {
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 341.84008000000006,
+        "median": 320.4572,
+        "p95": 413.5744,
+        "stdDev": 40.646897778883464,
+        "min": 319.3458,
+        "max": 413.5744
+      }
+    },
+    {
+      "id": "ui.tiles-5k.tiles.scroll",
+      "tier": "B",
+      "parameters": {
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 368.55568000000005,
+        "median": 375.4263,
+        "p95": 375.8139,
+        "stdDev": 9.66237263238177,
+        "min": 357.2322,
+        "max": 375.8139
+      }
+    },
+    {
+      "id": "ui.transfer-2k.copy.2k",
+      "tier": "B",
+      "parameters": {
+        "files": "2000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 1410.26836,
+        "median": 1400.373,
+        "p95": 1445.5957,
+        "stdDev": 23.01772401157422,
+        "min": 1386.5759,
+        "max": 1445.5957
+      }
+    },
+    {
+      "id": "ui.transfer-2k.delete.2k",
+      "tier": "B",
+      "parameters": {
+        "files": "2000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 490.95712000000003,
+        "median": 486.3209,
+        "p95": 508.0908,
+        "stdDev": 10.429704608329049,
+        "min": 483.1948,
+        "max": 508.0908
+      }
+    },
+    {
+      "id": "ui.transfer-2k.transfer",
+      "tier": "B",
+      "parameters": {
+        "files": "2000",
+        "dirs": "0",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 173748224,
+        "privateBytes": 85311488,
+        "managedHeapBytes": 13132208,
+        "realizedRows": 0,
+        "items": 0,
+        "retainedThumbnails": 0
+      }
+    }
+  ]
+}

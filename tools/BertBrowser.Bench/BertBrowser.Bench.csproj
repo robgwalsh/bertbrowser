@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>BertBrowser.Bench</AssemblyName>
+    <RootNamespace>BertBrowser.Bench</RootNamespace>
+
+    <!-- Workstation GC, like the app. Server GC would make every allocation number here describe a
+         runtime the app never runs under. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Tier A. The default toolchain builds a generated project per benchmark class; its artifacts
+         are kept outside the repo (see BenchConfig) so Directory.Build.props never applies to
+         generated code. -->
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BertBrowser.Core\BertBrowser.Core.csproj" />
+  </ItemGroup>
+
+</Project>

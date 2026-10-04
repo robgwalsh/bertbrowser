@@ -56,6 +56,10 @@ dlldata.c
 
 # Benchmark Results
 BenchmarkDotNet.Artifacts/
+# tools/BertBrowser.Bench: where runs land, and the per-developer real-data config.
+# bench/baselines/ is committed; see bench/README.md.
+bench-results/
+bench/*.local.json
 
 # .NET Core
 project.lock.json

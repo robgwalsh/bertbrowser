@@ -16,6 +16,10 @@ dotnet test tests/BertBrowser.Core.Tests --filter "FullyQualifiedName~PathKeyTes
 
 # Drive the real window offscreen — see "Never launch the GUI" below.
 tools/BertBrowser.Harness/bin/Debug/net10.0-windows/BertBrowser.Harness.exe --script tools/ui/smoke.bbs
+
+# Measure — see bench/README.md. Release build; `run` is BenchmarkDotNet over Core, `ui` the harness.
+tools/BertBrowser.Bench/bin/Release/net10.0/BertBrowser.Bench.exe run --filter *PathKey*
+tools/BertBrowser.Bench/bin/Release/net10.0/BertBrowser.Bench.exe compare --baseline bench/baselines/<key>.json --current bench-results/current.json
 ```
 
 `Directory.Build.props` sets `TreatWarningsAsErrors` and `Nullable` for all projects — any warning
@@ -98,6 +102,7 @@ you where and what to watch for.
 | Flat branch view (Ctrl+B) | `Core/Services/FlatView/FlatViewRules`, `SearchService.ListSubtreeAsync`, `DirectoryTabViewModel.IsFlatView`, `FileListViewModel.IsFlatBrowse` |
 | Thumbnail tiles / scrolling | `Views/VirtualizingWrapPanel`, `ThumbnailTemplateSelector`, `ThumbPanel`/`ThumbTileTemplate` in `Styles.xaml`, `tools/ui/tiles.bbs` |
 | UI test harness | `tools/BertBrowser.Harness`, `tools/ui/*.bbs`, `.claude/skills/verify` |
+| Benchmarks / performance evidence | `tools/BertBrowser.Bench` (`run`, `ui`, `startup`, `compare`, `baseline`, `report`, `corpus`), `Core/Benchmarking/*` (the results schema, `BenchCompare`, `MachineKey`, `PerformanceDoc`), `bench/baselines/<machine-key>.json`, `docs/performance.md` (generated), `tools/ui/bench-*.bbs` + `ScriptRunner.Bench.cs` (`time`/`mem`/`settle-thumbnails`), `App/Services/StartupTrace`, the `bench` job in `unstable.yml`, `bench/README.md` |
 
 ## Cross-cutting gotchas
 
@@ -396,6 +401,28 @@ you where and what to watch for.
   a drag) after `MarqueeSelector` had already been fixed for it. Leave it unfrozen and it repaints
   on a theme change for free; freeze a `SolidColorBrush` you built yourself from a `ThemeColor`
   instead (`TreemapCanvas` does).
+- **Three benchmark tiers write one schema, and only `BertBrowser.Bench` writes it.** Tier A is
+  BenchmarkDotNet over Core (`tools/BertBrowser.Bench/Benchmarks`), Tier B times whole scenarios
+  through the harness (`tools/ui/bench-*.bbs`; the `time` verb wraps any verb, so each sample is
+  "issued to settled"), Tier C launches the real exe. The harness and the app emit raw samples; the
+  Bench exe aggregates them into `Core/Benchmarking.BenchResultSet`, which `compare` judges against
+  `bench/baselines/<machine-key>.json`. **CI gates allocations only** (deterministic); time gates run
+  locally at 15% over a noise floor. Compare like with like: the in-process and default toolchains
+  report different allocations for SQLite and hashing code (measured, 5× on MD5), so the CI baseline
+  is recorded by CI and a local baseline by the default job. A deliberate slowdown re-records the baseline and regenerates
+  `docs/performance.md` (`report`) in the same commit, with the reason in the message. Consequences
+  that are easy to undo: `[AllocationTolerance]` is for classes over SQLite, `Parallel` or disk only —
+  loosening a pure benchmark to make a run pass defeats the gate; benchmark classes read
+  `BenchContext.FromEnvironment()`, never a static, because BDN's default toolchain runs them in a
+  child process; `settle-thumbnails` is a verb rather than part of `Settle`, or every script would
+  wait on shell COM calls; the synthetic corpus lives on drive `Q:` so it can never be mistaken for a
+  real folder, and `--real` reads a daily SQLite backup, never the live database. **Tier C is the one
+  sanctioned launch of `BertBrowser.exe`**, only via `BertBrowser.Bench startup`: under
+  `BERTBROWSER_STARTUP_TRACE` the app parks its window offscreen and `OnStartup` returns after
+  `ListenForOtherInstances`, skipping the index attach and `ApplyChangeLogPolicy` — the single-instance
+  mutex and the helper's pipe are per user, not per data directory, so a scratch-dir launch would
+  otherwise push "recording off" at the user's real helper and wipe their change log. Nothing a
+  benchmark motivates may change the `Matches`/`WriteSql` agreement.
 - **When editing a doc file with load-bearing prose** (this file, `docs/*.md`), keep new content as
   terse pointers/gotchas, not a re-narration of the code — the code and its tests are the source of
   truth; this file is a map, not a manual.

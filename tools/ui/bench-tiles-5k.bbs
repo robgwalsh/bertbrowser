@@ -1,0 +1,22 @@
+# Tier B: the thumbnail view over five thousand rows — the panel that is this app's own code.
+#
+# `many-fixture` rather than `bench-fixture`, because its .mp4/.txt mix is the point of the tile
+# panel: a full-width row among tiles ends a line early. Settle does not wait for pictures, so
+# `settle-thumbnails` is what makes "tiles on" mean "every visible tile has asked the shell and
+# heard back". The retained-thumbnail cap (400) is what `mem` is there to show holding.
+
+many-fixture 5000
+go Many
+flat on
+assert-count 5000
+time tiles.on thumbnails 0.5; settle-thumbnails
+assert-realized under 200
+time tiles.scroll list-scroll 100000; settle-thumbnails
+assert-realized under 200
+time tiles.back list-scroll 0; settle-thumbnails
+time tiles.large thumbnails 1; settle-thumbnails
+assert-realized under 200
+assert-mem managed under 400
+mem tiles
+thumbnails 0
+assert-not-launched

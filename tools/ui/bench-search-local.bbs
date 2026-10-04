@@ -1,0 +1,18 @@
+#! files=20000 dirs=200
+# Tier B: searching this folder, over twenty thousand files the index has never seen.
+#
+# A run has no MFT index, so the first search is a live walk of the disk streaming hits in batches,
+# while a background crawl writes the subtree into the scratch database for next time. The later
+# searches may be answered from that index — which is exactly what a user gets on an un-indexed
+# drive, and why the four are reported separately rather than averaged. Every sample includes the
+# 200 ms typing debounce; `search` waits for the query to start before it waits for it to finish.
+
+bench-fixture 20000 200 Deep
+go Deep
+time search.word search f0012
+time search.ext search ext:txt
+time search.regex search re:^f001
+time search.clear clear-search
+assert-count 200
+mem search
+assert-not-launched

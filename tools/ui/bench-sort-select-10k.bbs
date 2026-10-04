@@ -1,0 +1,18 @@
+#! files=10000 dirs=0
+# Tier B: re-sorting and selecting ten thousand rows in place.
+#
+# Sorting replaces the collection; select-all touches every row's IsSelected. Both are the kind of
+# "it was instant with forty files" operation that goes quadratic without anyone noticing.
+
+bench-fixture 10000 0 Flat
+go Flat
+assert-count 10000
+time sort.name sort Name
+time sort.size sort Size
+time sort.modified sort Modified
+time sort.type sort Type
+time select.all select-all
+assert-selected 10000
+time select.none deselect
+mem sort
+assert-not-launched

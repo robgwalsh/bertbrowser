@@ -1,0 +1,18 @@
+#! files=20000 dirs=200
+# Tier B: the flat branch view (Ctrl+B) over twenty thousand files in two hundred folders.
+#
+# The walk reads the disk, never the index — a browse surface has to be true — so this is the
+# FileSystemWalker, the hit building, the final sort and the list swap, as a user feels them.
+
+bench-fixture 20000 200 Deep
+flat-cap 100000
+go Deep
+assert-count 200
+time flat.on flat on
+assert-count 20000
+time flat.sort.size sort Size
+time flat.sort.name sort Name
+time flat.off flat off
+assert-count 200
+mem flat
+assert-not-launched
