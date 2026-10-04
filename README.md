@@ -4,7 +4,7 @@
 [![Unstable](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Frobgwalsh%2Fbertbrowser%2Freleases%2Ftags%2Funstable&query=%24.name&label=unstable&color=d29922)](https://github.com/robgwalsh/bertbrowser/releases/tag/unstable)
 [![Unstable build](https://img.shields.io/github/actions/workflow/status/robgwalsh/bertbrowser/unstable.yml?branch=main&label=build)](https://github.com/robgwalsh/bertbrowser/actions/workflows/unstable.yml)
 
-A fast and efficient offline Windows 10/11 file browser.
+A [fast and memory-efficient](docs/performance.md) offline Windows 10/11 file browser.
 
 - **Offline** - BertBrowser does not connect to the Internet except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates.
 - **[Instant global search](docs/search-indexing.md)** - MFT indexing and USN journal tracking for fastest possible performance.
@@ -13,38 +13,31 @@ A fast and efficient offline Windows 10/11 file browser.
 - **Tree Map browser by filesize** - Visualize recursive directory sizes, easily find whats taking the most space.
 - **Rich Preview Panel** - Inline media playback, syntax highlighting in text, hex viewer
 - **Tools** - Find duplicates, compare files and directories, track file system changes, and more!
-- **Customizable** - Customizable command palette, context menus, browser columns, themes; saved workspaces and searches;
-- **Fast and efficient** - Prioritizes [performance](docs/performance.md)
+- **Customizable** - Customizable command palette, context menus, browser columns, themes; saved workspaces and searches.
 
 <table>
 <tr>
 <td width="50%" align="center" valign="top">
 <a href="docs/images/split-panes.png?raw=true"><img src="docs/images/split-panes.png" alt="Split panes with recursive folder sizes and thumbnail tiles (Dark+)"></a>
-<br><sub>Split panes with recursive folder sizes and thumbnail tiles (Dark+)</sub>
 </td>
 <td width="50%" align="center" valign="top">
 <a href="docs/images/search.png?raw=true"><img src="docs/images/search.png" alt="Query language with content search (Synthwave)"></a>
-<br><sub>Query language with content search (Synthwave)</sub>
 </td>
 </tr>
 <tr>
 <td align="center" valign="top">
 <a href="docs/images/compare.png?raw=true"><img src="docs/images/compare.png" alt="Comparing two folders side by side (Light+)"></a>
-<br><sub>Comparing two folders side by side (Light+)</sub>
 </td>
 <td align="center" valign="top">
 <a href="docs/images/preview-pane.png?raw=true"><img src="docs/images/preview-pane.png" alt="Preview pane with syntax highlighting (Monokai)"></a>
-<br><sub>Preview pane with syntax highlighting (Monokai)</sub>
 </td>
 </tr>
 <tr>
 <td align="center" valign="top">
 <a href="docs/images/disk-usage.png?raw=true"><img src="docs/images/disk-usage.png" alt="Disk usage treemap (Dracula)"></a>
-<br><sub>Disk usage treemap (Dracula)</sub>
 </td>
 <td align="center" valign="top">
 <a href="docs/images/command-palette.png?raw=true"><img src="docs/images/command-palette.png" alt="Command palette (Cobalt2)"></a>
-<br><sub>Command palette (Cobalt2)</sub>
 </td>
 </tr>
 </table>

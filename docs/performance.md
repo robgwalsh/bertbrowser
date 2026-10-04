@@ -32,7 +32,7 @@ $bench = "tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe"
 | Power plan | High performance |
 | Corpus | synthetic, scale 1 (100,000 rows) |
 | Job | default |
-| Recorded | 2026-10-04 at `19d071442` (uncommitted changes) |
+| Recorded | 2026-10-04 at `4719d7ce7` (uncommitted changes) |
 
 ### Tier A — Core micro-benchmarks (BenchmarkDotNet)
 
@@ -194,16 +194,16 @@ $bench = "tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe"
 
 | Mark | Median | p95 | Min | n |
 |---|---:|---:|---:|---:|
-| `startup.main` | 75.4 ms | 80.0 ms | 73.7 ms | 9 |
-| `startup.velopackDone` | 102 ms | 107 ms | 101 ms | 9 |
-| `startup.instanceClaimed` | 106 ms | 110 ms | 104 ms | 9 |
-| `startup.servicesBuilt` | 370 ms | 377 ms | 364 ms | 9 |
-| `startup.migrated` | 405 ms | 412 ms | 398 ms | 9 |
-| `startup.themeReady` | 419 ms | 427 ms | 412 ms | 9 |
-| `startup.windowShown` | 1.03 s | 1.06 s | 1.02 s | 9 |
-| `startup.contentRendered` | 1.05 s | 1.07 s | 1.03 s | 9 |
-| `startup.firstListing` | 1.14 s | 1.19 s | 1.14 s | 9 |
-| `startup.processLifetime` | 1.41 s | 1.46 s | 1.40 s | 9 |
+| `startup.main` | 74.0 ms | 77.7 ms | 73.0 ms | 9 |
+| `startup.velopackDone` | 99.8 ms | 104 ms | 98.7 ms | 9 |
+| `startup.instanceClaimed` | 103 ms | 107 ms | 102 ms | 9 |
+| `startup.servicesBuilt` | 234 ms | 242 ms | 227 ms | 9 |
+| `startup.migrated` | 234 ms | 242 ms | 227 ms | 9 |
+| `startup.themeReady` | 246 ms | 254 ms | 239 ms | 9 |
+| `startup.windowShown` | 679 ms | 691 ms | 670 ms | 9 |
+| `startup.contentRendered` | 682 ms | 693 ms | 673 ms | 9 |
+| `startup.firstListing` | 714 ms | 725 ms | 703 ms | 9 |
+| `startup.processLifetime` | 1.09 s | 1.11 s | 1.08 s | 9 |
 
 ## What the numbers do and do not mean
 

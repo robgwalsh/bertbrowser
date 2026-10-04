@@ -404,12 +404,17 @@ public sealed class AppSettings
 
     private static string FilePath => AppPaths.SettingsPath;
 
+    /// <summary>One instance for reading and writing. The serialiser caches what it learns about
+    /// these types per options object, so a fresh one on every <see cref="Save"/> — the settings
+    /// page saves as you type — threw that away and rebuilt it each time.</summary>
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
     public static AppSettings Load()
     {
         try
         {
             if (File.Exists(FilePath) &&
-                JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) is { } loaded)
+                JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath), JsonOptions) is { } loaded)
             {
                 loaded.LoadedFromDisk = true;
                 return loaded;
@@ -426,7 +431,7 @@ public sealed class AppSettings
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, JsonOptions));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

@@ -25,6 +25,12 @@ public partial class App : Application
 
     private static SingleInstance? _instance;
 
+    /// <summary>Started by <see cref="Main"/>; null under a host, which never runs it.</summary>
+    private static Task<AppSettings>? _settingsLoad;
+
+    /// <inheritdoc cref="_settingsLoad"/>
+    private static Task? _migration;
+
     static App()
     {
         // WPF's default hover delay makes the toolbar feel sluggish to explore. Overridden once for
@@ -64,6 +70,27 @@ public partial class App : Application
             return;
         }
 
+        // Multicore JIT: the runtime notes which methods this launch compiled and, next launch,
+        // compiles them on a spare core ahead of the UI thread asking. A third of the way to the
+        // first listing was the UI thread waiting on the JIT — 960 ms to 720 ms measured. The
+        // profile is only a hint: a missing one, or one from another build, is ignored, and the
+        // root has to exist or the runtime silently records nothing. After the hand-off, so a
+        // second launch that only passes its arguments on pays for none of it.
+        Directory.CreateDirectory(AppPaths.DataDir);
+        System.Runtime.ProfileOptimization.SetProfileRoot(AppPaths.DataDir);
+        System.Runtime.ProfileOptimization.StartProfile("startup.jitprofile");
+
+        // Three things the first window needs that do not need this thread, started here so they
+        // run beside the XAML load instead of in front of it: reading settings.json (90 ms, nearly
+        // all of it the serialiser meeting these types for the first time), opening and migrating
+        // the database (40 ms, mostly SQLite loading), and the first shell icon (50 ms — shell32's
+        // image list and WIC start up behind it, and the folder tree used to pay that during the
+        // first render). Measured by `BertBrowser.Bench startup`. BuildServices and OnStartup
+        // collect the first two where they used to do the work, so a failure surfaces where it did.
+        _settingsLoad = Task.Run(AppSettings.Load);
+        _migration = Task.Run(() => new Db(AppPaths.DbPath).Migrate());
+        _ = Task.Run(() => ShellIcons.GetIcon("folder", isDirectory: true));
+
         // Either we are the first copy, or the first one could not be reached — it may be
         // mid-shutdown — in which case starting normally beats exiting and doing nothing at all.
         var app = new App();
@@ -87,7 +114,8 @@ public partial class App : Application
         Services = BuildServices();
         StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.ServicesBuilt);
 
-        Services.GetRequiredService<Db>().Migrate();
+        if (_migration is { } migration) migration.GetAwaiter().GetResult();
+        else Services.GetRequiredService<Db>().Migrate();
         StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.Migrated);
 
         // Before any window exists, so the first frame is already in the chosen theme.
@@ -198,7 +226,7 @@ public partial class App : Application
     internal static IServiceProvider BuildServices(Action<IServiceCollection>? customize = null)
     {
         var services = new ServiceCollection();
-        services.AddSingleton(AppSettings.Load());
+        services.AddSingleton(_settingsLoad?.GetAwaiter().GetResult() ?? AppSettings.Load());
         services.AddSingleton<UserThemeStore>();
         services.AddSingleton<ISystemAppearance, WindowsSystemAppearance>();
         services.AddSingleton<IThemeService, ThemeService>();
