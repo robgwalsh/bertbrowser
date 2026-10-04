@@ -24,6 +24,8 @@ internal static class CompareCommand
                 case "--alloc-threshold": options = options with { AllocTolerancePctOverride = args.Double(arg) }; break;
                 case "--no-time": options = options with { GateTime = false }; break;
                 case "--no-alloc": options = options with { GateAlloc = false }; break;
+                case "--memory-threshold": options = options with { MemoryThresholdPct = args.Double(arg) }; break;
+                case "--no-memory": options = options with { GateMemory = false }; break;
                 case "--strict": options = options with { Strict = true }; break;
                 case "--summary": summaryPath = args.Value(arg); break;
                 case "--title": title = args.Value(arg); break;
@@ -36,7 +38,8 @@ internal static class CompareCommand
         if (baselinePath is null || currentPath is null)
             throw new UsageException("compare needs --baseline <file> and --current <file>.");
 
-        if (ci) options = options with { GateTime = false };
+        // A shared runner's process memory is as much the runner as the code, like its clock.
+        if (ci) options = options with { GateTime = false, GateMemory = false };
 
         var current = BenchResultsJson.Read(currentPath);
         title ??= $"Benchmarks — {current.Machine.Key} — {current.Git.Sha[..Math.Min(9, current.Git.Sha.Length)]}";
@@ -91,7 +94,7 @@ internal static class CompareCommand
             return Exit.Errors;
         }
 
-        var regressed = report.TimeRegressed || report.AllocRegressed || (options.Strict && report.HasRemoved);
+        var regressed = report.TimeRegressed || report.AllocRegressed || report.MemoryRegressed || (options.Strict && report.HasRemoved);
         if (regressed)
         {
             Console.Error.WriteLine("# regression: " + string.Join(", ", Reasons(report, options)));
@@ -105,6 +108,7 @@ internal static class CompareCommand
     private static IEnumerable<string> Reasons(CompareReport report, CompareOptions options)
     {
         if (report.AllocRegressed) yield return "more allocation than the baseline allows";
+        if (report.MemoryRegressed) yield return $"a process snapshot holds more than the baseline (managed heap over {options.MemoryThresholdPct:0.#}%, or private bytes over {options.PrivateBytesThresholdPct:0.#}%)";
         if (report.TimeRegressed) yield return $"slower than the baseline by more than {options.TimeThresholdPct:0.#}%";
         if (options.Strict && report.HasRemoved) yield return "benchmarks missing from this run (--strict)";
     }

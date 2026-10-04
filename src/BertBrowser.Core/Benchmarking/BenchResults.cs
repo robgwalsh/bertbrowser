@@ -7,7 +7,7 @@ namespace BertBrowser.Core.Benchmarking;
 /// <para>
 /// Three very different measurers feed this: BenchmarkDotNet over Core (nanoseconds, allocations),
 /// the UI harness over whole scenarios (milliseconds, process memory), and timed launches of the
-/// real executable (milliseconds since process start). Keeping them in one shape is what lets one
+/// real executable (milliseconds since process start, process memory). Keeping them in one shape is what lets one
 /// baseline file hold a machine's whole picture and one <see cref="BenchCompare"/> judge all of it —
 /// but the shape is deliberately not clever: a tier fills the fields it can answer and leaves the
 /// rest null, and <see cref="TimeStats.Unit"/> says which clock a number is in.
@@ -80,8 +80,8 @@ public sealed record RunInfo(
 /// <param name="Parameters">Whatever sized the work — a query, a file count, a scale — so a number is never read without its denominator.</param>
 /// <param name="N">How many measurements the statistics summarise.</param>
 /// <param name="Time">Null when the benchmark failed.</param>
-/// <param name="Memory">Tier A only.</param>
-/// <param name="Process">Tier B only.</param>
+/// <param name="Memory">Tier A only: what one operation allocates.</param>
+/// <param name="Process">Tiers B and C: a memory snapshot of the whole process. An entry carries this or <paramref name="Time"/>, not both.</param>
 /// <param name="Error">Non-null when the benchmark did not produce a result. Any error fails a CI comparison.</param>
 public sealed record BenchEntry(
     string Id,
@@ -136,11 +136,24 @@ public sealed record AllocStats(
     double Gen2PerKOps,
     double TolerancePct);
 
-/// <summary>A snapshot of the harness process after a scenario, taken after a full collection.</summary>
+/// <summary>
+/// A snapshot of a process's memory: the harness's at a point in a scenario (Tier B), or the real
+/// executable's at its first listing (Tier C).
+/// </summary>
+/// <remarks>
+/// Taken after a full collection unless the entry's id says otherwise, so the managed heap is what
+/// is <em>held</em> rather than what happens to be uncollected. <see cref="PrivateBytes"/> and
+/// <see cref="ManagedHeapBytes"/> are what <see cref="BenchCompare"/> gates; the working set is the
+/// number Task Manager shows and is reported, but Windows trims and grows it for its own reasons.
+/// </remarks>
+/// <param name="RealizedRows">Tier B: rows the list has built, or -1 without a virtualizing panel. Zero in Tier C.</param>
+/// <param name="PeakWorkingSetBytes">The process's high-water mark so far, which a snapshot taken
+/// after the work is over cannot otherwise see. Null in a file written before this was recorded.</param>
 public sealed record ProcessStats(
     long WorkingSetBytes,
     long PrivateBytes,
     long ManagedHeapBytes,
     int RealizedRows,
     int Items,
-    int RetainedThumbnails);
+    int RetainedThumbnails,
+    long? PeakWorkingSetBytes = null);

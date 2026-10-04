@@ -61,6 +61,46 @@ public class BenchMarkdownTests
         Assert.Contains("| `core.broken` | error: boom |", md);
     }
 
+    [Fact]
+    public void RenderResults_SnapshotsGetTheirOwnTable_UnderTheTiersTimings()
+    {
+        var set = BenchCompareTests.Set(
+            [BenchCompareTests.Entry("ui.listing.list", 268, null, "ms", "B"),
+             BenchCompareTests.Snapshot("ui.memory.idle", privateMb: 70, managedMb: 9, tier: "B"),
+             BenchCompareTests.Entry("startup.firstListing", 714, null, "ms", "C"),
+             BenchCompareTests.Snapshot("startup.memory.collected", privateMb: 60, managedMb: 8, tier: "C")],
+            false);
+
+        var md = BenchMarkdown.RenderResults(set);
+
+        // Not a row of dashes among the timings…
+        Assert.DoesNotContain("| `ui.memory.idle` | —", md);
+        // …but a row of its own, with the row counts only the harness knows.
+        Assert.Contains("| Memory snapshot | Managed heap | Private bytes | Working set | Peak working set | Items | Realized | n |", md);
+        Assert.Contains("| `ui.memory.idle` | 9.00 MB | 70.0 MB | 140 MB | 150 MB | 10 | 5 | 5 |", md);
+        Assert.Contains("| Memory snapshot | Managed heap | Private bytes | Working set | Peak working set | n |", md);
+        Assert.Contains("| `startup.memory.collected` | 8.00 MB | 60.0 MB | 120 MB | 130 MB | 5 |", md);
+    }
+
+    [Fact]
+    public void RenderCompare_SnapshotsAreJudgedInTheirOwnTable()
+    {
+        var baseline = BenchCompareTests.Set(
+            [BenchCompareTests.Entry("core.a", 1000, 0), BenchCompareTests.Snapshot("ui.memory.soak", privateMb: 100, managedMb: 13)], false);
+        var current = BenchCompareTests.Set(
+            [BenchCompareTests.Entry("core.a", 1000, 0), BenchCompareTests.Snapshot("ui.memory.soak", privateMb: 200, managedMb: 120)], false);
+
+        var md = BenchMarkdown.RenderCompare(BenchCompare.Compare(baseline, current, new CompareOptions()), new CompareOptions(), "t");
+
+        Assert.Contains("1 holds more memory, 1 same", md);
+        Assert.Contains("Process-memory gate on", md);
+        Assert.Contains("### Process memory", md);
+        Assert.Contains("| `ui.memory.soak` | A | 100 MB | 200 MB | +100.0% | 13.0 MB | 120 MB | +823.1% |", md);
+        Assert.DoesNotContain("| `ui.memory.soak` | A | — |", md);
+        Assert.Contains("Process-memory gate off (reported only)",
+            BenchMarkdown.RenderCompare(BenchCompare.Compare(baseline, current, new CompareOptions(GateMemory: false)), new CompareOptions(GateMemory: false), "t"));
+    }
+
     [Theory]
     [InlineData(999, "ns", "999 ns")]
     [InlineData(1500, "ns", "1.50 µs")]

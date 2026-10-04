@@ -24,12 +24,22 @@ public static class BenchMarkdown
           .Append(options.GateAlloc ? "on" : "off").Append(options.AllocTolerancePctOverride is { } tol
               ? $" at {Pct(tol)} for every benchmark."
               : " at each benchmark's own tolerance.")
+          .Append(" Process-memory gate ").Append(options.GateMemory ? "on" : "off (reported only)")
+          .Append(": managed heap at ").Append(Pct(options.MemoryThresholdPct)).Append(" over ")
+          .Append(Bytes(options.MemoryNoiseFloorBytes)).Append(", private bytes at ")
+          .Append(Pct(options.PrivateBytesThresholdPct)).Append(" over ")
+          .Append(Bytes(options.PrivateBytesNoiseFloorBytes)).Append('.')
           .AppendLine().AppendLine();
+
+        // A snapshot has no time and no per-operation allocation, so in the table below it would be
+        // a row of dashes; it gets its own, with the three numbers it does have.
+        var ordered = report.Rows.OrderBy(r => r.Status).ThenBy(r => r.Id, StringComparer.Ordinal).ToList();
+        var snapshots = ordered.Where(r => r.BaselineProcess is not null || r.CurrentProcess is not null).ToList();
 
         sb.AppendLine("| Benchmark | Tier | Base | Current | Δ | Alloc base | Alloc now | Δ | Status |");
         sb.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|---|");
 
-        foreach (var row in report.Rows.OrderBy(r => r.Status).ThenBy(r => r.Id, StringComparer.Ordinal))
+        foreach (var row in ordered.Except(snapshots))
         {
             sb.Append("| `").Append(row.Id).Append("` | ").Append(row.Tier)
               .Append(" | ").Append(Time(row.BaselineMedian, row.Unit))
@@ -41,6 +51,33 @@ public static class BenchMarkdown
               .Append(" | ").Append(Describe(row.Status));
             if (row.Note is not null) sb.Append(" — ").Append(row.Note.Replace('|', '/'));
             sb.AppendLine(" |");
+        }
+
+        if (snapshots.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("### Process memory");
+            sb.AppendLine();
+            sb.AppendLine("| Snapshot | Tier | Private base | Private now | Δ | Managed base | Managed now | Δ | Working set base | Working set now | Status |");
+            sb.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|");
+
+            foreach (var row in snapshots)
+            {
+                var was = row.BaselineProcess;
+                var now = row.CurrentProcess;
+                sb.Append("| `").Append(row.Id).Append("` | ").Append(row.Tier)
+                  .Append(" | ").Append(Bytes(was?.PrivateBytes))
+                  .Append(" | ").Append(Bytes(now?.PrivateBytes))
+                  .Append(" | ").Append(Delta(row.MemoryDeltaPct))
+                  .Append(" | ").Append(Bytes(was?.ManagedHeapBytes))
+                  .Append(" | ").Append(Bytes(now?.ManagedHeapBytes))
+                  .Append(" | ").Append(Delta(DeltaPct(was?.ManagedHeapBytes, now?.ManagedHeapBytes)))
+                  .Append(" | ").Append(Bytes(was?.WorkingSetBytes))
+                  .Append(" | ").Append(Bytes(now?.WorkingSetBytes))
+                  .Append(" | ").Append(Describe(row.Status));
+                if (row.Note is not null) sb.Append(" — ").Append(row.Note.Replace('|', '/'));
+                sb.AppendLine(" |");
+            }
         }
 
         return sb.ToString();
@@ -82,25 +119,23 @@ public static class BenchMarkdown
                     break;
 
                 case "B":
-                    sb.AppendLine("| Scenario | Median | p95 | Working set | Managed heap | Realized | n |");
-                    sb.AppendLine("|---|---:|---:|---:|---:|---:|---:|");
-                    foreach (var e in tier.OrderBy(e => e.Id, StringComparer.Ordinal))
+                    sb.AppendLine("| Scenario | Median | p95 | n |");
+                    sb.AppendLine("|---|---:|---:|---:|");
+                    foreach (var e in tier.Where(e => e.Process is null).OrderBy(e => e.Id, StringComparer.Ordinal))
                     {
                         sb.Append("| `").Append(e.Id).Append("` | ");
-                        if (e.Error is not null) { sb.Append("error: ").Append(e.Error.Replace('|', '/')).AppendLine(" | | | | | |"); continue; }
+                        if (e.Error is not null) { sb.Append("error: ").Append(e.Error.Replace('|', '/')).AppendLine(" | | |"); continue; }
                         sb.Append(Time(e.Time?.Median, e.Time?.Unit)).Append(" | ")
                           .Append(Time(e.Time?.P95, e.Time?.Unit)).Append(" | ")
-                          .Append(Bytes(e.Process?.WorkingSetBytes)).Append(" | ")
-                          .Append(Bytes(e.Process?.ManagedHeapBytes)).Append(" | ")
-                          .Append(e.Process is null ? "—" : e.Process.RealizedRows.ToString(CultureInfo.InvariantCulture)).Append(" | ")
                           .Append(e.N).AppendLine(" |");
                     }
+                    AppendMemoryTable(sb, tier, rows: true);
                     break;
 
                 default:
                     sb.AppendLine("| Mark | Median | p95 | Min | n |");
                     sb.AppendLine("|---|---:|---:|---:|---:|");
-                    foreach (var e in tier.OrderBy(e => e.Time?.Median ?? double.MaxValue).ThenBy(e => e.Id, StringComparer.Ordinal))
+                    foreach (var e in tier.Where(e => e.Process is null).OrderBy(e => e.Time?.Median ?? double.MaxValue).ThenBy(e => e.Id, StringComparer.Ordinal))
                     {
                         sb.Append("| `").Append(e.Id).Append("` | ");
                         if (e.Error is not null) { sb.Append("error: ").Append(e.Error.Replace('|', '/')).AppendLine(" | | | |"); continue; }
@@ -109,10 +144,43 @@ public static class BenchMarkdown
                           .Append(Time(e.Time?.Min, e.Time?.Unit)).Append(" | ")
                           .Append(e.N).AppendLine(" |");
                     }
+                    AppendMemoryTable(sb, tier, rows: false);
                     break;
             }
 
             sb.AppendLine();
+        }
+    }
+
+    /// <summary>
+    /// The tier's process snapshots, if it has any, as a table of their own under its timings.
+    /// </summary>
+    /// <param name="rows">Whether the snapshots know how many rows the list held (Tier B does; the
+    /// real executable in Tier C has nobody to ask).</param>
+    private static void AppendMemoryTable(StringBuilder sb, IEnumerable<BenchEntry> tier, bool rows)
+    {
+        var snapshots = tier.Where(e => e.Process is not null).OrderBy(e => e.Id, StringComparer.Ordinal).ToList();
+        if (snapshots.Count == 0) return;
+
+        sb.AppendLine();
+        sb.Append("| Memory snapshot | Managed heap | Private bytes | Working set | Peak working set |")
+          .AppendLine(rows ? " Items | Realized | n |" : " n |");
+        sb.Append("|---|---:|---:|---:|---:|").AppendLine(rows ? "---:|---:|---:|" : "---:|");
+
+        foreach (var e in snapshots)
+        {
+            var p = e.Process!;
+            sb.Append("| `").Append(e.Id).Append("` | ")
+              .Append(Bytes(p.ManagedHeapBytes)).Append(" | ")
+              .Append(Bytes(p.PrivateBytes)).Append(" | ")
+              .Append(Bytes(p.WorkingSetBytes)).Append(" | ")
+              .Append(Bytes(p.PeakWorkingSetBytes)).Append(" | ");
+            if (rows)
+            {
+                sb.Append(p.Items.ToString(CultureInfo.InvariantCulture)).Append(" | ")
+                  .Append(p.RealizedRows.ToString(CultureInfo.InvariantCulture)).Append(" | ");
+            }
+            sb.Append(e.N).AppendLine(" |");
         }
     }
 
@@ -127,11 +195,13 @@ public static class BenchMarkdown
     private static string Describe(CompareStatus status) => status switch
     {
         CompareStatus.AllocUp => "allocates more",
+        CompareStatus.MemoryUp => "holds more memory",
         CompareStatus.Slower => "slower",
         CompareStatus.Errored => "errored",
         CompareStatus.Removed => "removed",
         CompareStatus.New => "new",
         CompareStatus.AllocDown => "allocates less",
+        CompareStatus.MemoryDown => "holds less memory",
         CompareStatus.Faster => "faster",
         _ => "same",
     };
@@ -174,6 +244,9 @@ public static class BenchMarkdown
     private static string Delta(double? pct) => pct is { } p
         ? (p >= 0 ? "+" : "") + p.ToString("0.0", CultureInfo.InvariantCulture) + "%"
         : "—";
+
+    private static double? DeltaPct(long? was, long? now) =>
+        was is > 0 && now is { } n ? (n - was.Value) / (double)was.Value * 100 : null;
 
     private static string Pct(double pct) => pct.ToString("0.#", CultureInfo.InvariantCulture) + "%";
 

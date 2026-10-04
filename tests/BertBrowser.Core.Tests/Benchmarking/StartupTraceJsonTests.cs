@@ -29,6 +29,23 @@ public class StartupTraceJsonTests
     }
 
     [Fact]
+    public void Memory_RoundTrips_AndIsAbsentFromAnOlderTrace()
+    {
+        var reading = new StartupMemory(96_000_000, 61_000_000, 9_500_000, 104_000_000);
+        var trace = new StartupTraceData(1, DateTime.UnixEpoch, new Dictionary<string, double>(), "first", "skipped", true, null,
+            new Dictionary<string, StartupMemory> { [StartupMemoryPoints.Collected] = reading });
+
+        var json = StartupTraceJson.Serialize(trace);
+        Assert.Contains("\"managedHeapBytes\": 9500000", json);
+        Assert.Equal(reading, StartupTraceJson.Deserialize(json).Memory![StartupMemoryPoints.Collected]);
+
+        // A trace from a build that did not read its memory has no such property at all.
+        var older = StartupTraceJson.Serialize(trace with { Memory = null });
+        Assert.DoesNotContain("\"memory\"", older);
+        Assert.Null(StartupTraceJson.Deserialize(older).Memory);
+    }
+
+    [Fact]
     public void Serialize_IsCamelCase()
     {
         var json = StartupTraceJson.Serialize(new StartupTraceData(1, DateTime.UnixEpoch, new Dictionary<string, double>(), "second", "skipped", true, "late"));

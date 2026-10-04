@@ -9,7 +9,7 @@ using BertBrowser.App.Views;
 namespace BertBrowser.Harness;
 
 /// <summary>
-/// The benchmarking verbs: timing any other verb, reading the process's memory back, waiting for
+/// The benchmarking verbs: timing or repeating any other verb, reading the process's memory back, waiting for
 /// the two things <c>Settle</c> deliberately does not wait for, and a fixture sized for quantity.
 /// </summary>
 /// <remarks>
@@ -56,11 +56,32 @@ internal sealed partial class ScriptRunner
         RecordTime(name, ms);
     }
 
+    /// <summary><c>repeat &lt;n&gt; &lt;verb&gt; [args][; &lt;verb&gt; [args]…]</c>: the chain, that many times over.</summary>
+    /// <remarks>
+    /// What a soak needs and nothing more: a leak is a few kilobytes a lap, invisible in one and
+    /// unmissable in thirty. It owns the rest of its line, so it cannot sit inside a <c>time</c>
+    /// chain — <c>time</c> splits on the same <c>;</c> first.
+    /// </remarks>
+    private void Repeat(string rest)
+    {
+        var (count, inner) = Split(Require(rest, "repeat"));
+        var laps = Number(count, "repeat");
+        var steps = inner.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (laps < 1 || steps.Length == 0) throw new FormatException("repeat wants '<n> <verb> [args][; <verb> [args]…]'.");
+
+        for (var lap = 0; lap < laps; lap++)
+            foreach (var step in steps) Execute(step);
+    }
+
+    /// <summary>What each named <c>mem</c> read, so a later <c>assert-mem … since</c> has something to subtract.</summary>
+    private readonly Dictionary<string, MemorySample> _memorySamples = new(StringComparer.Ordinal);
+
     /// <summary><c>mem [name]</c>: the process after a full collection.</summary>
     private void Mem(string rest)
     {
         var name = rest.Length == 0 ? "mem" : rest;
         var sample = ReadMemory();
+        _memorySamples[name] = sample;
 
         output.WriteLine("MEM " + JsonSerializer.Serialize(new
         {
@@ -69,32 +90,61 @@ internal sealed partial class ScriptRunner
             sample.ManagedBytes,
             sample.WorkingSetBytes,
             sample.PrivateBytes,
+            sample.PeakWorkingSetBytes,
             sample.Items,
             sample.Realized,
             sample.RetainedThumbnails,
         }, JsonLines));
-        Append(new { kind = "mem", name, sample.ManagedBytes, sample.WorkingSetBytes, sample.PrivateBytes, sample.Items, sample.Realized, sample.RetainedThumbnails });
+        Append(new { kind = "mem", name, sample.ManagedBytes, sample.WorkingSetBytes, sample.PrivateBytes, sample.PeakWorkingSetBytes, sample.Items, sample.Realized, sample.RetainedThumbnails });
     }
 
-    /// <summary><c>assert-mem managed|workingset under &lt;mb&gt;</c>.</summary>
+    /// <summary>
+    /// <c>assert-mem managed|private|workingset under &lt;mb&gt; [since &lt;name&gt;]</c>.
+    /// </summary>
+    /// <remarks>
+    /// With <c>since</c> the budget is on <em>growth</em> over an earlier <c>mem &lt;name&gt;</c> — the
+    /// shape a leak check takes, because what a soak may hold depends on the machine and what it
+    /// may gain does not.
+    /// </remarks>
     private void AssertMem(string rest)
     {
-        var parts = Require(rest, "assert-mem").Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length != 3 || !parts[1].Equals("under", StringComparison.OrdinalIgnoreCase))
-            throw new FormatException("assert-mem wants '<managed|workingset> under <mb>'.");
+        const string usage = "assert-mem wants '<managed|private|workingset> under <mb> [since <name>]'.";
+        var parts = Require(rest, "assert-mem").Split(' ', 5, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length is not (3 or 5) || !parts[1].Equals("under", StringComparison.OrdinalIgnoreCase))
+            throw new FormatException(usage);
+        if (parts.Length == 5 && !parts[3].Equals("since", StringComparison.OrdinalIgnoreCase))
+            throw new FormatException(usage);
 
         var limitMb = Number(parts[2], "assert-mem");
         var sample = ReadMemory();
-        var (what, bytes) = parts[0].ToLowerInvariant() switch
+        Func<MemorySample, long> read;
+        string what;
+        switch (parts[0].ToLowerInvariant())
         {
-            "managed" => ("managed heap", sample.ManagedBytes),
-            "workingset" => ("working set", sample.WorkingSetBytes),
-            var other => throw new FormatException($"assert-mem: expected 'managed' or 'workingset', got '{other}'."),
-        };
+            case "managed": what = "managed heap"; read = s => s.ManagedBytes; break;
+            case "private": what = "private bytes"; read = s => s.PrivateBytes; break;
+            case "workingset": what = "working set"; read = s => s.WorkingSetBytes; break;
+            default: throw new FormatException($"assert-mem: expected 'managed', 'private' or 'workingset', got '{parts[0]}'.");
+        }
 
-        var mb = bytes / (1024.0 * 1024);
-        if (mb >= limitMb)
-            throw new AssertionException($"expected the {what} under {limitMb} MB, got {mb:0.0} MB.");
+        if (parts.Length == 3)
+        {
+            var mb = read(sample) / (1024.0 * 1024);
+            if (mb >= limitMb)
+                throw new AssertionException($"expected the {what} under {limitMb} MB, got {mb:0.0} MB.");
+            return;
+        }
+
+        if (!_memorySamples.TryGetValue(parts[4], out var earlier))
+            throw new FormatException($"assert-mem: no 'mem {parts[4]}' has run yet.");
+
+        var grownMb = (read(sample) - read(earlier)) / (1024.0 * 1024);
+        if (grownMb >= limitMb)
+        {
+            throw new AssertionException(
+                $"expected the {what} to have grown by under {limitMb} MB since '{parts[4]}', " +
+                $"it grew {grownMb:0.0} MB (to {read(sample) / (1024.0 * 1024):0.0} MB).");
+        }
     }
 
     /// <summary>
@@ -195,7 +245,8 @@ internal sealed partial class ScriptRunner
     // ---- readback ----
 
     private readonly record struct MemorySample(
-        long ManagedBytes, long WorkingSetBytes, long PrivateBytes, int Items, int Realized, int RetainedThumbnails);
+        long ManagedBytes, long WorkingSetBytes, long PrivateBytes, long PeakWorkingSetBytes,
+        int Items, int Realized, int RetainedThumbnails);
 
     private MemorySample ReadMemory() => session.Dispatcher.Invoke(() =>
     {
@@ -213,6 +264,7 @@ internal sealed partial class ScriptRunner
             GC.GetTotalMemory(forceFullCollection: false),
             process.WorkingSet64,
             process.PrivateMemorySize64,
+            process.PeakWorkingSet64,
             list.Items.Count,
             RealizedRowCount(),
             list.RetainedThumbnailCount);

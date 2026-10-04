@@ -38,6 +38,21 @@ public class BenchResultsJsonTests
     }
 
     [Fact]
+    public void ProcessStats_PeakIsOptional_SoAnOlderBaselineStillReads()
+    {
+        var with = new BenchEntry("ui.memory.idle", "B", new Dictionary<string, string>(), 5, null, null,
+            new ProcessStats(150_000_000, 70_000_000, 9_400_000, 2, 2, 0, 175_000_000), null);
+        var without = with with { Id = "ui.old", Process = with.Process! with { PeakWorkingSetBytes = null } };
+
+        var json = BenchResultsJson.Serialize(BenchCompareTests.Set([with, without], false));
+        var back = BenchResultsJson.Deserialize(json);
+
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(json, "\"peakWorkingSetBytes\""));
+        Assert.Equal(175_000_000, back.Benchmarks[0].Process!.PeakWorkingSetBytes);
+        Assert.Null(back.Benchmarks[1].Process!.PeakWorkingSetBytes);
+    }
+
+    [Fact]
     public void Serialize_IsCamelCaseAndOmitsNulls()
     {
         var json = BenchResultsJson.Serialize(BenchCompareTests.Set([BenchCompareTests.Entry("a", 1, null)], false));

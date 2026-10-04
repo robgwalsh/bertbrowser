@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "generatedUtc": "2026-10-04T22:26:45.9401079Z",
+  "generatedUtc": "2026-10-04T23:29:56.4373892Z",
   "tool": "BertBrowser.Bench 1.0.0",
   "git": {
-    "sha": "4719d7ce70723c02b3b0af345eeffc7760fcd200",
+    "sha": "844f9055b262f6778778186e3f1737d1018bc22c",
     "branch": "main",
     "dirty": true
   },
@@ -2650,6 +2650,50 @@
       }
     },
     {
+      "id": "startup.memory.collected",
+      "tier": "C",
+      "parameters": {
+        "launches": "10",
+        "discarded": "1",
+        "startFolder": "Startup(500)",
+        "parked": "true",
+        "app": "src\\BertBrowser.App\\bin\\Release\\net10.0-windows\\BertBrowser.exe",
+        "instance": "first"
+      },
+      "n": 9,
+      "process": {
+        "workingSetBytes": 168706048,
+        "privateBytes": 118362112,
+        "managedHeapBytes": 8815984,
+        "realizedRows": 0,
+        "items": 0,
+        "retainedThumbnails": 0,
+        "peakWorkingSetBytes": 171339776
+      }
+    },
+    {
+      "id": "startup.memory.firstListing",
+      "tier": "C",
+      "parameters": {
+        "launches": "10",
+        "discarded": "1",
+        "startFolder": "Startup(500)",
+        "parked": "true",
+        "app": "src\\BertBrowser.App\\bin\\Release\\net10.0-windows\\BertBrowser.exe",
+        "instance": "first"
+      },
+      "n": 9,
+      "process": {
+        "workingSetBytes": 168841216,
+        "privateBytes": 117592064,
+        "managedHeapBytes": 10255064,
+        "realizedRows": 0,
+        "items": 0,
+        "retainedThumbnails": 0,
+        "peakWorkingSetBytes": 171339776
+      }
+    },
+    {
       "id": "startup.migrated",
       "tier": "C",
       "parameters": {
@@ -2977,6 +3021,132 @@
         "stdDev": 16.2446742647552,
         "min": 33.5769,
         "max": 70.6443
+      }
+    },
+    {
+      "id": "ui.memory.flat-20k",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "flat": "20000",
+        "laps": "25",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 181747712,
+        "privateBytes": 99721216,
+        "managedHeapBytes": 25461664,
+        "realizedRows": 34,
+        "items": 20000,
+        "retainedThumbnails": 0,
+        "peakWorkingSetBytes": 185028608
+      }
+    },
+    {
+      "id": "ui.memory.idle",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "flat": "20000",
+        "laps": "25",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 148480000,
+        "privateBytes": 69718016,
+        "managedHeapBytes": 9538744,
+        "realizedRows": 0,
+        "items": 0,
+        "retainedThumbnails": 0,
+        "peakWorkingSetBytes": 153645056
+      }
+    },
+    {
+      "id": "ui.memory.listing-10k",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "flat": "20000",
+        "laps": "25",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 162340864,
+        "privateBytes": 81571840,
+        "managedHeapBytes": 19094416,
+        "realizedRows": 34,
+        "items": 10000,
+        "retainedThumbnails": 0,
+        "peakWorkingSetBytes": 167530496
+      }
+    },
+    {
+      "id": "ui.memory.released",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "flat": "20000",
+        "laps": "25",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 169148416,
+        "privateBytes": 85741568,
+        "managedHeapBytes": 13072312,
+        "realizedRows": 2,
+        "items": 2,
+        "retainedThumbnails": 0,
+        "peakWorkingSetBytes": 185028608
+      }
+    },
+    {
+      "id": "ui.memory.soak-navigate",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "flat": "20000",
+        "laps": "25",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 172003328,
+        "privateBytes": 82608128,
+        "managedHeapBytes": 13129680,
+        "realizedRows": 2,
+        "items": 2,
+        "retainedThumbnails": 0,
+        "peakWorkingSetBytes": 203010048
+      }
+    },
+    {
+      "id": "ui.memory.soak-tabs",
+      "tier": "B",
+      "parameters": {
+        "files": "10000",
+        "flat": "20000",
+        "laps": "25",
+        "renderMode": "SoftwareOnly",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 215691264,
+        "privateBytes": 123805696,
+        "managedHeapBytes": 13977320,
+        "realizedRows": 2,
+        "items": 2,
+        "retainedThumbnails": 0,
+        "peakWorkingSetBytes": 247492608
       }
     },
     {

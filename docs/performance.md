@@ -14,7 +14,8 @@ $bench = "tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe"
 & $bench run                                    # Tier A, default job (long; --filter *PathKey* to narrow)
 & $bench run --job short                        # Tier A, quick pass
 & $bench ui --repeat 5                          # Tier B, each tools/ui/bench-*.bbs five times
-& $bench startup --launches 10                  # Tier C, the real exe (a window is shown offscreen)
+& $bench ui --scenario memory                   # Tier B, just the memory scenario (idle, 10k, 20k flat, soaks)
+& $bench startup --launches 10                  # Tier C, the real exe: time and memory (a window is shown offscreen)
 
 & $bench compare --baseline bench\baselines\<key>.json --current bench-results\current.json
 & $bench baseline --from bench-results\current.json --from bench-results\ui.json --from bench-results\startup.json
@@ -32,7 +33,7 @@ $bench = "tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe"
 | Power plan | High performance |
 | Corpus | synthetic, scale 1 (100,000 rows) |
 | Job | default |
-| Recorded | 2026-10-04 at `4719d7ce7` (uncommitted changes) |
+| Recorded | 2026-10-04 at `844f9055b` (uncommitted changes) |
 
 ### Tier A — Core micro-benchmarks (BenchmarkDotNet)
 
@@ -144,51 +145,60 @@ $bench = "tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe"
 
 ### Tier B — UI scenarios (offscreen harness)
 
-| Scenario | Median | p95 | Working set | Managed heap | Realized | n |
-|---|---:|---:|---:|---:|---:|---:|
-| `ui.flat-20k.flat` | — | — | 173 MB | 13.5 MB | 34 | 5 |
-| `ui.flat-20k.flat.off` | 108 ms | 118 ms | — | — | — | 5 |
-| `ui.flat-20k.flat.on` | 494 ms | 509 ms | — | — | — | 5 |
-| `ui.flat-20k.flat.sort.name` | 126 ms | 134 ms | — | — | — | 5 |
-| `ui.flat-20k.flat.sort.size` | 140 ms | 144 ms | — | — | — | 5 |
-| `ui.listing-10k.back` | 148 ms | 167 ms | — | — | — | 5 |
-| `ui.listing-10k.list` | 268 ms | 277 ms | — | — | — | 5 |
-| `ui.listing-10k.listing` | — | — | 168 MB | 18.6 MB | 34 | 5 |
-| `ui.listing-10k.refresh` | 255 ms | 264 ms | — | — | — | 5 |
-| `ui.listing-10k.up` | 34.1 ms | 70.6 ms | — | — | — | 5 |
-| `ui.preview.preview` | — | — | 219 MB | 34.1 MB | 10 | 5 |
-| `ui.preview.preview.code` | 262 ms | 273 ms | — | — | — | 5 |
-| `ui.preview.preview.hex2mb` | 2.97 s | 3.02 s | — | — | — | 5 |
-| `ui.preview.preview.png` | 259 ms | 283 ms | — | — | — | 5 |
-| `ui.preview.preview.text2mb` | 1.98 s | 2.14 s | — | — | — | 5 |
-| `ui.search-local.search` | — | — | 165 MB | 13.6 MB | 34 | 5 |
-| `ui.search-local.search.clear` | 115 ms | 117 ms | — | — | — | 5 |
-| `ui.search-local.search.ext` | 331 ms | 383 ms | — | — | — | 5 |
-| `ui.search-local.search.regex` | 384 ms | 418 ms | — | — | — | 5 |
-| `ui.search-local.search.word` | 639 ms | 698 ms | — | — | — | 5 |
-| `ui.sort-select-10k.select.all` | 9.73 s | 9.76 s | — | — | — | 5 |
-| `ui.sort-select-10k.select.none` | 17.8 ms | 18.4 ms | — | — | — | 5 |
-| `ui.sort-select-10k.sort` | — | — | 184 MB | 19.9 MB | 34 | 5 |
-| `ui.sort-select-10k.sort.modified` | 97.6 ms | 98.5 ms | — | — | — | 5 |
-| `ui.sort-select-10k.sort.name` | 237 ms | 242 ms | — | — | — | 5 |
-| `ui.sort-select-10k.sort.size` | 121 ms | 122 ms | — | — | — | 5 |
-| `ui.sort-select-10k.sort.type` | 120 ms | 121 ms | — | — | — | 5 |
-| `ui.startup.startup.hosted` | 953 ms | 959 ms | — | — | — | 5 |
-| `ui.tabs-panes.pane.close` | 71.5 ms | 72.8 ms | — | — | — | 5 |
-| `ui.tabs-panes.pane.split` | 222 ms | 240 ms | — | — | — | 5 |
-| `ui.tabs-panes.pane.switch` | 1.35 ms | 1.49 ms | — | — | — | 5 |
-| `ui.tabs-panes.tab.close` | 31.0 ms | 32.1 ms | — | — | — | 5 |
-| `ui.tabs-panes.tab.new` | 291 ms | 305 ms | — | — | — | 5 |
-| `ui.tabs-panes.tab.switch` | 6.21 ms | 6.53 ms | — | — | — | 5 |
-| `ui.tabs-panes.tabs` | — | — | 180 MB | 25.6 MB | 34 | 5 |
-| `ui.tiles-5k.tiles` | — | — | 201 MB | 16.1 MB | 34 | 5 |
-| `ui.tiles-5k.tiles.back` | 83.8 ms | 108 ms | — | — | — | 5 |
-| `ui.tiles-5k.tiles.large` | 127 ms | 134 ms | — | — | — | 5 |
-| `ui.tiles-5k.tiles.on` | 320 ms | 414 ms | — | — | — | 5 |
-| `ui.tiles-5k.tiles.scroll` | 375 ms | 376 ms | — | — | — | 5 |
-| `ui.transfer-2k.copy.2k` | 1.40 s | 1.45 s | — | — | — | 5 |
-| `ui.transfer-2k.delete.2k` | 486 ms | 508 ms | — | — | — | 5 |
-| `ui.transfer-2k.transfer` | — | — | 166 MB | 12.5 MB | 0 | 5 |
+| Scenario | Median | p95 | n |
+|---|---:|---:|---:|
+| `ui.flat-20k.flat.off` | 108 ms | 118 ms | 5 |
+| `ui.flat-20k.flat.on` | 494 ms | 509 ms | 5 |
+| `ui.flat-20k.flat.sort.name` | 126 ms | 134 ms | 5 |
+| `ui.flat-20k.flat.sort.size` | 140 ms | 144 ms | 5 |
+| `ui.listing-10k.back` | 148 ms | 167 ms | 5 |
+| `ui.listing-10k.list` | 268 ms | 277 ms | 5 |
+| `ui.listing-10k.refresh` | 255 ms | 264 ms | 5 |
+| `ui.listing-10k.up` | 34.1 ms | 70.6 ms | 5 |
+| `ui.preview.preview.code` | 262 ms | 273 ms | 5 |
+| `ui.preview.preview.hex2mb` | 2.97 s | 3.02 s | 5 |
+| `ui.preview.preview.png` | 259 ms | 283 ms | 5 |
+| `ui.preview.preview.text2mb` | 1.98 s | 2.14 s | 5 |
+| `ui.search-local.search.clear` | 115 ms | 117 ms | 5 |
+| `ui.search-local.search.ext` | 331 ms | 383 ms | 5 |
+| `ui.search-local.search.regex` | 384 ms | 418 ms | 5 |
+| `ui.search-local.search.word` | 639 ms | 698 ms | 5 |
+| `ui.sort-select-10k.select.all` | 9.73 s | 9.76 s | 5 |
+| `ui.sort-select-10k.select.none` | 17.8 ms | 18.4 ms | 5 |
+| `ui.sort-select-10k.sort.modified` | 97.6 ms | 98.5 ms | 5 |
+| `ui.sort-select-10k.sort.name` | 237 ms | 242 ms | 5 |
+| `ui.sort-select-10k.sort.size` | 121 ms | 122 ms | 5 |
+| `ui.sort-select-10k.sort.type` | 120 ms | 121 ms | 5 |
+| `ui.startup.startup.hosted` | 953 ms | 959 ms | 5 |
+| `ui.tabs-panes.pane.close` | 71.5 ms | 72.8 ms | 5 |
+| `ui.tabs-panes.pane.split` | 222 ms | 240 ms | 5 |
+| `ui.tabs-panes.pane.switch` | 1.35 ms | 1.49 ms | 5 |
+| `ui.tabs-panes.tab.close` | 31.0 ms | 32.1 ms | 5 |
+| `ui.tabs-panes.tab.new` | 291 ms | 305 ms | 5 |
+| `ui.tabs-panes.tab.switch` | 6.21 ms | 6.53 ms | 5 |
+| `ui.tiles-5k.tiles.back` | 83.8 ms | 108 ms | 5 |
+| `ui.tiles-5k.tiles.large` | 127 ms | 134 ms | 5 |
+| `ui.tiles-5k.tiles.on` | 320 ms | 414 ms | 5 |
+| `ui.tiles-5k.tiles.scroll` | 375 ms | 376 ms | 5 |
+| `ui.transfer-2k.copy.2k` | 1.40 s | 1.45 s | 5 |
+| `ui.transfer-2k.delete.2k` | 486 ms | 508 ms | 5 |
+
+| Memory snapshot | Managed heap | Private bytes | Working set | Peak working set | Items | Realized | n |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `ui.flat-20k.flat` | 13.5 MB | 95.4 MB | 173 MB | — | 200 | 34 | 5 |
+| `ui.listing-10k.listing` | 18.6 MB | 90.8 MB | 168 MB | — | 10000 | 34 | 5 |
+| `ui.memory.flat-20k` | 24.3 MB | 95.1 MB | 173 MB | 176 MB | 20000 | 34 | 5 |
+| `ui.memory.idle` | 9.10 MB | 66.5 MB | 142 MB | 147 MB | 0 | 0 | 5 |
+| `ui.memory.listing-10k` | 18.2 MB | 77.8 MB | 155 MB | 160 MB | 10000 | 34 | 5 |
+| `ui.memory.released` | 12.5 MB | 81.8 MB | 161 MB | 176 MB | 2 | 2 | 5 |
+| `ui.memory.soak-navigate` | 12.5 MB | 78.8 MB | 164 MB | 194 MB | 2 | 2 | 5 |
+| `ui.memory.soak-tabs` | 13.3 MB | 118 MB | 206 MB | 236 MB | 2 | 2 | 5 |
+| `ui.preview.preview` | 34.1 MB | 126 MB | 219 MB | — | 10 | 10 | 5 |
+| `ui.search-local.search` | 13.6 MB | 85.6 MB | 165 MB | — | 200 | 34 | 5 |
+| `ui.sort-select-10k.sort` | 19.9 MB | 101 MB | 184 MB | — | 10000 | 34 | 5 |
+| `ui.tabs-panes.tabs` | 25.6 MB | 103 MB | 180 MB | — | 5000 | 34 | 5 |
+| `ui.tiles-5k.tiles` | 16.1 MB | 119 MB | 201 MB | — | 5000 | 34 | 5 |
+| `ui.transfer-2k.transfer` | 12.5 MB | 81.4 MB | 166 MB | — | 0 | 0 | 5 |
 
 ### Tier C — Startup of the real executable
 
@@ -205,6 +215,11 @@ $bench = "tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe"
 | `startup.firstListing` | 714 ms | 725 ms | 703 ms | 9 |
 | `startup.processLifetime` | 1.09 s | 1.11 s | 1.08 s | 9 |
 
+| Memory snapshot | Managed heap | Private bytes | Working set | Peak working set | n |
+|---|---:|---:|---:|---:|---:|
+| `startup.memory.collected` | 8.41 MB | 113 MB | 161 MB | 163 MB | 9 |
+| `startup.memory.firstListing` | 9.78 MB | 112 MB | 161 MB | 163 MB | 9 |
+
 ## What the numbers do and do not mean
 
 - **Tier A** is BenchmarkDotNet over `BertBrowser.Core` with a synthetic corpus unless marked real.
@@ -218,5 +233,15 @@ $bench = "tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe"
   app writes under `BERTBROWSER_STARTUP_TRACE`. The window is parked offscreen and the post-window
   side effects (index-helper attach, change-log policy, update check) are skipped, so the headline is
   "process start to first listing", not "to idle". The first launch is discarded as cold.
+- **Memory** is three different measurements. Tier A's `Allocated/op` is what one call allocates. A
+  Tier B *memory snapshot* is the harness process at a named point in a scenario, after a full
+  collection, so the managed heap is what the app is holding rather than what is waiting to be
+  collected; its working set and private bytes include the harness and the software rasteriser.
+  `ui.memory.*` is the scenario written for this: idle, ten thousand rows, twenty thousand flat,
+  after leaving them, and after two soaks (25 navigations, 15 tabs opened and closed) that must not
+  grow. Tier C's `startup.memory.*` is the real executable reading itself with the first listing up:
+  `firstListing` as it stood, which is what Task Manager shows, and `collected` after a full collection.
+  A later run is held to the managed heap within 10% and private bytes within 25%; the working set is
+  reported and not judged, because Windows trims it for its own reasons.
 - Medians are reported because a single slow sample is the machine, not the code; p95 is nearest-rank.
 

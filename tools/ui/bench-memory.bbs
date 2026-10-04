@@ -1,0 +1,39 @@
+#! files=10000 flat=20000 laps=25
+# Tier B: what the process holds, rather than how long anything takes.
+#
+# Five questions, each a `mem` (which collects fully first, so the answer is what is *held*): the
+# floor with a window on a small folder; ten thousand rows listed; twenty thousand in a flat view;
+# whether leaving gives all of that back; and whether doing it again and again keeps anything — the
+# two soaks, where a leak of a few kilobytes a lap is invisible in one and unmissable in twenty-five.
+#
+# The managed heap and private bytes are the numbers to read. The working set here is the harness's,
+# under the software rasteriser; the real executable's is `startup.memory.*` in Tier C.
+# The `since` budgets are on growth, not size, so they hold on any machine; `compare` judges the sizes.
+
+bench-fixture 10000 0 Big
+bench-fixture 20000 200 Deep
+flat-cap 100000
+mem idle
+
+go Big
+assert-count 10000
+mem listing-10k
+up
+
+go Deep
+flat on
+assert-count 20000
+mem flat-20k
+flat off
+up
+mem released
+
+repeat 25 go Big; up
+mem soak-navigate
+assert-mem managed under 8 since released
+
+repeat 15 newtab Big; closetab
+assert-tabs 1
+mem soak-tabs
+assert-mem managed under 8 since soak-navigate
+assert-not-launched

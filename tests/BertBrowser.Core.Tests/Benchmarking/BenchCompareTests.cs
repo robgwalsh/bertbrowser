@@ -112,6 +112,59 @@ public class BenchCompareTests
         Assert.False(report.AllocRegressed);
     }
 
+    [Theory]
+    [InlineData(13.0, 13.9, CompareStatus.Same)]       // +0.9 MB: under the 1 MB floor, whatever the percentage
+    [InlineData(13.0, 14.2, CompareStatus.Same)]       // +1.2 MB clears the floor but is 9.2%
+    [InlineData(13.0, 14.5, CompareStatus.MemoryUp)]   // +1.5 MB and 11.5%
+    [InlineData(13.0, 120.0, CompareStatus.MemoryUp)]  // the fifteen-tab leak this gate was written after
+    [InlineData(20.0, 17.0, CompareStatus.MemoryDown)]
+    public void ManagedHeap_JudgedAtTenPercentOverAMegabyte(double before, double after, CompareStatus expected)
+    {
+        var report = Compare([Snapshot("m", 100, before)], [Snapshot("m", 100, after)]);
+        Assert.Equal(expected, report.Rows[0].Status);
+        Assert.Equal(expected == CompareStatus.MemoryUp, report.MemoryRegressed);
+        Assert.False(report.TimeRegressed);
+        Assert.False(report.AllocRegressed);
+    }
+
+    [Theory]
+    [InlineData(100, 112, CompareStatus.Same)]      // the spread measured between identical runs
+    [InlineData(100, 124, CompareStatus.Same)]      // over the 16 MB floor, under 25%
+    [InlineData(100, 130, CompareStatus.MemoryUp)]
+    [InlineData(40, 55, CompareStatus.Same)]        // +37%, but 15 MB is under the floor
+    [InlineData(100, 70, CompareStatus.MemoryDown)]
+    public void PrivateBytes_JudgedLooserThanTheManagedHeap(double before, double after, CompareStatus expected)
+    {
+        var report = Compare([Snapshot("m", before, 13)], [Snapshot("m", after, 13)]);
+        Assert.Equal(expected, report.Rows[0].Status);
+        Assert.Equal(expected == CompareStatus.MemoryUp, report.MemoryRegressed);
+    }
+
+    [Fact]
+    public void WorkingSet_IsReportedAndNeverJudged()
+    {
+        var report = Compare([Snapshot("m", 100, 13, workingSetMb: 150)], [Snapshot("m", 100, 13, workingSetMb: 600)]);
+        Assert.Equal(CompareStatus.Same, report.Rows[0].Status);
+        Assert.False(report.MemoryRegressed);
+        Assert.Equal(600L * 1024 * 1024, report.Rows[0].CurrentProcess!.WorkingSetBytes);
+    }
+
+    [Fact]
+    public void MemoryGateOff_StillReportsMemoryUp()
+    {
+        var report = Compare([Snapshot("m", 100, 13)], [Snapshot("m", 100, 30)], Default with { GateMemory = false });
+        Assert.Equal(CompareStatus.MemoryUp, report.Rows[0].Status);
+        Assert.False(report.MemoryRegressed);
+    }
+
+    [Fact]
+    public void MemoryUp_WinsOverAShrinkingOtherNumber()
+    {
+        // Private bytes fell and the managed heap rose: the rise is the news.
+        var report = Compare([Snapshot("m", 200, 13)], [Snapshot("m", 100, 30)]);
+        Assert.Equal(CompareStatus.MemoryUp, report.Rows[0].Status);
+    }
+
     [Fact]
     public void New_Removed_Errored()
     {
@@ -175,6 +228,16 @@ public class BenchCompareTests
             new TimeStats(unit, median, median, median * 1.05, median * 0.02, median * 0.98, median * 1.1),
             alloc is { } a ? new AllocStats(a, 1.0, 0, 0, tolerance) : null,
             null, null);
+
+    /// <summary>A process snapshot: the working set is twice the private bytes and the peak 10 MB over that.</summary>
+    internal static BenchEntry Snapshot(string id, double privateMb, double managedMb, string tier = "A", double? workingSetMb = null)
+    {
+        const double mb = 1024 * 1024;
+        var workingSet = workingSetMb ?? privateMb * 2;
+        return new(id, tier, new Dictionary<string, string>(), 5, null, null,
+            new ProcessStats((long)(workingSet * mb), (long)(privateMb * mb), (long)(managedMb * mb), 5, 10, 0, (long)((workingSet + 10) * mb)),
+            null);
+    }
 
     private static BenchEntry Failed(string id) =>
         new(id, "A", new Dictionary<string, string>(), 0, null, null, null, "threw NullReferenceException");

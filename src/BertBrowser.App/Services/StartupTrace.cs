@@ -129,6 +129,40 @@ internal static class StartupTrace
         window.Focusable = false;
     }
 
+    /// <summary>
+    /// The process as it stands with the first listing up, then again after a full collection.
+    /// </summary>
+    /// <remarks>
+    /// Both, because they answer different questions: the first is what Task Manager shows a person
+    /// who has just opened the app, the second is what the app is holding and is the one steady
+    /// enough to compare between builds. Collected the way the harness's <c>mem</c> verb collects —
+    /// twice with finalizers between, since the first pass only queues what bitmaps and SQLite
+    /// handles release.
+    /// </remarks>
+    private static Dictionary<string, StartupMemory> ReadMemory()
+    {
+        var memory = new Dictionary<string, StartupMemory>(StringComparer.Ordinal)
+        {
+            [StartupMemoryPoints.FirstListing] = Snapshot(),
+        };
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        memory[StartupMemoryPoints.Collected] = Snapshot();
+        return memory;
+    }
+
+    private static StartupMemory Snapshot()
+    {
+        using var process = Process.GetCurrentProcess();
+        return new StartupMemory(
+            process.WorkingSet64,
+            process.PrivateMemorySize64,
+            GC.GetTotalMemory(forceFullCollection: false),
+            process.PeakWorkingSet64);
+    }
+
     private static void FinishIfComplete(Window window)
     {
         lock (Gate)
@@ -147,7 +181,14 @@ internal static class StartupTrace
             if (_flushed) return;
             _flushed = true;
             _fallback?.Dispose();
+        }
 
+        // After every mark is in, so the collection it forces is on nobody's clock but the
+        // process lifetime's.
+        var memory = ReadMemory();
+
+        lock (Gate)
+        {
             trace = new StartupTraceData(
                 Environment.ProcessId,
                 _processStartUtc,
@@ -155,7 +196,8 @@ internal static class StartupTrace
                 _instance,
                 Indexer: "skipped",
                 SideEffectsSkipped: true,
-                error);
+                error,
+                memory);
         }
 
         try

@@ -35,7 +35,18 @@ public sealed class ThemeTokenDictionary : ResourceDictionary
     private static readonly Dictionary<string, ThemeBrush> SharedBrushes =
         ThemeToken.All.ToDictionary(key => key, _ => new ThemeBrush(), StringComparer.Ordinal);
 
-    private static readonly List<ThemeTokenDictionary> Instances = new();
+    /// <summary>
+    /// Every dictionary still in use, so a theme change can refill each one's colour keys.
+    /// </summary>
+    /// <remarks>
+    /// Weak, and it has to be. A view that merges <c>Tokens.xaml</c> into its own resources gets an
+    /// instance of its own — the preview pane does, so there is one per tab — and WPF hands a
+    /// dictionary's owner to the unfrozen brushes inside it as their inheritance context. A strong
+    /// list here therefore kept every tab ever opened alive, listing and all, through the system
+    /// colour brushes <see cref="ThemeSystemColors"/> adds: fifteen tabs on a ten-thousand-file
+    /// folder, opened and closed, left 105 MB behind. <c>tools/ui/bench-memory.bbs</c> holds this down.
+    /// </remarks>
+    private static readonly List<WeakReference<ThemeTokenDictionary>> Instances = new();
 
     private static ResolvedTheme _current = ThemeResolver.Resolve(ThemeCatalog.Default, ThemeCatalog.Find);
 
@@ -44,7 +55,8 @@ public sealed class ThemeTokenDictionary : ResourceDictionary
     public ThemeTokenDictionary()
     {
         foreach (var key in ThemeToken.All) this[key] = SharedBrushes[key].Brush;
-        Instances.Add(this);
+        Instances.RemoveAll(i => !i.TryGetTarget(out _));
+        Instances.Add(new WeakReference<ThemeTokenDictionary>(this));
         Populate(this, _current);
     }
 
@@ -60,7 +72,10 @@ public sealed class ThemeTokenDictionary : ResourceDictionary
     {
         _current = theme;
         Recolour(theme);
-        foreach (var instance in Instances) Populate(instance, theme);
+        foreach (var reference in Instances)
+        {
+            if (reference.TryGetTarget(out var instance)) Populate(instance, theme);
+        }
     }
 
     public static Color ToMediaColor(ThemeColor color) =>

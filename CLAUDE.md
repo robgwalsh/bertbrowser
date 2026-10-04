@@ -401,13 +401,21 @@ you where and what to watch for.
   a drag) after `MarqueeSelector` had already been fixed for it. Leave it unfrozen and it repaints
   on a theme change for free; freeze a `SolidColorBrush` you built yourself from a `ThemeColor`
   instead (`TreemapCanvas` does).
+- **A static must not hold a view, and a theme dictionary is a view's.** A control that merges
+  `Tokens.xaml` into its own resources (the preview pane: one per tab) gets its own
+  `ThemeTokenDictionary`, and WPF gives a dictionary's unfrozen brushes their *owner* as inheritance
+  context — so the registry `ApplyTheme` walks is weak. Strong, it kept every closed tab and its
+  whole listing alive (15 tabs on 10k files: 105 MB). The soaks in `tools/ui/bench-memory.bbs` are
+  what catch the next one; `dotnet-dump analyze` → `gcroot` on a `DirectoryTabView` names the holder.
 - **Three benchmark tiers write one schema, and only `BertBrowser.Bench` writes it.** Tier A is
   BenchmarkDotNet over Core (`tools/BertBrowser.Bench/Benchmarks`), Tier B times whole scenarios
   through the harness (`tools/ui/bench-*.bbs`; the `time` verb wraps any verb, so each sample is
   "issued to settled"), Tier C launches the real exe. The harness and the app emit raw samples; the
   Bench exe aggregates them into `Core/Benchmarking.BenchResultSet`, which `compare` judges against
   `bench/baselines/<machine-key>.json`. **CI gates allocations only** (deterministic); time gates run
-  locally at 15% over a noise floor. Compare like with like: the in-process and default toolchains
+  locally at 15% over a noise floor, and so does process memory — `mem` snapshots in Tier B
+  (`bench-memory.bbs` is the one about nothing else) and the real exe's own reading in Tier C — with
+  the managed heap held tight and private bytes loose, because only the first repeats. Compare like with like: the in-process and default toolchains
   report different allocations for SQLite and hashing code (measured, 5× on MD5), so the CI baseline
   is recorded by CI and a local baseline by the default job. A deliberate slowdown re-records the baseline and regenerates
   `docs/performance.md` (`report`) in the same commit, with the reason in the message. Consequences

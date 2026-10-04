@@ -21,13 +21,14 @@ evidence is `docs/performance.md`, generated from the baselines in this folder.
 |---|---|---|---|
 | A | Core code paths: search, index writes, planners, hashing, preview readers… | BenchmarkDotNet, in `tools/BertBrowser.Bench/Benchmarks` | ns, bytes allocated |
 | B | Whole UI scenarios: open a 10k folder, flat view, tiles, search, transfer, preview | The offscreen harness, `tools/ui/bench-*.bbs`, each scenario K times in a fresh process | ms, process memory |
-| C | Startup of the real `BertBrowser.exe` to first listing | N launches against a scratch data dir, marks written by the app | ms |
+| C | Startup of the real `BertBrowser.exe` to first listing, and what it holds once there | N launches against a scratch data dir, marks and memory written by the app | ms, process memory |
 
-A Tier B script is an ordinary harness script with three extra verbs: `time <name> <verb>[; <verb>…]`
-wraps any verb (or chain) under a stopwatch, `mem <name>` reads the process back after a full
-collection, and `settle-thumbnails` / `settle-preview` wait for the two things `Settle` deliberately
-does not. A `#! files=10000 dirs=50` line carries the fixture size into the result. `BertBrowser.Bench
-ui` runs each script K times as separate processes and takes the median.
+A Tier B script is an ordinary harness script with a few extra verbs: `time <name> <verb>[; <verb>…]`
+wraps any verb (or chain) under a stopwatch, `repeat <n> <verb>[; <verb>…]` runs one n times, `mem
+<name>` reads the process back after a full collection, and `settle-thumbnails` / `settle-preview`
+wait for the two things `Settle` deliberately does not. A `#! files=10000 dirs=50` line carries the
+fixture size into the result. `BertBrowser.Bench ui` runs each script K times as separate processes
+and takes the median.
 
 Tier C refuses while a real BertBrowser is running: the single-instance claim is per user, so the
 launch would be a "second" copy and measure a different path. `--allow-running` measures it anyway and
@@ -86,6 +87,29 @@ Pure code allocates exactly the same bytes every run, and one extra object is th
 gate exists for. Code over SQLite, the thread pool or disk does not have that property. Those
 benchmark classes carry `[AllocationTolerance(2)]` (five for the end-to-end disk scans) and the
 tolerance travels in the result. Do not loosen a pure benchmark to make a run pass.
+
+## Process memory
+
+Three measurements, and they are not interchangeable:
+
+| Where | What | Read it as |
+|---|---|---|
+| Tier A `Allocated/op` | Bytes one call allocates | Churn. Gated in CI. |
+| Tier B `mem <name>` → `ui.<scenario>.<name>` | The harness process after a full collection: managed heap, private bytes, working set, peak | What the app *holds* at that point. The managed heap is the app's own; the OS numbers include the harness and the software rasteriser. |
+| Tier C `startup.memory.firstListing` / `.collected` | The real `BertBrowser.exe` reading itself once the first listing is up, as it stood and after a full collection | The number a user sees in Task Manager, and the steadier one beside it. |
+
+`tools/ui/bench-memory.bbs` is the scenario about memory and nothing else: idle, 10,000 rows, 20,000
+flat, after leaving them, then two soaks — 25 navigations, 15 tabs opened and closed — each followed by
+`assert-mem managed under <mb> since <name>`, a budget on *growth* that fails the run on any machine.
+That is the leak check; the first time it ran it found every closed tab still alive.
+
+`compare` puts snapshots in their own table and gates them locally (never in CI): the managed heap at
+10% over 1 MB, private bytes at 25% over 16 MB. The asymmetry is measured — over identical runs the
+collected managed heap repeats to 0.1 MB while private bytes wander by 10 MB in 100. The working set is
+reported, never judged. `--memory-threshold <pct>` moves the managed-heap line; `--no-memory` reports
+without gating.
+
+A snapshot that grew on purpose is re-recorded like a slowdown: same commit, reason in the message.
 
 ## Real data
 

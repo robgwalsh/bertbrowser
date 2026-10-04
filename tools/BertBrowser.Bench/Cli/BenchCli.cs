@@ -45,7 +45,8 @@ internal static class BenchCli
                       --out <file>             default bench-results/startup.json
                       --machine-key <name>
           compare   --baseline <file> --current <file>
-                      [--time-threshold <pct>] [--alloc-threshold <pct>] [--no-time] [--no-alloc]
+                      [--time-threshold <pct>] [--alloc-threshold <pct>] [--memory-threshold <pct>]
+                      [--no-time] [--no-alloc] [--no-memory]
                       [--strict] [--summary <md-file>] [--title <text>]
                       --ci                     gates allocations only; writes $GITHUB_STEP_SUMMARY;
                                                with no baseline, writes a candidate and passes

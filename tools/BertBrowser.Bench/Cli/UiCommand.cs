@@ -110,7 +110,9 @@ internal static class UiCommand
                 }
 
                 samples.Add(ReadSamples(benchOut));
-                Console.WriteLine($"#   run {k}: {string.Join(", ", samples[^1].Where(s => s.Ms is not null).Select(s => $"{s.Name} {s.Ms:0} ms"))}");
+                Console.WriteLine($"#   run {k}: {string.Join(", ", samples[^1].Select(s => s.Ms is not null
+                    ? $"{s.Name} {s.Ms:0} ms"
+                    : $"{s.Name} {s.Process!.ManagedHeapBytes / (1024.0 * 1024):0.0}/{s.Process.PrivateBytes / (1024.0 * 1024):0} MB"))}");
             }
 
             if (failure is not null)
@@ -217,7 +219,8 @@ internal static class UiCommand
                     o.GetProperty("managedBytes").GetInt64(),
                     o.GetProperty("realized").GetInt32(),
                     o.GetProperty("items").GetInt32(),
-                    o.GetProperty("retainedThumbnails").GetInt32())));
+                    o.GetProperty("retainedThumbnails").GetInt32(),
+                    o.TryGetProperty("peakWorkingSetBytes", out var peak) ? peak.GetInt64() : null)));
         }
 
         return samples;
@@ -251,7 +254,8 @@ internal static class UiCommand
                     Median(mems.Select(m => (double)m.ManagedHeapBytes)),
                     (int)Median(mems.Select(m => (double)m.RealizedRows)),
                     (int)Median(mems.Select(m => (double)m.Items)),
-                    (int)Median(mems.Select(m => (double)m.RetainedThumbnails)));
+                    (int)Median(mems.Select(m => (double)m.RetainedThumbnails)),
+                    mems.All(m => m.PeakWorkingSetBytes is not null) ? Median(mems.Select(m => (double)m.PeakWorkingSetBytes!.Value)) : null);
                 yield return new BenchEntry(id, "B", parameters, mems.Count, null, null, process, null);
             }
         }

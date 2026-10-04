@@ -98,7 +98,10 @@ internal static class StartupCommand
 
             var trace = result.Trace!;
             var first = trace.MarksMs.TryGetValue(StartupMarks.FirstListing, out var fl) ? $"{fl:0} ms" : "no first listing";
-            Console.WriteLine($"#   launch {k}{(k == 0 ? " (cold, discarded)" : "")}: first listing at {first}, " +
+            var held = trace.Memory?.GetValueOrDefault(StartupMemoryPoints.FirstListing) is { } m
+                ? $", {m.WorkingSetBytes / (1024.0 * 1024):0} MB working set"
+                : "";
+            Console.WriteLine($"#   launch {k}{(k == 0 ? " (cold, discarded)" : "")}: first listing at {first}{held}, " +
                               $"exit after {result.LifetimeMs:0} ms, instance {trace.Instance}" +
                               (trace.Error is null ? "" : $", error: {trace.Error}"));
 
@@ -139,6 +142,20 @@ internal static class StartupCommand
 
             entries.Add(new BenchEntry("startup.processLifetime", "C", parameters, kept.Count,
                 TimeStats.From(kept.Select(t => t.LifetimeMs).ToList(), "ms"), null, null, null));
+
+            // The app's own readings of itself, one entry per point, each field the median launch.
+            var points = kept.SelectMany(t => t.Trace.Memory?.Keys ?? []).Distinct(StringComparer.Ordinal);
+            foreach (var point in points)
+            {
+                var readings = kept.Select(t => t.Trace.Memory?.GetValueOrDefault(point)).OfType<StartupMemory>().ToList();
+                var process = new ProcessStats(
+                    Median(readings.Select(m => m.WorkingSetBytes)),
+                    Median(readings.Select(m => m.PrivateBytes)),
+                    Median(readings.Select(m => m.ManagedHeapBytes)),
+                    RealizedRows: 0, Items: 0, RetainedThumbnails: 0,
+                    Median(readings.Select(m => m.PeakWorkingSetBytes)));
+                entries.Add(new BenchEntry($"startup.memory.{point}", "C", parameters, readings.Count, null, null, process, null));
+            }
         }
 
         var set = new BenchResultSet(
@@ -164,6 +181,14 @@ internal static class StartupCommand
         }
 
         return failure is null ? Exit.Ok : Exit.Errors;
+    }
+
+    private static long Median(IEnumerable<long> values)
+    {
+        var sorted = values.Order().ToArray();
+        if (sorted.Length == 0) return 0;
+        var mid = sorted.Length / 2;
+        return sorted.Length % 2 == 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
     }
 
     private sealed record LaunchResult(StartupTraceData? Trace, double LifetimeMs, string? Error);

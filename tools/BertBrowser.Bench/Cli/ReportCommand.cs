@@ -14,7 +14,8 @@ internal static class ReportCommand
         & $bench run                                    # Tier A, default job (long; --filter *PathKey* to narrow)
         & $bench run --job short                        # Tier A, quick pass
         & $bench ui --repeat 5                          # Tier B, each tools/ui/bench-*.bbs five times
-        & $bench startup --launches 10                  # Tier C, the real exe (a window is shown offscreen)
+        & $bench ui --scenario memory                   # Tier B, just the memory scenario (idle, 10k, 20k flat, soaks)
+        & $bench startup --launches 10                  # Tier C, the real exe: time and memory (a window is shown offscreen)
 
         & $bench compare --baseline bench\baselines\<key>.json --current bench-results\current.json
         & $bench baseline --from bench-results\current.json --from bench-results\ui.json --from bench-results\startup.json

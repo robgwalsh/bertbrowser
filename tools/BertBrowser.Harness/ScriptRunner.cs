@@ -338,6 +338,7 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
 
             // benchmarking (ScriptRunner.Bench.cs)
             case "time": Time(rest); break;
+            case "repeat": Repeat(rest); break;
             case "mem": Mem(rest); break;
             case "assert-mem": AssertMem(rest); break;
             case "settle-thumbnails": SettleThumbnails(rest); break;

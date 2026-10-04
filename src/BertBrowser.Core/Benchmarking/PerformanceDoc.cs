@@ -71,6 +71,16 @@ public static class PerformanceDoc
         sb.AppendLine("  app writes under `BERTBROWSER_STARTUP_TRACE`. The window is parked offscreen and the post-window");
         sb.AppendLine("  side effects (index-helper attach, change-log policy, update check) are skipped, so the headline is");
         sb.AppendLine("  \"process start to first listing\", not \"to idle\". The first launch is discarded as cold.");
+        sb.AppendLine("- **Memory** is three different measurements. Tier A's `Allocated/op` is what one call allocates. A");
+        sb.AppendLine("  Tier B *memory snapshot* is the harness process at a named point in a scenario, after a full");
+        sb.AppendLine("  collection, so the managed heap is what the app is holding rather than what is waiting to be");
+        sb.AppendLine("  collected; its working set and private bytes include the harness and the software rasteriser.");
+        sb.AppendLine("  `ui.memory.*` is the scenario written for this: idle, ten thousand rows, twenty thousand flat,");
+        sb.AppendLine("  after leaving them, and after two soaks (25 navigations, 15 tabs opened and closed) that must not");
+        sb.AppendLine("  grow. Tier C's `startup.memory.*` is the real executable reading itself with the first listing up:");
+        sb.AppendLine("  `firstListing` as it stood, which is what Task Manager shows, and `collected` after a full collection.");
+        sb.AppendLine("  A later run is held to the managed heap within 10% and private bytes within 25%; the working set is");
+        sb.AppendLine("  reported and not judged, because Windows trims it for its own reasons.");
         sb.AppendLine("- Medians are reported because a single slow sample is the machine, not the code; p95 is nearest-rank.");
         sb.AppendLine();
 
