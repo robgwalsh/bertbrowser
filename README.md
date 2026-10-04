@@ -6,6 +6,16 @@
 
 A fast and efficient offline Windows 10/11 file browser.
 
+- **Offline** - BertBrowser does not connect to the Internet except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates.
+- **[Instant global search](docs/search-indexing.md)** - MFT indexing and USN journal tracking for fastest possible performance.
+- **Directory sizes** — Show total size on directories, just like files.
+- **Split panes with tabs** - Infinite pane splitting and tabs per pane.
+- **Tree Map browser by filesize** - Visualize recursive directory sizes, easily find whats taking the most space.
+- **Rich Preview Panel** - Inline media playback, syntax highlighting in text, hex viewer
+- **Tools** - Find duplicates, compare files and directories, track file system changes, and more!
+- **Customizable** - Customizable command palette, context menus, browser columns, themes; saved workspaces and searches;
+- **Fast and efficient** - Prioritizes [performance](docs/performance.md)
+
 <table>
 <tr>
 <td width="50%" align="center" valign="top">
@@ -39,16 +49,6 @@ A fast and efficient offline Windows 10/11 file browser.
 </tr>
 </table>
 
-- **Offline** - BertBrowser does not connect to the Internet except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates.
-- **[Fast global search](docs/search-indexing.md)** - MFT indexing and USN journal tracking for fastest possible performance.
-- **Directory sizes** — Show total size on directories, just like files.
-- **Split panes with tabs** - Infinite pane splitting and tabs per pane.
-- **Tree Map browser by filesize** - Visualize recursive directory sizes, easily find whats taking the most space.
-- **Rich Preview Panel** - Inline media playback, syntax highlighting in text, hex viewer
-- **Tools** - Find duplicates, compare files and directories, track file system changes, and more!
-- **Customizable** - Customizable command palette, context menus, browser columns; saved workspaces and searches
-- **Themes** - Rich theming system, with many pre-loaded themes
-
 ## Install
 
 ```powershell
@@ -70,19 +70,6 @@ along unstable instead of along releases. The title bar says which you are on �
 against `BertBrowser 1.1.2`. Your data in `%USERPROFILE%\.bertbrowser` is untouched either way, and
 running the [stable installer](https://github.com/robgwalsh/bertbrowser/releases/latest/download/BertBrowser-win-Setup.exe)
 over the top puts you back.
-
-## Performance
-
-`tools/BertBrowser.Bench` comprehensively benchmarks all aspects of BertBrowser performance.
-Results are compared against a committed per-machine baseline, CI gates allocations on every 
-push, and [docs/performance.md](docs/performance.md) is generated from the baselines.
-
-```powershell
-$bench = "tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe"
-& $bench run --filter *FsIndex*          # a Core area, BenchmarkDotNet
-& $bench ui --scenario listing-10k       # a UI scenario, five fresh processes
-& $bench compare --baseline bench\baselines\<key>.json --current bench-results\current.json
-```
 
 See [bench/README.md](bench/README.md).
 
@@ -123,6 +110,19 @@ Each run gets a throwaway fixture tree and its own scratch `BERTBROWSER_DATA_DIR
 touches your real index, settings or themes. It starts no programs, never touches the clipboard, and
 refuses to write outside its sandbox — the harness drives the real transfer, rename and delete
 executors, not stubs.
+
+## Benchmarking
+
+`tools/BertBrowser.Bench` comprehensively benchmarks all aspects of BertBrowser performance.
+Results are compared against a committed per-machine baseline, CI gates allocations on every 
+push, and [docs/performance.md](docs/performance.md) is generated from the baselines.
+
+```powershell
+$bench = "tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe"
+& $bench run --filter *FsIndex*          # a Core area, BenchmarkDotNet
+& $bench ui --scenario listing-10k       # a UI scenario, five fresh processes
+& $bench compare --baseline bench\baselines\<key>.json --current bench-results\current.json
+```
 
 ## Data locations
 
