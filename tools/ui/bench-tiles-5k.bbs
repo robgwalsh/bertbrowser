@@ -9,6 +9,10 @@ many-fixture 5000
 go Many
 flat on
 assert-count 5000
+# A quiet moment first: what `flat on` leaves running behind it (Settle does not wait for all of
+# it) otherwise lands inside the next sample or misses it, and the number came out as 320 ms or
+# 420 ms depending on nothing but how fast the listing before it had been.
+settle 400
 time tiles.on thumbnails 0.5; settle-thumbnails
 assert-realized under 200
 time tiles.scroll list-scroll 100000; settle-thumbnails

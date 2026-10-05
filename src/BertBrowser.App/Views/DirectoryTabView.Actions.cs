@@ -14,9 +14,8 @@ public partial class DirectoryTabView
 {
     // --- Selection ---
 
-    /// <summary>True while a command is changing many rows' selection at once. The list raises
-    /// <c>SelectionChanged</c> per row, and mirroring the whole selection out each time would make
-    /// selecting a few thousand rows quadratic; the mirror runs once at the end instead.</summary>
+    /// <summary>True while a command is replacing the selection, so the mirror runs once at the
+    /// end rather than from inside the change.</summary>
     private bool _bulkSelecting;
 
     internal int RowCount => FileListView.Items.Count;
@@ -67,8 +66,8 @@ public partial class DirectoryTabView
         _bulkSelecting = true;
         try
         {
-            FileListView.SelectedItems.Clear();
-            foreach (var row in rows) FileListView.SelectedItems.Add(row);
+            // One selection change, not one per row — see BulkSelectListView.
+            FileListView.SelectOnly(rows.ToList());
         }
         finally
         {
@@ -110,9 +109,9 @@ public partial class DirectoryTabView
 
     internal void UseColumnsForNewTabs() => SaveColumnsAsDefault();
 
-    internal void TogglePreviewPlayback() => PreviewPane.TogglePlayback();
+    internal void TogglePreviewPlayback() => _previewPane?.TogglePlayback();
 
-    internal void TogglePreviewFullScreen() => PreviewPane.ToggleFullScreen();
+    internal void TogglePreviewFullScreen() => _previewPane?.ToggleFullScreen();
 
     // --- Transfers that start from a command ---
 

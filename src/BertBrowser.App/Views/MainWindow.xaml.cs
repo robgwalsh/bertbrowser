@@ -57,6 +57,7 @@ public partial class MainWindow : ThemedWindow
         BertBrowser.App.Services.Commands.KeymapService keymap)
     {
         InitializeComponent();
+        BertBrowser.App.Services.StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.WindowXamlLoaded);
         _shell = shell;
         _settings = settings;
         _keymap = keymap;
@@ -68,9 +69,11 @@ public partial class MainWindow : ThemedWindow
 
         _layoutHost = new PaneLayoutHost(shell, settings);
         PaneHostSite.Child = _layoutHost;
+        BertBrowser.App.Services.StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.PanesBuilt);
 
         // Throws if the catalogue and the handlers disagree, which is the point of building it here.
         Commands = BuildCommands();
+        BertBrowser.App.Services.StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.CommandsBuilt);
 
         // Attached once, not per pane: the tree is shared, so N file-list controllers each hooking
         // its Drop would carry the same transfer out once per open pane.

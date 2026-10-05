@@ -2,7 +2,8 @@
 # Tier B: re-sorting and selecting ten thousand rows in place.
 #
 # Sorting replaces the collection; select-all touches every row's IsSelected. Both are the kind of
-# "it was instant with forty files" operation that goes quadratic without anyone noticing.
+# "it was instant with forty files" operation that goes quadratic without anyone noticing. Invert
+# and "select files" are here because they choose rows one at a time where select-all does not.
 
 bench-fixture 10000 0 Flat
 go Flat
@@ -14,5 +15,11 @@ time sort.type sort Type
 time select.all select-all
 assert-selected 10000
 time select.none deselect
+time select.invert run select.invert; settle
+assert-selected 10000
+deselect
+time select.files run select.files; settle
+assert-selected 10000
+deselect
 mem sort
 assert-not-launched

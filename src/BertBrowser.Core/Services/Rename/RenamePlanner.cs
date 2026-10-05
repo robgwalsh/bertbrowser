@@ -104,7 +104,7 @@ public sealed class RenamePlanner
                 continue;
             }
 
-            if (directoryKeys.Any(other => other != key && PathKey.IsUnder(key, other)))
+            if (PathKey.HasAncestorKeyIn(key, directoryKeys))
             {
                 rejected.Add(new RejectedRename(path, RenameRejection.InsideARenamedFolder,
                     $"'{Path.GetFileName(path)}' is inside a folder that is being renamed too."));

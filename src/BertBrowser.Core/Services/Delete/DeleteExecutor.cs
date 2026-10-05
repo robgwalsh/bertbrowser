@@ -598,11 +598,15 @@ public sealed class DeleteExecutor
     /// </summary>
     public static bool IsHeldPath(string path)
     {
-        if (ProtectedLocations.IsInsideRecycleBin(path)) return true;
-
-        foreach (var segment in path.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries))
+        // Asked once per row by a search and by the flat view, so the segments are walked in place:
+        // splitting the path cost an array and a string per folder, for every row, to say "no".
+        foreach (var range in path.AsSpan().SplitAny('\\', '/'))
         {
-            if (string.Equals(segment, TrashFolderName, StringComparison.OrdinalIgnoreCase) ||
+            var segment = path.AsSpan(range);
+            if (segment.IsEmpty) continue;
+
+            if (ProtectedLocations.IsRecycleBinName(segment) ||
+                segment.Equals(TrashFolderName, StringComparison.OrdinalIgnoreCase) ||
                 segment.StartsWith(LocalStagingPrefix, StringComparison.OrdinalIgnoreCase))
                 return true;
         }

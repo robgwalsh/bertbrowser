@@ -1030,8 +1030,13 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
         SetSelection(names.Select(Row).ToList());
     }
 
-    private void SelectAll() => Invoke(() =>
-        SetSelection(session.Tab.FileList.Items.ToList()));
+    /// <summary>The app's own Select all, not a row-by-row loop of ours: one selection change, which
+    /// is what a person pressing the key gets and what a benchmark of it should time.</summary>
+    private void SelectAll()
+    {
+        Invoke(() => session.Window.Commands.TryExecute("select.all"));
+        session.Settle();
+    }
 
     private void SetSelection(IReadOnlyList<FileItemViewModel> items) => Invoke(() =>
     {
@@ -3155,7 +3160,7 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
 
         // The pane re-reads off-thread behind its 150 ms debounce, so an assertion made straight
         // after this command would pass whatever the mode did.
-        session.Settle(quietMs: 400);
+        SettlePreview();
     }
 
     /// <summary>Presses the preview pane's fit-width button, the way a click would — there is no

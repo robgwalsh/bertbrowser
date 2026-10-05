@@ -38,6 +38,16 @@ public class GifBenchmarks
         return bytes;
     }
 
+    /// <summary>The same sixty frames the way the preview takes them: the canvas, not a copy.</summary>
+    [Benchmark]
+    public int NextShared60Frames()
+    {
+        var compositor = new GifFrameCompositor(Width, Height);
+        var bytes = 0;
+        foreach (var frame in _frames) bytes += compositor.NextShared(frame).Length;
+        return bytes;
+    }
+
     /// <summary>BGRA32 pixels, fully opaque except every nth, which a GIF leaves transparent.</summary>
     private static byte[] Opaque(int width, int height, Random rng, int transparentEvery = 0)
     {

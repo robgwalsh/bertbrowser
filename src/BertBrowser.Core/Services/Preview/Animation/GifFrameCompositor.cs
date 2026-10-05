@@ -33,7 +33,17 @@ public sealed class GifFrameCompositor
 {
     private readonly int _width;
     private readonly int _height;
-    private byte[] _canvas;
+    private readonly byte[] _canvas;
+
+    /// <summary>The frame last drawn, whose disposal is still owed — carried out at the start of
+    /// the next call, so the canvas stays that frame's picture for as long as a caller may be
+    /// reading it.</summary>
+    private GifSubFrame? _undisposed;
+
+    /// <summary>What was under a <see cref="GifDisposal.Restore"/> frame's rectangle. Only the
+    /// rectangle, and one buffer reused: saving the whole canvas per frame was a large-object
+    /// allocation for every frame of the animation.</summary>
+    private byte[] _under = [];
 
     public GifFrameCompositor(int width, int height)
     {
@@ -46,16 +56,42 @@ public sealed class GifFrameCompositor
 
     /// <summary>Draws the next frame and returns the whole picture it makes — a copy of its own,
     /// since the canvas goes on to be disposed of and drawn over.</summary>
-    public byte[] Next(GifSubFrame frame)
+    public byte[] Next(GifSubFrame frame) => (byte[])NextShared(frame).Clone();
+
+    /// <summary>
+    /// Draws the next frame and returns the canvas itself, which is that frame's whole picture
+    /// <b>only until the next call</b>. For a caller that copies the pixels somewhere of its own
+    /// straight away — a bitmap does — and so has no use for a second copy in between.
+    /// </summary>
+    public byte[] NextShared(GifSubFrame frame)
     {
-        var saved = frame.Disposal == GifDisposal.Restore ? (byte[])_canvas.Clone() : null;
+        if (_undisposed is { } previous)
+        {
+            if (previous.Disposal == GifDisposal.Restore) CopyRect(previous, restore: true);
+            else if (previous.Disposal == GifDisposal.Clear) ClearRect(previous);
+        }
+
+        if (frame.Disposal == GifDisposal.Restore) CopyRect(frame, restore: false);
         Draw(frame);
-        var picture = (byte[])_canvas.Clone();
+        _undisposed = frame;
+        return _canvas;
+    }
 
-        if (saved is not null) _canvas = saved;
-        else if (frame.Disposal == GifDisposal.Clear) ClearRect(frame);
+    /// <summary>Saves the frame's clipped rectangle out of the canvas, or puts it back.</summary>
+    private void CopyRect(GifSubFrame frame, bool restore)
+    {
+        var (x0, y0, x1, y1) = Clip(frame);
+        var rowBytes = (x1 - x0) * 4;
+        var needed = rowBytes * (y1 - y0);
+        if (!restore && _under.Length < needed) _under = new byte[needed];
 
-        return picture;
+        for (var y = y0; y < y1; y++)
+        {
+            var canvasAt = (y * _width + x0) * 4;
+            var underAt = (y - y0) * rowBytes;
+            if (restore) Buffer.BlockCopy(_under, underAt, _canvas, canvasAt, rowBytes);
+            else Buffer.BlockCopy(_canvas, canvasAt, _under, underAt, rowBytes);
+        }
     }
 
     /// <summary>Every frame at once.</summary>

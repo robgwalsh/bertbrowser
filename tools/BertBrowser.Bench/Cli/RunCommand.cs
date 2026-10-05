@@ -79,7 +79,8 @@ internal static class RunCommand
 
         var bdnArgs = filters.Count == 0
             ? new[] { "--filter", "*" }
-            : filters.SelectMany(f => new[] { "--filter", f }).ToArray();
+            // One --filter with every glob after it: BenchmarkDotNet refuses the option twice.
+            : ["--filter", .. filters];
 
         var clock = Stopwatch.StartNew();
         var summaries = BenchmarkSwitcher.FromAssembly(typeof(RunCommand).Assembly).Run(bdnArgs, config).ToList();

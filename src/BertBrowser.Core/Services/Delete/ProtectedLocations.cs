@@ -40,11 +40,18 @@ public static class ProtectedLocations
     /// </summary>
     public static bool IsInsideRecycleBin(string path)
     {
-        foreach (var segment in path.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries))
+        foreach (var range in path.AsSpan().SplitAny('\\', '/'))
         {
-            foreach (var folder in RecycleBinFolders)
-                if (string.Equals(segment, folder, StringComparison.OrdinalIgnoreCase)) return true;
+            if (IsRecycleBinName(path.AsSpan(range))) return true;
         }
+        return false;
+    }
+
+    /// <summary>True when one path segment is a Recycle Bin folder's name.</summary>
+    internal static bool IsRecycleBinName(ReadOnlySpan<char> segment)
+    {
+        foreach (var folder in RecycleBinFolders)
+            if (segment.Equals(folder, StringComparison.OrdinalIgnoreCase)) return true;
         return false;
     }
 

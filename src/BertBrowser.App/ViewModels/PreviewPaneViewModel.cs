@@ -351,8 +351,16 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         _cts.Dispose();
     }
 
+    /// <summary>True from the moment a load is scheduled — debounce included — until it has been
+    /// applied or superseded. <c>IsLoading</c> only covers the read, and a read of a few
+    /// milliseconds can rise and fall between two looks; this is what a run waits on.</summary>
+    internal bool IsLoadPending => _pendingLoads > 0;
+
+    private int _pendingLoads;
+
     private async Task LoadAsync(CancellationToken ct)
     {
+        _pendingLoads++;
         try
         {
             await Task.Delay(DebounceMs, ct);
@@ -414,6 +422,10 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         catch (OperationCanceledException)
         {
             // A newer selection is already on its way.
+        }
+        finally
+        {
+            _pendingLoads--;
         }
     }
 
@@ -843,7 +855,9 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
                         3 => GifDisposal.Restore,
                         _ => GifDisposal.Keep,
                     };
-                    var picture = compositor.Next(new GifSubFrame(
+                    // The canvas itself, not a copy: BitmapSource.Create copies the pixels into the
+                    // bitmap before this loop comes round to draw on it again.
+                    var picture = compositor.NextShared(new GifSubFrame(
                         GifQuery(meta, "/imgdesc/Left"), GifQuery(meta, "/imgdesc/Top"),
                         frame.PixelWidth, frame.PixelHeight, pixels, disposal));
 

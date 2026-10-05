@@ -27,8 +27,8 @@ internal sealed class TableHasher(IReadOnlyDictionary<string, (int ContentId, lo
     }
 }
 
-/// <summary>File text from a table, so a content scan is the scanner plus the decode ladder and
-/// nothing of the file system.</summary>
+/// <summary>File text from a table, already decoded: a content scan through this is the scanner
+/// and its matching alone, with neither the file system nor the decode ladder in it.</summary>
 internal sealed class InMemoryContentReader(IReadOnlyDictionary<string, ContentText> table) : IContentReader
 {
     public ContentText? Read(string path, long maxBytes, CancellationToken ct) =>

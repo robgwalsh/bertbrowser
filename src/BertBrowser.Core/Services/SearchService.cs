@@ -362,8 +362,9 @@ public sealed class SearchService : ISearchService, IDisposable
             ct).ConfigureAwait(false);
 
         // RefreshPending is LiveScan's answer to "is a crawl going to improve on this?" — and here
-        // none was started, so nothing is coming.
-        return outcome with { Hits = Visible(outcome.Hits), RefreshPending = false };
+        // none was started, so nothing is coming. No Visible() pass: LiveScan has already dropped
+        // every held path, and asking again was a second question per row with one answer.
+        return outcome with { RefreshPending = false };
     }
 
     /// <summary>
@@ -469,6 +470,12 @@ public sealed class SearchService : ISearchService, IDisposable
         var truncated = false;
         var sinceFlush = Stopwatch.StartNew();
 
+        // The walk hands over a folder's entries together, so the relative folder is worked out
+        // once per folder rather than once per row — GetRelativePath resolves both of its
+        // arguments every time it is asked.
+        string? lastParent = null;
+        var lastRelDir = "";
+
         FileSystemWalker.Walk(rootPath, entry =>
         {
             if (!includeDirectories && entry.IsDirectory)
@@ -486,8 +493,14 @@ public sealed class SearchService : ISearchService, IDisposable
                 return false; // stop scanning for hits; the background crawl keeps indexing
             }
 
-            var relDir = Path.GetRelativePath(rootDisplay, Path.GetDirectoryName(entry.DisplayPath) ?? rootDisplay);
-            if (relDir == ".") relDir = "";
+            var parent = Path.GetDirectoryName(entry.DisplayPath.AsSpan());
+            if (lastParent is null || !parent.SequenceEqual(lastParent))
+            {
+                lastParent = parent.IsEmpty ? rootDisplay : parent.ToString();
+                lastRelDir = Path.GetRelativePath(rootDisplay, lastParent);
+                if (lastRelDir == ".") lastRelDir = "";
+            }
+            var relDir = lastRelDir;
 
             var hit = new SearchHit(
                 entry.DisplayPath, relDir, entry.Name, entry.IsDirectory, entry.SizeBytes, entry.ModifiedUtc,

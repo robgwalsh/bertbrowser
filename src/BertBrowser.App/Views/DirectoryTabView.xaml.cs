@@ -72,7 +72,6 @@ public partial class DirectoryTabView : UserControl
         Tab.PropertyChanged += Tab_PropertyChanged;
         Tab.RevealFileRequested += OnRevealFileRequested;
         Tab.FileList.ColumnsChanged += FileList_ColumnsChanged;
-        PreviewPane.FitWidthRequested += PreviewPane_FitWidthRequested;
         Tab.Preview.NextMediaRequested += Preview_NextMediaRequested;
         Tab.FileList.RealizedRows = RealizedRows;
         DetailsView.Columns.CollectionChanged += Columns_CollectionChanged;
@@ -92,11 +91,14 @@ public partial class DirectoryTabView : UserControl
         Tab.PropertyChanged -= Tab_PropertyChanged;
         Tab.RevealFileRequested -= OnRevealFileRequested;
         Tab.FileList.ColumnsChanged -= FileList_ColumnsChanged;
-        PreviewPane.FitWidthRequested -= PreviewPane_FitWidthRequested;
         Tab.Preview.NextMediaRequested -= Preview_NextMediaRequested;
         DetailsView.Columns.CollectionChanged -= Columns_CollectionChanged;
         FileListView.RemoveHandler(Thumb.DragCompletedEvent, new DragCompletedEventHandler(Header_DragCompleted));
-        PreviewPane.Detach();
+        if (_previewPane is { } pane)
+        {
+            pane.FitWidthRequested -= PreviewPane_FitWidthRequested;
+            pane.Detach();
+        }
         _shellMenu?.Dispose();
         _shellMenu = null;
     }
@@ -134,9 +136,32 @@ public partial class DirectoryTabView : UserControl
         PreviewSplitterColumn.Width = show ? GridLength.Auto : new GridLength(0);
         PreviewColumn.Width = show ? new GridLength(PreviewWidth()) : new GridLength(0);
         PreviewSplitter.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        PreviewPane.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (show) EnsurePreviewPane();
+        if (_previewPane is { } pane) pane.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
 
         if (show) Tab.Preview.Show(Tab.SelectedItems);
+    }
+
+    private PreviewPane? _previewPane;
+
+    /// <summary>
+    /// The preview pane, built the first time this tab shows it.
+    /// </summary>
+    /// <remarks>
+    /// It used to be declared in the tab's XAML, so every tab built one — a rich text box, a media
+    /// element, three timers and a theme dictionary of its own — whether or not the preview was
+    /// ever opened, and it is off by default. Named in code as it was in XAML, because that name
+    /// is how a scripted run finds it.
+    /// </remarks>
+    private PreviewPane EnsurePreviewPane()
+    {
+        if (_previewPane is { } pane) return pane;
+
+        pane = new PreviewPane { Name = "PreviewPane" };
+        pane.SetBinding(DataContextProperty, new System.Windows.Data.Binding(nameof(DirectoryTabViewModel.Preview)));
+        pane.FitWidthRequested += PreviewPane_FitWidthRequested;
+        PreviewHost.Child = pane;
+        return _previewPane = pane;
     }
 
     /// <summary>Clamped, because a width saved on a wide monitor must not leave a narrow pane with
@@ -161,7 +186,7 @@ public partial class DirectoryTabView : UserControl
     {
         if (!Tab.IsPreviewVisible) return;
 
-        var desired = PreviewPane.MeasureDesiredWidth();
+        var desired = EnsurePreviewPane().MeasureDesiredWidth();
         var available = Math.Max(PreviewColumn.ActualWidth,
             PreviewLayoutGrid.ActualWidth - 120 - PreviewSplitter.ActualWidth);
         var target = Math.Clamp(desired <= available ? desired : available * 0.9, 180, 1200);
@@ -1190,8 +1215,9 @@ public partial class DirectoryTabView : UserControl
         // The date goes across local, matching the Modified column the user was just reading, and
         // stays null when the row has never been hydrated — a search result arrives that way, and
         // {modified} refuses such an item rather than stamping it year one.
+        var chosen = selection.ToHashSet();
         var ordered = Tab.FileList.Items
-            .Where(selection.Contains)
+            .Where(chosen.Contains)
             .Select(i => new RenameSource(i.FullPath, i.IsDirectory,
                 i.ModifiedUtc == default ? null : i.ModifiedUtc.ToLocalTime()))
             .ToList();
@@ -1246,12 +1272,8 @@ public partial class DirectoryTabView : UserControl
         var wanted = paths.ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (wanted.Count == 0) return false;
 
-        FileListView.SelectedItems.Clear();
-        foreach (var obj in FileListView.Items)
-        {
-            if (obj is FileItemViewModel vm && wanted.Contains(vm.FullPath))
-                FileListView.SelectedItems.Add(vm);
-        }
+        FileListView.SelectOnly(
+            FileListView.Items.OfType<FileItemViewModel>().Where(vm => wanted.Contains(vm.FullPath)).ToList());
         if (FileListView.SelectedItem is not { } first) return false;
 
         FileListView.ScrollIntoView(first);
@@ -1340,8 +1362,9 @@ public partial class DirectoryTabView : UserControl
         }
 
         // In the order the list shows them, so the confirmation reads down the screen.
+        var chosen = selection.ToHashSet();
         var ordered = Tab.FileList.Items
-            .Where(selection.Contains)
+            .Where(chosen.Contains)
             .Select(i => new DeleteSource(i.FullPath, i.IsDirectory))
             .ToList();
 

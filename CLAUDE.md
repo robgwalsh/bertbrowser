@@ -108,7 +108,15 @@ you where and what to watch for.
 
 - **Path keys**: every DB path column must store `PathKey.Canonicalize()` output (uppercased,
   no trailing separator except drive roots); use `PrefixBounds(dir)` for subtree range scans instead
-  of `LIKE`. A row that isn't canonicalized breaks every subtree query silently.
+  of `LIKE`. A row that isn't canonicalized breaks every subtree query silently. `IsUnder`
+  re-canonicalizes and allocates per call — one question only; a loop over keys uses `IsUnderKey` /
+  `HasAncestorKeyIn` (a thousand-item drop planned through `IsUnder` allocated 53 MB).
+- **Selecting many rows is one `FileListView.SelectOnly`, never a loop of `SelectedItems.Add`.**
+  Each `Add` is a whole selection change: invert over 10,000 rows took 9.5 s that way and 0.2 s
+  as one (`BulkSelectListView`; `bench-sort-select-10k.bbs` holds it down).
+- **The preview pane is built on first show** (`DirectoryTabView.EnsurePreviewPane`), not declared
+  in the tab's XAML, and its line numbers are drawn (`LineNumberGutter`), not a `TextBlock` — which
+  laid out every line to show thirty and was 0.9 s of a large file's preview.
 - **Directory sizes are never computed on demand.** All numbers come from `dir_size_cache`, filled by
   the MFT pass. A missing row means *unknown* and must render blank, **never zero**.
 - **Virtual (in-archive) paths must never reach a `PathKey`-keyed table.** `C:\x\a.zip\src` is a real

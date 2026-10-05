@@ -92,7 +92,7 @@ public sealed class DeletePlanner
                 continue;
             }
 
-            if (directoryKeys.Any(other => other != key && PathKey.IsUnder(key, other)))
+            if (PathKey.HasAncestorKeyIn(key, directoryKeys))
             {
                 rejected.Add(new RejectedDelete(path, DeleteRejection.InsideADeletedFolder,
                     $"'{Path.GetFileName(path)}' is inside a folder that is being deleted too."));

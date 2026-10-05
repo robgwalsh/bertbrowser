@@ -9,9 +9,28 @@ public static class StartupMarks
     public const string Main = "main";
     public const string VelopackDone = "velopackDone";
     public const string InstanceClaimed = "instanceClaimed";
+
+    /// <summary>App.xaml and the dictionaries it merges loaded, on the UI thread.</summary>
+    public const string AppXamlLoaded = "appXamlLoaded";
+
+    /// <summary>settings.json parsed — the composition root waits on it before anything else.</summary>
+    public const string SettingsLoaded = "settingsLoaded";
     public const string ServicesBuilt = "servicesBuilt";
     public const string Migrated = "migrated";
     public const string ThemeReady = "themeReady";
+
+    /// <summary>The shell view model and the graph behind it resolved.</summary>
+    public const string ShellBuilt = "shellBuilt";
+
+    /// <summary>The main window's own XAML loaded, before any pane exists.</summary>
+    public const string WindowXamlLoaded = "windowXamlLoaded";
+
+    /// <summary>The first pane and its tab view built.</summary>
+    public const string PanesBuilt = "panesBuilt";
+    public const string CommandsBuilt = "commandsBuilt";
+
+    /// <summary>The window constructed; what is left before <see cref="WindowShown"/> is Show().</summary>
+    public const string WindowBuilt = "windowBuilt";
     public const string WindowShown = "windowShown";
     public const string ContentRendered = "contentRendered";
     public const string FirstListing = "firstListing";

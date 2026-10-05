@@ -251,11 +251,12 @@
                           ShowsPreview="False"
                           DragCompleted="PreviewSplitter_DragCompleted"/>
 
-            <v:PreviewPane x:Name="PreviewPane" Grid.Column="2"
-                           DataContext="{Binding Preview}"/>
+            <!-- Empty until the preview is first shown: see EnsurePreviewPane. -->
+            <Border x:Name="PreviewHost" Grid.Column="2"/>
 
         <Grid Grid.Column="0">
-            <ListView x:Name="FileListView"
+            <v:BulkSelectListView x:Name="FileListView"
+                      Style="{StaticResource {x:Type ListView}}"
                       AutomationProperties.AutomationId="FileList"
                       ItemsSource="{Binding FileList.Items}"
                       BorderThickness="0"
@@ -424,7 +425,7 @@
                 <ListView.View>
                     <GridView x:Name="DetailsView"/>
                 </ListView.View>
-            </ListView>
+            </v:BulkSelectListView>
 
             <!-- Inline empty state for searches with no hits -->
             <TextBlock IsHitTestVisible="False"

@@ -18,6 +18,10 @@ internal sealed class MftDirectorySizeBuilder
     private readonly Dictionary<ulong, int> _directFiles = new();
     private readonly Dictionary<ulong, List<ulong>> _childDirs = new();
 
+    /// <summary>What a folder with no subfolders has. Shared and never added to: a fresh list as
+    /// the lookup's default was built on every call, found or not.</summary>
+    private static readonly List<ulong> NoChildren = [];
+
     public void Add(in MftFileRecord rec)
     {
         if (rec.IsDirectory)
@@ -51,7 +55,7 @@ internal sealed class MftDirectorySizeBuilder
         var seen = new HashSet<ulong>();
         var done = new HashSet<ulong>();
         var stack = new Stack<(ulong Frn, bool Expanded)>();
-        foreach (var top in _childDirs.GetValueOrDefault(NtfsLayout.RootRecordNumber, new List<ulong>()))
+        foreach (var top in _childDirs.GetValueOrDefault(NtfsLayout.RootRecordNumber, NoChildren))
             if (seen.Add(top)) stack.Push((top, false));
 
         while (stack.Count > 0)
@@ -60,7 +64,7 @@ internal sealed class MftDirectorySizeBuilder
             if (!expanded)
             {
                 stack.Push((frn, true));
-                foreach (var child in _childDirs.GetValueOrDefault(frn, new List<ulong>()))
+                foreach (var child in _childDirs.GetValueOrDefault(frn, NoChildren))
                     if (seen.Add(child)) stack.Push((child, false));
                 continue;
             }
@@ -70,7 +74,7 @@ internal sealed class MftDirectorySizeBuilder
             var bytes = _directBytes.GetValueOrDefault(frn);
             var files = _directFiles.GetValueOrDefault(frn);
             var dirs = 0;
-            foreach (var child in _childDirs.GetValueOrDefault(frn, new List<ulong>()))
+            foreach (var child in _childDirs.GetValueOrDefault(frn, NoChildren))
             {
                 bytes += subtreeBytes.GetValueOrDefault(child);
                 files += subtreeFiles.GetValueOrDefault(child);

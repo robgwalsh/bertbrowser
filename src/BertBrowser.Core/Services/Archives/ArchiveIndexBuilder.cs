@@ -31,6 +31,7 @@ public static class ArchiveIndexBuilder
     {
         var root = new ArchiveNode { Path = "", Name = "", IsDirectory = true };
         var byPath = new Dictionary<string, ArchiveNode>(StringComparer.OrdinalIgnoreCase);
+        var bySpan = byPath.GetAlternateLookup<ReadOnlySpan<char>>();
         var refused = 0;
         var files = 0;
         var seen = 0;
@@ -55,11 +56,15 @@ public static class ArchiveIndexBuilder
             }
 
             var cut = key.LastIndexOf('\\');
-            var parentPath = cut < 0 ? "" : key[..cut];
             var name = cut < 0 ? key : key[(cut + 1)..];
             if (name.Length == 0) { refused++; continue; }
 
-            var parent = EnsureDirectory(root, byPath, parentPath, ref refused, ref files);
+            // Nearly every entry's folder is already there — a container lists a folder's files
+            // together — so it is looked up whole, and only a miss walks the path to build it.
+            ArchiveNode parent;
+            if (cut < 0) parent = root;
+            else if (bySpan.TryGetValue(key.AsSpan(0, cut), out var known) && known.IsDirectory) parent = known;
+            else parent = EnsureDirectory(root, byPath, key[..cut], ref refused, ref files);
 
             if (byPath.TryGetValue(key, out var existing))
             {
@@ -122,6 +127,9 @@ public static class ArchiveIndexBuilder
         if (path.StartsWith('\\')) return null;
         if (path.Length >= 2 && path[1] == ':') return null;
 
+        // The ordinary key needs nothing done to it, and is handed back as it stands.
+        if (IsAlreadyNormal(path)) return path;
+
         var parts = new List<string>();
         foreach (var segment in path.Split('\\'))
         {
@@ -136,6 +144,21 @@ public static class ArchiveIndexBuilder
         }
 
         return parts.Count == 0 ? null : string.Join('\\', parts);
+    }
+
+    /// <summary>True when no segment is empty or ends in a dot or a space — which rules out
+    /// <c>.</c> and <c>..</c> with them — so the loop in <see cref="Normalize"/> would rebuild the
+    /// very same string.</summary>
+    private static bool IsAlreadyNormal(string path)
+    {
+        var start = 0;
+        for (var i = 0; i <= path.Length; i++)
+        {
+            if (i < path.Length && path[i] != '\\') continue;
+            if (i == start || path[i - 1] is ' ' or '.') return false;
+            start = i + 1;
+        }
+        return true;
     }
 
     /// <summary>Walks a normalised directory path, creating nodes for anything not yet there.</summary>

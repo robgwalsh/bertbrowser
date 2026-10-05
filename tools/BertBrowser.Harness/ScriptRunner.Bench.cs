@@ -28,7 +28,6 @@ namespace BertBrowser.Harness;
 internal sealed partial class ScriptRunner
 {
     private const int DefaultThumbnailTimeoutMs = 30_000;
-    private const int PreviewStartWindowMs = 1_500;
 
     /// <summary>
     /// The one sample that is not a verb: how long the session took to come up. Written first,
@@ -180,27 +179,20 @@ internal sealed partial class ScriptRunner
     /// </summary>
     /// <remarks>
     /// The pane debounces a selection before reading, so a plain <c>Settle</c> after <c>select</c>
-    /// returns with the previous body still showing — the same shape <c>SettleSearch</c> handles for
-    /// the search box, and handled the same way: wait for <c>IsLoading</c> to rise, then for it to
-    /// fall. A selection the pane has nothing to load for never raises it, and the wait gives up
-    /// after a short window rather than failing.
+    /// returns with the previous body still showing. The wait is on <c>IsLoadPending</c>, which is
+    /// up from the moment the load is scheduled: watching <c>IsLoading</c> rise and fall instead
+    /// missed any read short enough to do both between two looks, and then sat out a whole
+    /// start window waiting for a rise that had already happened.
     /// </remarks>
     private void SettlePreview()
     {
         var clock = Stopwatch.StartNew();
         var preview = session.Tab.Preview;
 
-        while (clock.ElapsedMilliseconds < PreviewStartWindowMs)
-        {
-            session.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
-            if (session.Dispatcher.Invoke(() => preview.IsLoading)) break;
-            Thread.Sleep(5);
-        }
-
-        while (clock.ElapsedMilliseconds < options.BusyTimeoutMs && session.Dispatcher.Invoke(() => preview.IsLoading))
+        while (clock.ElapsedMilliseconds < options.BusyTimeoutMs && session.Dispatcher.Invoke(() => preview.IsLoadPending))
             session.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
 
-        if (session.Dispatcher.Invoke(() => preview.IsLoading))
+        if (session.Dispatcher.Invoke(() => preview.IsLoadPending))
             throw new TimeoutException($"The preview was still loading after {options.BusyTimeoutMs} ms.");
 
         session.Settle();

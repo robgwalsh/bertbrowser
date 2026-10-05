@@ -55,4 +55,20 @@ public class PathKeyBenchmarks
 
         return hits;
     }
+
+    /// <summary>The same 1,000 × 50 questions through the key-only form the hot loops use.</summary>
+    [Benchmark]
+    public int IsUnderKeyLoop()
+    {
+        var hits = 0;
+        foreach (var key in _keys)
+        {
+            foreach (var dir in _dirs)
+            {
+                if (PathKey.IsUnderKey(key, dir)) hits++;
+            }
+        }
+
+        return hits;
+    }
 }

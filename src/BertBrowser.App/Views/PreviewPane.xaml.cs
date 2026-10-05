@@ -202,7 +202,7 @@ public partial class PreviewPane : UserControl
         if (lines.Count == 0)
         {
             TextView.Document = new FlowDocument();
-            Gutter.Text = "";
+            Gutter.Show(0);
             return;
         }
 
@@ -219,29 +219,42 @@ public partial class PreviewPane : UserControl
             PageWidth = wrap ? double.NaN : 4000,
         };
 
-        foreach (var line in lines)
+        if (lines.All(line => line.Spans.Count == 0))
         {
-            var paragraph = new Paragraph { Margin = default };
-            if (line.Spans.Count == 0)
+            // Nothing is coloured — a hex dump, or text past the colouring limit, which is to say
+            // the five-thousand-line case. One paragraph holding one run, its lines parted by
+            // newlines: a paragraph per line is five thousand blocks for the document to lay out,
+            // and that, not the read, was the two seconds a large file took to appear.
+            document.Blocks.Add(new Paragraph(new Run(string.Join('\n', lines.Select(l => l.Text))))
             {
-                paragraph.Inlines.Add(new Run(line.Text));
-            }
-            else
+                Margin = default,
+            });
+        }
+        else
+        {
+            foreach (var line in lines)
             {
-                foreach (var span in line.Spans)
+                var paragraph = new Paragraph { Margin = default };
+                if (line.Spans.Count == 0)
                 {
-                    var run = new Run(line.Text.Substring(span.Start, span.Length));
-                    if (BrushFor(span.Class) is { } brush) run.Foreground = brush;
-                    paragraph.Inlines.Add(run);
+                    paragraph.Inlines.Add(new Run(line.Text));
                 }
+                else
+                {
+                    foreach (var span in line.Spans)
+                    {
+                        var run = new Run(line.Text.Substring(span.Start, span.Length));
+                        if (BrushFor(span.Class) is { } brush) run.Foreground = brush;
+                        paragraph.Inlines.Add(run);
+                    }
+                }
+                document.Blocks.Add(paragraph);
             }
-            document.Blocks.Add(paragraph);
         }
 
         TextView.Document = document;
         TextView.HorizontalScrollBarVisibility = wrap ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
-        Gutter.Text = string.Join('\n', lines.Select(l => l.Number.ToString()));
-        GutterOffset.Y = 0;
+        Gutter.Show(lines.Count, lines[0].Number);
         HookGutterScrolling();
     }
 
@@ -270,7 +283,7 @@ public partial class PreviewPane : UserControl
         if (_gutterScroller is not null) return;
         _gutterScroller = VisualTreeUtil.FindDescendant<ScrollViewer>(TextView);
         if (_gutterScroller is null) return;
-        _gutterScroller.ScrollChanged += (_, e) => GutterOffset.Y = -e.VerticalOffset;
+        _gutterScroller.ScrollChanged += (_, e) => Gutter.Offset = e.VerticalOffset;
     }
 
     private ScrollViewer? _gutterScroller;

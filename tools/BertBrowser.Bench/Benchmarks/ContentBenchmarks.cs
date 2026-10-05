@@ -9,9 +9,10 @@ using BertBrowser.Core.Services.Search;
 namespace BertBrowser.Bench.Benchmarks;
 
 /// <summary>
-/// The <c>content:</c> pass over two thousand candidates: once from memory, so the scanner, the
-/// decode ladder and the four-way parallelism are measured alone, and once from the real
-/// <c>Text</c> tree with its binaries and its needles.
+/// The <c>content:</c> pass over two thousand candidates: once from memory, so the scanner and
+/// the four-way parallelism are measured alone, and once from the real <c>Text</c> tree with its
+/// binaries and its needles — which adds the reads <em>and</em> the decode ladder, so the gap
+/// between the two is not disk alone.
 /// </summary>
 [AllocationTolerance(5)]
 public class ContentBenchmarks

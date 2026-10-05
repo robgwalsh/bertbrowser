@@ -145,7 +145,9 @@ public static class TextDiffer
 
         for (var d = 0; d <= maxD; d++)
         {
-            trace.Add((int[])v.Clone());
+            // Only the diagonals this step can read, -d-1 to d+1: the rest of v is still zero, and
+            // cloning all of it every step cost a full-width array per unit of edit distance.
+            trace.Add(v.AsSpan(offset - d - 1, 2 * d + 3).ToArray());
 
             for (var k = -d; k <= d; k += 2)
             {
@@ -158,7 +160,7 @@ public static class TextDiffer
 
                 v[k + offset] = x;
 
-                if (x >= n && y >= m) return Backtrack(trace, a, b, offset);
+                if (x >= n && y >= m) return Backtrack(trace, a, b);
             }
         }
 
@@ -166,14 +168,16 @@ public static class TextDiffer
     }
 
     private static List<(DiffOp Op, int A, int B)> Backtrack(
-        List<int[]> trace, ReadOnlySpan<int> a, ReadOnlySpan<int> b, int offset)
+        List<int[]> trace, ReadOnlySpan<int> a, ReadOnlySpan<int> b)
     {
         var script = new List<(DiffOp, int, int)>();
         int x = a.Length, y = b.Length;
 
         for (var d = trace.Count - 1; d >= 0; d--)
         {
+            // Step d's slice starts at diagonal -d-1, so diagonal k sits at k + d + 1.
             var v = trace[d];
+            var offset = d + 1;
             var k = x - y;
 
             int previousK;

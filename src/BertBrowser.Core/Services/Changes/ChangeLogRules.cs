@@ -44,7 +44,7 @@ public static class ChangeLogRules
     /// </summary>
     public static bool IsExcluded(string pathKey, string excludedRootKey) =>
         string.Equals(pathKey, excludedRootKey, StringComparison.Ordinal) ||
-        PathKey.IsUnder(pathKey, excludedRootKey);
+        PathKey.IsUnderKey(pathKey, excludedRootKey);
 
     /// <summary>
     /// The lower bound of a range, never earlier than the policy's retention: the writer prunes on

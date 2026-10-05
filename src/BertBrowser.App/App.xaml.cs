@@ -95,6 +95,7 @@ public partial class App : Application
         // mid-shutdown — in which case starting normally beats exiting and doing nothing at all.
         var app = new App();
         app.InitializeComponent();
+        StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.AppXamlLoaded);
         app.Run();
     }
 
@@ -125,6 +126,7 @@ public partial class App : Application
         // Start path priority: command-line argument, then last visited, then user profile.
         var settings = Services.GetRequiredService<AppSettings>();
         var shell = Services.GetRequiredService<ShellViewModel>();
+        StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.ShellBuilt);
         var startup = CommandLine.Parse(e.Args);
         if (startup.Targets.FirstOrDefault(t => Directory.Exists(t.Path)) is { } target)
         {
@@ -154,6 +156,7 @@ public partial class App : Application
         }
 
         var window = Services.GetRequiredService<MainWindow>();
+        StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.WindowBuilt);
         StartupTrace.Observe(window, shell);
         window.Show();
         StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.WindowShown);
@@ -227,6 +230,7 @@ public partial class App : Application
     {
         var services = new ServiceCollection();
         services.AddSingleton(_settingsLoad?.GetAwaiter().GetResult() ?? AppSettings.Load());
+        StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.SettingsLoaded);
         services.AddSingleton<UserThemeStore>();
         services.AddSingleton<ISystemAppearance, WindowsSystemAppearance>();
         services.AddSingleton<IThemeService, ThemeService>();

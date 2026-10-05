@@ -70,7 +70,7 @@ public sealed class TransferPlanner
                 continue;
             }
 
-            if (directoryKeys.Any(other => other != key && PathKey.IsUnder(key, other)))
+            if (PathKey.HasAncestorKeyIn(key, directoryKeys))
             {
                 rejected.Add(new RejectedTransfer(path, TransferRejection.MovesWithAncestor,
                     $"'{Path.GetFileName(path)}' travels with the folder above it."));

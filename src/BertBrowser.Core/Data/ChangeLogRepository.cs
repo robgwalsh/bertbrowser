@@ -95,6 +95,20 @@ public sealed class ChangeLogRepository
         cmd.Parameters.AddWithValue("@cutoff", (nowUtc - retention).ToString("O"));
         cmd.ExecuteNonQuery();
 
+        // Ids only ever grow, so the span from the oldest to the newest is at least the row count:
+        // a table whose span is inside the cap has nothing past it. Both ends are one step into
+        // the rowid tree, where the OFFSET below walks every row it skips — the whole table, once
+        // a minute and under the write lock, to learn there was nothing to do. Two subselects,
+        // because SQLite only answers min or max from the tree's end when it is asked for one.
+        cmd.CommandText =
+            "SELECT (SELECT max(id) FROM fs_change) - (SELECT min(id) FROM fs_change) + 1;";
+        cmd.Parameters.Clear();
+        if (cmd.ExecuteScalar() is not long span || span <= maxRows)
+        {
+            tx.Commit();
+            return;
+        }
+
         // The subselect is NULL while the table is under the cap, and a comparison with NULL
         // deletes nothing.
         cmd.CommandText =
