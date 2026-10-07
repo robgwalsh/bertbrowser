@@ -23,6 +23,13 @@ public enum RenamePart
 
     /// <summary>The last-modified date. <see cref="RenameSegment.Argument"/> holds the format.</summary>
     Modified,
+
+    /// <summary>
+    /// A field of the file's own metadata — <c>{artist}</c>, <c>{track:00}</c>, <c>{taken:yyyy-MM}</c>.
+    /// <see cref="RenameSegment.Argument"/> holds the field's id, then a colon and its padding or
+    /// date format when it has one.
+    /// </summary>
+    Tag,
 }
 
 /// <param name="Part">What this piece stands for.</param>
@@ -90,6 +97,22 @@ public static class RenameTemplate
         return segments is not null && segments.Any(s => s.Part != RenamePart.Literal);
     }
 
+    /// <summary>True when <paramref name="template"/> names a metadata field, and so needs the
+    /// sources' tags read before it can be applied.</summary>
+    public static bool UsesTags(string template)
+    {
+        var segments = Parse(template, out _);
+        return segments is not null && segments.Any(s => s.Part == RenamePart.Tag);
+    }
+
+    /// <summary>The field and argument a <see cref="RenamePart.Tag"/> segment carries.</summary>
+    public static (Metadata.MetadataFieldSpec Field, string Argument) TagOf(RenameSegment segment)
+    {
+        var colon = segment.Argument.IndexOf(':');
+        var id = colon < 0 ? segment.Argument : segment.Argument[..colon];
+        return (Metadata.MetadataFields.Find(id)!, colon < 0 ? "" : segment.Argument[(colon + 1)..]);
+    }
+
     /// <summary>True when the parsed template uses any of <paramref name="parts"/>.</summary>
     public static bool Uses(IReadOnlyList<RenameSegment> segments, params RenamePart[] parts) =>
         segments.Any(s => parts.Contains(s.Part));
@@ -114,10 +137,34 @@ public static class RenameTemplate
             _ => (RenamePart?)null,
         };
 
+        if (part is null && Metadata.MetadataFields.Find(name) is { } field)
+        {
+            switch (field.Kind)
+            {
+                case Metadata.MetadataFieldKind.Number when argument.Length > 0 && !argument.All(c => c == '0'):
+                    problem = $"'{{{body}}}' is not a width — write {{{field.Id}:00}} to pad to two digits.";
+                    return false;
+
+                case Metadata.MetadataFieldKind.Number or Metadata.MetadataFieldKind.Date:
+                    break;
+
+                default:
+                    if (argument.Length > 0)
+                    {
+                        problem = $"'{{{field.Id}}}' does not take a ':' argument.";
+                        return false;
+                    }
+                    break;
+            }
+
+            segment = new RenameSegment(RenamePart.Tag, argument.Length > 0 ? field.Id + ":" + argument : field.Id);
+            return true;
+        }
+
         if (part is null)
         {
             problem = $"'{{{body}}}' is not a name template token. Try {{name}}, {{base}}, {{ext}}, " +
-                "{parent}, {n} or {modified} — or write '{{' for a literal brace.";
+                "{parent}, {n}, {modified}, or a tag such as {artist} or {taken} — or write '{{' for a literal brace.";
             return false;
         }
 

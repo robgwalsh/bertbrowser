@@ -76,9 +76,9 @@ public sealed class AppSettings
     /// moving on its own rather than as the app remembering anything.</summary>
     public double PreviewPaneWidth { get; set; } = 360;
 
-    /// <summary>Whether the preview pane's details strip is folded down to its header. Global, like
-    /// the width: it is a choice about how much room a video gets, not about one file.</summary>
-    public bool PreviewDetailsCollapsed { get; set; }
+    /// <summary>Whether a newly opened tab shows the metadata pane instead. The two share one
+    /// column, so this wins over <see cref="ShowPreviewPane"/> if a hand-edited file sets both.</summary>
+    public bool ShowMetadataPane { get; set; }
 
     /// <summary>Whether a video that finishes in the preview pane goes on to the next one in the
     /// list. Off by default: selecting a file should never start a chain of playback on its own.</summary>

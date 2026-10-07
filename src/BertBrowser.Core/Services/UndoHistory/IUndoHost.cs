@@ -2,7 +2,9 @@ using BertBrowser.Core.Services.Archives;
 using BertBrowser.Core.Services.Compare;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.Elevation;
+using BertBrowser.Core.Services.Metadata;
 using BertBrowser.Core.Services.Rename;
+using BertBrowser.Core.Services.Timestamps;
 using BertBrowser.Core.Services.Transfer;
 
 namespace BertBrowser.Core.Services.UndoHistory;
@@ -33,6 +35,11 @@ public interface IUndoHost
     RenameExecutor Renames { get; }
 
     ArchiveEditExecutor ArchiveEdits { get; }
+
+    /// <summary>No elevated retry goes with this one, for the reason archives have none.</summary>
+    MetadataEditExecutor MetadataEdits { get; }
+
+    TimestampExecutor Timestamps { get; }
 
     SyncRunner Sync { get; }
 
@@ -72,6 +79,10 @@ public sealed class PlainUndoHost(
     public RenameExecutor Renames { get; } = renames;
 
     public ArchiveEditExecutor ArchiveEdits { get; } = archiveEdits;
+
+    public MetadataEditExecutor MetadataEdits { get; } = new();
+
+    public TimestampExecutor Timestamps { get; } = new();
 
     public SyncRunner Sync { get; } = new(transfers, deletes);
 

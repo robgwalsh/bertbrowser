@@ -1,0 +1,450 @@
+# The metadata pane: a picture's EXIF and a song's tags, shown beside the list for whatever is
+# selected, edited there, undone and redone as one step, and read back two ways.
+#
+# The fixtures are MetadataFixtures — pictures from Windows' own encoder and MP3 tags laid out by
+# hand — so nothing here starts from a file the code under test wrote. Every edit goes through the
+# pane's own boxes and Apply (metadata-set), which is what puts it in the queue and the history.
+#
+# assert-tag reads the file back through our codec. assert-metadata reads the rendered cell of a
+# property column, which comes from the Windows property handler — a second reader that shares no
+# code with the writer. A tag only we could read would pass the first and fail the second.
+
+sandbox
+metadata-fixture
+write notes.txt 64
+refresh
+
+# --- three states, and the command that steps through them -----------------------------------------
+
+assert-side-pane none
+side-pane cycle
+assert-side-pane preview
+side-pane cycle
+assert-side-pane metadata
+shot 00-nothing-selected
+side-pane cycle
+assert-side-pane none
+
+# The keys: Ctrl+M for metadata as Ctrl+P is for the preview, each closing its own pane again.
+key Ctrl+M
+assert-side-pane metadata
+key Ctrl+P
+assert-side-pane preview
+key Ctrl+P
+assert-side-pane none
+key Alt+M
+assert-side-pane metadata
+key Ctrl+M
+assert-side-pane none
+assert-tooltip SidePaneMetadata Ctrl+M
+
+# The two panes share a column: turning one on is turning the other off.
+side-pane metadata
+preview on
+assert-side-pane preview
+side-pane metadata
+assert-side-pane metadata
+
+# --- one picture: what the camera wrote, then a change -------------------------------------------
+
+select camera.jpg
+settle 300
+shot 01-one-picture
+assert-metadata-field title "Old title"
+assert-metadata-field make TestCam
+assert-metadata-field taken "2021-06-05 04:03:02"
+assert-metadata-field author (none)
+
+metadata-type title=Harbour at dawn; author=Renée; rating=4
+shot 02-typed
+
+metadata-set title=Harbour at dawn; author=Renée; rating=4; keywords=sea; boats
+settle
+assert-tag camera.jpg title Harbour at dawn
+assert-tag camera.jpg author Renée
+assert-tag camera.jpg rating 4
+assert-tag camera.jpg keywords sea; boats
+assert-tag camera.jpg make TestCam
+assert-can-undo
+
+# The pane follows what is on disk, not what was typed.
+assert-metadata-field title "Harbour at dawn"
+
+# --- the same edit as Windows sees it -------------------------------------------------------------
+
+columns add System.Title
+columns add System.Author
+settle 600
+assert-metadata camera.jpg System.Title Harbour at dawn
+assert-metadata camera.jpg System.Author Renée
+shot 03-windows-agrees
+
+# --- undo and redo are one step each, and the pane follows both -----------------------------------
+
+undo
+settle 300
+assert-tag camera.jpg title Old title
+assert-tag camera.jpg author (none)
+select camera.jpg
+assert-metadata-field title "Old title"
+assert-can-redo
+
+redo
+settle
+assert-tag camera.jpg title Harbour at dawn
+
+# --- a selection that disagrees: one album set, two titles kept -----------------------------------
+
+select first.mp3, second.mp3
+settle 300
+shot 04-two-songs
+assert-metadata-field album "Album One"
+assert-metadata-field title (multiple)
+assert-metadata-field track (multiple)
+
+metadata-set album=Album Two; year=1999
+settle
+assert-tag first.mp3 album Album Two
+assert-tag second.mp3 album Album Two
+assert-tag first.mp3 year 1999
+assert-tag first.mp3 title First song
+assert-tag second.mp3 title Second song
+assert-tag second.mp3 track 2
+
+columns add System.Music.AlbumTitle
+settle 600
+assert-metadata first.mp3 System.Music.AlbumTitle Album Two
+assert-metadata second.mp3 System.Music.AlbumTitle Album Two
+
+# --- a mixed selection: each file takes the part it can hold, and the rest say why ----------------
+
+select camera.jpg, first.mp3, notes.txt
+settle 300
+shot 05-mixed-selection
+assert-metadata-file notes.txt Skipped only its dates
+assert-metadata-file camera.jpg Ready
+
+metadata-set title=Shared title; album=Only the song
+settle
+assert-tag camera.jpg title Shared title
+assert-tag first.mp3 title Shared title
+assert-tag first.mp3 album Only the song
+assert-exists notes.txt
+
+# --- clearing a field -----------------------------------------------------------------------------
+
+select first.mp3
+metadata-set year=
+settle
+assert-tag first.mp3 year (none)
+assert-tag first.mp3 title Shared title
+
+# --- removing: the location alone, then everything ------------------------------------------------
+#
+# Each on a fresh copy, so what is asserted is what one press did.
+
+metadata-fixture Strip
+go Strip
+
+select camera.jpg, plain.jpg
+settle 300
+assert-tag camera.jpg location yes
+assert-tag plain.jpg location (none)
+
+metadata-remove location
+settle
+assert-tag camera.jpg location (none)
+assert-tag camera.jpg title Old title
+assert-tag camera.jpg make TestCam
+
+undo
+settle
+assert-tag camera.jpg location yes
+
+select camera.jpg, first.mp3
+metadata-remove all
+settle
+assert-tag camera.jpg title (none)
+assert-tag camera.jpg make (none)
+assert-tag camera.jpg location (none)
+assert-tag first.mp3 title (none)
+assert-tag first.mp3 album (none)
+
+undo
+settle
+assert-tag camera.jpg title Old title
+assert-tag first.mp3 album Album One
+
+# --- dates are fields like the rest ----------------------------------------------------------------
+#
+# The date inside a picture, and the file's own two dates on disk: three boxes, typed the same
+# way. A folder and a text file have no metadata, but they have dates, so they get those two.
+
+select camera.jpg
+metadata-set taken=2021-06-04 23:03:02
+settle
+assert-tag camera.jpg taken 2021-06-04 23:03:02
+
+select camera.jpg
+metadata-set modified=2020-01-02 03:04:05; created=2019-12-31 23:59:58
+settle
+assert-file-date camera.jpg modified 2020-01-02 03:04:05
+assert-file-date camera.jpg created 2019-12-31 23:59:58
+
+# Set together with a tag: the date is applied after the rewrite, or the rewrite would move it.
+select first.mp3
+metadata-set title=Dated; modified=2018-07-06 05:04:03
+settle
+assert-tag first.mp3 title Dated
+assert-file-date first.mp3 modified 2018-07-06 05:04:03
+
+mkdir Strip\Album
+write Strip\readme.txt 32
+refresh
+select Album, readme.txt
+settle 300
+shot 06-a-folder-and-a-text-file
+assert-metadata-field title (absent)
+assert-metadata-file Album Skipped only its dates
+metadata-set modified=2017-01-02 03:04:05
+settle
+assert-file-date Album modified 2017-01-02 03:04:05
+assert-file-date readme.txt modified 2017-01-02 03:04:05
+
+undo
+settle
+assert-file-date first.mp3 modified 2018-07-06 05:04:03
+
+up
+
+# --- the other containers, each read back by Windows ----------------------------------------------
+#
+# One tag library writes all of these and each stores its tags differently, so each is checked
+# against the property handler Windows ships for it. The MP4 is a real two-track video.
+
+media-fixture Media
+go Media
+columns add System.Title
+columns add System.Music.AlbumTitle
+
+select tone.flac, tone.m4a, tone.wma, tone.wav, clip.mp4
+metadata-set title=One tone; album=Five containers; artist=Nobody; year=2024
+settle
+assert-tag tone.flac title One tone
+assert-tag tone.m4a album Five containers
+assert-tag tone.wma artist Nobody
+assert-tag tone.wav year 2024
+assert-tag clip.mp4 title One tone
+
+settle 800
+assert-metadata tone.flac System.Title One tone
+assert-metadata tone.m4a System.Title One tone
+assert-metadata tone.wma System.Title One tone
+assert-metadata clip.mp4 System.Title One tone
+assert-metadata tone.flac System.Music.AlbumTitle Five containers
+assert-metadata tone.m4a System.Music.AlbumTitle Five containers
+assert-metadata tone.wma System.Music.AlbumTitle Five containers
+shot 07-containers-windows-agrees
+
+undo
+settle
+assert-tag tone.flac title (none)
+assert-tag clip.mp4 title (none)
+
+up
+
+# --- a cover picture, more than the basics, and what cannot be typed ------------------------------
+
+metadata-fixture Covers
+go Covers
+
+select first.mp3, second.mp3
+metadata-picture plain.jpg
+settle
+assert-tag first.mp3 picture yes
+assert-tag second.mp3 picture yes
+select first.mp3
+settle 400
+shot 08-cover-and-details
+metadata-set lyrics=La la la; bpm=120; publisher=A label
+settle
+assert-tag first.mp3 lyrics La la la
+assert-tag first.mp3 bpm 120
+metadata-remove picture
+settle
+assert-tag first.mp3 picture (none)
+assert-tag second.mp3 picture yes
+
+select camera.jpg
+metadata-set iso=400; aperture=5.6; exposure=1/60; focal=35; lens=35mm F1.4
+settle
+assert-tag camera.jpg iso 400
+assert-tag camera.jpg exposure 1/60
+assert-tag camera.jpg make TestCam
+columns add System.Photo.ISOSpeed
+settle 600
+assert-metadata camera.jpg System.Photo.ISOSpeed 400
+select camera.jpg
+settle 400
+assert-metadata-detail Dimensions 8 x 8
+
+up
+
+# --- pictures that are not JPEGs, and documents ---------------------------------------------------
+
+formats-fixture Formats
+go Formats
+
+select pixel.png, pixel.webp
+metadata-set title=One pixel; author=Nobody; taken=2024-03-14 09:26:53
+settle
+assert-tag pixel.png title One pixel
+assert-tag pixel.webp author Nobody
+assert-tag pixel.webp taken 2024-03-14 09:26:53
+
+select scan.tif
+settle 400
+assert-metadata-field title "Old tiff title"
+metadata-set title=A scan; author=The scanner; rating=5
+settle
+assert-tag scan.tif title A scan
+assert-tag scan.tif make ScanCo
+columns add System.Title
+settle 600
+assert-metadata scan.tif System.Title A scan
+metadata-remove location
+settle
+assert-tag scan.tif location (none)
+
+select tone.aiff, tone.opus
+metadata-set title=One tone; artist=Nobody; track=3
+settle
+assert-tag tone.aiff title One tone
+assert-tag tone.opus artist Nobody
+assert-tag tone.opus track 3
+
+select report.docx
+settle 400
+shot 09-a-document
+assert-metadata-field title "Quarterly report"
+assert-metadata-field author "A. Writer"
+assert-metadata-field artist (absent)
+metadata-set title=Annual report; category=Finance; keywords=money; year end
+settle
+assert-tag report.docx title Annual report
+assert-tag report.docx category Finance
+assert-tag report.docx author A. Writer
+
+select book.epub
+metadata-set title=A Longer Book; publisher=Small Press; keywords=Fiction; Novels
+settle
+assert-tag book.epub title A Longer Book
+assert-tag book.epub publisher Small Press
+assert-tag book.epub keywords Fiction; Novels
+assert-tag book.epub author Some Author
+
+undo
+settle
+assert-tag book.epub title A Short Book
+
+up
+
+# --- what no codec here writes: Windows' own handler, on a copy -----------------------------------
+#
+# An .asf has no codec in this app and an in-box Windows handler that writes; a GIF has a handler
+# that writes nothing. The first gets boxes and a line saying who does the writing; the second is
+# left with its dates. Read back twice as above: the pane's own reading, and a property column.
+
+windows-fixture Windows
+go Windows
+
+select dot.gif
+settle 400
+assert-metadata-file dot.gif Skipped only its dates
+assert-metadata-field title (absent)
+
+select tone.asf
+settle 400
+assert-metadata-file tone.asf Ready Written by Windows
+assert-metadata-field title (none)
+metadata-type title=One tone; year=2024
+shot 10-written-by-windows
+
+metadata-set title=One tone; artist=Nobody; year=2024; rating=4; keywords=sea; boats
+settle
+assert-tag tone.asf title One tone
+assert-tag tone.asf artist Nobody
+assert-tag tone.asf year 2024
+assert-tag tone.asf rating 4
+assert-tag tone.asf keywords sea; boats
+assert-metadata-file tone.asf Changed Written by Windows
+columns add System.Title
+settle 600
+assert-metadata tone.asf System.Title One tone
+assert-can-undo
+
+undo
+settle
+assert-tag tone.asf title (none)
+redo
+settle
+assert-tag tone.asf title One tone
+
+select tone.asf
+metadata-set title=
+settle
+assert-tag tone.asf title (none)
+assert-tag tone.asf artist Nobody
+
+up
+
+# --- names from tags: what most people want tags for ----------------------------------------------
+
+metadata-fixture Names
+go Names
+
+select first.mp3, second.mp3
+rename-rule template="{track:00} {artist} - {title}{ext}"
+settle
+assert-row "01 The Band - First song.mp3"
+assert-row "02 The Band - Second song.mp3"
+
+select camera.jpg
+rename-rule template="{taken:yyyy-MM-dd} {make}{ext}"
+settle
+assert-row "2021-06-05 TestCam.jpg"
+
+# A picture with no date taken is refused by name rather than renamed to half a name; that is
+# pinned in RenameTagTests, since a refused rename fails a script by design.
+assert-row plain.jpg
+
+up
+
+# --- nothing is left lying beside the files once the history lets go ------------------------------
+#
+# Held versions are hidden beside their files while an edit can still be undone. Showing hidden
+# items after the history is cleared is what proves they were erased rather than merely out of sight.
+
+assert-count 11
+clear-undo-history
+settle 500
+hidden on
+refresh
+assert-count 11
+go Formats
+assert-count 7
+up
+go Covers
+assert-count 4
+up
+go Strip
+assert-count 6
+up
+go Windows
+assert-count 2
+up
+go Media
+assert-count 5
+
+assert-not-launched
+echo metadata edits land, undo, and read the same through Windows

@@ -16,7 +16,7 @@ assert-count 8
 # the other two, and the checkbox only says what a *new* tab starts from. It is asserted here
 # rather than photographed: whether it is lit is a title-bar detail the window shots below carry.
 
-assert-visible PreviewPaneToggle
+assert-visible SidePanePreview
 assert-hidden PreviewPane
 preview on
 assert-visible PreviewPane

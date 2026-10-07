@@ -131,7 +131,6 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         _autoAdvance = settings.PreviewAutoAdvance;
         _loop = settings.PreviewLoop && !settings.PreviewAutoAdvance;
         _autoPlay = settings.PreviewAutoPlay;
-        _detailsCollapsed = settings.PreviewDetailsCollapsed;
     }
 
     // --- what the view binds to ---
@@ -160,7 +159,6 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _archiveFooter = "";
     [ObservableProperty] private FontFamily? _fontSpecimen;
     [ObservableProperty] private string _fontFooter = "";
-    [ObservableProperty] private IReadOnlyList<MetadataRow> _metadata = [];
 
     /// <summary>The text as one string, for copying; <see cref="Lines"/> is for rendering.</summary>
     public string TextForCopy { get; private set; } = "";
@@ -197,11 +195,6 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _autoPlay;
 
     partial void OnAutoPlayChanged(bool value) => _settings.PreviewAutoPlay = value;
-
-    /// <summary>The details strip folded down to its header — room given back to a video.</summary>
-    [ObservableProperty] private bool _detailsCollapsed;
-
-    partial void OnDetailsCollapsedChanged(bool value) => _settings.PreviewDetailsCollapsed = value;
 
     /// <summary>Asks the tab to select whatever <see cref="Core.Services.Preview.MediaPlaylist"/>
     /// says comes next. The list's order and selection are the view's; this pane only knows the one
@@ -255,7 +248,6 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     public bool HasArchive => !IsLoading && Kind == PreviewKind.Archive && ArchiveEntries.Count > 0;
     public bool HasFont => !IsLoading && Kind == PreviewKind.Font && FontSpecimen is not null;
     public bool HasMedia => !IsLoading && Kind == PreviewKind.Media;
-    public bool HasMetadata => Metadata.Count > 0;
 
     /// <summary>Wrapping is offered for text and not for a dump: a hex row is a fixed width, and
     /// wrapping one would put half of it under the offset of the next.</summary>
@@ -299,9 +291,6 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
 
     [RelayCommand]
     private void ToggleAutoPlay() => AutoPlay = !AutoPlay;
-
-    [RelayCommand]
-    private void ToggleDetails() => DetailsCollapsed = !DetailsCollapsed;
 
     /// <summary>Called by the tab just before it selects <paramref name="path"/>, so that file
     /// starts playing when it arrives instead of stopping at its poster frame.</summary>
@@ -479,7 +468,6 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         MediaSource = null;
         CanPlayMedia = false;
         _playWhenLoaded = null;
-        Metadata = [];
         FitImageToPane = true;
 
         if (_target is null)
@@ -507,7 +495,6 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         ArchiveFooter = payload.ArchiveFooter;
         FontSpecimen = payload.FontSource is { } source ? SafeFontFamily(source) : null;
         FontFooter = payload.FontFooter;
-        Metadata = payload.Metadata;
         MediaSource = null;
         CanPlayMedia = payload.Kind == PreviewKind.Media;
         FitImageToPane = true;
@@ -553,7 +540,6 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasFont));
         OnPropertyChanged(nameof(HasMedia));
         OnPropertyChanged(nameof(HasMessage));
-        OnPropertyChanged(nameof(HasMetadata));
         OnPropertyChanged(nameof(CanChooseMode));
         OnPropertyChanged(nameof(HasActions));
         OnPropertyChanged(nameof(ShowWrapButton));
@@ -586,7 +572,6 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         public string ArchiveFooter { get; init; } = "";
         public string? FontSource { get; init; }
         public string FontFooter { get; init; } = "";
-        public IReadOnlyList<MetadataRow> Metadata { get; init; } = [];
         public string? Message { get; init; }
     }
 
@@ -625,14 +610,7 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
             };
 
             ct.ThrowIfCancellationRequested();
-
-            // Shell properties come from the shell, which has never heard of a path inside a
-            // container. Skipped rather than attempted: the strip would be empty either way, and
-            // this way it costs nothing per selection.
-            return payload with
-            {
-                Metadata = inArchive ? [] : ReadMetadata(path, plan.Kind),
-            };
+            return payload;
         }
         catch (OperationCanceledException)
         {
@@ -648,14 +626,6 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
         {
             return new Payload { Message = "This file could not be read." };
         }
-    }
-
-    private static IReadOnlyList<MetadataRow> ReadMetadata(string path, PreviewKind kind)
-    {
-        var rows = ShellProperties.Read(path)
-            .Select(p => new ShellPropertyRow(p.Canonical, p.Name, p.Value))
-            .ToList();
-        return PreviewMetadata.Select(kind, rows);
     }
 
     /// <summary>Opens sharing everything, copies into memory, closes. The handle is gone before a

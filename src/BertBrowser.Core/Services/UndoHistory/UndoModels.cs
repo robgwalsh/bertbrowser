@@ -3,7 +3,7 @@ using BertBrowser.Core.Services.Rename;
 
 namespace BertBrowser.Core.Services.UndoHistory;
 
-/// <summary>The six kinds of operation the history can take back and do again.</summary>
+/// <summary>The eight kinds of operation the history can take back and do again.</summary>
 public enum UndoKind
 {
     Rename,
@@ -14,6 +14,10 @@ public enum UndoKind
     Delete,
     ArchiveEdit,
     Sync,
+    /// <summary>Tags and details written into files — a picture's EXIF, a song's ID3.</summary>
+    MetadataEdit,
+    /// <summary>A file's or folder's modified and created dates.</summary>
+    Timestamps,
 }
 
 public enum UndoDirection

@@ -74,6 +74,11 @@ you where and what to watch for.
 | Compare / sync two folders | `Core/Services/Compare/*`, `ViewModels/CompareSessionViewModel` |
 | Compare two files by content | `Core/Services/Compare/FileContentComparer`, `FileComparePlan`, `ContentSettlement`, `Core/Services/Diff/*` (`TextDiffer`), `Views/FileCompareWindow` |
 | Checksums (hash / verify) | `Core/Services/Checksums/*` (`ChecksumAlgorithms`, `DigestSink`, `IFileDigester`, `ChecksumFile`, `ChecksumPath`, `ChecksumVerify`, `ChecksumRunner`), `Views/ChecksumWindow` |
+| Metadata editing (pictures, audio/video tags, documents, cover art, strip) | `Core/Services/Metadata/*` (`MetadataFields`, `IMetadataCodec` + `MetadataCodecs`, `JpegCodec` / `PngCodec` / `WebPCodec` / `TiffCodec` over `ExifBlock` + `ExifFields`, `XmpPacket`, `IptcBlock`, `AudioTagCodec`, `AudioPayload`, `ZipDocumentCodec` (`OpenXmlCodec`, `EpubCodec`), `MetadataEditPlanner`, `MetadataEditExecutor`, `MetadataFixtures`), `Core/Services/StagedReplace`, `UndoHistory/MetadataEditRecord`, `ShellViewModel.Metadata`, `ViewModels/MetadataViewModel`, `Views/MetadataPane`, `tools/ui/metadata.bbs` |
+| Metadata for types with no codec (Windows' property handlers) | `Core/Services/Metadata/PropertyFallback.cs` (`IPropertyFallback`, `WindowsPropertyFields`), `PlannedMetadataEdit.ViaWindows`, `MetadataEditExecutor.EditViaWindows`, `Services/WindowsPropertyFallback`, `ShellProperties.ReadWritable` / `Write`, `PropertyFallbackTests`, the "written by Windows" section of `tools/ui/metadata.bbs` |
+| Side pane (none / preview / metadata) | `SidePane` + `SetSidePane` / `CycleSidePane` in `DirectoryTabViewModel`, `DirectoryTabView.UpdatePreviewPane` / `EnsureMetadataPane` / `ShowMetadataForSelection`, `SidePaneSelector` (three buttons) in `DirectoryTabView.xaml` |
+| File dates (modified/created) | `Core/Services/Timestamps/*` (`TimestampPlanner`, `TimestampExecutor`), `UndoHistory/TimestampRecord`, the two date rows of `MetadataViewModel` |
+| Rename from tags (`{artist}`, `{taken:…}`) | `RenamePart.Tag` in `RenameTemplate`, `RenamePattern.Tag`, `RenameSource.Tags`, `ShellViewModel.ReadRenameTags` |
 | Search query language | `Core/Services/Search/*`, `docs/search-indexing.md` |
 | Content search (`content:`) | `Core/Services/Search/ContentTerm.cs`, `Core/Services/Search/ContentReader.cs` |
 | Saved workspaces (switcher placement, Settings page) | `Core/Services/SavedWorkspaces/*` (`SavedWorkspaceRules`), `Core/Data/SavedWorkspaceRepository`, `ViewModels/SavedWorkspacesViewModel`, `MainWindow.SavedWorkspaces` (title-bar dropdown), the Workspaces page of `SettingsView` |
@@ -267,7 +272,7 @@ you where and what to watch for.
   `TransferMergeLimits` the folder keeps its old wholesale question rather than becoming a dialog
   nobody can answer.
 - **Undo is a session-only, LIFO history** (`UndoStack`) of moves, renames, deletes, merged
-  pastes, archive edits and syncs, with redo and "undo/redo to here". Data is committed only when
+  pastes, archive edits, syncs, metadata edits and date changes, with redo and "undo/redo to here". Data is committed only when
   an entry's record is `Retire`d: when the budget (steps + held bytes, History settings page)
   releases it, when a new operation discards the redo branch, on Clear, and on window close
   (`ReleaseUndoHistory`). The budget never releases the next undo, however large. Each operation
@@ -290,6 +295,66 @@ you where and what to watch for.
   stamp changed. Held bytes are file stats plus `dir_size_cache` by original path, falling back to a
   capped walk of our own staged copy; an estimate for the budget only, never shown as a folder size.
   On by default, unlike the change log, because nothing it holds outlives the session.
+- **The preview and the metadata pane are one three-state choice (`SidePane`), not two switches.**
+  They share a column, a splitter and a remembered width; `IsPreviewVisible`/`IsMetadataVisible` are
+  views of the one value. The metadata pane is built on first show like the preview, follows the
+  selection, and reloads only when the selected paths *or their modified times* change — a refresh
+  that changes neither must not wipe what is half typed. It never writes: Apply goes through the
+  shell. After a write the list has reloaded with nothing selected, so the pane re-selects what it
+  edited (`MetadataViewModel.Applied`) or it would answer its own edit by going blank. The file's
+  own modified/created dates are two more rows, applied through the timestamp executor **after**
+  the metadata, since rewriting a file is what moves its modified date. The date popup's
+  `Calendar` is WPF's stock one and is not themed yet.
+- **A metadata edit is only swapped in once its payload digest matches the original's.**
+  `IMetadataCodec.PayloadDigest` hashes everything that is *not* metadata, and `MetadataEditExecutor`
+  writes a sibling, reads it back, compares that digest and the fields, and only then swaps — so a
+  codec bug costs an error message, not a photograph. Consequences that are easy to undo: the audio
+  digest (`AudioPayload`) is **our own reading, never ATL's** (a check that asks the suspect where to
+  look is not one), and a container with no locator there cannot be edited however well ATL reads
+  it; for MPEG-4 hashing `mdat` is not enough, so it also hashes what each `stco`/`co64` entry
+  points at — a writer that pushes `mdat` down and forgets one track's offsets leaves every byte
+  intact and the file unplayable; `ExifBlock` **never relocates anything** (a MakerNote's offsets are
+  absolute within the block), it overwrites in place or appends, and zeroes what it abandons because
+  an unlinked GPS directory still sitting in the file has not been removed; a removal is verified by
+  reading `HasLocation` back, and XMP that mentions GPS but will not parse counts as *having* one and
+  is refused rather than claimed clean; an existing XMP packet is kept in step on every edit and
+  never created; the swap is `StagedReplace` (`ReplaceFile`), not two renames, which is what keeps
+  creation time, ACL, attributes and `Zone.Identifier`; held versions are hidden siblings, left in
+  place rather than erased when a step fails; an edit that produces identical bytes is `Unchanged`,
+  not a history entry; no elevated retry, for the reason archives have none. **Which fields a file
+  takes is its codec's answer (`IMetadataCodec.Fields`), not its family's** — WMA has no publisher —
+  and `Every_field_a_container_offers_is_one_it_keeps` is what pins each set: a field offered that a
+  format silently drops fails the read-back on every file of that kind. An Ogg stream is hashed by
+  **packet, not page** (a tag edit re-cuts and renumbers every page) plus each page's granule; a
+  WebP given its first EXIF gains a `VP8X` header and loses it again when stripped; a TIFF *is* an
+  `ExifBlock` end to end, so its digest walks the IFD chain its own way and hashes every strip; a
+  zip document is hashed by entry name and *uncompressed* bytes, and an EPUB's package part by
+  everything in it but `<metadata>`. `MetadataEditPlanner.IsInsideArchive` asks a path's **folder**,
+  never its own name, because an EPUB is an archive and standing on one is not being in it. IPTC is
+  kept in step like XMP, and a value its character set or length limit cannot hold is taken out of
+  the record rather than written wrong. No codec: PDF (an incremental update cannot honour a
+  removal — the old value stays in the earlier revision), MOV, HEIC, camera RAW — those get
+  whatever Windows' own handler offers, unchecked (next). ATL is reached from
+  `AudioTagCodec` alone. Fixtures (`MetadataFixtures`) are never written by the code under test:
+  Windows' own encoders, or bytes laid out by hand from the spec.
+- **A file no codec writes goes through Windows' property handler, and that is the one metadata
+  write with no payload check.** There is no reading of the format to hash, so what is kept is
+  everything else: the handler is only ever pointed at a **copy** beside the file (it writes in
+  place, so in place is where the user's file must not be), the fields are read back from the copy,
+  and it is swapped in and held for undo like any rewrite. The pane says "Written by Windows" on
+  every such file, and keeps saying it after an apply. Consequences that are easy to undo: a codec
+  always wins (`MetadataCodecs.Handles` is asked first, in the planner); fields only — never a
+  removal or a picture, since a removal is a promise about the whole file; **`IsPropertyWritable`
+  lies on a read-only store** (a `.txt`, which has no handler, answers yes to everything), so the
+  question is asked of a store opened `GPS_READWRITE`, and because that open is exclusive — it
+  collided with this app's own column read of the same file, which then cached a blank — the answer
+  is remembered per extension and the values are read through an ordinary shared store; a store
+  that would not open is not remembered, since that can be one file in use. Offering a field is
+  the handler's promise, not ours: `Commit` can still refuse (it does for a tiny `.mov`), which
+  costs the copy and an error. Which property a field is, the star bands, and dates crossing as
+  UTC are `WindowsPropertyFields`, in Core, because they can be wrong without Windows being
+  involved. The planner takes the offered fields as an argument rather than asking — asking is
+  opening the file.
 - **A comparison's "same" is what authorises a delete**, so every doubt resolves away from it: a
   missing timestamp is `Unknown` and one `Unknown` descendant carries a whole subtree to `Unknown`.
   `dir_size_cache` deliberately never classifies a folder — equal totals do not mean equal trees,

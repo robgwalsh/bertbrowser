@@ -47,28 +47,6 @@
                 <Setter Property="Padding" Value="5,3"/>
                 <Setter Property="Margin" Value="1,0"/>
             </Style>
-
-            <!-- The details strip's header: the full width of the strip is the click target, so
-                 folding it never needs aiming at a 16-pixel chevron. -->
-            <Style x:Key="DetailsHeaderButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
-                <Setter Property="Padding" Value="0,2"/>
-                <Setter Property="Margin" Value="0"/>
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="Button">
-                            <Border x:Name="Bd" Background="Transparent" CornerRadius="3">
-                                <ContentPresenter Margin="{TemplateBinding Padding}"/>
-                            </Border>
-                            <ControlTemplate.Triggers>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="Bd" Property="Background"
-                                            Value="{StaticResource Theme.Toolbar.HoverBackground}"/>
-                                </Trigger>
-                            </ControlTemplate.Triggers>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
         </ResourceDictionary>
     </UserControl.Resources>
 
@@ -174,55 +152,6 @@
                         ToolTip="Copy the previewed text"
                         Visibility="{Binding HasText, Converter={StaticResource BoolToVisibility}}"/>
             </StackPanel>
-        </Border>
-
-        <!-- Details, from the shell's property handlers. Curated per kind, not the whole dump —
-             the Properties dialog is where everything lives. -->
-        <Border DockPanel.Dock="Bottom" BorderThickness="0,1,0,0"
-                BorderBrush="{StaticResource Theme.Border.Subtle}" Padding="8,2,8,4"
-                Visibility="{Binding HasMetadata, Converter={StaticResource BoolToVisibility}}">
-            <DockPanel>
-                <!-- Folds the strip to this one line. Remembered across files and restarts, since it is
-                     a choice about how much room the body gets rather than about any one file. -->
-                <Button DockPanel.Dock="Top" Style="{StaticResource DetailsHeaderButton}"
-                        Command="{Binding ToggleDetailsCommand}"
-                        AutomationProperties.AutomationId="PreviewDetailsToggle"
-                        ToolTip="Show or hide the details">
-                    <DockPanel>
-                        <Path DockPanel.Dock="Right" Width="12" Height="12">
-                            <Path.Style>
-                                <Style TargetType="Path" BasedOn="{StaticResource IconPath}">
-                                    <Setter Property="Data" Value="{StaticResource Icon.ChevronDown}"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding DetailsCollapsed}" Value="True">
-                                            <Setter Property="Data" Value="{StaticResource Icon.ChevronUp}"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Path.Style>
-                        </Path>
-                        <TextBlock Text="Details" FontSize="11" FontWeight="SemiBold"
-                                   Foreground="{StaticResource Theme.Text.Muted}"/>
-                    </DockPanel>
-                </Button>
-                <ItemsControl ItemsSource="{Binding Metadata}" Grid.IsSharedSizeScope="True" Margin="0,2,0,0"
-                              Visibility="{Binding DetailsCollapsed, Converter={StaticResource InverseBoolToVisibility}}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Grid Margin="0,1">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" SharedSizeGroup="MetaLabel"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="{Binding Label}" Margin="0,0,10,0" FontSize="11"
-                                           Foreground="{StaticResource Theme.Text.Muted}"/>
-                                <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="11"
-                                           TextTrimming="CharacterEllipsis" ToolTip="{Binding Value}"/>
-                            </Grid>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </DockPanel>
         </Border>
 
         <!-- Whichever footer belongs to the body that is showing. -->

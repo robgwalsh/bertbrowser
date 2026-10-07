@@ -60,7 +60,11 @@ public partial class DirectoryTabView : UserControl
         // The last selection change of a rubber-band sweep lands while the band is still down, and
         // the preview skips those; without this the pane would keep showing whatever was selected
         // before the drag began.
-        _marquee.DragEnded += () => { if (Tab.IsPreviewVisible) Tab.Preview.Show(Tab.SelectedItems); };
+        _marquee.DragEnded += () =>
+        {
+            if (Tab.IsPreviewVisible) Tab.Preview.Show(Tab.SelectedItems);
+            ShowMetadataForSelection();
+        };
         // Attached after the marquee so the two never fight: the marquee ignores presses that land
         // on a row, and this ignores presses that land on empty space.
         FileDragDropController.Attach(FileListView, tab, shell);
@@ -115,7 +119,7 @@ public partial class DirectoryTabView : UserControl
             return;
         }
 
-        if (e.PropertyName == nameof(DirectoryTabViewModel.IsPreviewVisible))
+        if (e.PropertyName == nameof(DirectoryTabViewModel.SidePane))
         {
             UpdatePreviewPane();
             return;
@@ -130,16 +134,72 @@ public partial class DirectoryTabView : UserControl
     /// <summary>Shows or hides the preview column. Assigned rather than bound because
     /// <see cref="ColumnDefinition.Width"/> is not a bindable target — the same reason
     /// <see cref="ReconcileColumns"/> builds the file list's columns in code.</summary>
+    /// <remarks>
+    /// The preview and the metadata pane stand in the same column and are never both up
+    /// (<see cref="SidePane"/>), so one splitter and one remembered width serve whichever it is.
+    /// </remarks>
     private void UpdatePreviewPane()
     {
-        var show = Tab.IsPreviewVisible;
+        var preview = Tab.IsPreviewVisible;
+        var metadata = Tab.IsMetadataVisible;
+        var show = preview || metadata;
+
         PreviewSplitterColumn.Width = show ? GridLength.Auto : new GridLength(0);
         PreviewColumn.Width = show ? new GridLength(PreviewWidth()) : new GridLength(0);
         PreviewSplitter.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        if (show) EnsurePreviewPane();
-        if (_previewPane is { } pane) pane.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
 
-        if (show) Tab.Preview.Show(Tab.SelectedItems);
+        if (preview) EnsurePreviewPane();
+        if (metadata) EnsureMetadataPane();
+        if (_previewPane is { } pane) pane.Visibility = preview ? Visibility.Visible : Visibility.Collapsed;
+        if (_metadataPane is { } editor) editor.Visibility = metadata ? Visibility.Visible : Visibility.Collapsed;
+
+        if (preview) Tab.Preview.Show(Tab.SelectedItems);
+        if (metadata) ShowMetadataForSelection();
+    }
+
+    private MetadataPane? _metadataPane;
+
+    /// <summary>This tab's metadata editor, once the pane has been shown. Internal for the UI
+    /// harness, which types into the same view model a person would.</summary>
+    internal MetadataViewModel? Metadata { get; private set; }
+
+    /// <summary>What the pane was last pointed at: each selected path and when it was modified.
+    /// A refresh that changes neither must not throw away what somebody is half-way through typing.</summary>
+    private string _metadataShown = "\0";
+
+    /// <summary>The metadata pane, built the first time this tab shows it — for the reason
+    /// <see cref="EnsurePreviewPane"/> gives, and most tabs never will.</summary>
+    private MetadataPane EnsureMetadataPane()
+    {
+        if (_metadataPane is { } pane) return pane;
+
+        Metadata = new MetadataViewModel(
+            _shell, App.Services.GetRequiredService<BertBrowser.Core.Services.Metadata.IMetadataProbe>(),
+            App.Services.GetRequiredService<BertBrowser.Core.Services.Metadata.IPropertyFallback>());
+        Metadata.Applied += paths =>
+        {
+            // Recorded as shown before the selection comes back, so re-selecting the same items
+            // does not start a second read on top of the one the pane is about to do itself.
+            SelectPaths(paths);
+            _metadataShown = string.Join("\n", Tab.SelectedItems.Select(i => $"{i.FullPath}|{i.ModifiedUtc.Ticks}"));
+        };
+        pane = new MetadataPane { Name = "MetadataPane", DataContext = Metadata };
+        SidePaneHost.Children.Add(pane);
+        return _metadataPane = pane;
+    }
+
+    /// <summary>Points the metadata pane at whatever is selected now.</summary>
+    internal void ShowMetadataForSelection()
+    {
+        if (!Tab.IsMetadataVisible || Metadata is not { } metadata) return;
+
+        // Nothing inside an archive has a file of its own to read or rewrite.
+        var selected = Tab.FileList.IsInsideArchive ? [] : Tab.SelectedItems;
+        var key = string.Join("\n", selected.Select(i => $"{i.FullPath}|{i.ModifiedUtc.Ticks}"));
+        if (key == _metadataShown) return;
+
+        _metadataShown = key;
+        metadata.Load([.. selected.Select(i => i.FullPath)]);
     }
 
     private PreviewPane? _previewPane;
@@ -160,7 +220,7 @@ public partial class DirectoryTabView : UserControl
         pane = new PreviewPane { Name = "PreviewPane" };
         pane.SetBinding(DataContextProperty, new System.Windows.Data.Binding(nameof(DirectoryTabViewModel.Preview)));
         pane.FitWidthRequested += PreviewPane_FitWidthRequested;
-        PreviewHost.Child = pane;
+        SidePaneHost.Children.Add(pane);
         return _previewPane = pane;
     }
 
@@ -684,6 +744,8 @@ public partial class DirectoryTabView : UserControl
             UpdateSelectionSummary();
             if (Tab.IsPreviewVisible && !_marquee.IsDragging)
                 Tab.Preview.Show(Tab.SelectedItems);
+            if (Tab.IsMetadataVisible && !_marquee.IsDragging)
+                ShowMetadataForSelection();
         }, DispatcherPriority.Background);
     }
 
@@ -1223,7 +1285,7 @@ public partial class DirectoryTabView : UserControl
             .ToList();
 
         var owner = Window.GetWindow(this);
-        if (RenameDialog.Show(owner, ordered, _shell.PlanRename) is not { } plan) return;
+        if (RenameDialog.Show(owner, ordered, _shell.PlanRename, _shell.ReadRenameTags) is not { } plan) return;
 
         var outcome = await _shell.RenameAsync(plan);
 

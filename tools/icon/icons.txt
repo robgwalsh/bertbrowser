@@ -36,6 +36,7 @@ SplitBelow        | Layout Row Two          | layout_row_two          | 20
 OpenInNewTab      | Tab Add                 | tab_add                 | 20
 OpenInNewPane     | Split Horizontal        | split_horizontal        | 20
 PreviewPane       | Panel Right             | panel_right             | 20
+SidePaneNone      | Square                  | square                  | 20
 DetailsList       | Apps List               | apps_list               | 20
 # The flat branch view's toggle. A plain flat list of bullets, because that is what the button does
 # to the tree it is pointed at -- a "tree" glyph would name what it replaces rather than what it does.
@@ -108,6 +109,8 @@ Save              | Save                    | save                    | 20
 
 # The checksum dialog: a file's SHA-256 digest, for verifying a download.
 Checksum          | Number Symbol           | number_symbol           | 20
+Metadata          | Tag                     | tag                     | 20
+FileDates         | Calendar Clock          | calendar_clock          | 20
 
 # Comparing two files by content. Deliberately not Icon.Compare, which already means "compare this
 # pane with the one beside it" — both appear in the file list's menu, and one picture on two verbs

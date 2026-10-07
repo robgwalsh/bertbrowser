@@ -12,6 +12,14 @@ using BertBrowser.Core.Services.Search;
 
 namespace BertBrowser.App.ViewModels;
 
+/// <summary>What a tab shows beside its file list.</summary>
+public enum SidePane
+{
+    None,
+    Preview,
+    Metadata,
+}
+
 public sealed record BreadcrumbSegment(string Name, string FullPath);
 
 /// <summary>
@@ -56,20 +64,59 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
     /// is one per tab because the selection it follows is per tab.</summary>
     public PreviewPaneViewModel Preview { get; }
 
-    /// <summary>Whether this tab shows its preview pane. Per tab, so one pane can be previewing
-    /// while another shows a full-width list; the persisted setting is what a new tab starts
-    /// from, and toggling writes it back so the next tab inherits the choice.</summary>
+    /// <summary>
+    /// What stands beside this tab's list: nothing, the preview, or the metadata editor.
+    /// </summary>
+    /// <remarks>
+    /// One value rather than two switches, because the two panes share one column and cannot both
+    /// be up — two booleans would have a fourth state nothing could draw. Per tab, so one pane can
+    /// be previewing while another shows a full-width list; the persisted setting is what a new
+    /// tab starts from, and changing it writes it back so the next tab inherits the choice.
+    /// </remarks>
     [ObservableProperty]
-    private bool _isPreviewVisible;
+    [NotifyPropertyChangedFor(nameof(IsPreviewVisible), nameof(IsMetadataVisible))]
+    private SidePane _sidePane;
 
-    partial void OnIsPreviewVisibleChanged(bool value)
+    partial void OnSidePaneChanged(SidePane value)
     {
-        _settings.ShowPreviewPane = value;
-        if (value) Preview.Show(SelectedItems);
+        _settings.ShowPreviewPane = value == SidePane.Preview;
+        _settings.ShowMetadataPane = value == SidePane.Metadata;
+        if (value == SidePane.Preview) Preview.Show(SelectedItems);
+    }
+
+    /// <summary>Whether the preview is the pane showing. Setting it false closes the side pane
+    /// only when the preview was what was open.</summary>
+    public bool IsPreviewVisible
+    {
+        get => SidePane == SidePane.Preview;
+        set => SidePane = value ? SidePane.Preview : IsPreviewVisible ? SidePane.None : SidePane;
+    }
+
+    /// <inheritdoc cref="IsPreviewVisible"/>
+    public bool IsMetadataVisible
+    {
+        get => SidePane == SidePane.Metadata;
+        set => SidePane = value ? SidePane.Metadata : IsMetadataVisible ? SidePane.None : SidePane;
     }
 
     [RelayCommand]
     private void TogglePreview() => IsPreviewVisible = !IsPreviewVisible;
+
+    [RelayCommand]
+    private void ToggleMetadata() => IsMetadataVisible = !IsMetadataVisible;
+
+    /// <summary>The toolbar's selector: one button for each of the three, lit when it is the one.</summary>
+    [RelayCommand]
+    private void SetSidePane(SidePane pane) => SidePane = pane;
+
+    /// <summary>For a key or the palette: nothing, then the preview, then metadata, then nothing.</summary>
+    [RelayCommand]
+    private void CycleSidePane() => SidePane = SidePane switch
+    {
+        SidePane.None => SidePane.Preview,
+        SidePane.Preview => SidePane.Metadata,
+        _ => SidePane.None,
+    };
 
     // --- Flat branch view ---
 
@@ -245,7 +292,9 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         FileList = new FileListViewModel(fileSystem, dirSizeRepository, settings, archives);
         FileList.PropertyChanged += OnFileListPropertyChanged;
         Preview = new PreviewPaneViewModel(settings, archives, archiveReader, archivePasswords);
-        _isPreviewVisible = settings.ShowPreviewPane;
+        _sidePane = settings.ShowMetadataPane ? SidePane.Metadata
+            : settings.ShowPreviewPane ? SidePane.Preview
+            : SidePane.None;
         _refreshTimer.Tick += OnRefreshTick;
     }
 

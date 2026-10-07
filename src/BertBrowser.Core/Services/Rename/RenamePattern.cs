@@ -164,10 +164,58 @@ public static class RenamePattern
                 case RenamePart.Modified:
                     problem = Date(built, source, segment.Argument) ?? problem;
                     break;
+
+                case RenamePart.Tag:
+                    problem = Tag(built, source, segment) ?? problem;
+                    break;
             }
         }
 
         return new RenamedName(Clean(built.ToString()), problem);
+    }
+
+    /// <summary>
+    /// Puts one of the file's own metadata fields into its name, or says why it cannot.
+    /// </summary>
+    /// <remarks>
+    /// <b>A missing tag is a refusal for that item, never an empty piece of a name.</b> "{artist} -
+    /// {title}" over a file with no artist would otherwise come out as " - Song", and forty such
+    /// files would be forty names nobody chose. And what a tag holds is somebody else's text: a
+    /// title can contain a slash or a colon, so anything a name cannot hold becomes an underscore
+    /// here rather than failing the whole name on a character the user never typed.
+    /// </remarks>
+    private static string? Tag(StringBuilder built, RenameSource source, RenameSegment segment)
+    {
+        var (field, argument) = RenameTemplate.TagOf(segment);
+        var label = field.Label.ToLowerInvariant();
+
+        if (source.Tags is not { } tags || !tags.TryGetValue(field.Field, out var value) || value.Length == 0)
+            return $"'{source.Name}' has no {label} to put in its name.";
+
+        switch (field.Kind)
+        {
+            case Metadata.MetadataFieldKind.Number
+                when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var number):
+                built.Append(number.ToString(argument.Length > 0 ? "D" + argument.Length : "D", CultureInfo.InvariantCulture));
+                return null;
+
+            case Metadata.MetadataFieldKind.Date when Metadata.MetadataFields.TryParseDate(value, out var date):
+                try
+                {
+                    built.Append(date.ToString(
+                        argument.Length > 0 ? argument : DefaultDateFormat, CultureInfo.InvariantCulture));
+                    return null;
+                }
+                catch (FormatException)
+                {
+                    return $"'{argument}' is not a date format. Try {DefaultDateFormat}.";
+                }
+
+            default:
+                foreach (var c in value.Trim())
+                    built.Append(char.IsControl(c) || InvalidChars.Contains(c) ? '_' : c);
+                return null;
+        }
     }
 
     private static string? Date(StringBuilder built, RenameSource source, string format)
@@ -280,22 +328,30 @@ public static class RenamePattern
 
         foreach (var segment in segments)
         {
-            if (segment.Part != RenamePart.Modified || segment.Argument.Length == 0) continue;
+            // A date from the file's own metadata is formatted by the same rules as its modified date.
+            var format = segment.Part switch
+            {
+                RenamePart.Modified => segment.Argument,
+                RenamePart.Tag when RenameTemplate.TagOf(segment) is
+                    { Field.Kind: Metadata.MetadataFieldKind.Date, Argument: var argument } => argument,
+                _ => "",
+            };
+            if (format.Length == 0) continue;
 
             string formatted;
             try
             {
-                formatted = SampleDate.ToString(segment.Argument, CultureInfo.InvariantCulture);
+                formatted = SampleDate.ToString(format, CultureInfo.InvariantCulture);
             }
             catch (FormatException)
             {
-                return $"'{segment.Argument}' is not a date format. Try {DefaultDateFormat}.";
+                return $"'{format}' is not a date format. Try {DefaultDateFormat}.";
             }
 
             // A standard format such as "d" is perfectly valid and produces slashes; the refusal
             // that followed would name the character rather than the format that put it there.
             if (formatted.AsSpan().IndexOfAny(InvalidChars) >= 0)
-                return $"A date written '{segment.Argument}' comes out as '{formatted}', which a " +
+                return $"A date written '{format}' comes out as '{formatted}', which a " +
                     $"name can't hold. Try {DefaultDateFormat}.";
         }
 

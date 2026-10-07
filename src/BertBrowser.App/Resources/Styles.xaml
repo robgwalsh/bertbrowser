@@ -114,6 +114,42 @@
     </Style>
 
     <!--
+      One segment of a joined group of toolbar buttons: no gap and no rounding of its own, so the
+      group's single outline is the only edge, and a BorderThickness of "0,0,1,0" on all but the
+      last draws the divider between neighbours.
+    -->
+    <Style x:Key="ToolbarSegment" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+        <Setter Property="Margin" Value="0"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Theme.Border.Default}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" SnapsToDevicePixels="True">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.Toolbar.HoverBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background"
+                                    Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--
       Text that happens to be clickable, for the status bar: no chrome, no padding, just the link
       colour and a hand cursor. The status bar uses this so the indexing line can offer a retry
       without turning into a control that draws a box in the middle of a sentence.

@@ -24,6 +24,12 @@
          — which is what makes it replaceable by the forty lines of table-driven CRC32 it saves us
          writing. Note its GetHashAndReset is little-endian; see Crc32DigestSink for why that matters. -->
     <PackageReference Include="System.IO.Hashing" Version="9.0.0" />
+    <!-- Reading and writing audio tags: ID3v2, Vorbis comments, MP4 atoms, ASF, APE. MIT, and
+         reached from exactly one class, Services/Metadata/AudioTagCodec.cs. Ten container formats
+         each with its own tag layout is the SharpCompress case over again, not the Markdig one —
+         where the image codecs beside it are ours, because splicing a JPEG segment is small and
+         nothing MIT does it without re-encoding the picture. -->
+    <PackageReference Include="z440.atl.core" Version="7.18.0" />
   </ItemGroup>
 
   <ItemGroup>

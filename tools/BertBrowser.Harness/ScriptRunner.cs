@@ -198,6 +198,21 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
             case "conflict-plan": ConflictPlan(rest); break;
             case "progress-demo": ProgressDemo(rest); break;
             case "archive-fixture": ArchiveFixture(rest); break;
+            case "metadata-fixture": MetadataFixture(rest); break;
+            case "media-fixture": MediaFixture(rest); break;
+            case "formats-fixture": FormatsFixture(rest); break;
+            case "windows-fixture": WindowsFixture(rest); break;
+            case "metadata-picture": MetadataPicture(rest); break;
+            case "assert-metadata-detail": AssertMetadataDetail(rest); break;
+            case "metadata-type": MetadataType(rest); break;
+            case "metadata-set": MetadataSet(rest); break;
+            case "metadata-remove": MetadataRemove(rest); break;
+            case "side-pane": SidePaneVerb(rest); break;
+            case "assert-side-pane": AssertSidePane(rest); break;
+            case "assert-file-date": AssertFileDate(rest); break;
+            case "assert-tag": AssertTag(rest); break;
+            case "assert-metadata-file": AssertMetadataFile(rest); break;
+            case "assert-metadata-field": AssertMetadataField(rest); break;
             case "extract": Extract(rest); break;
             case "compress": Compress(rest); break;
             case "unlock": Unlock(rest); break;
@@ -1948,7 +1963,13 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
         if (rest.Trim().Length == 0)
             throw new FormatException("rename-rule needs key=value settings.");
 
-        Carry(RenameSources("rename-rule"), ParseRule(rest), "That rule");
+        // Read exactly when the dialog reads them: only for a template that names a tag.
+        var rule = ParseRule(rest);
+        var sources = RenameSources("rename-rule");
+        if (RenameTemplate.UsesTags(rule.Template))
+            sources = [.. session.Shell.ReadRenameTags(sources)];
+
+        Carry(sources, rule, "That rule");
     }
 
     private List<RenameSource> RenameSources(string verb) => Selection()
@@ -3690,6 +3711,7 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
         // selected, so 'write-text' pairs photograph the first and 'write' pairs the second.
         "compare-files" => FileCompareWindowFor(),
 
+
         "properties" => new PropertiesDialog(new PropertiesViewModel(
             Selection().Select(i => new PropertiesTarget(i.FullPath, i.IsDirectory)).ToList(),
             session.Services.GetRequiredService<DirSizeRepository>())),
@@ -4097,7 +4119,7 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
             ("previewFooter", Quote(tab.Preview.TextFooter)),
             ("previewPaneWidth", (FindNamed<FrameworkElement>("PreviewPane")?.ActualWidth ?? 0)
                 .ToString("0.#", CultureInfo.InvariantCulture)),
-            ("previewMetadata", Text(tab.Preview.Metadata.Count)),
+            ("sidePane", Quote(tab.SidePane.ToString())),
             ("canUndo", Bool(shell.CanUndo)),
             ("undo", Quote(shell.UndoDescription)),
             ("canRedo", Bool(shell.CanRedo)),

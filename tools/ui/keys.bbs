@@ -143,7 +143,7 @@ assert-menu-gesture Delete… Del
 assert-menu-gesture Copy as path Ctrl+Shift+C
 assert-menu-gesture Folder Ctrl+Shift+N
 assert-menu-gesture Bookmark none
-assert-tooltip PreviewPaneToggle Ctrl+P
+assert-tooltip SidePanePreview Ctrl+P
 
 bind file.rename F9
 bind file.bookmark Ctrl+D
@@ -153,13 +153,13 @@ menu files 02-menu-rebound
 assert-menu-gesture Rename F9
 assert-menu-gesture Bookmark Ctrl+D
 assert-menu-gesture Folder none
-assert-tooltip PreviewPaneToggle Ctrl+Shift+V
+assert-tooltip SidePanePreview Ctrl+Shift+V
 assert-key F2 list none
 assert-key F9 list file.rename
 deselect
 
 unbind
-assert-tooltip PreviewPaneToggle Ctrl+P
+assert-tooltip SidePanePreview Ctrl+P
 assert-gesture view.flat Ctrl+B
 assert-key Ctrl+T list tab.new
 assert-gesture tab.duplicate Ctrl+Shift+K

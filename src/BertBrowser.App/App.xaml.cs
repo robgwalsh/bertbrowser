@@ -274,6 +274,20 @@ public partial class App : Application
         services.AddSingleton<BertBrowser.Core.Services.Archives.ArchiveEditPlanner>();
         services.AddSingleton(s => new BertBrowser.Core.Services.Archives.ArchiveEditExecutor(
             s.GetRequiredService<BertBrowser.Core.Services.Archives.IArchiveReader>()));
+        services.AddSingleton<BertBrowser.Core.Services.Metadata.IMetadataProbe,
+            BertBrowser.Core.Services.Metadata.FileSystemMetadataProbe>();
+        services.AddSingleton(s => new BertBrowser.Core.Services.Metadata.MetadataEditPlanner(
+            s.GetRequiredService<BertBrowser.Core.Services.Metadata.IMetadataProbe>()));
+        services.AddSingleton<BertBrowser.Core.Services.Metadata.IPropertyFallback, WindowsPropertyFallback>();
+        services.AddSingleton(s => new BertBrowser.Core.Services.Metadata.MetadataEditExecutor(
+            s.GetRequiredService<BertBrowser.Core.Services.Metadata.IMetadataProbe>(),
+            s.GetRequiredService<BertBrowser.Core.Services.Metadata.IPropertyFallback>()));
+        services.AddSingleton<BertBrowser.Core.Services.Timestamps.ITimestampProbe,
+            BertBrowser.Core.Services.Timestamps.FileSystemTimestampProbe>();
+        services.AddSingleton(s => new BertBrowser.Core.Services.Timestamps.TimestampPlanner(
+            s.GetRequiredService<BertBrowser.Core.Services.Timestamps.ITimestampProbe>()));
+        services.AddSingleton(s => new BertBrowser.Core.Services.Timestamps.TimestampExecutor(
+            s.GetRequiredService<BertBrowser.Core.Services.Timestamps.ITimestampProbe>()));
         services.AddSingleton<BertBrowser.Core.Services.Archives.ExtractPlanner>();
         services.AddSingleton(s => new BertBrowser.Core.Services.Archives.ExtractExecutor(
             s.GetRequiredService<BertBrowser.Core.Services.Archives.IArchiveReader>()));

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using BertBrowser.Core.Services.Columns;
+using BertBrowser.Core.Services.Metadata;
 using BertBrowser.Core.Services.Preview;
 using System.Text;
 
@@ -211,6 +212,191 @@ public static class ShellProperties
         return values;
     }
 
+    // --- Writing, for the metadata pane's fallback ---
+
+    /// <summary>One property as it stands in a file whose handler would take a new value for it.</summary>
+    public sealed record WritableProperty(string Canonical, string Text, double? Number, DateTime? Utc);
+
+    /// <summary>
+    /// The named properties this file's handler will write, with what each holds now. Null when
+    /// it will write nothing: no handler, a read-only one, or a file that cannot be opened for it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Opening the store for writing is the test.</b> Asked of a read-only store,
+    /// <c>IsPropertyWritable</c> answers yes for every property of a text file, which has no
+    /// handler at all; only a store that opened <c>GPS_READWRITE</c> answers for the handler.
+    /// Nothing is written — there is no <c>Commit</c> here. Blocking; never a cloud placeholder
+    /// (the caller's refusals), since opening one downloads it.
+    /// </remarks>
+    public static IReadOnlyList<WritableProperty>? ReadWritable(string path, IReadOnlyList<string> canonicals)
+    {
+        try
+        {
+            if (WritableNames(path, canonicals) is not { Count: > 0 } writable) return null;
+
+            // The values come from an ordinary shared read, like a column's.
+            var iid = IID_IPropertyStore;
+            if (SHGetPropertyStoreFromParsingName(
+                    path, IntPtr.Zero, GPS_BESTEFFORT | GPS_OPENSLOWITEM, ref iid, out var store) != 0)
+                return null;
+
+            try
+            {
+                var found = new List<WritableProperty>();
+                foreach (var canonical in canonicals)
+                {
+                    if (!writable.Contains(canonical) || KeyFor(canonical) is not { } key) continue;
+
+                    var pv = default(PROPVARIANT);
+                    try
+                    {
+                        store.GetValue(ref key, out pv);
+                        found.Add(new WritableProperty(canonical, TextOf(ref pv), NumberOf(pv), DateOf(pv)));
+                    }
+                    catch (COMException)
+                    {
+                        // Writable but unreadable is not something to offer a box for.
+                    }
+                    finally
+                    {
+                        PropVariantClear(ref pv);
+                    }
+                }
+
+                return found.Count == 0 ? null : found;
+            }
+            finally
+            {
+                Marshal.FinalReleaseComObject(store);
+            }
+        }
+        catch (Exception)
+        {
+            return null; // a third-party handler must never take the app down — as in Read
+        }
+    }
+
+    /// <summary>What a type's handler writes, by extension — Windows chooses the handler by
+    /// extension, so the first file of a kind answers for the rest of the session.</summary>
+    private static readonly ConcurrentDictionary<string, IReadOnlySet<string>> WritableByExtension =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <remarks>
+    /// Remembered because the question costs a write-open, which is exclusive: asked on every
+    /// selection it would collide with this app's own column and thumbnail reads of the same
+    /// file, and theirs would come back empty. A store that would not open is <em>not</em>
+    /// remembered — that can be this one file being in use — so only a handler's own answer is.
+    /// </remarks>
+    private static IReadOnlySet<string>? WritableNames(string path, IReadOnlyList<string> canonicals)
+    {
+        var extension = System.IO.Path.GetExtension(path);
+        if (WritableByExtension.TryGetValue(extension, out var known)) return known;
+
+        var iid = IID_IPropertyStore;
+        if (SHGetPropertyStoreFromParsingName(path, IntPtr.Zero, GPS_READWRITE, ref iid, out var store) != 0)
+            return null;
+
+        try
+        {
+            var writable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (store is IPropertyStoreCapabilities capabilities)
+            {
+                foreach (var canonical in canonicals)
+                {
+                    if (KeyFor(canonical) is { } key && capabilities.IsPropertyWritable(ref key) == 0)
+                        writable.Add(canonical);
+                }
+            }
+
+            return WritableByExtension[extension] = writable;
+        }
+        finally
+        {
+            // Final, not one count: the handler holds the file open for writing until it goes.
+            Marshal.FinalReleaseComObject(store);
+        }
+    }
+
+    /// <summary>
+    /// Sets the named properties through the file's handler and commits, in place.
+    /// </summary>
+    /// <returns>Null when it was written; otherwise why not, as the handler put it.</returns>
+    public static string? Write(string path, IReadOnlyList<(string Canonical, WindowsPropertyValue Value)> values)
+    {
+        try
+        {
+            var iid = IID_IPropertyStore;
+            var opened = SHGetPropertyStoreFromParsingName(path, IntPtr.Zero, GPS_READWRITE, ref iid, out var store);
+            if (opened != 0) return Marshal.GetExceptionForHR(opened)?.Message ?? "Windows could not open it for writing.";
+
+            try
+            {
+                foreach (var (canonical, value) in values)
+                {
+                    if (KeyFor(canonical) is not { } key) return $"Windows does not know the property {canonical}.";
+
+                    var pv = default(PROPVARIANT);
+                    try
+                    {
+                        if (value.Text is { } text)
+                        {
+                            pv.vt = VT_LPWSTR;
+                            pv.p1 = Marshal.StringToCoTaskMemUni(text);
+                        }
+                        else if (value.Number is { } number)
+                        {
+                            pv.vt = VT_UI4;
+                            pv.p1 = (IntPtr)(long)number;
+                        }
+                        else if (value.Utc is { } utc)
+                        {
+                            pv.vt = VT_FILETIME;
+                            pv.p1 = (IntPtr)utc.ToFileTimeUtc();
+                        }
+
+                        // Into the type the property is declared with: one string becomes the
+                        // list System.Keywords is, a number the string a handler may want.
+                        var coerced = PSCoerceToCanonicalValue(ref key, ref pv);
+                        if (coerced < 0) return Marshal.GetExceptionForHR(coerced)?.Message ?? "Windows refused the value.";
+
+                        store.SetValue(ref key, ref pv);
+                    }
+                    finally
+                    {
+                        PropVariantClear(ref pv);
+                    }
+                }
+
+                store.Commit();
+                return null;
+            }
+            finally
+            {
+                Marshal.FinalReleaseComObject(store);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Whatever a handler throws, and .NET turns an HRESULT into a dozen exception types.
+            return ex.Message;
+        }
+    }
+
+    /// <summary>The value as text, a list joined with "; " — Windows' own rendering of the
+    /// variant, not the display formatting, which would localise a number.</summary>
+    private static string TextOf(ref PROPVARIANT pv)
+    {
+        if (pv.vt is VT_EMPTY or VT_NULL || PropVariantToStringAlloc(ref pv, out var text) != 0) return "";
+        try
+        {
+            return Marshal.PtrToStringUni(text) ?? "";
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(text);
+        }
+    }
+
     /// <summary>Every property this machine has a description for, for the "More columns…" picker.
     /// Ordered and filtered by the caller; anything without a display name is plumbing.</summary>
     public static IReadOnlyList<(string Canonical, string Display)> EnumerateDescriptions()
@@ -345,7 +531,9 @@ public static class ShellProperties
 
     private const uint GPS_BESTEFFORT = 0x40;   // degrade gracefully on per-handler failure
     private const uint GPS_OPENSLOWITEM = 0x10; // open the file so content handlers (EXIF, ID3, …) run
+    private const uint GPS_READWRITE = 0x2;     // the handler's own store, opened to be written
     private const int PDFF_DEFAULT = 0;
+    private const ushort VT_LPWSTR = 31;
     private const ushort VT_EMPTY = 0;
     private const ushort VT_NULL = 1;
     private const ushort VT_I4 = 3;
@@ -426,6 +614,20 @@ public static class ShellProperties
 
     [DllImport("propsys.dll", CharSet = CharSet.Unicode)]
     private static extern int PSGetPropertyKeyFromName(string pszName, out PROPERTYKEY pkey);
+
+    [ComImport, Guid("c8e2d566-186e-4d49-bf41-6909ead56acc"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IPropertyStoreCapabilities
+    {
+        /// <summary>S_OK when writable, S_FALSE when not — so not an exception either way.</summary>
+        [PreserveSig]
+        int IsPropertyWritable(ref PROPERTYKEY key);
+    }
+
+    [DllImport("propsys.dll")]
+    private static extern int PSCoerceToCanonicalValue(ref PROPERTYKEY key, ref PROPVARIANT pv);
+
+    [DllImport("propsys.dll")]
+    private static extern int PropVariantToStringAlloc(ref PROPVARIANT pv, out IntPtr text);
 
     [DllImport("propsys.dll")]
     private static extern int PSEnumeratePropertyDescriptions(

@@ -283,6 +283,8 @@ public partial class MainWindow
 
         // --- View ---
         Bound("view.preview", () => tab().TogglePreviewCommand, "");
+        Bound("view.metadata", () => tab().ToggleMetadataCommand, "");
+        Bound("view.side-pane", () => tab().CycleSidePaneCommand, "");
         Bound("view.flat", () => tab().ToggleFlatCommand, "");
         // The same property the settings page's box sets; the shell saves it and refreshes every
         // tab. Browser context, so it cannot be pressed under that page and race its own write.
@@ -355,7 +357,6 @@ public partial class MainWindow
         Add("preview.mode-hex", () => tab().Preview.SetModeCommand.Execute(PreviewMode.Hex), noPreview);
         Add("preview.wrap", () => tab().Preview.ToggleWrapCommand.Execute(null), noPreview);
         Add("preview.fit", () => tab().Preview.ToggleFitCommand.Execute(null), noPreview);
-        Add("preview.details", () => tab().Preview.ToggleDetailsCommand.Execute(null), noPreview);
         Add("preview.fit-width", () => ActiveTabView?.FitPreviewWidth(), noPreview);
         Add("preview.play-next", () => tab().Preview.PlayNextCommand.Execute(null), noPreview);
         Add("preview.auto-advance", () => tab().Preview.ToggleAutoAdvanceCommand.Execute(null), noPreview);

@@ -18,6 +18,14 @@ namespace BertBrowser.Core.Services.Rename;
 public sealed record RenameSource(string Path, bool IsDirectory, DateTime? Modified = null)
 {
     public string Name => System.IO.Path.GetFileName(Path);
+
+    /// <summary>
+    /// What the file's own metadata says — its artist, its date taken — for the tag tokens. Null
+    /// when nobody has read it, which is the usual case: reading costs a file open per item, so
+    /// the dialog asks only once a template actually names a tag. Empty when it was read and
+    /// held nothing. Rides on the source for the reason <see cref="Modified"/> does.
+    /// </summary>
+    public IReadOnlyDictionary<Metadata.MetadataField, string>? Tags { get; init; }
 }
 
 /// <summary>Why the planner refused to rename one item. Every one of these is worth telling the

@@ -240,6 +240,8 @@ public sealed partial class UndoEntryViewModel : ObservableObject
         UndoKind.Delete => "Icon.Delete",
         UndoKind.ArchiveEdit => "Icon.Archive",
         UndoKind.Sync => "Icon.Compare",
+        UndoKind.MetadataEdit => "Icon.Metadata",
+        UndoKind.Timestamps => "Icon.FileDates",
         _ => "Icon.Undo",
     };
 

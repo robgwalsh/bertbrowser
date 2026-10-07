@@ -42,6 +42,8 @@ public class DefaultKeymapParityTests
     [InlineData("Ctrl+Shift+T", "tab.reopen")]
     [InlineData("Ctrl+P", "view.preview")]
     [InlineData("Alt+P", "view.preview")]
+    [InlineData("Ctrl+M", "view.metadata")]
+    [InlineData("Alt+M", "view.metadata")]
     [InlineData("Ctrl+B", "view.flat")]
     [InlineData("Ctrl+F", "search.folder")]
     [InlineData("Ctrl+E", "search.folder")]

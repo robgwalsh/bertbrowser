@@ -38,8 +38,13 @@ public partial class RenameDialog : ThemedWindow
     /// so re-planning a large selection on every keystroke is otherwise a frozen window.</summary>
     private static readonly TimeSpan ReplanDelay = TimeSpan.FromMilliseconds(200);
 
-    private readonly IReadOnlyList<RenameSource> _sources;
+    private IReadOnlyList<RenameSource> _sources;
     private readonly Func<IReadOnlyList<RenameSource>, RenameRule, RenamePlan> _planner;
+
+    /// <summary>Reads the files' own metadata onto the sources. Called at most once, and only when
+    /// a template first names a tag: it opens every selected file, which a plain rename must not.</summary>
+    private readonly Func<IReadOnlyList<RenameSource>, IReadOnlyList<RenameSource>>? _readTags;
+    private bool _tagsRead;
     private readonly AppSettings? _settings;
     private readonly DispatcherTimer _replan;
 
@@ -55,11 +60,13 @@ public partial class RenameDialog : ThemedWindow
     private RenameDialog(
         IReadOnlyList<RenameSource> sources,
         Func<IReadOnlyList<RenameSource>, RenameRule, RenamePlan> planner,
-        bool expanded)
+        bool expanded,
+        Func<IReadOnlyList<RenameSource>, IReadOnlyList<RenameSource>>? readTags)
     {
         InitializeComponent();
         _sources = sources;
         _planner = planner;
+        _readTags = readTags;
         _settings = App.Services?.GetService<AppSettings>();
 
         _replan = new DispatcherTimer { Interval = ReplanDelay };
@@ -85,18 +92,21 @@ public partial class RenameDialog : ThemedWindow
     internal static RenameDialog Create(
         IReadOnlyList<RenameSource> sources,
         Func<IReadOnlyList<RenameSource>, RenameRule, RenamePlan> planner,
-        bool expanded = false) => new(sources, planner, expanded);
+        bool expanded = false,
+        Func<IReadOnlyList<RenameSource>, IReadOnlyList<RenameSource>>? readTags = null) =>
+        new(sources, planner, expanded, readTags);
 
     /// <summary>Shows the dialog and returns the plan to carry out, or null if it was cancelled or
     /// there was nothing to do.</summary>
     public static RenamePlan? Show(
         Window? owner,
         IReadOnlyList<RenameSource> sources,
-        Func<IReadOnlyList<RenameSource>, RenameRule, RenamePlan> planner)
+        Func<IReadOnlyList<RenameSource>, RenameRule, RenamePlan> planner,
+        Func<IReadOnlyList<RenameSource>, IReadOnlyList<RenameSource>>? readTags = null)
     {
         if (sources.Count == 0) return null;
 
-        var dialog = new RenameDialog(sources, planner, expanded: false);
+        var dialog = new RenameDialog(sources, planner, expanded: false, readTags);
         if (owner is not null && !ReferenceEquals(owner, dialog)) dialog.Owner = owner;
 
         return dialog.ShowDialog() == true ? dialog._plan : null;
@@ -278,7 +288,15 @@ public partial class RenameDialog : ThemedWindow
         _replan.Stop();
 
         var numbersOk = Numeric(StartBox.Text) && Numeric(StepBox.Text);
-        _plan = _planner(_sources, CurrentRule());
+        var rule = CurrentRule();
+
+        if (!_tagsRead && _readTags is not null && !rule.IsLiteral && RenameTemplate.UsesTags(rule.Template))
+        {
+            _sources = _readTags(_sources);
+            _tagsRead = true;
+        }
+
+        _plan = _planner(_sources, rule);
 
         // Any refusal blocks the whole rename: a batch that silently skips some of its items is
         // worse than one that says what is wrong while the name can still be changed.

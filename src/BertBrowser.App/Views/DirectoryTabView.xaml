@@ -173,23 +173,68 @@
                     <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.FlatView}"/>
                 </Button>
 
-                <Button x:Name="PreviewPaneToggle" Margin="6,0,0,0"
-                        v:Cmd.Tip="Preview pane ({view.preview})"
-                        Command="{Binding TogglePreviewCommand}"
-                        AutomationProperties.AutomationId="PreviewPaneToggle"
-                        AutomationProperties.Name="Preview pane">
-                    <Button.Style>
-                        <Style TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsPreviewVisible}" Value="True">
-                                    <Setter Property="Background"
-                                            Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Button.Style>
-                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.PreviewPane}"/>
-                </Button>
+                <!-- Three buttons, one choice: no side pane, the preview, the metadata editor. The two
+                     panes share a column, so this is a selector rather than two switches — whichever
+                     is lit is what is showing, and all three are always there to be seen. -->
+                <Border x:Name="SidePaneSelector" Margin="6,0,0,0" CornerRadius="2" BorderThickness="1"
+                        BorderBrush="{StaticResource Theme.Border.Default}" VerticalAlignment="Center"
+                        AutomationProperties.AutomationId="SidePaneSelector">
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="SidePaneNone" ToolTip="No side pane" BorderThickness="0,0,1,0"
+                                Command="{Binding SetSidePaneCommand}"
+                                CommandParameter="{x:Static vm:SidePane.None}"
+                                AutomationProperties.AutomationId="SidePaneNone"
+                                AutomationProperties.Name="No side pane">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ToolbarSegment}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SidePane}" Value="None">
+                                            <Setter Property="Background"
+                                                    Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.SidePaneNone}"/>
+                        </Button>
+                        <Button x:Name="SidePanePreview" BorderThickness="0,0,1,0"
+                                v:Cmd.Tip="Preview pane ({view.preview})"
+                                Command="{Binding SetSidePaneCommand}"
+                                CommandParameter="{x:Static vm:SidePane.Preview}"
+                                AutomationProperties.AutomationId="SidePanePreview"
+                                AutomationProperties.Name="Preview pane">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ToolbarSegment}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SidePane}" Value="Preview">
+                                            <Setter Property="Background"
+                                                    Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.PreviewPane}"/>
+                        </Button>
+                        <Button x:Name="SidePaneMetadata"
+                                v:Cmd.Tip="Metadata pane ({view.metadata})"
+                                Command="{Binding SetSidePaneCommand}"
+                                CommandParameter="{x:Static vm:SidePane.Metadata}"
+                                AutomationProperties.AutomationId="SidePaneMetadata"
+                                AutomationProperties.Name="Metadata pane">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ToolbarSegment}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SidePane}" Value="Metadata">
+                                            <Setter Property="Background"
+                                                    Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Metadata}"/>
+                        </Button>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </Grid>
 
@@ -251,8 +296,9 @@
                           ShowsPreview="False"
                           DragCompleted="PreviewSplitter_DragCompleted"/>
 
-            <!-- Empty until the preview is first shown: see EnsurePreviewPane. -->
-            <Border x:Name="PreviewHost" Grid.Column="2"/>
+            <!-- Empty until a side pane is first shown: see EnsurePreviewPane and EnsureMetadataPane.
+                 A Grid because the two share this cell, one visible at a time. -->
+            <Grid x:Name="SidePaneHost" Grid.Column="2"/>
 
         <Grid Grid.Column="0">
             <v:BulkSelectListView x:Name="FileListView"

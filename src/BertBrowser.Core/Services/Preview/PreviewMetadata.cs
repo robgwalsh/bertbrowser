@@ -70,6 +70,25 @@ public static class PreviewMetadata
 
     /// <summary>Also the seed for the column catalogue's curated shell columns — one copy of these
     /// canonical names, because a second would drift with nothing to notice.</summary>
+    /// <summary>
+    /// The facts worth showing about any file, whatever kind it is: every curated property the
+    /// shell reported a value for, pictures' first, then media's, then documents'. For the metadata
+    /// pane, which shows them read-only beneath what it can edit.
+    /// </summary>
+    public static IReadOnlyList<MetadataRow> Details(IReadOnlyList<ShellPropertyRow> properties)
+    {
+        var byCanonical = new Dictionary<string, ShellPropertyRow>(StringComparer.OrdinalIgnoreCase);
+        foreach (var property in properties) byCanonical.TryAdd(property.Canonical, property);
+
+        var rows = new List<MetadataRow>();
+        foreach (var canonical in ImageOrder.Concat(MediaOrder).Concat(DocumentOrder).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (byCanonical.TryGetValue(canonical, out var property) && !string.IsNullOrWhiteSpace(property.Value))
+                rows.Add(new MetadataRow(property.Name, property.Value.Trim()));
+        }
+        return rows;
+    }
+
     internal static readonly string[] ImageOrder =
     [
         "System.Image.Dimensions",

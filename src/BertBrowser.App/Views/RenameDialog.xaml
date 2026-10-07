@@ -104,7 +104,7 @@
 
                 <TextBlock Grid.Row="3" Grid.ColumnSpan="4" Margin="0,10,0,0" TextWrapping="Wrap"
                            FontSize="11" Foreground="{StaticResource Theme.Text.Secondary}"
-                           Text="Name tokens: {name} {base} {ext} {parent} {n} {n:000} {modified} {modified:yyyy-MM} — {ext} brings its own dot, and {{ writes a literal brace."/>
+                           Text="Name tokens: {name} {base} {ext} {parent} {n} {n:000} {modified} {modified:yyyy-MM} — {ext} brings its own dot, and {{ writes a literal brace. From the file's own metadata: {artist} {album} {title} {track:00} {year} {taken:yyyy-MM-dd}."/>
             </Grid>
         </StackPanel>
 

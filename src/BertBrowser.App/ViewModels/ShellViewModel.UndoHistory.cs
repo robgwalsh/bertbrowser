@@ -6,6 +6,7 @@ using BertBrowser.Core.Services.Archives;
 using BertBrowser.Core.Services.Compare;
 using BertBrowser.Core.Services.Delete;
 using BertBrowser.Core.Services.Elevation;
+using BertBrowser.Core.Services.Metadata;
 using BertBrowser.Core.Services.Rename;
 using BertBrowser.Core.Services.Transfer;
 using BertBrowser.Core.Services.UndoHistory;
@@ -265,6 +266,10 @@ public sealed partial class ShellViewModel
         public RenameExecutor Renames => shell._renameExecutor;
 
         public ArchiveEditExecutor ArchiveEdits => shell._archiveEditExecutor;
+
+        public MetadataEditExecutor MetadataEdits => shell._metadataExecutor;
+
+        public BertBrowser.Core.Services.Timestamps.TimestampExecutor Timestamps => shell._timestampExecutor;
 
         public SyncRunner Sync => shell._syncRunner;
 

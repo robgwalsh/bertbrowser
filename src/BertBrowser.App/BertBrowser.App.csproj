@@ -24,6 +24,13 @@
     <Resource Include="Assets\app.ico" />
   </ItemGroup>
 
+  <!-- Beside the executable in a build and in a publish alike, so every way this app is packaged
+       carries the notices its dependencies' licences ask for. -->
+  <ItemGroup>
+    <Content Include="..\..\THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- The UI harness hosts this window offscreen and builds the same service graph. Seeing the
        internals is what lets it drive the real view models and the real composition root rather
        than a parallel set of accessors that could drift from them. -->

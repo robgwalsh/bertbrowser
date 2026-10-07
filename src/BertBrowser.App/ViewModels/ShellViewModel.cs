@@ -15,6 +15,7 @@ using BertBrowser.Core.Services.Compare;
 using BertBrowser.Core.Services.Columns;
 using BertBrowser.Core.Services.Elevation;
 using BertBrowser.Core.Services.Delete;
+using BertBrowser.Core.Services.Metadata;
 using BertBrowser.Core.Services.Mft;
 using BertBrowser.Core.Services.NewItem;
 using BertBrowser.Core.Services.Rename;
@@ -405,6 +406,10 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
     private readonly ArchiveCreator _archiveCreator;
     private readonly ArchiveEditPlanner _archiveEditPlanner;
     private readonly ArchiveEditExecutor _archiveEditExecutor;
+    private readonly MetadataEditPlanner _metadataPlanner;
+    private readonly MetadataEditExecutor _metadataExecutor;
+    private readonly BertBrowser.Core.Services.Timestamps.TimestampPlanner _timestampPlanner;
+    private readonly BertBrowser.Core.Services.Timestamps.TimestampExecutor _timestampExecutor;
 
     public ShellViewModel(
         IFileSystemService fileSystem,
@@ -434,6 +439,10 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         ArchiveCreator archiveCreator,
         ArchiveEditPlanner archiveEditPlanner,
         ArchiveEditExecutor archiveEditExecutor,
+        MetadataEditPlanner metadataPlanner,
+        MetadataEditExecutor metadataExecutor,
+        BertBrowser.Core.Services.Timestamps.TimestampPlanner timestampPlanner,
+        BertBrowser.Core.Services.Timestamps.TimestampExecutor timestampExecutor,
         IElevatedOperationRunner elevation,
         IElevationPrompt elevationPrompt,
         IFolderCompareService folderCompare,
@@ -454,6 +463,10 @@ public sealed partial class ShellViewModel : ObservableObject, IPaneHost
         _elevationPrompt = elevationPrompt;
         _archiveEditPlanner = archiveEditPlanner;
         _archiveEditExecutor = archiveEditExecutor;
+        _metadataPlanner = metadataPlanner;
+        _metadataExecutor = metadataExecutor;
+        _timestampPlanner = timestampPlanner;
+        _timestampExecutor = timestampExecutor;
         _archiveCreator = archiveCreator;
         _archives = archives;
         _archivePasswords = archivePasswords;
