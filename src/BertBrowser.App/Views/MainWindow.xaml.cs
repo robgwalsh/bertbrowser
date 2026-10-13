@@ -54,7 +54,8 @@ public partial class MainWindow : ThemedWindow
 
     public MainWindow(
         ShellViewModel shell, BertBrowser.App.Services.AppSettings settings,
-        BertBrowser.App.Services.Commands.KeymapService keymap)
+        BertBrowser.App.Services.Commands.KeymapService keymap,
+        BertBrowser.App.Services.Commands.CommandBarService commandBars)
     {
         InitializeComponent();
         BertBrowser.App.Services.StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.WindowXamlLoaded);
@@ -63,7 +64,8 @@ public partial class MainWindow : ThemedWindow
         _keymap = keymap;
         DataContext = shell;
 
-        // In the caption we draw ourselves, and in the taskbar and Alt-Tab with it. Set here rather
+        // In the taskbar and Alt-Tab; the title bar itself shows the menu bar where the name would
+        // be (ShowsTitleText), and Help > About says the version to anyone looking there. Set here rather
         // than in XAML because the version is only known at runtime.
         Title = $"BertBrowser {BertBrowser.App.Services.AppVersion.Display}".TrimEnd();
 
@@ -73,6 +75,7 @@ public partial class MainWindow : ThemedWindow
 
         // Throws if the catalogue and the handlers disagree, which is the point of building it here.
         Commands = BuildCommands();
+        InitializeCommandBars(commandBars);
         BertBrowser.App.Services.StartupTrace.Mark(BertBrowser.Core.Benchmarking.StartupMarks.CommandsBuilt);
 
         // Attached once, not per pane: the tree is shared, so N file-list controllers each hooking
@@ -200,8 +203,6 @@ public partial class MainWindow : ThemedWindow
 
     // --- Toolbar / dialogs ---
 
-    private void Settings_Click(object sender, RoutedEventArgs e) => ShowSettings((SettingsCategory?)null);
-
     /// <summary>The settings page while it is up, over <see cref="BrowserRoot"/>.</summary>
     private SettingsView? _settingsView;
 
@@ -262,7 +263,8 @@ public partial class MainWindow : ThemedWindow
             App.Services.GetRequiredService<IShellMenuSource>(),
             _shell.SavedWorkspaces,
             _shell.SavedSearches,
-            _keymap);
+            _keymap,
+            _bars);
         vm.ReadIndexerState();
         return vm;
     }
@@ -282,12 +284,16 @@ public partial class MainWindow : ThemedWindow
         view.WorkspaceDeleteRequested += (_, item) => _ = _shell.RemoveWorkspaceAsync(item);
         view.SavedSearchEditRequested += (_, item) => EditSavedSearch(item);
         view.SavedSearchDeleteRequested += (_, item) => _ = _shell.RemoveSavedSearchAsync(item);
+        view.CommandBarsSaveRequested += (_, _) => SaveCommandBars();
+        view.CommandBarsRenameRequested += (_, item) => RenameCommandBars(item.Name);
+        vm.ConfirmDiscardBars = ConfirmDiscardCommandBars;
         vm.Applied += Settings_Applied;
         _lastApplied = AppliedSettings.Of(_settings);
         _settingsView = view;
 
         GlobalSearchGroup.IsEnabled = false;
-        CompareButton.IsEnabled = false;
+        // Every toolbar button about the folders greys with the page up; see WhyNotNow.
+        InvalidateBars();
         // Switching would replace panes nobody can see, and the page already lists them all.
         WorkspaceSwitcher.IsEnabled = false;
         SavedSearchSwitcher.IsEnabled = false;
@@ -325,7 +331,7 @@ public partial class MainWindow : ThemedWindow
         SettingsHost.Content = null;
 
         GlobalSearchGroup.IsEnabled = true;
-        CompareButton.ClearValue(IsEnabledProperty);
+        InvalidateBars();
         WorkspaceSwitcher.IsEnabled = true;
         SavedSearchSwitcher.IsEnabled = true;
 

@@ -105,19 +105,29 @@ public partial class MainWindow
             // The palette is not offered as a row in itself.
             if (id == "app.palette") continue;
 
-            var unavailable = IsSettingsOpen && command.Context != CommandContext.App
-                ? SettingsOpenReason
-                : Commands.Unavailable(id);
-
             items.Add(new PaletteItem(
                 new PaletteEntry(
                     id, command.Name, command.Category, command.Icon, _keymap.GestureText(id),
-                    command.Aliases, command.Prominence, unavailable),
+                    command.Aliases, command.Prominence, WhyNotNow(id)),
                 () => Commands.TryExecute(id),
                 Bindable: true));
         }
 
         var blocked = IsSettingsOpen ? SettingsOpenReason : null;
+
+        // Not blocked by the settings page: recalling an arrangement is what its own page is for.
+        var inForce = _bars.CurrentName;
+        foreach (var arrangement in _bars.Saved)
+        {
+            var name = arrangement.Name;
+            items.Add(new PaletteItem(
+                new PaletteEntry($"bars:{name}", name, "Menus and toolbars", "Icon.Reorder",
+                    Aliases: ["switch menus", "toolbar arrangement", "menu bar"],
+                    Detail: string.Equals(name, inForce, StringComparison.OrdinalIgnoreCase)
+                        ? "in use"
+                        : BertBrowser.Core.Services.CommandBars.SavedCommandBarRules.ShapeText(arrangement.Set)),
+                () => ApplyCommandBars(name)));
+        }
 
         foreach (var workspace in _shell.SavedWorkspaces.Items)
         {

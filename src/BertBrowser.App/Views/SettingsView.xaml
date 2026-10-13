@@ -109,6 +109,10 @@
                                      Value="{x:Static vm:SettingsCategory.ContextMenu}">
                             <Setter Property="VerticalScrollBarVisibility" Value="Disabled"/>
                         </DataTrigger>
+                        <DataTrigger Binding="{Binding SelectedCategory.Id}"
+                                     Value="{x:Static vm:SettingsCategory.CommandBars}">
+                            <Setter Property="VerticalScrollBarVisibility" Value="Disabled"/>
+                        </DataTrigger>
                         <!-- The Keyboard page too: its list scrolls inside itself so the recorder
                              strip beneath it never leaves the screen. -->
                         <DataTrigger Binding="{Binding SelectedCategory.Id}"
@@ -1571,6 +1575,423 @@
                                 </Grid>
                             </StackPanel>
                         </ScrollViewer>
+                    </Grid>
+                </DockPanel>
+
+                <!--
+                  Menus and toolbars: the menu bar, the title bar's toolbar and any rows under it,
+                  edited in place. The real menu bar above this page is the preview — every edit is
+                  written at once by CommandBarService and the window redraws from it, so nothing
+                  here waits on the page's debounce (SettingsViewModel.CommandBars). Three columns:
+                  which bar, what is on it (one level at a time; a submenu is opened to be edited),
+                  and what can be added. Takes exactly the viewport, like the Context menu page.
+                -->
+                <DockPanel x:Name="CommandBarsPage" AutomationProperties.AutomationId="SettingsCommandBarsPage">
+                    <DockPanel.Style>
+                        <Style TargetType="DockPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedCategory.Id}"
+                                             Value="{x:Static vm:SettingsCategory.CommandBars}">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DockPanel.Style>
+
+                    <TextBlock DockPanel.Dock="Top" Text="Menus and toolbars"
+                               Style="{StaticResource PageHeading}" Margin="0,0,0,4"/>
+                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,10"
+                               v:Cmd.Text="What is on the menu bar and the toolbars, and in what order. Changes show in the title bar above as you make them. Every command stays in the command palette ({app.palette}) whether or not it is placed here."/>
+
+                    <!-- What is in force, and the two things to do with the whole of it. -->
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                        <Button DockPanel.Dock="Right" Content="Reset to default" Padding="12,3" Margin="8,0,0,0"
+                                Command="{Binding ResetBarsCommand}"
+                                ToolTip="The menus and toolbar BertBrowser ships with. Saved arrangements are kept."
+                                AutomationProperties.AutomationId="CommandBarsReset"/>
+                        <Button DockPanel.Dock="Right" Content="Save as…" Padding="12,3" Margin="8,0,0,0"
+                                Click="CommandBarsSave_Click"
+                                ToolTip="Keep this arrangement under a name, to come back to"
+                                AutomationProperties.AutomationId="CommandBarsSave"/>
+                        <TextBlock Text="{Binding BarsStatus}" VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"
+                                   Foreground="{StaticResource Theme.Text.Secondary}"
+                                   AutomationProperties.AutomationId="CommandBarsStatus"/>
+                    </DockPanel>
+
+                    <!-- Saved arrangements, under the editor: what Save as… adds to. -->
+                    <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+                        <TextBlock Text="Saved arrangements" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <TextBlock Style="{StaticResource Hint}" Margin="0"
+                                   Text="Nothing saved yet. Save as… keeps the arrangement above under a name; View ▸ Menus and toolbars and the command palette switch between them."
+                                   Visibility="{Binding HasSavedBars, Converter={StaticResource InverseBoolToVisibility}}"
+                                   AutomationProperties.AutomationId="SettingsSavedBarsEmpty"/>
+                        <ListBox x:Name="SavedBarsList" MaxHeight="120"
+                                 ItemsSource="{Binding SavedBars}"
+                                 SelectedItem="{Binding SelectedSavedBars, Mode=TwoWay}"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 PreviewKeyDown="SavedBarsList_KeyDown"
+                                 MouseDoubleClick="SavedBarsList_DoubleClick"
+                                 Visibility="{Binding HasSavedBars, Converter={StaticResource BoolToVisibility}}"
+                                 AutomationProperties.AutomationId="SettingsSavedBarsList"
+                                 AutomationProperties.Name="Saved arrangements">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                                    <Setter Property="Padding" Value="10,3,8,3"/>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="70"/>
+                                            <ColumnDefinition Width="140"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="{Binding Name}" FontWeight="SemiBold"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Grid.Column="1" Text="in use" FontSize="11" VerticalAlignment="Center"
+                                                   Foreground="{StaticResource Theme.Text.Muted}"
+                                                   Visibility="{Binding IsCurrent, Converter={StaticResource BoolToVisibility}}"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding ShapeText}" VerticalAlignment="Center"
+                                                   Foreground="{StaticResource Theme.Text.Secondary}"/>
+                                        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Button Style="{StaticResource ToolbarButton}" Content="Use" Padding="8,2"
+                                                    Margin="0,0,4,0" Foreground="{StaticResource Theme.Text.Link}"
+                                                    ToolTip="Switch the menus and toolbars to this arrangement (Enter)"
+                                                    Command="{Binding DataContext.ApplySavedBarsCommand,
+                                                              RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                    CommandParameter="{Binding}"/>
+                                            <Button Style="{StaticResource ToolbarButton}" Width="24" Height="24" Padding="5"
+                                                    Margin="0,0,4,0" ToolTip="Rename (F2)"
+                                                    Click="SavedBarsRename_Click"
+                                                    AutomationProperties.Name="Rename arrangement">
+                                                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Rename}"/>
+                                            </Button>
+                                            <Button Style="{StaticResource ToolbarButton}" Width="24" Height="24" Padding="5"
+                                                    ToolTip="Delete (Del)"
+                                                    Click="SavedBarsDelete_Click"
+                                                    AutomationProperties.Name="Delete arrangement">
+                                                <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Delete}"/>
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </StackPanel>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="14"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="14"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Which bar. -->
+                        <DockPanel Grid.Column="0">
+                            <TextBlock DockPanel.Dock="Top" Text="Bars" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                                <Button Padding="10,3" HorizontalAlignment="Left" Command="{Binding AddToolbarRowCommand}"
+                                        ToolTip="A new toolbar under the title bar"
+                                        AutomationProperties.AutomationId="AddToolbarRow">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Add}"
+                                              Width="11" Height="11" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                        <TextBlock Text="Toolbar row"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button Content="Remove row" Padding="10,3" Margin="0,6,0,0" HorizontalAlignment="Left"
+                                        Command="{Binding RemoveToolbarRowCommand}"
+                                        ToolTip="Take the selected toolbar row away, with everything on it"
+                                        AutomationProperties.AutomationId="RemoveToolbarRow"/>
+                            </StackPanel>
+                            <ListBox x:Name="BarTargetList"
+                                     ItemsSource="{Binding BarTargets}"
+                                     SelectedItem="{Binding SelectedBar, Mode=TwoWay}"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     AutomationProperties.AutomationId="BarTargetList"
+                                     AutomationProperties.Name="Bars">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                                        <Setter Property="Padding" Value="8,5"/>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Path Style="{StaticResource IconPath}" Data="{Binding Icon}"
+                                                  Width="13" Height="13" Margin="0,0,8,0"/>
+                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+
+                        <!-- What is on it, one level at a time. -->
+                        <DockPanel Grid.Column="2">
+                            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                                <Button DockPanel.Dock="Left" Style="{StaticResource ToolbarButton}" Width="22" Height="20"
+                                        Padding="3" Margin="0,0,4,0" Command="{Binding BarUpCommand}"
+                                        ToolTip="Back out of this submenu (Backspace)"
+                                        AutomationProperties.Name="Up a level"
+                                        Visibility="{Binding CanGoUpBars, Converter={StaticResource BoolToVisibility}}">
+                                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Up}" Width="12" Height="12"/>
+                                </Button>
+                                <TextBlock Text="{Binding BarLocation}" FontWeight="SemiBold" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"
+                                           AutomationProperties.AutomationId="BarLocation"/>
+                            </DockPanel>
+
+                            <!-- The selected item's own words, and for a toolbar its labels. -->
+                            <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Padding="10,3" Margin="0,0,6,0" Command="{Binding AddBarSeparatorCommand}"
+                                            AutomationProperties.AutomationId="AddBarSeparator">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Add}"
+                                                  Width="11" Height="11" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                            <TextBlock Text="Separator"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Padding="10,3" Margin="0,0,6,0" Command="{Binding AddBarSubmenuCommand}"
+                                            ToolTip="An empty menu to fill: open it, then add commands from the right"
+                                            AutomationProperties.AutomationId="AddBarSubmenu">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Add}"
+                                                  Width="11" Height="11" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                            <TextBlock Text="{Binding AddSubmenuLabel}"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Content="Open" Padding="12,3" Command="{Binding OpenBarRowCommand}"
+                                            ToolTip="Edit what is inside the selected menu (Enter)"
+                                            AutomationProperties.AutomationId="OpenBarRow"/>
+                                </StackPanel>
+                                <TextBlock Margin="0,6,0,0" FontSize="11" TextTrimming="CharacterEllipsis"
+                                           Foreground="{StaticResource Theme.Text.Muted}"
+                                           Text="Alt+↑/↓ moves · Del removes · Enter opens a menu"/>
+
+                                <Grid Margin="0,8,0,0"
+                                      Visibility="{Binding CanEditBarCaption, Converter={StaticResource BoolToVisibility}}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="Name" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                    <TextBox x:Name="BarCaptionBox" Grid.Column="1"
+                                             Text="{Binding BarCaption, UpdateSourceTrigger=PropertyChanged}"
+                                             LostFocus="BarCaptionBox_LostFocus" KeyDown="BarCaptionBox_KeyDown"
+                                             AutomationProperties.AutomationId="BarCaptionBox"
+                                             AutomationProperties.Name="Name shown for the selected item"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Hint}" Margin="0,3,0,0"
+                                               Text="{Binding BarCaptionHint}"/>
+                                </Grid>
+                                <StackPanel Visibility="{Binding IsEditingToolbar, Converter={StaticResource BoolToVisibility}}">
+                                    <CheckBox Content="Show names beside the icons on this toolbar" Margin="0,8,0,0"
+                                              IsChecked="{Binding BarShowsText}"
+                                              AutomationProperties.AutomationId="BarShowsText"/>
+                                    <CheckBox Content="Always show the selected button's name" Margin="0,4,0,0"
+                                              IsChecked="{Binding BarRowShowsText}"
+                                              IsEnabled="{Binding CanEditBarCaption}"
+                                              AutomationProperties.AutomationId="BarRowShowsText"/>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <Border Background="{StaticResource Theme.Menu.Background}"
+                                    BorderBrush="{StaticResource Theme.Menu.Border}" BorderThickness="1" Padding="2">
+                                <ListBox x:Name="BarItemsList"
+                                         AutomationProperties.AutomationId="BarItemsList"
+                                         AutomationProperties.Name="Items on this bar"
+                                         ItemsSource="{Binding BarRows}"
+                                         SelectedItem="{Binding SelectedBarRow, Mode=TwoWay}"
+                                         Background="Transparent" BorderThickness="0"
+                                         Foreground="{StaticResource Theme.Menu.Foreground}"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                         PreviewKeyDown="BarItemsList_KeyDown"
+                                         MouseDoubleClick="BarItemsList_DoubleClick">
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                                            <Setter Property="Padding" Value="0"/>
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid>
+                                                <Grid x:Name="EntryRow" Height="26">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="14"/>
+                                                        <ColumnDefinition Width="28"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="26"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Path Grid.Column="0" Style="{StaticResource IconPath}" Data="{StaticResource Icon.Reorder}"
+                                                          Width="10" Height="10" Margin="2,0,0,0" Opacity="0.45"
+                                                          VerticalAlignment="Center"/>
+                                                    <Path Grid.Column="1" Style="{StaticResource MenuIconPath}" Data="{Binding Icon}"
+                                                          Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                    <TextBlock Grid.Column="2" Text="{Binding Name}" VerticalAlignment="Center"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Grid.Column="3" Text="{Binding Detail}" FontSize="11" Margin="8,0,0,0"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="{StaticResource Theme.Text.Muted}"/>
+                                                    <TextBlock Grid.Column="4" Text="{Binding Gesture}" Margin="12,0,4,0"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="{StaticResource Theme.Menu.GestureForeground}"/>
+                                                    <Button Grid.Column="5" Width="22" Height="22" Margin="2,0,0,0"
+                                                            Style="{StaticResource ToolbarButton}"
+                                                            ToolTip="Take this off (Del)"
+                                                            AutomationProperties.Name="Remove"
+                                                            Command="{Binding DataContext.RemoveBarRowCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                            CommandParameter="{Binding}">
+                                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Dismiss}"
+                                                              Width="10" Height="10"/>
+                                                    </Button>
+                                                </Grid>
+                                                <Grid x:Name="SeparatorRow" Height="18" Visibility="Collapsed">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="42"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="26"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Rectangle Grid.Column="1" Height="1" Margin="0,0,4,0" VerticalAlignment="Center"
+                                                               Fill="{StaticResource Theme.Menu.Separator}"/>
+                                                    <Button Grid.Column="2" Width="22" Height="18" Margin="2,0,0,0" Padding="0" MinWidth="0"
+                                                            Style="{StaticResource ToolbarButton}"
+                                                            ToolTip="Remove this separator (Del)"
+                                                            AutomationProperties.Name="Remove separator"
+                                                            Command="{Binding DataContext.RemoveBarRowCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                            CommandParameter="{Binding}">
+                                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Dismiss}"
+                                                              Width="9" Height="9"/>
+                                                    </Button>
+                                                </Grid>
+                                            </Grid>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding IsSeparator}" Value="True">
+                                                    <Setter TargetName="EntryRow" Property="Visibility" Value="Collapsed"/>
+                                                    <Setter TargetName="SeparatorRow" Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Border>
+                        </DockPanel>
+
+                        <!-- What can be added. -->
+                        <DockPanel Grid.Column="4">
+                            <TextBlock DockPanel.Dock="Top" Text="Add" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <Border DockPanel.Dock="Top" Style="{StaticResource FieldBorder}" Margin="0,0,0,6">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="28"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Path Style="{StaticResource IconPath}" Data="{StaticResource Icon.Search}" Width="12" Height="12"
+                                          IsHitTestVisible="False" Fill="{StaticResource Theme.Text.Secondary}"/>
+                                    <TextBox x:Name="BarFilterBox" Grid.Column="1" BorderThickness="0" Background="Transparent"
+                                             Padding="0,3,6,3" VerticalContentAlignment="Center"
+                                             Text="{Binding BarFilter, UpdateSourceTrigger=PropertyChanged}"
+                                             AutomationProperties.AutomationId="BarFilter"
+                                             AutomationProperties.Name="Filter commands"/>
+                                    <TextBlock Grid.Column="1" Margin="2,0,0,0" Text="Filter by name or category"
+                                               IsHitTestVisible="False" VerticalAlignment="Center"
+                                               Foreground="{StaticResource Theme.Text.Placeholder}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Text, ElementName=BarFilterBox}" Value="">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Grid>
+                            </Border>
+                            <CheckBox DockPanel.Dock="Top" Content="Only what is not placed anywhere" Margin="0,0,0,6"
+                                      IsChecked="{Binding BarUnplacedOnly}"
+                                      AutomationProperties.AutomationId="BarUnplacedOnly"/>
+                            <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource Hint}" Margin="0,6,0,0"
+                                       Text="The menu bar itself holds menus. Open one to add commands to it."
+                                       Visibility="{Binding CanAddBarChoices, Converter={StaticResource InverseBoolToVisibility}}"/>
+
+                            <ListBox x:Name="BarChoiceList"
+                                     ItemsSource="{Binding BarChoices}"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     MouseDoubleClick="BarChoiceList_DoubleClick"
+                                     AutomationProperties.AutomationId="BarChoiceList"
+                                     AutomationProperties.Name="Commands that can be added">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                                        <Setter Property="Padding" Value="8,2,4,2"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsHeading}" Value="True">
+                                                <Setter Property="Focusable" Value="False"/>
+                                                <Setter Property="IsHitTestVisible" Value="False"/>
+                                                <Setter Property="Padding" Value="8,10,4,3"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid MinHeight="22" Background="Transparent">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="24"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock x:Name="HeadingText" Grid.ColumnSpan="4" Text="{Binding Name}"
+                                                       FontSize="10.5" FontWeight="SemiBold" Visibility="Collapsed"
+                                                       TextOptions.TextFormattingMode="Ideal"
+                                                       Foreground="{StaticResource Theme.Text.Muted}"/>
+                                            <Path x:Name="RowIcon" Style="{StaticResource IconPath}" Data="{Binding Icon}"
+                                                  HorizontalAlignment="Left" Width="14" Height="14"/>
+                                            <TextBlock x:Name="RowName" Grid.Column="1" Text="{Binding Name}"
+                                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                       ToolTip="Drag onto the list to put it exactly where you want"/>
+                                            <TextBlock x:Name="RowPlaced" Grid.Column="2" Text="{Binding PlacedText}" FontSize="11"
+                                                       Margin="8,0" VerticalAlignment="Center"
+                                                       Foreground="{StaticResource Theme.Text.Muted}"/>
+                                            <Button x:Name="RowAdd" Grid.Column="3" Style="{StaticResource ToolbarButton}"
+                                                    Content="Add" Padding="8,1" FontWeight="SemiBold"
+                                                    Foreground="{StaticResource Theme.Text.Link}"
+                                                    ToolTip="Add under the selected item"
+                                                    IsEnabled="{Binding DataContext.CanAddBarChoices,
+                                                                RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                    Command="{Binding DataContext.AddBarChoiceCommand,
+                                                              RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                    CommandParameter="{Binding}"/>
+                                        </Grid>
+                                        <DataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding IsHeading}" Value="True">
+                                                <Setter TargetName="HeadingText" Property="Visibility" Value="Visible"/>
+                                                <Setter TargetName="RowIcon" Property="Visibility" Value="Collapsed"/>
+                                                <Setter TargetName="RowName" Property="Visibility" Value="Collapsed"/>
+                                                <Setter TargetName="RowPlaced" Property="Visibility" Value="Collapsed"/>
+                                                <Setter TargetName="RowAdd" Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </DataTemplate.Triggers>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
                     </Grid>
                 </DockPanel>
             </Grid>

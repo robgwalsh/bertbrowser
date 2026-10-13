@@ -93,20 +93,7 @@ public partial class MainWindow
     /// Manage. Internal so the harness can photograph the same list.</summary>
     internal List<FrameworkElement> BuildSavedSearchMenuItems()
     {
-        var items = new List<FrameworkElement>();
-
-        foreach (var search in _shell.SavedSearches.Items)
-        {
-            var item = new MenuItem
-            {
-                // "__" so underscores in names render instead of becoming access keys.
-                Header = search.Name.Replace("_", "__"),
-                InputGestureText = search.ScopeColumnText,
-                ToolTip = search.ToolTip,
-            };
-            item.Click += (_, _) => _ = _shell.RunSavedSearchAsync(search);
-            items.Add(item);
-        }
+        var items = SavedSearchRows();
 
         if (items.Count == 0)
             items.Add(new MenuItem { Header = "No saved searches yet", IsEnabled = false });
@@ -127,6 +114,28 @@ public partial class MainWindow
         var manage = new MenuItem { Header = "Manage saved searches…", Icon = MenuIcon("Icon.Settings") };
         manage.Click += (_, _) => ShowSettings(SettingsCategory.SavedSearches);
         items.Add(manage);
+
+        return items;
+    }
+
+    /// <summary>One row per saved search and nothing else: what the title bar's dropdown lists
+    /// first, and what a "saved searches" list on a menu or toolbar expands to.</summary>
+    private List<FrameworkElement> SavedSearchRows()
+    {
+        var items = new List<FrameworkElement>();
+
+        foreach (var search in _shell.SavedSearches.Items)
+        {
+            var item = new MenuItem
+            {
+                // "__" so underscores in names render instead of becoming access keys.
+                Header = search.Name.Replace("_", "__"),
+                InputGestureText = search.ScopeColumnText,
+                ToolTip = search.ToolTip,
+            };
+            item.Click += (_, _) => _ = _shell.RunSavedSearchAsync(search);
+            items.Add(item);
+        }
 
         return items;
     }

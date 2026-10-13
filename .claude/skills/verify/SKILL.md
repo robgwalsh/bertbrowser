@@ -55,6 +55,7 @@ MSB3021 because a running BertBrowser locks `bin\Debug`, kill it
 & $harness --script C:\Source\bertbrowser\tools\ui\palette.bbs        # the command palette
 & $harness --script C:\Source\bertbrowser\tools\ui\keyboard.bbs       # the Keyboard settings page and its recorder
 & $harness --script C:\Source\bertbrowser\tools\ui\commands.bbs       # selection, other-pane, view and sort commands
+& $harness --script C:\Source\bertbrowser\tools\ui\command-bars.bbs   # the menu bar, toolbars and their settings page
 & $harness -c "tree .; refresh; shot check" --out $env:TEMP\look      # ad hoc
 
 # The folder tree keeping its selection through a rebuild. Needs a visible sandbox — see the
@@ -103,6 +104,12 @@ hide-menu-item <id> | show-menu-item <id>
                             untick (or re-tick) one of the app's own right-click entries on the
                             Context menu page, by the ids in Core's BuiltInMenuItems (copy-path,
                             open-terminal, cut…); the next `menu` reads it as a person's save would
+command-bars reset | toolbar title|row<n> [text] <item…> | menu <Name> <item…>
+command-bars save|apply|remove <name> | rename <old> to <new> | saved
+                            arrange the menu bar and toolbars through CommandBarService, the app's
+                            one writer for them. An item is a command id, `-`, or `@list`
+                            (`@workspaces`); `text` labels the toolbar's buttons; a row past the end
+                            is made. `apply` goes through the window, so it asks what a person is asked
 menu-layout <token…> | menu-layout default
                             arrange both right-click menus as the Context menu page saves them:
                             app:<id>, -, cmd:<id>, clsid:{…}/verb:<name>, @more (MenuLayoutRules)
@@ -303,6 +310,11 @@ palette type <text> | clear | down [n] | up [n] | tab | pin | shortcut | pick | 
                             the box and the keys that work in it: `pick` is Enter (and reports
                             `WOULD-RUN` exactly as `run` does), `tab` carries on into a category or
                             folder, `shortcut` is "change its shortcut", `rows` prints the list
+settings bars select menu-bar|title|row<n> | open <name> | up | pick <name> | add <item> |
+              add-menu | remove <name> | nudge <name> up|down | name <text> | filter <text> |
+              unplaced on|off | rows | choices
+                            the Menus and toolbars page (`settings command-bars`), through its view
+                            model: the middle list is one level of one bar, and `open` drills in
 settings key select <id> | filter <text> | change | add | press <chord> | reassign | remove |
              reset | reset-all | find | cancel
                             the Keyboard page's recorder. `press` is the recorder being offered a
@@ -313,7 +325,7 @@ settings <page> [dragging]  puts the settings page up in the main window, where 
                             (it is not a dialog), for a `shot`. Pages: general, appearance,
                             preview, search-index, history, new-items, columns, saved-searches,
                             workspaces,
-                            context-menu, keyboard.
+                            context-menu, command-bars, keyboard.
                             The columns page shows the *saved default*, so put an arrangement in
                             front of it with `columns default` first; `dragging` adds a row's
                             insertion line (columns and context-menu), placed rather than dragged
@@ -378,6 +390,9 @@ columns width <id> <px>
 columns reset               back to the saved default
 columns default             the header menu's "Set as default for new tabs" — what the settings
                             page reads, and the only way to seed it from a script
+menu main <Menu> [name]     PNG of one of the menu bar's dropdowns, by its heading (`menu main File`)
+                            — the rows a click would show, greyed and ticked as they would be. The
+                            menu asserts below read it. Alt and F10 cannot be scripted: no input is posted
 menu columns|files|background|tree|workspaces|saved-searches|undo|undo-range|redo [name]
                             PNG of a menu's items — the column header's, the file list's for the selection,
                             the file list's over empty space (the folder background), or the
@@ -468,6 +483,14 @@ assert-gesture <id> <chord|none>
                             the shortcut a menu or tooltip prints for a command
 assert-menu-gesture <item text> <chord|none>
                             what the last `menu` printed beside an item
+assert-menu-bar <a> | <b> | …   the menu bar's headings, all of them, in order
+assert-toolbar title|row<n> <item…> [+<n>]
+                            what a toolbar is showing, exactly; `+2` for how many more are behind
+                            its overflow button (none, when left out)
+assert-toolbar-item title|row<n> <id> enabled|disabled|checked|unchecked|text|icon
+assert-bars default|custom|<saved name>
+assert-bar-rows <a> | <b> | …   the Menus and toolbars page's middle list, exactly (`-` a separator)
+assert-bar-choice <name> | assert-no-bar-choice <name>
 assert-tooltip <Name> <text>
 assert-palette-open | assert-palette-closed
 assert-palette-row <text> | assert-no-palette-row <text> | assert-palette-order <a> | <b> | …

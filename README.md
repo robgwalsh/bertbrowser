@@ -13,7 +13,7 @@ A [fast and memory-efficient](docs/performance.md) offline Windows 10/11 file br
 - **Tree Map browser by filesize** - Visualize recursive directory sizes, easily find whats taking the most space.
 - **Rich Preview Panel** - Inline media playback, syntax highlighting in text, hex viewer
 - **Tools** - Find duplicates, compare files and directories, track file system changes, and more!
-- **Customizable** - Customizable command palette, context menus, browser columns, themes; saved workspaces and searches.
+- **Customizable** - Customizable command palette, menus, toolbars, browser columns, context menus, themes; saved workspaces and searches.
 
 <table>
 <tr>
@@ -59,7 +59,7 @@ gets and none of the settling time.
 * Grab the [unstable installer](https://github.com/robgwalsh/bertbrowser/releases/download/unstable/BertBrowser-unstable-Setup.exe), or the [unstable portable build](https://github.com/robgwalsh/bertbrowser/releases/download/unstable/BertBrowser-unstable-Portable.zip).
 
 It **replaces an installed copy** rather than sitting beside it, and from then on that copy updates
-along unstable instead of along releases. The title bar says which you are on — `BertBrowser 1.1.3-unstable.42`
+along unstable instead of along releases. Help ▸ About says which you are on, as does the taskbar — `BertBrowser 1.1.3-unstable.42`
 against `BertBrowser 1.1.2`. Your data in `%USERPROFILE%\.bertbrowser` is untouched either way, and
 running the [stable installer](https://github.com/robgwalsh/bertbrowser/releases/latest/download/BertBrowser-win-Setup.exe)
 over the top puts you back.

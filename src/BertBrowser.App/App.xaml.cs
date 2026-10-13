@@ -399,6 +399,8 @@ public partial class App : Application
         services.AddSingleton<Services.Commands.KeymapService>();
         // What the command palette remembers: pins on disk, recents for the life of the window.
         services.AddSingleton<Services.Commands.PaletteMemory>();
+        // The menu bar and toolbars in force, and the arrangements saved under a name.
+        services.AddSingleton<Services.Commands.CommandBarService>();
         services.AddSingleton<PaneFactory>();
         services.AddSingleton<ShellViewModel>();
         services.AddSingleton<MainWindow>();

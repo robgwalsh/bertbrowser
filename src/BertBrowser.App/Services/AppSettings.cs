@@ -300,6 +300,15 @@ public sealed class AppSettings
     /// the hidden lists above and <see cref="CustomCommandDefinition.ShowInMenu"/>.</summary>
     public List<string>? ContextMenuLayout { get; set; }
 
+    /// <summary>The menu bar and the toolbars. Null means never arranged — or arranged back to what
+    /// ships — which is <c>CommandBarDefaults.Default</c>, so a later build's additions arrive by
+    /// themselves. Written only by <c>CommandBarService</c>, never by the settings page's debounce.</summary>
+    public BertBrowser.Core.Services.CommandBars.CommandBarSet? CommandBars { get; set; }
+
+    /// <summary>Arrangements of the menu bar and toolbars saved under a name, in name order. A
+    /// preference like <see cref="PalettePins"/>, which is why it is here and not in the database.</summary>
+    public List<BertBrowser.Core.Services.CommandBars.SavedCommandBarSet> SavedCommandBars { get; set; } = new();
+
     /// <summary>The file types on the "New" submenu, in menu order. Null means the user has never
     /// configured the list, which is what lets a first launch ship
     /// <see cref="BertBrowser.Core.Services.NewItem.NewFileTemplate.Defaults"/> — an empty list is a

@@ -33,8 +33,35 @@
     </Style>
 
     <!--
-      The app has no menu bar, so only the two submenu roles are templated. If one is ever added,
-      TopLevelHeader and TopLevelItem will need their own triggers here.
+      The menu bar. It sits in the title bar, so it paints nothing of its own: a null Background —
+      not Transparent, which is hit-testable — leaves the gaps between and beyond its headers to
+      the caption, and they go on dragging the window. A horizontal StackPanel because the stock
+      WrapPanel would fold a long row of menus into a second line the title bar has no room for.
+    -->
+    <Style TargetType="Menu">
+        <Setter Property="Background" Value="{x:Null}"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.TitleBar.Foreground}"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="ItemsPanel">
+            <Setter.Value>
+                <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal"/>
+                </ItemsPanelTemplate>
+            </Setter.Value>
+        </Setter>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Menu">
+                    <ItemsPresenter/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--
+      Four roles. The default template below is a row inside a dropdown (SubmenuItem); the triggers
+      after it swap in the row that opens a further dropdown (SubmenuHeader) and the two a menu bar
+      has — a heading with a dropdown under it (TopLevelHeader) and one without (TopLevelItem).
     -->
     <Style TargetType="MenuItem">
         <Setter Property="Foreground" Value="{StaticResource Theme.Menu.Foreground}"/>
@@ -160,6 +187,73 @@
                                 <Trigger Property="IsEnabled" Value="False">
                                     <Setter Property="Foreground"
                                             Value="{StaticResource Theme.Menu.DisabledForeground}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Trigger>
+            <!-- A heading on the menu bar: toolbar colours, since it shares the title bar with the
+                 toolbar buttons, and its dropdown below it. -->
+            <Trigger Property="Role" Value="TopLevelHeader">
+                <Setter Property="Foreground" Value="{StaticResource Theme.TitleBar.Foreground}"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="MenuItem">
+                            <Border x:Name="Bd" Background="Transparent" CornerRadius="3" Padding="8,4"
+                                    VerticalAlignment="Center" SnapsToDevicePixels="True">
+                                <Grid>
+                                    <ContentPresenter ContentSource="Header" VerticalAlignment="Center"
+                                                      RecognizesAccessKey="True"/>
+                                    <Popup x:Name="PART_Popup" Placement="Bottom" VerticalOffset="6" HorizontalOffset="-8"
+                                           AllowsTransparency="True" Focusable="False"
+                                           PopupAnimation="None"
+                                           IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}">
+                                        <Border Background="{StaticResource Theme.Menu.Background}"
+                                                BorderBrush="{StaticResource Theme.Menu.Border}"
+                                                BorderThickness="1" Padding="0,4"
+                                                SnapsToDevicePixels="True">
+                                            <Grid Grid.IsSharedSizeScope="True">
+                                                <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                                            </Grid>
+                                        </Border>
+                                    </Popup>
+                                </Grid>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsHighlighted" Value="True">
+                                    <Setter TargetName="Bd" Property="Background"
+                                            Value="{StaticResource Theme.Toolbar.HoverBackground}"/>
+                                </Trigger>
+                                <Trigger Property="IsSubmenuOpen" Value="True">
+                                    <Setter TargetName="Bd" Property="Background"
+                                            Value="{StaticResource Theme.Toolbar.PressedBackground}"/>
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.4"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Trigger>
+            <Trigger Property="Role" Value="TopLevelItem">
+                <Setter Property="Foreground" Value="{StaticResource Theme.TitleBar.Foreground}"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="MenuItem">
+                            <Border x:Name="Bd" Background="Transparent" CornerRadius="3" Padding="8,4"
+                                    VerticalAlignment="Center" SnapsToDevicePixels="True">
+                                <ContentPresenter ContentSource="Header" VerticalAlignment="Center"
+                                                  RecognizesAccessKey="True"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsHighlighted" Value="True">
+                                    <Setter TargetName="Bd" Property="Background"
+                                            Value="{StaticResource Theme.Toolbar.HoverBackground}"/>
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.4"/>
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>

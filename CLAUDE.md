@@ -96,6 +96,7 @@ you where and what to watch for.
 | Animated GIFs in the preview (autoplay, loop, scrub) | `Core/Services/Preview/Animation/*` (`AnimationTimeline`, `GifFrameCompositor`, `AnimationLimits`), `PreviewPaneViewModel.StartAnimation` (one thread owns the decoder — it's a `DispatcherObject` — and returns after frame 0; never `BitmapCacheOption.OnLoad`, which decodes every frame first), `Views/PreviewPane` (animation section: frames swapped via `SetCurrentValue` so the `Image` binding and zoom survive; the clock holds at an undecoded frame), `Views/SliderScrubber` (both seek bars: press anywhere and drag, since a `Slider` only drags from its thumb), `tools/ui/gif.bbs` |
 | Archives (zip/7z/tar/rar) | `Core/Services/Archives/*` (`ArchivePath`, `ArchiveReader`, `ArchiveIndexBuilder`) |
 | Commands / keyboard shortcuts | `Core/Services/Commands/*` (`CommandCatalog`, `KeyChord`, `KeymapRules`, `FileVerbRules`), `Services/Commands/*` (`CommandRegistry`, `KeymapService`, `GestureText`, `KeyChordInterop`), `MainWindow.Commands` (handlers + the one key dispatcher), `DirectoryTabView.Verbs`/`.Actions`, `Views/Cmd` (XAML gesture text), the Keyboard page of `SettingsView` (`SettingsViewModel.Keyboard`), `tools/ui/keys.bbs`, `keyboard.bbs`, `commands.bbs` |
+| Menu bar / toolbars (arrangement, Settings page, saved arrangements) | `Core/Services/CommandBars/*` (`CommandBarModels`, `CommandBarDefaults`, `CommandBarRules`, `CommandBarEdit`, `AccessKeys`, `CommandBarLists`, `CommandBarCaptions`, `SavedCommandBarRules`), `Services/Commands/CommandBarService`, `MainWindow.CommandBars` (the gate, the menu bar, list rows), `Views/CommandBarToolbar`, `TopLevelHeader` templates in `Theme/Controls/Menus.xaml`, `ThemedWindow.ShowsTitleText`, `SettingsViewModel.CommandBars` + the Menus and toolbars page of `SettingsView`, `Views/AboutDialog`, `tools/ui/command-bars.bbs` |
 | Command palette | `Core/Services/Commands/PaletteRules`, `CommandMatcher`, `GoToRules`, `PaletteSuggestions`, `ViewModels/CommandPaletteViewModel`, `Views/CommandPalette`, `MainWindow.Palette` (what it can run), `Services/Commands/PaletteMemory`, `tools/ui/palette.bbs` |
 | Settings page | `ViewModels/SettingsViewModel` (`Apply`, `TryLeave`), `Views/SettingsView`, `MainWindow.ShowSettings`/`CloseSettings`, `tools/ui/settings.bbs` |
 | Theming | `Core/Theming/*` (`ThemeCatalog`, `ThemeResolver`), `App/Theming/*` |
@@ -208,6 +209,31 @@ you where and what to watch for.
   `v:Cmd.Id`/`Cmd.Tip`/`Cmd.Text` in XAML), never a literal: `"Ctrl+Z"` in a string is wrong the
   first time somebody rebinds it. `KeymapService` is the keymap's only writer and writes at once,
   not on the settings page's debounce.
+- **The menu bar and toolbars are data, and an item is only a command id.** The arrangement is a
+  `CommandBarSet` in `AppSettings.CommandBars`; **null means the default**, and one equal to the
+  default is written back as null, so an uncustomised user gets a later build's additions — a
+  customised one is never edited behind their back (the picker's "not placed anywhere" is where a
+  new command turns up; the palette reaches everything regardless). `CommandBarService` is its only
+  writer and writes at once, like the keymap; saved arrangements live beside it in the settings
+  file, not the database, because a migration makes every running index helper exit. Consequences
+  that are easy to undo: `MainWindow.WhyNotNow` is the **one gate** — the registry's answer plus
+  "a dialog is up" and "Settings is open" — for a menu row, a toolbar button and a palette row, and
+  `RunFromBar` asks it again because a button is only as fresh as its last refresh; a menu is built
+  when its heading opens, a toolbar is refreshed coalesced at idle (`InvalidateBars`) and **updates
+  its buttons in place** unless the arrangement changed, since a button replaced between mouse-down
+  and mouse-up never raises Click; no toolbar button is focusable, or the command runs against a
+  list that just lost focus; the `Menu` and the toolbar panel have a **null** background, never
+  `Transparent`, or the gaps stop dragging the window; the title bar stays live under a modal
+  (`OnContentBlockedChanged` is what disables them); the handler held for
+  `CommandManager.RequerySuggested` is a field because that event is weak. **Alt belongs to WPF**:
+  the bar is a real `Menu`, its access keys run after `OnPreviewKeyDown`, so a claimed chord still
+  wins — which is why the default top-level keys avoid Alt+D/P/M (pinned in
+  `CommandBarRulesTests`) — and the only code is two stand-downs: focus on a heading counts as
+  `InPopup`, and `KeymapRules.AllowsMenuMode` swallows the Alt/F10 release under a dialog, the
+  recorder or the palette. The harness cannot send Alt; `menu main <Menu>` renders a dropdown's
+  rows detached. A caption marks its key with `&` and anything from data is `AccessKeys.Escape`d
+  first. The window's title text is hidden for the main window only (`ShowsTitleText`); the version
+  is still `Window.Title`, and Help ▸ About.
 - **The palette's empty state is never the catalogue.** Pinned, then this session's recents, then
   `PaletteSuggestions` for what is selected, then one row per category — `PaletteRules`, with the
   ordering in `PaletteRulesTests`. Recents live in memory only (`PaletteMemory`): a list of what was

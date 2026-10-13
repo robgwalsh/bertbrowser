@@ -202,7 +202,7 @@ beside it never depends on GitHub's API at all.
 `UpdateService` uses it for the one flag that differs — whether `GithubSource` looks at pre-releases.
 Both directions are load-bearing: an unstable build that refused pre-releases could never see its own
 feed, and a release build that accepted them would be handed the unstable pre-release, which carries
-no `releases.win.json`. The version is also what the title bar shows, so which channel a copy is on is
+no `releases.win.json`. The version is also what Help ▸ About and the window's taskbar title show, so which channel a copy is on is
 visible without digging.
 
 **Unstable replaces a release install rather than sitting beside it** — same `packId`, so same install

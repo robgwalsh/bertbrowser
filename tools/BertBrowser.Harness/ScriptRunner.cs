@@ -8,6 +8,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using BertBrowser.App.Services;
+using BertBrowser.App.Services.Commands;
 using BertBrowser.App.Theming;
 using BertBrowser.App.ViewModels;
 using BertBrowser.App.Views;
@@ -122,6 +123,14 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
             case "hide-menu-item": BuiltInMenuItemSetting(rest, shown: false); break;
             case "show-menu-item": BuiltInMenuItemSetting(rest, shown: true); break;
             case "menu-layout": MenuLayoutSetting(rest); break;
+            case "command-bars": CommandBars(rest); break;
+            case "assert-menu-bar": AssertMenuBar(rest); break;
+            case "assert-toolbar": AssertToolbar(rest); break;
+            case "assert-toolbar-item": AssertToolbarItem(rest); break;
+            case "assert-bars": AssertBars(rest); break;
+            case "assert-bar-rows": AssertBarRows(rest); break;
+            case "assert-bar-choice": AssertBarChoice(rest, expected: true); break;
+            case "assert-no-bar-choice": AssertBarChoice(rest, expected: false); break;
             case "sandbox": output.WriteLine(_sandbox.Root); break;
             case "deny": Deny(rest); break;
 
@@ -1235,7 +1244,7 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
     private void Menu(string rest)
     {
         var (kind, tail) = Split(rest);
-        var (name, _) = Split(tail);
+        var (name, shotName) = Split(tail);
 
         var items = session.Dispatcher.Invoke<IReadOnlyList<FrameworkElement>>(() => kind.ToLowerInvariant() switch
         {
@@ -1248,14 +1257,21 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
             "undo" => session.Window.BuildUndoMenuItems(),
             "undo-range" => session.Window.BuildUndoMenuItems(poseHover: 2),
             "redo" => session.Window.BuildRedoMenuItems(),
+            // One of the menu bar's dropdowns, by its heading: `menu main File`.
+            "main" => session.Window.BuildMainMenuItems(name)
+                      ?? throw new FormatException($"The menu bar has no '{name}' menu."),
             var other => throw new FormatException(
-                $"'{other}' is not a menu. Try: columns, files, background, tree, workspaces, saved-searches, undo, undo-range, redo."),
+                $"'{other}' is not a menu. Try: columns, files, background, tree, workspaces, saved-searches, undo, undo-range, redo, main <Menu>."),
         });
         _lastMenuHeaders = session.Dispatcher.Invoke(() => Headers(items).ToList());
         _lastMenuTopLevel = session.Dispatcher.Invoke(() => TopLevel(items).ToList());
         _lastMenuGestures = session.Dispatcher.Invoke(() => MenuGestures(items).ToList());
 
-        var path = Resolve(Named(name.Length == 0 ? $"menu-{kind}" : name, ++_shots));
+        var path = Resolve(Named(
+            kind.Equals("main", StringComparison.OrdinalIgnoreCase)
+                ? $"menu-main-{name.ToLowerInvariant()}{(shotName.Length == 0 ? "" : "-" + shotName)}"
+            : name.Length == 0 ? $"menu-{kind}" : name,
+            ++_shots));
         session.Dispatcher.Invoke(() =>
         {
             RenderDetached(items, path);
@@ -3507,7 +3523,7 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
         var (page, tail) = Split(rest);
         if (page.Length == 0)
             throw new FormatException("settings needs a page (general, appearance, preview, search-index, " +
-                                      "history, new-items, columns, saved-searches, workspaces, context-menu, keyboard) or close.");
+                                      "history, new-items, columns, saved-searches, workspaces, context-menu, command-bars, keyboard) or close.");
 
         // "settings tick Show hidden items on": sets a box on the open page by its label, the way a
         // click would. Nothing is saved by this verb — what makes it stick is the page's own
@@ -3537,6 +3553,13 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
         if (page.Equals("key", StringComparison.OrdinalIgnoreCase))
         {
             SettingsKey(tail);
+            return;
+        }
+
+        // "settings bars …": the Menus and toolbars page, driven through its view model.
+        if (page.Equals("bars", StringComparison.OrdinalIgnoreCase))
+        {
+            SettingsBars(tail);
             return;
         }
 
@@ -3638,7 +3661,8 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
             session.Services.GetRequiredService<IShellMenuSource>(),
             session.Shell.SavedWorkspaces,
             session.Shell.SavedSearches,
-            Keymap);
+            Keymap,
+            session.Services.GetRequiredService<CommandBarService>());
         vm.ReadIndexerState();
         vm.SelectedCategory = vm.Categories.First(c => c.Id == category);
         return vm;
@@ -3672,6 +3696,14 @@ internal sealed partial class ScriptRunner(UiSession session, HarnessOptions opt
         // Needs no selection and no fixture: its content is SearchSyntax.Sections, which is a
         // constant in Core.
         "search-syntax" => SearchSyntaxDialog.Create(),
+
+        // Help > About: where the version reads now that the title bar holds the menu bar.
+        "about" => AboutDialog.Create(),
+
+        // The name dialog, worded for an arrangement of the menus and toolbars.
+        "saved-command-bars" => SavedWorkspaceDialog.Create(
+            Core.Services.CommandBars.SavedCommandBarRules.DefaultName(DateTime.Now),
+            n => Bars.IsNameTaken(n), thing: NamedThing.CommandBars),
 
         // Seeded from the active tab exactly as the save button seeds it, so 'search x' first
         // gives it something to show; with no search on it opens on its "type a search" refusal.

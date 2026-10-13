@@ -84,7 +84,23 @@ public partial class MainWindow
             focus, SettingsOpen: IsSettingsOpen, PaletteOpen: IsPaletteOpen, ContentBlocked: IsContentBlocked,
             // The Keyboard page is waiting for a chord, and the next key press is its answer.
             Recording: _settingsView?.ViewModel.IsCapturingKey == true,
-            InPopup: IsFocusInPopup());
+            // A highlighted menu-bar header is in this window, not in a popup, but the keyboard is
+            // the menu's all the same: F5 or Backspace there must not reach the folders.
+            InPopup: IsFocusInPopup() || MainMenuBar.IsKeyboardFocusWithin);
+    }
+
+    /// <summary>
+    /// Alt and F10 open the menu bar on their way <em>up</em>, which is WPF's doing and needs no
+    /// help — except where taking the keyboard would be wrong: under a dialog, while the Keyboard
+    /// page is waiting for a chord, or with the palette up. There the release is swallowed.
+    /// </summary>
+    protected override void OnPreviewKeyUp(KeyEventArgs e)
+    {
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key is Key.LeftAlt or Key.RightAlt or Key.F10 && !KeymapRules.AllowsMenuMode(FocusNow()))
+            e.Handled = true;
+
+        base.OnPreviewKeyUp(e);
     }
 
     /// <summary>
@@ -111,19 +127,24 @@ public partial class MainWindow
     {
         var handlers = new Dictionary<string, CommandHandler>(StringComparer.Ordinal);
 
-        void Add(string id, Action run, Func<string?>? unavailable = null, bool window = false) =>
-            handlers.Add(id, new CommandHandler(run, unavailable, window));
+        void Add(
+            string id, Action run, Func<string?>? unavailable = null, bool window = false,
+            Func<bool>? on = null, Func<string?>? caption = null) =>
+            handlers.Add(id, new CommandHandler(run, unavailable, window, on, caption));
 
         // A command the view models already expose: runnable exactly when its CanExecute says so.
-        void Bound(string id, Func<ICommand?> command, string whyNot, object? parameter = null, bool window = false) =>
+        void Bound(
+            string id, Func<ICommand?> command, string whyNot, object? parameter = null, bool window = false,
+            Func<bool>? on = null, Func<string?>? caption = null) =>
             Add(id,
                 () => command()?.Execute(parameter),
                 () => command() is { } c && c.CanExecute(parameter) ? null : whyNot,
-                window);
+                window, on, caption);
 
         // A file verb: the active tab's, under FileVerbRules — the rule the right-click menu shows.
+        // Its caption is that rule's own header, so a menu says "Delete 3 items…" as that one does.
         void Verb(string id, FileVerb verb, bool window = false) =>
-            Add(id, () => ActiveTabView?.RunVerb(verb), () => WhyNot(verb), window);
+            Add(id, () => ActiveTabView?.RunVerb(verb), () => WhyNot(verb), window, caption: () => VerbNow(verb)?.Header);
 
         var tab = () => _shell.ActiveTab;
         var pane = () => _shell.ActivePane;
@@ -271,8 +292,8 @@ public partial class MainWindow
         Add("edit.copy-folder-path", CopyFolderPath,
             () => tab().CurrentPath.Length > 0 ? null : "There is no folder here.");
         Add("edit.paste-shortcut", PasteShortcut, () => WhyNot(FileVerb.Paste) ?? WhyNot(FileVerb.New));
-        Bound("edit.undo", () => _shell.UndoCommand, "There is nothing to undo.");
-        Bound("edit.redo", () => _shell.RedoCommand, "There is nothing to redo.");
+        Bound("edit.undo", () => _shell.UndoCommand, "There is nothing to undo.", caption: () => _shell.UndoDescription);
+        Bound("edit.redo", () => _shell.RedoCommand, "There is nothing to redo.", caption: () => _shell.RedoDescription);
         Add("edit.undo-history", ShowUndoHistory, window: true);
         Add("edit.clear-undo-history",
             () => UndoHistoryWindow.ConfirmAndClear(_shell, App.Services.GetRequiredService<IUserConfirm>()),
@@ -282,31 +303,37 @@ public partial class MainWindow
             window: true);
 
         // --- View ---
-        Bound("view.preview", () => tab().TogglePreviewCommand, "");
-        Bound("view.metadata", () => tab().ToggleMetadataCommand, "");
+        Bound("view.preview", () => tab().TogglePreviewCommand, "", on: () => tab().IsPreviewVisible);
+        Bound("view.metadata", () => tab().ToggleMetadataCommand, "", on: () => tab().IsMetadataVisible);
         Bound("view.side-pane", () => tab().CycleSidePaneCommand, "");
-        Bound("view.flat", () => tab().ToggleFlatCommand, "");
+        Bound("view.flat", () => tab().ToggleFlatCommand, "", on: () => tab().IsFlatView);
         // The same property the settings page's box sets; the shell saves it and refreshes every
         // tab. Browser context, so it cannot be pressed under that page and race its own write.
-        Add("view.hidden", () => _shell.ShowHiddenItems = !_shell.ShowHiddenItems);
+        Add("view.hidden", () => _shell.ShowHiddenItems = !_shell.ShowHiddenItems, on: () => _shell.ShowHiddenItems);
         Add("view.details", () => SetThumbnailScale(0),
-            () => tab().FileList.IsThumbnailView ? null : "This is already the details view.");
+            () => tab().FileList.IsThumbnailView ? null : "This is already the details view.",
+            on: () => !tab().FileList.IsThumbnailView);
         Add("view.thumbnails", () => SetThumbnailScale(_lastThumbnailScale),
-            () => tab().FileList.IsThumbnailView ? "This is already the thumbnail view." : null);
+            () => tab().FileList.IsThumbnailView ? "This is already the thumbnail view." : null,
+            on: () => tab().FileList.IsThumbnailView);
         Add("view.toggle-thumbnails",
             () => SetThumbnailScale(tab().FileList.IsThumbnailView ? 0 : _lastThumbnailScale));
         Add("view.thumbs-larger", () => SetThumbnailScale(Math.Min(1, tab().FileList.ThumbnailScale + ThumbnailStep)),
             () => tab().FileList.ThumbnailScale < 1 ? null : "The thumbnails are as large as they go.");
         Add("view.thumbs-smaller", () => SetThumbnailScale(Math.Max(0, tab().FileList.ThumbnailScale - ThumbnailStep)),
             () => tab().FileList.IsThumbnailView ? null : "This is the details view — there are no thumbnails to shrink.");
-        Add("view.sort-name", () => SortBy(ColumnCatalog.Name));
-        Add("view.sort-size", () => SortBy(ColumnCatalog.Size));
-        Add("view.sort-type", () => SortBy(ColumnCatalog.Type));
-        Add("view.sort-modified", () => SortBy(ColumnCatalog.Modified));
-        Add("view.sort-created", () => SortBy(ColumnCatalog.Created));
-        Add("view.sort-extension", () => SortBy(ColumnCatalog.Extension));
+        void Sort(string id, string column) =>
+            Add(id, () => SortBy(column),
+                on: () => string.Equals(tab().FileList.SortBy, column, StringComparison.OrdinalIgnoreCase));
+        Sort("view.sort-name", ColumnCatalog.Name);
+        Sort("view.sort-size", ColumnCatalog.Size);
+        Sort("view.sort-type", ColumnCatalog.Type);
+        Sort("view.sort-modified", ColumnCatalog.Modified);
+        Sort("view.sort-created", ColumnCatalog.Created);
+        Sort("view.sort-extension", ColumnCatalog.Extension);
         // SetSort reverses when asked for the column already in force, which is exactly this.
-        Add("view.sort-reverse", () => tab().FileList.SetSort(tab().FileList.SortBy));
+        Add("view.sort-reverse", () => tab().FileList.SetSort(tab().FileList.SortBy),
+            on: () => tab().FileList.SortDescending);
         Add("view.add-column", () => ActiveTabView?.ShowColumnPickerFromCommand(), window: true);
         Add("view.columns-default", () => ActiveTabView?.UseColumnsForNewTabs());
         Add("view.reset-columns", () => tab().FileList.ColumnLayout = null,
@@ -329,14 +356,17 @@ public partial class MainWindow
         Bound("tools.disk-usage", () => _shell.AnalyseDiskUsageCommand, "", window: true);
         Bound("tools.duplicates", () => _shell.FindDuplicatesCommand, "", window: true);
         Bound("tools.changes", () => _shell.ShowChangesCommand, "", window: true);
-        Bound("tools.compare", () => _shell.CompareWithOtherPaneCommand, "");
+        Bound("tools.compare", () => _shell.CompareWithOtherPaneCommand, "",
+            on: () => _shell.CompareSession is not null,
+            caption: () => _shell.CompareSession is null ? null : "Stop comparing");
         Bound("tools.compare-rescan", () => _shell.CompareSession?.RescanCommand,
             "Only while two panes are being compared.");
         Bound("tools.compare-sync", () => _shell.CompareSession?.SyncCommand,
             "Only once a comparison has found something to sync.", window: true);
         Add("tools.compare-differences",
             () => { if (_shell.CompareSession is { } session) session.DifferencesOnly = !session.DifferencesOnly; },
-            () => _shell.CompareSession is null ? "Only while two panes are being compared." : null);
+            () => _shell.CompareSession is null ? "Only while two panes are being compared." : null,
+            on: () => _shell.CompareSession is { DifferencesOnly: true });
         Add("tools.indexer-dismiss", () => _shell.DismissIndexerBannerCommand.Execute(null),
             () => _shell.ShowIndexerBanner ? null : "The banner is not showing.");
         Bound("tools.transfer-cancel", () => _shell.TransferProgress?.CancelCommand, "Nothing is being transferred.");
@@ -352,16 +382,23 @@ public partial class MainWindow
 
         // --- Preview ---
         var noPreview = () => tab().IsPreviewVisible ? null : "The preview pane is closed.";
-        Add("preview.mode-auto", () => tab().Preview.SetModeCommand.Execute(PreviewMode.Auto), noPreview);
-        Add("preview.mode-raw", () => tab().Preview.SetModeCommand.Execute(PreviewMode.Text), noPreview);
-        Add("preview.mode-hex", () => tab().Preview.SetModeCommand.Execute(PreviewMode.Hex), noPreview);
-        Add("preview.wrap", () => tab().Preview.ToggleWrapCommand.Execute(null), noPreview);
-        Add("preview.fit", () => tab().Preview.ToggleFitCommand.Execute(null), noPreview);
+        Func<bool> previewing(Func<PreviewPaneViewModel, bool> on) => () => tab().IsPreviewVisible && on(tab().Preview);
+        Add("preview.mode-auto", () => tab().Preview.SetModeCommand.Execute(PreviewMode.Auto), noPreview,
+            on: previewing(p => p.IsAutoMode));
+        Add("preview.mode-raw", () => tab().Preview.SetModeCommand.Execute(PreviewMode.Text), noPreview,
+            on: previewing(p => p.IsRawMode));
+        Add("preview.mode-hex", () => tab().Preview.SetModeCommand.Execute(PreviewMode.Hex), noPreview,
+            on: previewing(p => p.IsHexMode));
+        Add("preview.wrap", () => tab().Preview.ToggleWrapCommand.Execute(null), noPreview, on: previewing(p => p.WrapText));
+        Add("preview.fit", () => tab().Preview.ToggleFitCommand.Execute(null), noPreview,
+            on: previewing(p => p.FitImageToPane));
         Add("preview.fit-width", () => ActiveTabView?.FitPreviewWidth(), noPreview);
         Add("preview.play-next", () => tab().Preview.PlayNextCommand.Execute(null), noPreview);
-        Add("preview.auto-advance", () => tab().Preview.ToggleAutoAdvanceCommand.Execute(null), noPreview);
-        Add("preview.loop", () => tab().Preview.ToggleLoopCommand.Execute(null), noPreview);
-        Add("preview.autoplay", () => tab().Preview.ToggleAutoPlayCommand.Execute(null), noPreview);
+        Add("preview.auto-advance", () => tab().Preview.ToggleAutoAdvanceCommand.Execute(null), noPreview,
+            on: previewing(p => p.AutoAdvance));
+        Add("preview.loop", () => tab().Preview.ToggleLoopCommand.Execute(null), noPreview, on: previewing(p => p.Loop));
+        Add("preview.autoplay", () => tab().Preview.ToggleAutoPlayCommand.Execute(null), noPreview,
+            on: previewing(p => p.AutoPlay));
         // Marked as needing a person: one plays media and the other opens a window of its own.
         var noMedia = () => noPreview() ?? (tab().Preview.HasMedia ? null : "Nothing playable is being previewed.");
         Add("preview.play", () => ActiveTabView?.TogglePreviewPlayback(), noMedia, window: true);
@@ -376,13 +413,16 @@ public partial class MainWindow
         {
             var theme = App.Services.GetRequiredService<IThemeService>();
             theme.SetFollowSystem(!theme.IsFollowingSystem);
-        });
+        }, on: () => App.Services.GetRequiredService<IThemeService>().IsFollowingSystem);
         Add("app.save-workspace", SaveWorkspace, window: true);
         Add("app.bookmark-folder",
             () => _ = _shell.ToggleBookmarksAsync([(tab().CurrentPath, true)]),
             () => tab().CurrentPath.Length == 0 ? "There is no folder here to bookmark."
                 : InArchive ? "Not available inside an archive."
                 : null);
+        Add("app.command-bars", () => ShowSettings(SettingsCategory.CommandBars));
+        Add("app.save-command-bars", SaveCommandBars, window: true);
+        Add("app.about", ShowAbout, window: true);
         Add("app.exit", Close, window: true);
 
         return new CommandRegistry(handlers, CustomCommandHandler);
@@ -517,9 +557,20 @@ public partial class MainWindow
     /// <summary>Why the active tab cannot run a file verb right now, or null when it can.</summary>
     private string? WhyNot(FileVerb verb)
     {
-        if (ActiveTabView is not { } view) return "No folder is open.";
-        var state = view.VerbState(verb);
+        if (VerbNow(verb) is not { } state) return "No folder is open.";
         return state.Enabled ? null : state.Reason;
+    }
+
+    /// <summary>The one snapshot every verb of a menu or toolbar pass is judged against. Taking
+    /// one walks the selection, and a File menu asks about twenty verbs twice each.</summary>
+    private FileVerbSnapshot? _passSnapshot;
+    private bool _inBarPass;
+
+    /// <summary>A file verb's state on the active tab, or null when there is no tab to ask.</summary>
+    private FileVerbState? VerbNow(FileVerb verb)
+    {
+        if (ActiveTabView is not { } view) return null;
+        return _inBarPass ? FileVerbRules.For(verb, _passSnapshot ??= view.VerbSnapshot()) : view.VerbState(verb);
     }
 
     /// <summary>The theme editor, from wherever it was asked for. With the settings page up it is

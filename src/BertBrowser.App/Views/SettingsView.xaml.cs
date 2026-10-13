@@ -44,6 +44,10 @@ public partial class SettingsView : UserControl
         foreach (var source in new ItemsControl[] { BuiltInChoiceList, ShellChoiceList, CommandChoiceList })
             ListReorderDrag.AttachInsert(source, MenuLayoutList, Orientation.Vertical, _vm.InsertMenuChoice);
 
+        // The Menus and toolbars page: the same two gestures, over whichever bar is on show.
+        ListReorderDrag.Attach(BarItemsList, Orientation.Vertical, _vm.MoveBarRow);
+        ListReorderDrag.AttachInsert(BarChoiceList, BarItemsList, Orientation.Vertical, _vm.InsertBarChoice);
+
         // Whatever was just added or selected is brought on screen: a row added from the right lands
         // wherever the selection is, and a command picked on the left is edited on the right.
         _vm.PropertyChanged += (_, e) =>
@@ -63,6 +67,13 @@ public partial class SettingsView : UserControl
             {
                 Dispatcher.BeginInvoke(() => ReassignKeyButton.Focus(),
                     System.Windows.Threading.DispatcherPriority.Loaded);
+                return;
+            }
+
+            if (e.PropertyName == nameof(SettingsViewModel.SelectedBarRow) && _vm.SelectedBarRow is { } barRow &&
+                CommandBarsPage.IsVisible)
+            {
+                BarItemsList.ScrollIntoView(barRow);
                 return;
             }
 
@@ -433,6 +444,135 @@ public partial class SettingsView : UserControl
         MenuLayoutList.ScrollIntoView(selected);
         if (MenuLayoutList.ItemContainerGenerator.ContainerFromItem(selected) is ListBoxItem item)
             item.Focus();
+    }
+
+    // --- Menus and toolbars page ---
+
+    /// <summary>"Save as…". The host asks for the name: the dialog is the one a workspace is
+    /// named with, and the same one the View menu's Save arrangement opens.</summary>
+    public event EventHandler? CommandBarsSaveRequested;
+
+    /// <summary>A saved arrangement's Rename, by button or F2.</summary>
+    public event EventHandler<SavedBarsItemViewModel>? CommandBarsRenameRequested;
+
+    private void CommandBarsSave_Click(object sender, RoutedEventArgs e) =>
+        CommandBarsSaveRequested?.Invoke(this, EventArgs.Empty);
+
+    private void SavedBarsRename_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is SavedBarsItemViewModel item)
+            CommandBarsRenameRequested?.Invoke(this, item);
+    }
+
+    private void SavedBarsDelete_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is SavedBarsItemViewModel item)
+            _vm.RemoveSavedBars(item);
+    }
+
+    /// <summary>Enter switches to the selected arrangement; F2 and Del are the saved lists' own.</summary>
+    private void SavedBarsList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.None || _vm.SelectedSavedBars is not { } item) return;
+
+        switch (e.Key)
+        {
+            case Key.Enter:
+                _vm.ApplySavedBarsCommand.Execute(item);
+                break;
+            case Key.F2:
+                CommandBarsRenameRequested?.Invoke(this, item);
+                break;
+            case Key.Delete:
+                _vm.RemoveSavedBars(item);
+                break;
+            default:
+                return;
+        }
+        e.Handled = true;
+    }
+
+    private void SavedBarsList_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (VisualTreeUtil.FindAncestor<ListBoxItem>(e.OriginalSource as DependencyObject) is null) return;
+        if (VisualTreeUtil.FindAncestor<Button>(e.OriginalSource as DependencyObject) is not null) return;
+        _vm.ApplySavedBarsCommand.Execute(_vm.SelectedSavedBars);
+    }
+
+    /// <summary>Alt+Up/Down moves the selected item, Del takes it off, Enter opens a submenu and
+    /// Backspace backs out of one — a folder's keys, since a menu inside a menu is one.</summary>
+    private void BarItemsList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers == ModifierKeys.Alt && e.Key is Key.Up or Key.Down or Key.System)
+        {
+            var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (key is not (Key.Up or Key.Down)) return;
+
+            _vm.NudgeSelectedBarRow(key == Key.Up ? -1 : 1);
+        }
+        else if (Keyboard.Modifiers != ModifierKeys.None)
+        {
+            return;
+        }
+        else if (e.Key == Key.Delete && _vm.RemoveBarRowCommand.CanExecute(null))
+        {
+            _vm.RemoveBarRowCommand.Execute(null);
+        }
+        else if (e.Key == Key.Enter && _vm.OpenBarRowCommand.CanExecute(null))
+        {
+            _vm.OpenBarRowCommand.Execute(null);
+        }
+        else if (e.Key == Key.Back && _vm.BarUpCommand.CanExecute(null))
+        {
+            _vm.BarUpCommand.Execute(null);
+        }
+        else
+        {
+            return;
+        }
+
+        RefocusSelectedBarRow();
+        e.Handled = true;
+    }
+
+    private void BarItemsList_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (VisualTreeUtil.FindAncestor<ListBoxItem>(e.OriginalSource as DependencyObject) is null) return;
+        if (VisualTreeUtil.FindAncestor<Button>(e.OriginalSource as DependencyObject) is not null) return;
+        if (!_vm.OpenBarRowCommand.CanExecute(null)) return;
+
+        _vm.OpenBarRowCommand.Execute(null);
+        RefocusSelectedBarRow();
+    }
+
+    private void BarChoiceList_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (VisualTreeUtil.FindAncestor<Button>(e.OriginalSource as DependencyObject) is not null) return;
+        if (VisualTreeUtil.FindAncestor<ListBoxItem>(e.OriginalSource as DependencyObject) is { DataContext: BarChoiceViewModel choice })
+            _vm.AddBarChoiceCommand.Execute(choice);
+    }
+
+    /// <summary>Every edit rebuilds the list, which drops the containers and the focus with them.</summary>
+    private void RefocusSelectedBarRow()
+    {
+        BarItemsList.UpdateLayout();
+        if (_vm.SelectedBarRow is not { } selected) return;
+        BarItemsList.ScrollIntoView(selected);
+        if (BarItemsList.ItemContainerGenerator.ContainerFromItem(selected) is ListBoxItem item)
+            item.Focus();
+    }
+
+    /// <summary>The name is written when the box is left or Enter is pressed, not per keystroke:
+    /// each write redraws the real menu bar, and rebuilds the list this box belongs to.</summary>
+    private void BarCaptionBox_LostFocus(object sender, RoutedEventArgs e) => _vm.CommitBarCaptionCommand.Execute(null);
+
+    private void BarCaptionBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || Keyboard.Modifiers != ModifierKeys.None) return;
+
+        _vm.CommitBarCaptionCommand.Execute(null);
+        RefocusSelectedBarRow();
+        e.Handled = true;
     }
 
     /// <summary>A list that is as tall as its rows still takes the wheel for its own scroller, which

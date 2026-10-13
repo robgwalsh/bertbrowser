@@ -178,6 +178,9 @@
                         <Trigger Property="TitleBarIcon" Value="{x:Null}">
                             <Setter TargetName="TitleIcon" Property="Visibility" Value="Collapsed"/>
                         </Trigger>
+                        <Trigger Property="ShowsTitleText" Value="False">
+                            <Setter TargetName="TitleText" Property="Visibility" Value="Collapsed"/>
+                        </Trigger>
                         <!-- ClampToWorkArea sizes a maximised window to the monitor's work area, but
                              WindowChrome (unlike the stock chrome) does not compensate for the
                              window then being positioned as if it still had a resize border outside

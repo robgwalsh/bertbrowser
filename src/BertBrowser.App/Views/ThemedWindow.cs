@@ -67,6 +67,13 @@ public class ThemedWindow : Window
         nameof(ShowsAppIcon), typeof(bool), typeof(ThemedWindow),
         new PropertyMetadata(false, (d, _) => ((ThemedWindow)d).RefreshTitleBarIcon()));
 
+    /// <summary>
+    /// Whether the title is written in the title bar. On by default; the main window turns it off
+    /// because its menu bar stands there instead — the title still names it in the taskbar.
+    /// </summary>
+    public static readonly DependencyProperty ShowsTitleTextProperty = DependencyProperty.Register(
+        nameof(ShowsTitleText), typeof(bool), typeof(ThemedWindow), new PropertyMetadata(true));
+
     private static readonly DependencyPropertyKey TitleBarIconPropertyKey = DependencyProperty.RegisterReadOnly(
         nameof(TitleBarIcon), typeof(ImageSource), typeof(ThemedWindow), new PropertyMetadata(null));
 
@@ -135,6 +142,12 @@ public class ThemedWindow : Window
     {
         get => (bool)GetValue(ShowsAppIconProperty);
         set => SetValue(ShowsAppIconProperty, value);
+    }
+
+    public bool ShowsTitleText
+    {
+        get => (bool)GetValue(ShowsTitleTextProperty);
+        set => SetValue(ShowsTitleTextProperty, value);
     }
 
     public ImageSource? TitleBarIcon => (ImageSource?)GetValue(TitleBarIconProperty);
@@ -230,12 +243,25 @@ public class ThemedWindow : Window
     {
         _contentBlockDepth++;
         if (_content is not null) _content.IsEnabled = false;
+        if (_contentBlockDepth == 1) OnContentBlockedChanged(true);
     }
 
     private void EndContentBlock()
     {
         _contentBlockDepth--;
-        if (_contentBlockDepth == 0 && _content is not null) _content.IsEnabled = true;
+        if (_contentBlockDepth != 0) return;
+
+        if (_content is not null) _content.IsEnabled = true;
+        OnContentBlockedChanged(false);
+    }
+
+    /// <summary>
+    /// A dialog this window owns has gone up, or the last one has come down. The content is
+    /// disabled for it already; this is for whatever a window keeps in its title bar, which stays
+    /// live so the caption buttons work and so has to be told.
+    /// </summary>
+    protected virtual void OnContentBlockedChanged(bool blocked)
+    {
     }
 
     private void Wire(string partName, Action action)

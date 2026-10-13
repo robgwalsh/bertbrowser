@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using BertBrowser.Core.Services.CommandBars;
 using BertBrowser.Core.Services.SavedWorkspaces;
 
 namespace BertBrowser.App.Views;
@@ -18,16 +19,18 @@ public partial class SavedWorkspaceDialog : ThemedWindow
 {
     private readonly Func<string, bool> _nameTaken;
     private readonly string? _editingName;
+    private readonly NamedThing _thing;
     private string? _result;
     private bool _ready;
 
-    private SavedWorkspaceDialog(string seedName, Func<string, bool> nameTaken, string? editingName)
+    private SavedWorkspaceDialog(string seedName, Func<string, bool> nameTaken, string? editingName, NamedThing? thing)
     {
         InitializeComponent();
         _nameTaken = nameTaken;
         _editingName = editingName;
+        _thing = thing ?? NamedThing.Workspace;
 
-        Title = editingName is null ? "Save workspace" : "Rename workspace";
+        Title = editingName is null ? _thing.SaveTitle : _thing.RenameTitle;
         NameBox.Text = seedName;
 
         _ready = true;
@@ -42,16 +45,18 @@ public partial class SavedWorkspaceDialog : ThemedWindow
     /// <summary>The dialog built but not shown, for the UI harness to park offscreen and
     /// photograph. Nothing in the app uses it: <see cref="Show"/> is the only way in from the
     /// interface, and it goes through this same constructor.</summary>
-    internal static SavedWorkspaceDialog Create(string seedName, Func<string, bool> nameTaken, string? editingName = null) =>
-        new(seedName, nameTaken, editingName);
+    internal static SavedWorkspaceDialog Create(
+        string seedName, Func<string, bool> nameTaken, string? editingName = null, NamedThing? thing = null) =>
+        new(seedName, nameTaken, editingName, thing);
 
     /// <summary>Shows the dialog and returns the name to save under, or null if it was
     /// cancelled.</summary>
     /// <param name="nameTaken">Whether a name belongs to another saved workspace — already
     /// excluding <paramref name="editingName"/>, the one being edited.</param>
-    public static string? Show(Window? owner, string seedName, Func<string, bool> nameTaken, string? editingName = null)
+    public static string? Show(
+        Window? owner, string seedName, Func<string, bool> nameTaken, string? editingName = null, NamedThing? thing = null)
     {
-        var dialog = new SavedWorkspaceDialog(seedName, nameTaken, editingName);
+        var dialog = new SavedWorkspaceDialog(seedName, nameTaken, editingName, thing);
         if (owner is not null && !ReferenceEquals(owner, dialog)) dialog.Owner = owner;
 
         return dialog.ShowDialog() == true ? dialog._result : null;
@@ -67,7 +72,7 @@ public partial class SavedWorkspaceDialog : ThemedWindow
 
         // A new workspace may take an existing name (it replaces); a rename may not.
         var replacing = _editingName is null && name.Length > 0 && _nameTaken(name);
-        var problem = SavedWorkspaceRules.Validate(name, _editingName is null ? _ => false : _nameTaken);
+        var problem = _thing.Validate(name, _editingName is null ? _ => false : _nameTaken);
 
         ProblemText.Text = problem ?? "";
         ProblemText.Visibility = problem is null ? Visibility.Collapsed : Visibility.Visible;
@@ -83,4 +88,17 @@ public partial class SavedWorkspaceDialog : ThemedWindow
         if (!OkButton.IsEnabled) return;
         DialogResult = true;
     }
+}
+
+/// <summary>
+/// What <see cref="SavedWorkspaceDialog"/> is naming. The dialog is one field and one rule either
+/// way; only the words and the rule's own messages differ.
+/// </summary>
+public sealed record NamedThing(string SaveTitle, string RenameTitle, Func<string, Func<string, bool>, string?> Validate)
+{
+    public static NamedThing Workspace { get; } =
+        new("Save workspace", "Rename workspace", SavedWorkspaceRules.Validate);
+
+    public static NamedThing CommandBars { get; } =
+        new("Save menus and toolbars", "Rename arrangement", SavedCommandBarRules.Validate);
 }

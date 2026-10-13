@@ -89,6 +89,28 @@ public partial class MainWindow
     /// from, then Save and Manage. Internal so the harness can photograph the same list.</summary>
     internal List<FrameworkElement> BuildWorkspaceMenuItems()
     {
+        var items = WorkspaceRows();
+
+        if (items.Count == 0)
+            items.Add(new MenuItem { Header = "No saved workspaces yet", IsEnabled = false });
+
+        items.Add(new Separator());
+
+        var save = new MenuItem { Header = "Save current layout…", Icon = MenuIcon("Icon.Save") };
+        save.Click += (_, _) => SaveWorkspace();
+        items.Add(save);
+
+        var manage = new MenuItem { Header = "Manage workspaces…", Icon = MenuIcon("Icon.Settings") };
+        manage.Click += (_, _) => ShowSettings(SettingsCategory.Workspaces);
+        items.Add(manage);
+
+        return items;
+    }
+
+    /// <summary>One row per saved workspace and nothing else: what the title bar's dropdown lists
+    /// first, and what a "saved workspaces" list on a menu or toolbar expands to.</summary>
+    private List<FrameworkElement> WorkspaceRows()
+    {
         var items = new List<FrameworkElement>();
 
         foreach (var workspace in _shell.SavedWorkspaces.Items)
@@ -104,19 +126,6 @@ public partial class MainWindow
             item.Click += (_, _) => _ = _shell.SwitchWorkspaceAsync(workspace);
             items.Add(item);
         }
-
-        if (items.Count == 0)
-            items.Add(new MenuItem { Header = "No saved workspaces yet", IsEnabled = false });
-
-        items.Add(new Separator());
-
-        var save = new MenuItem { Header = "Save current layout…", Icon = MenuIcon("Icon.Save") };
-        save.Click += (_, _) => SaveWorkspace();
-        items.Add(save);
-
-        var manage = new MenuItem { Header = "Manage workspaces…", Icon = MenuIcon("Icon.Settings") };
-        manage.Click += (_, _) => ShowSettings(SettingsCategory.Workspaces);
-        items.Add(manage);
 
         return items;
     }

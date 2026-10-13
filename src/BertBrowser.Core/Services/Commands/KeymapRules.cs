@@ -251,6 +251,14 @@ public static class KeymapRules
     }
 
     /// <summary>
+    /// Whether a bare Alt or F10 may hand the keyboard to the menu bar. Not under a dialog, whose
+    /// owner still receives keys; not while the Keyboard page waits for a chord, since Alt is
+    /// likely the start of it; and not with the palette up, which would be left open behind a menu.
+    /// </summary>
+    public static bool AllowsMenuMode(FocusState state) =>
+        !state.ContentBlocked && !state.Recording && !state.PaletteOpen;
+
+    /// <summary>
     /// The overrides after giving <paramref name="id"/> exactly these chords, taking each away from
     /// whichever command held it. An entry that ends up equal to its defaults is dropped, so the
     /// stored map stays "what the user changed" and a later build's new default still arrives.

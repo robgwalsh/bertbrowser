@@ -1,0 +1,212 @@
+# The menu bar and the toolbars: what ships, what greys when, arranging them, the Menus and
+# toolbars settings page, and saving and recalling an arrangement.
+#
+# A dropdown is never opened — it is a popup with a window of its own — so `menu main <Menu>`
+# renders the rows a click would show. Alt and F10 are not exercised: a run posts no input.
+
+tree .
+refresh
+
+# --- What ships ---
+
+assert-bars default
+assert-menu-bar File | Edit | View | Go | Tools | Help
+assert-toolbar title edit.undo edit.redo - tools.disk-usage tools.duplicates tools.changes tools.compare app.settings
+assert-hidden ToolbarRows
+shot 01-default TitleBarRoot
+
+# Nothing has been done, so there is nothing to undo; the rest of the toolbar is live.
+assert-toolbar-item title edit.undo disabled
+assert-toolbar-item title tools.disk-usage enabled
+assert-toolbar-item title tools.compare unchecked
+
+menu main File
+assert-menu-item New tab
+assert-menu-item Folder
+assert-menu-item Exit
+assert-menu-order New tab | New | - | Open | Run as administrator | Open in | - | Rename
+assert-menu-gesture New tab Ctrl+T
+# A list with nothing in it and no empty-state line takes its submenu with it.
+assert-no-menu-item Your commands
+
+menu main Edit
+assert-menu-order Undo | Redo | Undo history | - | Cut | Copy | Paste
+assert-menu-gesture Cut Ctrl+X
+
+menu main View
+assert-menu-item Sort by
+assert-menu-item Date modified
+assert-menu-item Preview pane
+assert-menu-item Menus and toolbars
+assert-menu-item No saved arrangements
+assert-menu-item No saved workspaces
+
+menu main Go
+assert-menu-order Back | Forward | Up | Drive root | - | Edit address
+assert-menu-item Drives
+
+menu main Tools
+assert-menu-item Find duplicates
+assert-menu-item Transfers
+
+menu main Help
+assert-menu-order Command palette | Search syntax help | - | About BertBrowser
+dialog about
+
+# --- A menu says what the selection makes of a command ---
+
+select notes.txt, report.md
+menu main File selected
+assert-menu-item Rename 2 items
+assert-menu-item Delete 2 items
+deselect
+
+# --- The toolbar follows what the app is doing ---
+
+select photo.jpg
+move to Documents
+assert-toolbar-item title edit.undo enabled
+undo
+assert-toolbar-item title edit.undo disabled
+deselect
+
+# Two folders side by side, neither inside the other, or the comparison is refused.
+go Documents
+split right Pictures
+compare
+assert-toolbar-item title tools.compare checked
+compare-end
+assert-toolbar-item title tools.compare unchecked
+closepane
+go .
+
+# --- Arranging by hand ---
+
+command-bars toolbar title nav.back nav.up - view.preview view.hidden custom:gone @workspaces
+assert-bars custom
+# The command nothing answers to is kept in the arrangement and simply not shown.
+assert-toolbar title nav.back nav.up - view.preview view.hidden @workspaces
+assert-toolbar-item title view.preview unchecked
+preview on
+assert-toolbar-item title view.preview checked
+preview off
+shot 02-custom-toolbar TitleBarRoot
+
+command-bars toolbar row1 text tab.new pane.split-right - file.rename
+assert-visible ToolbarRows
+assert-toolbar row1 tab.new pane.split-right - file.rename
+assert-toolbar-item row1 tab.new text
+assert-toolbar-item title nav.back icon
+# Rename needs a selection.
+assert-toolbar-item row1 file.rename disabled
+select notes.txt
+assert-toolbar-item row1 file.rename enabled
+deselect
+shot 03-toolbar-row
+
+command-bars menu Mine tab.new - @drives
+assert-menu-bar File | Edit | View | Go | Tools | Help | Mine
+menu main Mine
+assert-menu-order New tab | -
+
+# --- Saving and recalling ---
+
+command-bars save Work
+assert-bars Work
+menu main View with-saved
+assert-menu-item Work
+assert-no-menu-item No saved arrangements
+
+command-bars reset
+assert-bars default
+assert-hidden ToolbarRows
+assert-menu-bar File | Edit | View | Go | Tools | Help
+
+command-bars apply Work
+assert-bars Work
+assert-visible ToolbarRows
+assert-toolbar title nav.back nav.up - view.preview view.hidden @workspaces
+
+command-bars rename Work to Daily
+assert-bars Daily
+command-bars saved
+palette open
+palette type daily
+assert-palette-row Daily
+palette close
+
+# --- Settings open: the folders' commands grey, the app's own do not ---
+
+command-bars reset
+settings command-bars
+assert-toolbar-item title tools.disk-usage disabled
+assert-toolbar-item title app.settings enabled
+shot 04-settings-page
+
+menu main File under-settings
+assert-menu-item New tab
+
+# The page starts on the menu bar, which holds menus.
+assert-bar-rows File | Edit | View | Go | Tools | Help
+settings bars open Help
+assert-bar-rows Command palette | Search syntax help | - | About BertBrowser
+settings bars pick Search syntax help
+settings bars add nav.refresh
+assert-bar-rows Command palette | Search syntax help | Refresh | - | About BertBrowser
+settings bars nudge Refresh up
+assert-bar-rows Command palette | Refresh | Search syntax help | - | About BertBrowser
+settings bars name Reload
+assert-bar-rows Command palette | Reload | Search syntax help | - | About BertBrowser
+assert-bars custom
+menu main Help edited
+assert-menu-order Command palette | Reload | Search syntax help
+shot 05-editing-help
+
+settings bars remove Reload
+settings bars up
+assert-bar-rows File | Edit | View | Go | Tools | Help
+assert-bars default
+
+# A new menu, renamed and filled.
+settings bars pick Help
+settings bars add-menu
+settings bars name &Window
+assert-bar-rows File | Edit | View | Go | Tools | Help | Window
+assert-menu-bar File | Edit | View | Go | Tools | Help | Window
+settings bars open Window
+settings bars add pane.swap
+settings bars add @drives
+assert-bar-rows Swap panes | Drives
+settings bars up
+
+# The picker narrows by name, and can show only what is nowhere yet.
+settings bars filter thumbnail
+assert-bar-choice Thumbnail view
+assert-no-bar-choice New tab
+settings bars filter
+settings bars unplaced on
+assert-bar-choice Go to tab 1
+assert-no-bar-choice New tab
+settings bars unplaced off
+
+# A toolbar, edited the same way.
+settings bars select title
+assert-bar-rows Undo | Redo | - | Analyse disk usage | Find duplicates | What changed here | Compare with other pane | Settings
+settings bars remove Find duplicates
+assert-toolbar title edit.undo edit.redo - tools.disk-usage tools.changes tools.compare app.settings
+shot 06-editing-toolbar
+
+command-bars save Trimmed
+settings command-bars
+shot 07-saved-list
+dialog saved-command-bars
+
+command-bars reset
+assert-bars default
+settings close
+
+# --- A narrow window: the toolbar gives way before the search box does ---
+
+command-bars toolbar title edit.undo edit.redo - tools.disk-usage tools.duplicates tools.changes tools.compare app.settings nav.back nav.forward nav.up nav.refresh view.preview view.metadata view.flat view.hidden tab.new tab.close pane.split-right pane.split-below
+shot 08-crowded TitleBarRoot
+command-bars reset

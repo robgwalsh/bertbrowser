@@ -253,6 +253,11 @@ public static class CommandCatalog
             "tab set", "layout", "session"),
         Cmd("app.bookmark-folder", "Bookmark this folder", C.App, Browser, "Icon.Bookmark", "Ctrl+D", Standard,
             "favourite", "favorite", "add bookmark", "remove bookmark"),
+        Cmd("app.command-bars", "Customise menus and toolbars", C.App, App, "Icon.Reorder", "", Standard,
+            "menu bar", "toolbar", "buttons", "customize"),
+        Cmd("app.save-command-bars", "Save menus and toolbars…", C.App, App, "Icon.Save", "", Rare,
+            "arrangement", "menu bar", "toolbar"),
+        Cmd("app.about", "About BertBrowser", C.App, App, "Icon.Info", "", Rare, "version", "release", "channel"),
         Cmd("app.exit", "Exit", C.App, App, "Icon.Dismiss", "", Rare, "quit", "close window"),
     ];
 

@@ -129,6 +129,7 @@ public enum SettingsCategory
     SavedSearches,
     Workspaces,
     ContextMenu,
+    CommandBars,
     Keyboard,
 }
 
@@ -240,6 +241,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         new(SettingsCategory.SavedSearches, "Saved searches", "Icon.Search"),
         new(SettingsCategory.Workspaces, "Workspaces", "Icon.SplitRight"),
         new(SettingsCategory.ContextMenu, "Context menu", "Icon.CustomCommand"),
+        new(SettingsCategory.CommandBars, "Menus and toolbars", "Icon.Reorder"),
         new(SettingsCategory.Keyboard, "Keyboard", "Icon.Keyboard"),
     ];
 
@@ -574,7 +576,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         IShellMenuSource? shellMenus = null,
         SavedWorkspacesViewModel? workspaces = null,
         SavedSearchesViewModel? savedSearches = null,
-        Services.Commands.KeymapService? keymap = null)
+        Services.Commands.KeymapService? keymap = null,
+        Services.Commands.CommandBarService? commandBars = null)
     {
         Categories = AllCategories;
         _selectedCategory = Categories[0];
@@ -650,6 +653,9 @@ public sealed partial class SettingsViewModel : ObservableObject
 
         _keymap = keymap;
         LoadKeyRows();
+
+        _bars = commandBars;
+        LoadBars();
 
         TrackChanges();
     }

@@ -10,8 +10,9 @@ using BertBrowser.Core.Services.UndoHistory;
 namespace BertBrowser.App.Views;
 
 /// <summary>
-/// The undo history's surfaces: the title bar's Undo and Redo split buttons, their dropdowns, and the
-/// History window. Every action is a line into the shell, which owns the history and the busy flag.
+/// The undo history's surfaces: the dropdowns of the toolbar's Undo and Redo split buttons (the
+/// buttons themselves are <see cref="CommandBarToolbar"/>'s) and the History window. Every action
+/// is a line into the shell, which owns the history and the busy flag.
 /// </summary>
 public partial class MainWindow
 {
@@ -19,19 +20,6 @@ public partial class MainWindow
     internal const int MenuDepth = 12;
 
     private UndoHistoryWindow? _undoHistory;
-
-    private void UndoMenu_Click(object sender, RoutedEventArgs e) =>
-        OpenUndoMenu(UndoMenuButton, BuildUndoMenuItems());
-
-    private void RedoMenu_Click(object sender, RoutedEventArgs e) =>
-        OpenUndoMenu(RedoMenuButton, BuildRedoMenuItems());
-
-    private static void OpenUndoMenu(UIElement anchor, List<FrameworkElement> items)
-    {
-        var menu = new ContextMenu { PlacementTarget = anchor, Placement = PlacementMode.Bottom, VerticalOffset = 2 };
-        foreach (var item in items) menu.Items.Add(item);
-        menu.IsOpen = true;
-    }
 
     private void UndoHistoryLink_Click(object sender, RoutedEventArgs e) => ShowUndoHistory();
 

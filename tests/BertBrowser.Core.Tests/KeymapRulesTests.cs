@@ -270,6 +270,19 @@ public class KeymapRulesTests
         KeymapRules.Dispatch(KeymapRules.Resolve(Contexts, null), KeyChord.Parse(chord), state);
 
     [Fact]
+    public void Alt_opens_the_menu_bar_except_where_that_would_take_the_keyboard_from_something()
+    {
+        Assert.True(KeymapRules.AllowsMenuMode(new FocusState(FocusKind.FileList)));
+        Assert.True(KeymapRules.AllowsMenuMode(new FocusState(FocusKind.TextEditable)));
+        // The menu bar is the settings page's own preview, so it stays reachable under it.
+        Assert.True(KeymapRules.AllowsMenuMode(new FocusState(FocusKind.Other, SettingsOpen: true)));
+
+        Assert.False(KeymapRules.AllowsMenuMode(new FocusState(FocusKind.Other, ContentBlocked: true)));
+        Assert.False(KeymapRules.AllowsMenuMode(new FocusState(FocusKind.Other, Recording: true)));
+        Assert.False(KeymapRules.AllowsMenuMode(new FocusState(FocusKind.TextEditable, PaletteOpen: true)));
+    }
+
+    [Fact]
     public void An_unbound_chord_is_nobodys()
     {
         Assert.Null(Press("Ctrl+K", new FocusState(FocusKind.Other)));

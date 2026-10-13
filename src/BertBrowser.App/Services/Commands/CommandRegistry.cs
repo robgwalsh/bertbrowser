@@ -8,7 +8,13 @@ namespace BertBrowser.App.Services.Commands;
 /// <param name="NeedsAPerson">It puts a dialog or another window up, or plays something. A scripted
 /// run must not — it could never dismiss the one or silence the other — so the harness reports
 /// these instead of running them.</param>
-public sealed record CommandHandler(Action Execute, Func<string?>? Unavailable = null, bool NeedsAPerson = false);
+/// <param name="Checked">For a command that is a switch or one of a set — the preview pane, the
+/// sort column — whether it is the one that is on. A menu ticks it and a toolbar holds it down.</param>
+/// <param name="Caption">What a menu calls it at this moment, where that depends on the moment:
+/// "Delete 3 items…", "Remove bookmark". Null when its name always fits.</param>
+public sealed record CommandHandler(
+    Action Execute, Func<string?>? Unavailable = null, bool NeedsAPerson = false,
+    Func<bool>? Checked = null, Func<string?>? Caption = null);
 
 /// <summary>
 /// The other half of <see cref="CommandCatalog"/>: what each id does. A shortcut, the palette and
