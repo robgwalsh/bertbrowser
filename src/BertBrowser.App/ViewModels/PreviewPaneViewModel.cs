@@ -233,8 +233,10 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     private PreviewMode _mode = PreviewMode.Auto;
 
     /// <summary>Reload rather than <see cref="Show"/>: that one short-circuits on an unchanged
-    /// path and stamp, and would swallow this entirely.</summary>
-    partial void OnModeChanged(PreviewMode value) => Reload();
+    /// path and stamp, and would swallow this entirely. Not debounced: the debounce is for a sweep
+    /// of selections, and a press of a mode button is one deliberate gesture that waited 150 ms
+    /// for nothing.</summary>
+    partial void OnModeChanged(PreviewMode value) => Reload(debounce: false);
 
     public bool IsAutoMode => Mode == PreviewMode.Auto;
     public bool IsRawMode => Mode == PreviewMode.Text;
@@ -327,11 +329,13 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Re-runs the current preview, for when the folder changed under it.</summary>
-    public void Reload()
+    public void Reload() => Reload(debounce: true);
+
+    private void Reload(bool debounce)
     {
         _cts.Cancel();
         _cts = new CancellationTokenSource();
-        _ = LoadAsync(_cts.Token);
+        _ = LoadAsync(debounce, _cts.Token);
     }
 
     public void Dispose()
@@ -347,12 +351,12 @@ public sealed partial class PreviewPaneViewModel : ObservableObject, IDisposable
 
     private int _pendingLoads;
 
-    private async Task LoadAsync(CancellationToken ct)
+    private async Task LoadAsync(bool debounce, CancellationToken ct)
     {
         _pendingLoads++;
         try
         {
-            await Task.Delay(DebounceMs, ct);
+            if (debounce) await Task.Delay(DebounceMs, ct);
 
             var item = _target;
 
