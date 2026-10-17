@@ -147,4 +147,7 @@ Results go to `bench-results/current.real.json` and baselines to `<key>.real.jso
 - Tier C skips the post-window side effects (index attach, change-log policy, update check) — the
   change-log push would wipe your real change log from a scratch data dir — so it measures "to first
   listing", not "to idle".
+- Tier C launches the Release *build* by default, which is plain IL. What users run is a publish, and a
+  publish is ReadyToRun (about 45 ms sooner to the window when it was turned on). To measure that,
+  publish with `-r win-x64 --self-contained true -o <dir>` and pass `--app <dir>\BertBrowser.exe`.
 - Medians, not means. A single slow sample is the machine.

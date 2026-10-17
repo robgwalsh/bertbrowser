@@ -11,6 +11,9 @@
     <RootNamespace>BertBrowser.Indexer</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <IsPackable>false</IsPackable>
+    <!-- Precompiled like the app (see its project file), which is also what keeps the
+         BertBrowser.Core.dll this publish lays over the app's a precompiled one. -->
+    <PublishReadyToRun Condition="'$(RuntimeIdentifier)' != ''">true</PublishReadyToRun>
     <!-- Not InvariantGlobalization: path keys are ToUpperInvariant()'d on both sides of the pipe
          and written to a shared database. A different globalization mode here would fold some
          characters differently and the app would query keys this process never wrote. -->

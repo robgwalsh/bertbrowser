@@ -8,6 +8,11 @@
     <AssemblyName>BertBrowser</AssemblyName>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <StartupObject>BertBrowser.App.App</StartupObject>
+    <!-- Precompiled, so a launch runs native code instead of first JIT-compiling everything it
+         touches. A publish only, since it needs a runtime: a build stays plain IL. The helpers set
+         it too, or their publish into the same folder would overwrite BertBrowser.Core.dll with an
+         IL-only copy. -->
+    <PublishReadyToRun Condition="'$(RuntimeIdentifier)' != ''">true</PublishReadyToRun>
   </PropertyGroup>
 
   <!-- App.xaml is a Page (not ApplicationDefinition) so our explicit Main runs

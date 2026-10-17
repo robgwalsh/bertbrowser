@@ -11,6 +11,9 @@
     <RootNamespace>BertBrowser.Elevator</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <IsPackable>false</IsPackable>
+    <!-- Precompiled like the app (see its project file). It is started on demand, mid-operation,
+         so its start-up is waited on. -->
+    <PublishReadyToRun Condition="'$(RuntimeIdentifier)' != ''">true</PublishReadyToRun>
     <!-- Not InvariantGlobalization, for the reason the index helper gives: path keys are
          ToUpperInvariant()'d on both sides of the pipe, and a different globalization mode here
          would fold some characters differently from the process that built the plan. -->
