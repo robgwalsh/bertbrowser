@@ -728,8 +728,9 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
                 query: null, FlatEntryCap, ct,
                 includeDirectories: false), ct);
 
+            // Not appended first: CompleteSearchAsync replaces the list with these same rows, and
+            // adding them one at a time on the way cost a row-by-row insert nobody saw.
             if (ct.IsCancellationRequested) return;
-            FileList.AppendSearchHits(hits);
             outcome = new SearchOutcome(
                 hits, Truncated: hits.Count >= FlatEntryCap,
                 SearchResultSource.LiveScan, RefreshPending: false);
@@ -857,8 +858,8 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
                 _archives.ReadArchive(here.ArchiveFile),
                 here.ArchiveFile, here.EntryPath, ParsedSearch.Query!, ArchiveSearchLimit, ct), ct);
 
+            // Not appended first, for the reason the flat listing gives.
             if (ct.IsCancellationRequested) return;
-            FileList.AppendSearchHits(hits);
             outcome = new SearchOutcome(
                 hits, Truncated: hits.Count >= ArchiveSearchLimit, SearchResultSource.LiveScan,
                 RefreshPending: false);

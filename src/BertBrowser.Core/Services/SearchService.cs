@@ -109,8 +109,21 @@ public sealed class SearchService : ISearchService, IDisposable
 
     /// <summary>And how many bytes of them, whichever bound is reached first.</summary>
     private const long MaxArchiveBytesScanned = 2L * 1024 * 1024 * 1024;
-    private const int LiveBatchSize = 50;
-    private static readonly TimeSpan LiveBatchInterval = TimeSpan.FromMilliseconds(250);
+    /// <summary>The first batch a walk streams goes as soon as it has this many rows, so something is
+    /// on screen at once; each batch after it may be twice the last, up to
+    /// <see cref="MaxLiveBatchSize"/>, or goes when <see cref="LiveBatchInterval"/> has passed.</summary>
+    /// <remarks>
+    /// Growing, rather than fixed. Each batch is a dispatcher post with a layout pass after it, so
+    /// fifty at a time cost a fast walk of 20,000 files 400 posts. But one batch at the end is worse
+    /// again: the UI thread adds rows while the walk carries on, and a single late batch puts all of
+    /// that adding after the walk instead of beside it (measured: 486 ms became 575). Doubling keeps
+    /// both — a dozen posts, all but the last overlapping the walk.
+    /// </remarks>
+    internal const int FirstLiveBatchSize = 50;
+
+    internal const int MaxLiveBatchSize = 4096;
+
+    internal static readonly TimeSpan LiveBatchInterval = TimeSpan.FromMilliseconds(250);
 
     private readonly FsIndexRepository _repository;
     private readonly IndexCrawler _crawler;
@@ -468,6 +481,7 @@ public sealed class SearchService : ISearchService, IDisposable
         var hits = new List<SearchHit>();
         var batch = new List<SearchHit>();
         var truncated = false;
+        var batchSize = FirstLiveBatchSize;
         var sinceFlush = Stopwatch.StartNew();
 
         // The walk hands over a folder's entries together, so the relative folder is worked out
@@ -508,10 +522,11 @@ public sealed class SearchService : ISearchService, IDisposable
             hits.Add(hit);
             batch.Add(hit);
 
-            if (batch.Count >= LiveBatchSize || sinceFlush.Elapsed >= LiveBatchInterval)
+            if (batch.Count >= batchSize || sinceFlush.Elapsed >= LiveBatchInterval)
             {
                 liveBatches?.Report(batch.ToArray());
                 batch.Clear();
+                batchSize = Math.Min(batchSize * 2, MaxLiveBatchSize);
                 sinceFlush.Restart();
             }
             return true;

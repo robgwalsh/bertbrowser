@@ -180,6 +180,36 @@ public sealed class SubtreeListingTests : IDisposable
         Assert.Empty(outcome.Hits);
     }
 
+    private sealed class BatchRecorder : IProgress<IReadOnlyList<SearchHit>>
+    {
+        public List<int> Sizes { get; } = new();
+        public void Report(IReadOnlyList<SearchHit> value) => Sizes.Add(value.Count);
+    }
+
+    [Fact]
+    public async Task StreamsASmallFirstBatchThenDoublingOnes()
+    {
+        // Every batch is a post to the UI thread with a layout pass after it, so a fast walk must
+        // not cut one every fifty rows (a 20,000-file flat view spent a fifth of its time on that),
+        // nor save everything for one batch at the end, which serialises the adding after the walk.
+        for (var i = 0; i < 1_000; i++) CreateFile($@"D{i % 10}\f{i:0000}.txt");
+        var batches = new BatchRecorder();
+
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        var outcome = await List(batches: batches);
+        var ticks = (int)(started.Elapsed / SearchService.LiveBatchInterval);
+
+        Assert.Equal(1_000, outcome.Hits.Count);
+        Assert.Equal(1_000, batches.Sizes.Sum());
+        Assert.Equal(SearchService.FirstLiveBatchSize, batches.Sizes[0]);
+        if (ticks == 0)
+            // Nothing can have gone on the clock, so the sizes are the doubling alone.
+            Assert.Equal([50, 100, 200, 400, 250], batches.Sizes);
+        else
+            // A slow machine: each tick of the clock may cut one more.
+            Assert.InRange(batches.Sizes.Count, 1, 5 + ticks);
+    }
+
     [Fact]
     public async Task ListingNeverEnrolsTheFolderInTheIndex()
     {
