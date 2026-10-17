@@ -8,6 +8,10 @@
 bench-fixture 10000 0 Flat
 go Flat
 assert-count 10000
+# The first sort of a session pays for itself once (JIT and first-use setup, ~110 ms) whichever
+# column it is, so it is its own sample. It used to be sort.name, which then read as twice as slow
+# as every other column for a reason that had nothing to do with names.
+time sort.first sort Size
 time sort.name sort Name
 time sort.size sort Size
 time sort.modified sort Modified

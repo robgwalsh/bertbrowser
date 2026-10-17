@@ -33,7 +33,7 @@ $bench = "tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe"
 | Power plan | High performance |
 | Corpus | synthetic, scale 1 (100,000 rows) |
 | Job | default, default toolchain |
-| Recorded | 2026-10-05 at `878095259` (uncommitted changes) |
+| Recorded | 2026-10-17 at `08264df59` (uncommitted changes) |
 
 ### Tier A — Core micro-benchmarks (BenchmarkDotNet)
 
@@ -149,87 +149,88 @@ $bench = "tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe"
 
 | Scenario | Median | p95 | n |
 |---|---:|---:|---:|
-| `ui.flat-20k.flat.off` | 103 ms | 114 ms | 5 |
-| `ui.flat-20k.flat.on` | 458 ms | 465 ms | 5 |
-| `ui.flat-20k.flat.sort.name` | 115 ms | 121 ms | 5 |
-| `ui.flat-20k.flat.sort.size` | 137 ms | 155 ms | 5 |
-| `ui.listing-10k.back` | 135 ms | 149 ms | 5 |
-| `ui.listing-10k.list` | 276 ms | 305 ms | 5 |
-| `ui.listing-10k.refresh` | 243 ms | 261 ms | 5 |
-| `ui.listing-10k.up` | 52.4 ms | 53.9 ms | 5 |
-| `ui.preview.preview.code` | 223 ms | 228 ms | 5 |
-| `ui.preview.preview.hex2mb` | 567 ms | 577 ms | 5 |
-| `ui.preview.preview.png` | 252 ms | 256 ms | 5 |
-| `ui.preview.preview.text2mb` | 448 ms | 468 ms | 5 |
-| `ui.search-local.search.clear` | 116 ms | 117 ms | 5 |
-| `ui.search-local.search.ext` | 366 ms | 403 ms | 5 |
-| `ui.search-local.search.regex` | 399 ms | 414 ms | 5 |
-| `ui.search-local.search.word` | 416 ms | 652 ms | 5 |
-| `ui.sort-select-10k.select.all` | 38.1 ms | 38.9 ms | 5 |
-| `ui.sort-select-10k.select.files` | 124 ms | 126 ms | 5 |
-| `ui.sort-select-10k.select.invert` | 185 ms | 216 ms | 5 |
-| `ui.sort-select-10k.select.none` | 40.6 ms | 45.4 ms | 5 |
-| `ui.sort-select-10k.sort.modified` | 95.0 ms | 96.0 ms | 5 |
-| `ui.sort-select-10k.sort.name` | 264 ms | 269 ms | 5 |
-| `ui.sort-select-10k.sort.size` | 116 ms | 119 ms | 5 |
-| `ui.sort-select-10k.sort.type` | 110 ms | 111 ms | 5 |
-| `ui.startup.startup.hosted` | 914 ms | 919 ms | 5 |
-| `ui.tabs-panes.pane.close` | 65.3 ms | 73.8 ms | 5 |
-| `ui.tabs-panes.pane.split` | 188 ms | 223 ms | 5 |
-| `ui.tabs-panes.pane.switch` | 1.24 ms | 1.50 ms | 5 |
-| `ui.tabs-panes.tab.close` | 9.78 ms | 10.6 ms | 5 |
-| `ui.tabs-panes.tab.new` | 274 ms | 278 ms | 5 |
-| `ui.tabs-panes.tab.switch` | 4.97 ms | 5.78 ms | 5 |
-| `ui.tiles-5k.tiles.back` | 86.2 ms | 88.2 ms | 5 |
-| `ui.tiles-5k.tiles.large` | 129 ms | 133 ms | 5 |
-| `ui.tiles-5k.tiles.on` | 283 ms | 326 ms | 5 |
-| `ui.tiles-5k.tiles.scroll` | 370 ms | 376 ms | 5 |
-| `ui.transfer-2k.copy.2k` | 1.45 s | 1.49 s | 5 |
-| `ui.transfer-2k.delete.2k` | 499 ms | 530 ms | 5 |
+| `ui.flat-20k.flat.off` | 92.5 ms | 102 ms | 5 |
+| `ui.flat-20k.flat.on` | 452 ms | 462 ms | 5 |
+| `ui.flat-20k.flat.sort.name` | 117 ms | 127 ms | 5 |
+| `ui.flat-20k.flat.sort.size` | 132 ms | 138 ms | 5 |
+| `ui.listing-10k.back` | 145 ms | 163 ms | 5 |
+| `ui.listing-10k.list` | 268 ms | 270 ms | 5 |
+| `ui.listing-10k.refresh` | 244 ms | 251 ms | 5 |
+| `ui.listing-10k.up` | 34.4 ms | 40.7 ms | 5 |
+| `ui.preview.preview.code` | 208 ms | 210 ms | 5 |
+| `ui.preview.preview.hex2mb` | 393 ms | 415 ms | 5 |
+| `ui.preview.preview.png` | 166 ms | 181 ms | 5 |
+| `ui.preview.preview.text2mb` | 436 ms | 472 ms | 5 |
+| `ui.search-local.search.clear` | 106 ms | 115 ms | 5 |
+| `ui.search-local.search.ext` | 314 ms | 334 ms | 5 |
+| `ui.search-local.search.regex` | 390 ms | 396 ms | 5 |
+| `ui.search-local.search.word` | 492 ms | 655 ms | 5 |
+| `ui.sort-select-10k.select.all` | 44.8 ms | 45.4 ms | 5 |
+| `ui.sort-select-10k.select.files` | 141 ms | 188 ms | 5 |
+| `ui.sort-select-10k.select.invert` | 190 ms | 191 ms | 5 |
+| `ui.sort-select-10k.select.none` | 28.5 ms | 28.6 ms | 5 |
+| `ui.sort-select-10k.sort.first` | 229 ms | 231 ms | 5 |
+| `ui.sort-select-10k.sort.modified` | 115 ms | 116 ms | 5 |
+| `ui.sort-select-10k.sort.name` | 106 ms | 107 ms | 5 |
+| `ui.sort-select-10k.sort.size` | 95.8 ms | 96.6 ms | 5 |
+| `ui.sort-select-10k.sort.type` | 98.2 ms | 98.8 ms | 5 |
+| `ui.startup.startup.hosted` | 940 ms | 963 ms | 5 |
+| `ui.tabs-panes.pane.close` | 65.2 ms | 74.8 ms | 5 |
+| `ui.tabs-panes.pane.split` | 197 ms | 213 ms | 5 |
+| `ui.tabs-panes.pane.switch` | 1.46 ms | 1.84 ms | 5 |
+| `ui.tabs-panes.tab.close` | 10.8 ms | 12.1 ms | 5 |
+| `ui.tabs-panes.tab.new` | 274 ms | 289 ms | 5 |
+| `ui.tabs-panes.tab.switch` | 4.60 ms | 6.49 ms | 5 |
+| `ui.tiles-5k.tiles.back` | 86.9 ms | 96.5 ms | 5 |
+| `ui.tiles-5k.tiles.large` | 133 ms | 137 ms | 5 |
+| `ui.tiles-5k.tiles.on` | 268 ms | 269 ms | 5 |
+| `ui.tiles-5k.tiles.scroll` | 360 ms | 377 ms | 5 |
+| `ui.transfer-2k.copy.2k` | 1.26 s | 1.29 s | 5 |
+| `ui.transfer-2k.delete.2k` | 476 ms | 505 ms | 5 |
 
 | Memory snapshot | Managed heap | Private bytes | Working set | Peak working set | Items | Realized | n |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `ui.flat-20k.flat` | 12.9 MB | 89.4 MB | 163 MB | 171 MB | 200 | 34 | 5 |
-| `ui.listing-10k.listing` | 18.1 MB | 101 MB | 174 MB | 180 MB | 10000 | 34 | 5 |
-| `ui.memory.flat-20k` | 23.3 MB | 88.4 MB | 162 MB | 168 MB | 20000 | 34 | 5 |
-| `ui.memory.idle` | 8.60 MB | 65.5 MB | 137 MB | 146 MB | 0 | 0 | 5 |
-| `ui.memory.listing-10k` | 17.7 MB | 72.2 MB | 146 MB | 147 MB | 10000 | 34 | 5 |
-| `ui.memory.released` | 12.0 MB | 79.1 MB | 154 MB | 168 MB | 2 | 2 | 5 |
-| `ui.memory.soak-navigate` | 12.1 MB | 77.4 MB | 158 MB | 182 MB | 2 | 2 | 5 |
-| `ui.memory.soak-tabs` | 12.5 MB | 107 MB | 190 MB | 221 MB | 2 | 2 | 5 |
-| `ui.preview.preview` | 16.7 MB | 96.0 MB | 185 MB | 187 MB | 10 | 10 | 5 |
-| `ui.search-local.search` | 12.9 MB | 82.0 MB | 159 MB | 164 MB | 200 | 34 | 5 |
-| `ui.sort-select-10k.sort` | 20.1 MB | 94.4 MB | 169 MB | 176 MB | 10000 | 34 | 5 |
-| `ui.tabs-panes.tabs` | 20.1 MB | 94.2 MB | 168 MB | 169 MB | 5000 | 34 | 5 |
-| `ui.tiles-5k.tiles` | 15.4 MB | 112 MB | 192 MB | 196 MB | 5000 | 34 | 5 |
-| `ui.transfer-2k.transfer` | 12.0 MB | 83.4 MB | 161 MB | 164 MB | 0 | 0 | 5 |
+| `ui.flat-20k.flat` | 13.4 MB | 89.4 MB | 165 MB | 176 MB | 200 | 34 | 5 |
+| `ui.listing-10k.listing` | 18.5 MB | 91.5 MB | 168 MB | 181 MB | 10000 | 34 | 5 |
+| `ui.memory.flat-20k` | 23.6 MB | 96.1 MB | 173 MB | 177 MB | 20000 | 34 | 5 |
+| `ui.memory.idle` | 9.00 MB | 65.0 MB | 139 MB | 148 MB | 0 | 0 | 5 |
+| `ui.memory.listing-10k` | 18.1 MB | 76.3 MB | 153 MB | 154 MB | 10000 | 34 | 5 |
+| `ui.memory.released` | 12.4 MB | 79.8 MB | 157 MB | 177 MB | 2 | 2 | 5 |
+| `ui.memory.soak-navigate` | 12.5 MB | 77.8 MB | 161 MB | 183 MB | 2 | 2 | 5 |
+| `ui.memory.soak-tabs` | 12.9 MB | 107 MB | 191 MB | 224 MB | 2 | 2 | 5 |
+| `ui.preview.preview` | 17.0 MB | 92.5 MB | 177 MB | 181 MB | 10 | 10 | 5 |
+| `ui.search-local.search` | 13.3 MB | 86.2 MB | 165 MB | 168 MB | 200 | 34 | 5 |
+| `ui.sort-select-10k.sort` | 20.5 MB | 101 MB | 177 MB | 185 MB | 10000 | 34 | 5 |
+| `ui.tabs-panes.tabs` | 20.5 MB | 102 MB | 179 MB | 179 MB | 5000 | 34 | 5 |
+| `ui.tiles-5k.tiles` | 15.8 MB | 113 MB | 194 MB | 199 MB | 5000 | 34 | 5 |
+| `ui.transfer-2k.transfer` | 12.4 MB | 79.8 MB | 159 MB | 165 MB | 0 | 0 | 5 |
 
 ### Tier C — Startup of the real executable
 
 | Mark | Median | p95 | Min | n |
 |---|---:|---:|---:|---:|
-| `startup.main` | 74.9 ms | 77.8 ms | 72.5 ms | 9 |
-| `startup.velopackDone` | 101 ms | 105 ms | 98.1 ms | 9 |
-| `startup.instanceClaimed` | 104 ms | 109 ms | 101 ms | 9 |
-| `startup.appXamlLoaded` | 229 ms | 240 ms | 223 ms | 9 |
-| `startup.settingsLoaded` | 237 ms | 246 ms | 230 ms | 9 |
-| `startup.servicesBuilt` | 238 ms | 250 ms | 231 ms | 9 |
-| `startup.migrated` | 238 ms | 250 ms | 231 ms | 9 |
-| `startup.themeReady` | 251 ms | 259 ms | 244 ms | 9 |
-| `startup.shellBuilt` | 263 ms | 274 ms | 256 ms | 9 |
-| `startup.windowXamlLoaded` | 492 ms | 501 ms | 481 ms | 9 |
-| `startup.panesBuilt` | 515 ms | 523 ms | 504 ms | 9 |
-| `startup.commandsBuilt` | 515 ms | 524 ms | 504 ms | 9 |
-| `startup.windowBuilt` | 516 ms | 524 ms | 504 ms | 9 |
-| `startup.windowShown` | 668 ms | 679 ms | 651 ms | 9 |
-| `startup.contentRendered` | 671 ms | 682 ms | 654 ms | 9 |
-| `startup.firstListing` | 720 ms | 732 ms | 700 ms | 9 |
-| `startup.processLifetime` | 1.07 s | 1.11 s | 1.05 s | 9 |
+| `startup.main` | 71.8 ms | 73.6 ms | 69.9 ms | 9 |
+| `startup.velopackDone` | 97.0 ms | 99.7 ms | 94.5 ms | 9 |
+| `startup.instanceClaimed` | 100 ms | 103 ms | 97.6 ms | 9 |
+| `startup.appXamlLoaded` | 218 ms | 248 ms | 212 ms | 9 |
+| `startup.settingsLoaded` | 226 ms | 255 ms | 218 ms | 9 |
+| `startup.servicesBuilt` | 229 ms | 256 ms | 221 ms | 9 |
+| `startup.migrated` | 229 ms | 256 ms | 221 ms | 9 |
+| `startup.themeReady` | 240 ms | 267 ms | 232 ms | 9 |
+| `startup.shellBuilt` | 253 ms | 280 ms | 243 ms | 9 |
+| `startup.windowXamlLoaded` | 489 ms | 522 ms | 477 ms | 9 |
+| `startup.panesBuilt` | 514 ms | 547 ms | 501 ms | 9 |
+| `startup.commandsBuilt` | 520 ms | 553 ms | 507 ms | 9 |
+| `startup.windowBuilt` | 520 ms | 553 ms | 507 ms | 9 |
+| `startup.windowShown` | 692 ms | 741 ms | 676 ms | 9 |
+| `startup.contentRendered` | 694 ms | 743 ms | 679 ms | 9 |
+| `startup.firstListing` | 724 ms | 775 ms | 709 ms | 9 |
+| `startup.processLifetime` | 1.11 s | 1.17 s | 1.07 s | 9 |
 
 | Memory snapshot | Managed heap | Private bytes | Working set | Peak working set | n |
 |---|---:|---:|---:|---:|---:|
-| `startup.memory.collected` | 7.90 MB | 116 MB | 161 MB | 161 MB | 9 |
-| `startup.memory.firstListing` | 8.63 MB | 114 MB | 160 MB | 160 MB | 9 |
+| `startup.memory.collected` | 8.44 MB | 136 MB | 175 MB | 175 MB | 9 |
+| `startup.memory.firstListing` | 9.88 MB | 136 MB | 174 MB | 174 MB | 9 |
 
 ## What the numbers do and do not mean
 
