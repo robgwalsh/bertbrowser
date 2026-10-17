@@ -85,6 +85,8 @@ public partial class DirectoryTabView : UserControl
         AttachHeaderStripMenu();
         ApplyViewMode();     // honor a restored thumbnail zoom level
         UpdatePreviewPane(); // and a restored preview pane
+        // A view is built when its tab is first shown, which can be after the selection was asked for.
+        TryApplyPendingSelection(clearIfMissing: false);
     }
 
     /// <summary>Gives the subscriptions back. A tab is closable, unlike the window, so its view

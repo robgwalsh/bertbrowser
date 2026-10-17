@@ -582,7 +582,10 @@ public sealed partial class DirectoryTabViewModel : ObservableObject, IDisposabl
         var parent = Path.GetDirectoryName(fullPath);
         if (parent is null) return;
         await NavigateToAsync(parent);
-        RevealFileRequested?.Invoke(fullPath);
+        // A tab that has not been shown yet has no view listening (FilePaneView builds them on
+        // first show), so the file waits as a selection for the view it will get.
+        if (RevealFileRequested is { } reveal) reveal(fullPath);
+        else PendingSelection = fullPath;
     }
 
     // --- Per-directory thumbnail zoom ---

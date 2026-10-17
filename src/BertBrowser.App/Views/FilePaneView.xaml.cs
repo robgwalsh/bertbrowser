@@ -42,8 +42,6 @@ public partial class FilePaneView : UserControl
         // the view model moves the tab; the strip follows the collection like any other change.
         ListReorderDrag.Attach(TabStrip, Orientation.Horizontal, Pane.MoveTab);
 
-        foreach (var tab in Pane.Tabs)
-            AddTabView(tab);
         UpdateVisibleTab();
     }
 
@@ -74,9 +72,6 @@ public partial class FilePaneView : UserControl
         // must keep: the strip's order is the collection's, and the host below has no order at all.
         if (e.Action == NotifyCollectionChangedAction.Move) return;
 
-        foreach (var tab in e.NewItems?.OfType<DirectoryTabViewModel>() ?? [])
-            AddTabView(tab);
-
         foreach (var tab in e.OldItems?.OfType<DirectoryTabViewModel>() ?? [])
         {
             if (!_views.Remove(tab, out var view)) continue;
@@ -87,12 +82,16 @@ public partial class FilePaneView : UserControl
         UpdateVisibleTab();
     }
 
-    private void AddTabView(DirectoryTabViewModel tab)
+    /// <summary>A tab's view, built the first time the tab is shown. A view is about 15 ms of XAML,
+    /// so building one for every tab a session restores made each tab nobody had looked at yet a
+    /// cost of starting up. A tab's state is its view model's; the view only presents it.</summary>
+    private DirectoryTabView EnsureTabView(DirectoryTabViewModel tab)
     {
-        if (_views.ContainsKey(tab)) return;
-        var view = new DirectoryTabView(_shell, _settings, tab) { Visibility = Visibility.Collapsed };
+        if (_views.TryGetValue(tab, out var view)) return view;
+        view = new DirectoryTabView(_shell, _settings, tab) { Visibility = Visibility.Collapsed };
         _views[tab] = view;
         TabHost.Children.Add(view);
+        return view;
     }
 
     private void OnPanePropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -105,6 +104,8 @@ public partial class FilePaneView : UserControl
     /// or render pass, but keeps its list's scroll offset and selection intact.</summary>
     private void UpdateVisibleTab()
     {
+        if (Pane.ActiveTab is { } active && Pane.Tabs.Contains(active)) EnsureTabView(active);
+
         foreach (var (tab, view) in _views)
         {
             view.Visibility = ReferenceEquals(tab, Pane.ActiveTab)
