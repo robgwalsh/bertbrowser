@@ -111,6 +111,14 @@ user's to do — a new classic PAT with only `public_repo` from
 `gh secret set WINGET_PAT --repo robgwalsh/bertbrowser` and `gh run rerun <id> --job <winget-job>`.
 Report it rather than hand-submitting unless they ask.
 
+The other cause (1.3.0–1.3.2 never reached winget for it): the fork `robgwalsh/winget-pkgs` has
+fallen behind, and syncing it brings in upstream workflow files the PAT may not write. The log
+reads `while merging N upstream commits` / `refusing to allow a Personal Access Token to create or
+update workflow`, or `does not have the correct permissions to execute CreateRef`. Sync it with the
+user's own login (which has `workflow`) and rerun — this is part of "do winget", no need to ask:
+`gh repo sync robgwalsh/winget-pkgs --source microsoft/winget-pkgs`, then
+`gh run rerun <id> --failed`. A PAT that also has the `workflow` scope stops it recurring.
+
 The action builds each manifest from **the newest one already upstream**, so metadata changes have
 to be made once by hand upstream and are then inherited. `manifests/` in this repo is a record of
 what was submitted, not a source — no need to update it for an automated release.
