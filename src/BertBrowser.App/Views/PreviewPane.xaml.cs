@@ -51,6 +51,7 @@ public partial class PreviewPane : UserControl
         var gifScrubber = new SliderScrubber(GifSeek);
         gifScrubber.Started += GifSeek_ScrubStarted;
         gifScrubber.Completed += GifSeek_ScrubCompleted;
+        _ = new SliderScrubber(VolumeSlider);
         DataContextChanged += OnDataContextChanged;
         IsVisibleChanged += OnIsVisibleChanged;
         Loaded += OnLoaded;

@@ -393,7 +393,11 @@
                                 AutomationProperties.AutomationId="MediaFullScreen"
                                 ToolTip="Full screen (double-click the video; Esc to leave)"
                                 Click="FullScreen_Click"/>
-                        <Slider Grid.Row="1" Grid.Column="7" VerticalAlignment="Center" Minimum="0" Maximum="1"
+                        <!-- Follows the mouse like the seek bar (SliderScrubber): with the stock track a
+                             click is a LargeChange, which over 0..1 only ever lands on 0, 0.5 or 1. -->
+                        <Slider x:Name="VolumeSlider" Grid.Row="1" Grid.Column="7" VerticalAlignment="Center"
+                                Minimum="0" Maximum="1" SmallChange="0.05" LargeChange="0.1"
+                                AutomationProperties.AutomationId="MediaVolume"
                                 Value="{Binding Volume, ElementName=MediaView, Mode=TwoWay}"
                                 ToolTip="Volume"/>
                     </Grid>
