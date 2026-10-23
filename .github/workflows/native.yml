@@ -38,5 +38,21 @@ jobs:
         run: cmake --preset release
       - name: Build
         run: cmake --build --preset release
-      - name: Spike S7
+      - name: Spike S7 (FFI)
         run: .\out\release\spikes\s7_ffi.exe
+      - name: Spike S4 (offscreen capture through WARP)
+        run: .\out\release\spikes\s4_capture.exe s4.png
+      - name: Spike S1 (DirectWrite edit control)
+        run: .\out\release\spikes\s1_edit.exe s1.png
+      - name: Spike S2 (IMFMediaEngine frames into a D3D11 texture)
+        run: .\out\release\spikes\s2_media.exe
+      - name: Spike S3 (shell context-menu handler in a private HMENU)
+        run: .\out\release\spikes\s3_shellmenu.exe
+      - name: Spike S8 (custom chrome: hit tests, clamp, DWM attributes)
+        run: .\out\release\spikes\s8_chrome.exe
+      - name: Spike S5 (pause inside CopyFileExW)
+        run: cargo run -p bb-spikes --bin s5_copy_pause --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spike-captures
+          path: native/*.png

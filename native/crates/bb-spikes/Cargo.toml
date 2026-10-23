@@ -1,0 +1,14 @@
+[package]
+name = "bb-spikes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Phase 0 risk spikes written in Rust; deleted after M5 like native/spikes."
+
+[[bin]]
+name = "s5_copy_pause"
+path = "src/bin/s5_copy_pause.rs"
+
+[dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }

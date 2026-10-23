@@ -3,6 +3,8 @@
 //! literals, content text and snippets. Spec: Core/Services/Search/*.
 
 mod candidate;
+mod content_reader;
+mod content_scanner;
 mod content_text;
 mod date_shorthand;
 mod glob;
@@ -16,6 +18,8 @@ mod snippet;
 mod syntax;
 
 pub use candidate::SearchCandidate;
+pub use content_reader::{ContentReader, FileSystemContentReader, FileText};
+pub use content_scanner::{ContentProgressSink, ContentScanOutcome, ContentScanner, LiveBatches};
 pub use content_text::{ContentMatch, ContentText};
 pub use date_shorthand::DateShorthand;
 pub use glob::GlobText;

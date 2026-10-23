@@ -2,6 +2,7 @@
 //! Every path column stores `PathKey::canonicalize` output; subtree queries use `prefix_bounds`.
 
 mod bookmark;
+mod bookmark_service;
 mod change_log;
 mod db;
 mod dir_size;
@@ -10,6 +11,7 @@ mod saved_search;
 mod saved_workspace;
 
 pub use bookmark::{Bookmark, BookmarkRepository};
+pub use bookmark_service::BookmarkService;
 pub use change_log::ChangeLogRepository;
 pub use db::{Conn, Db, EXPECTED_SCHEMA_VERSION};
 pub use dir_size::{DirSizeRepository, DirSizeResult};
