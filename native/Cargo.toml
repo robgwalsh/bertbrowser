@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "2.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+# Win32, flat: cheap to compile. Features are declared per crate at the use site.
+windows-sys = "0.61"
+# COM (Shell, PropertiesSystem, TaskScheduler, PortableDevices): only in modules that host COM objects.
+windows = "0.62"
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+fancy-regex = "0.19"
+sha1 = "0.10"
+sha2 = "0.10"
+md-5 = "0.10"
+crc32fast = "1.5"
+quick-xml = "0.42"
+base64 = "0.22"
+tempfile = "3"
+embed-manifest = "1.5"
+
+[profile.release]
+debug = 1
+lto = "thin"
+codegen-units = 4
+
+[profile.dev]
+# Dependencies (sqlite, compressors) are built optimised even in debug so test runs stay fast.
+[profile.dev.package."*"]
+opt-level = 2

@@ -1,0 +1,5 @@
+# Static CRT on the Rust side. The C++ side is built /MT (CMAKE_MSVC_RUNTIME_LIBRARY), and the two must
+# match or the staticlib link produces duplicate CRT symbols and heap-crossing bugs. This also removes
+# the VC redistributable from Setup.exe.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

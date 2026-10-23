@@ -1,0 +1,13 @@
+[package]
+name = "bb-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "bbcore"
+crate-type = ["staticlib"]
+
+[dependencies]
+bb-app = { path = "../bb-app" }

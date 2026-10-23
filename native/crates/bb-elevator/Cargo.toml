@@ -1,0 +1,13 @@
+[package]
+name = "bb-elevator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bb-paths = { path = "../bb-paths" }
+bb-core = { path = "../bb-core" }
+
+[build-dependencies]
+embed-manifest.workspace = true

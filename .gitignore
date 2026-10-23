@@ -407,3 +407,7 @@ FodyWeavers.xsd
 # Project skills. The [Rr]elease/ build-output pattern above also matches
 # .claude/skills/release/, so that folder has to be re-included explicitly.
 !.claude/skills/release/
+
+# native rewrite build output
+native/target/
+native/out/

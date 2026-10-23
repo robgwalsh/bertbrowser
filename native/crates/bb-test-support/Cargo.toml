@@ -1,0 +1,10 @@
+[package]
+name = "bb-test-support"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bb-core = { path = "../bb-core" }
+bb-paths = { path = "../bb-paths" }

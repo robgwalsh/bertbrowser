@@ -1,0 +1,22 @@
+[package]
+name = "bb-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bb-paths = { path = "../bb-paths" }
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+fancy-regex.workspace = true
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_System_SystemInformation",
+    "Win32_System_Time",
+] }
+
+[dev-dependencies]
+bb-test-support = { path = "../bb-test-support" }

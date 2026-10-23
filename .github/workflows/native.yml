@@ -1,0 +1,42 @@
+name: Native
+
+on:
+  push:
+    branches: [main]
+    paths: ["native/**", ".github/workflows/native.yml"]
+  pull_request:
+    paths: ["native/**", ".github/workflows/native.yml"]
+  workflow_dispatch:
+
+jobs:
+  native:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - uses: seanmiddleditch/gha-setup-ninja@v5
+      - name: Install cbindgen
+        run: cargo install cbindgen --locked
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+      - name: Configure
+        run: cmake --preset release
+      - name: Build
+        run: cmake --build --preset release
+      - name: Spike S7
+        run: .\out\release\spikes\s7_ffi.exe

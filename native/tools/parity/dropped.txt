@@ -1,0 +1,2 @@
+# C# tests deliberately not ported, one per line: FileTests.cs::MethodName  reason
+# Everything else in a ported file must exist in Rust under the snake_cased name.
