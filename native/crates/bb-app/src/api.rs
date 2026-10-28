@@ -4,15 +4,15 @@
 
 use std::sync::Arc;
 
-use bb_core::columns::{ColumnLayoutRules, ResolvedColumn};
+use bb_core::columns::ResolvedColumn;
 use bb_core::commands::{FocusState, KeyChord};
 use bb_core::delete::DeleteMode;
 use bb_core::layout::{NodeId, SplitOrientation};
-use bb_core::theming::{ColorMap, SystemThemeRules, ThemeCatalog, ThemeResolver, ThemeToken};
 use bb_core::transfer::TransferVerb;
 use serde_json::{Value, json};
 
 use crate::app::{App, Inner, lock};
+use crate::commands::CommandOutcome;
 use crate::ids::{AppError, AppResult, OpId, PaneId, TabId};
 use crate::rows::Listing;
 use crate::tabs::{Crumb, SelectOp, breadcrumb, parent_path, tab_title};
@@ -210,12 +210,12 @@ impl App {
     pub fn columns(&self, tab: TabId) -> AppResult<Vec<ResolvedColumn>> {
         let cell = self.inner.tab(tab)?;
         let t = lock(&cell);
-        Ok(ColumnLayoutRules::resolve(
-            t.columns.as_deref(),
-            t.is_flattened,
-            t.shows_content_matches,
-            false,
-        ))
+        Ok(t.resolved_columns())
+    }
+
+    /// As `columns`, each with the cell index `bb_listing_cell` takes (-1: not readable here).
+    pub fn columns_with_cells(&self, tab: TabId) -> AppResult<Vec<(ResolvedColumn, i64)>> {
+        self.inner.tab_columns(tab)
     }
 
     // ---- selection ----
@@ -292,13 +292,20 @@ impl App {
         self.inner.dispatch_key(chord, state)
     }
 
-    /// Why the command cannot run now (`Some`), or None when it can. `Err` for an unknown id.
+    /// Why the command cannot run now (`Some`), or None when it can: **the one gate**, the answer
+    /// for a menu row, a toolbar button, a key and a palette row alike. `Err` for an unknown id.
     pub fn command_why_not(&self, id: &str) -> AppResult<Option<String>> {
-        self.inner.why_not(id)
+        self.inner.why_not_now(id)
+    }
+
+    /// Runs the command through the gate. A command that is the host's to carry out (a dialog, the
+    /// clipboard, focus) is not run: `Ok` with `NeedsUi` says so.
+    pub fn command_execute(&self, id: &str) -> AppResult<CommandOutcome> {
+        self.inner.run_command(id)
     }
 
     pub fn command_run(&self, id: &str) -> AppResult<()> {
-        self.inner.run_command(id)
+        self.inner.run_command(id).map(|_| ())
     }
 
     // ---- settings ----
@@ -357,76 +364,6 @@ impl App {
 }
 
 impl Inner {
-    pub(crate) fn settings_set(self: &Arc<Self>, key: &str, json_value: &str) -> AppResult<()> {
-        let value: Value = serde_json::from_str(json_value)
-            .map_err(|e| AppError::Invalid(format!("not JSON: {e}")))?;
-        {
-            let mut settings = lock(&self.settings);
-            let Value::Object(mut map) =
-                serde_json::to_value(&*settings).map_err(|e| AppError::Invalid(e.to_string()))?
-            else {
-                return Err(AppError::Invalid("settings are not an object".into()));
-            };
-            if !map.contains_key(key) {
-                return Err(AppError::Invalid(format!("unknown setting '{key}'")));
-            }
-            map.insert(key.to_string(), value);
-            let next: bb_core::settings::AppSettings =
-                serde_json::from_value(Value::Object(map))
-                    .map_err(|e| AppError::Invalid(format!("'{key}': {e}")))?;
-            *settings = next;
-            if let Err(e) = settings.save(&self.settings_path) {
-                return Err(AppError::Invalid(e.to_string()));
-            }
-        }
-        match key {
-            "keyBindings" => self.rebuild_keymap(),
-            "showHiddenItems" => self.refresh_all(),
-            _ => {}
-        }
-        self.hub.emit(crate::events::AppEvent::SettingsChanged {
-            key: key.to_string(),
-        });
-        Ok(())
-    }
-
-    pub(crate) fn theme_palette(&self) -> Vec<u32> {
-        let (follows, theme_id, light, dark, overrides) = {
-            let s = lock(&self.settings);
-            (
-                s.follows_system_theme(),
-                s.theme_id.clone(),
-                s.light_theme_id.clone(),
-                s.dark_theme_id.clone(),
-                s.theme_overrides.clone(),
-            )
-        };
-        let id = if follows {
-            SystemThemeRules::decide(
-                self.seams.appearance.current(),
-                light.as_deref(),
-                dark.as_deref(),
-                ThemeCatalog::find,
-            )
-            .theme_id
-        } else {
-            theme_id.unwrap_or_else(|| ThemeCatalog::default_theme().id.clone())
-        };
-        let definition = ThemeCatalog::find(&id).unwrap_or_else(ThemeCatalog::default_theme);
-        let map: ColorMap = overrides
-            .get(&definition.id)
-            .map(|m| m.iter().collect())
-            .unwrap_or_default();
-        let resolved = ThemeResolver::resolve_with(definition, ThemeCatalog::find, Some(&map));
-        ThemeToken::ALL
-            .iter()
-            .map(|t| {
-                let c = resolved.color(*t);
-                u32::from(c.a) << 24 | u32::from(c.r) << 16 | u32::from(c.g) << 8 | u32::from(c.b)
-            })
-            .collect()
-    }
-
     fn layout_json(&self, shell: &crate::app::Shell, node: NodeId) -> Value {
         if shell.layout.is_leaf(node) {
             return json!({
@@ -484,6 +421,9 @@ impl Inner {
                     "thumbnailScale": t.thumbnail_scale,
                     "sidePane": t.side_pane,
                     "searchRunning": t.is_search_running,
+                    "columns": t.resolved_columns().iter().map(|c| c.spec.id.clone()).collect::<Vec<_>>(),
+                    "columnsCustomized": t.columns_customized,
+                    "previewMode": t.preview_mode,
                 })
             })
             .collect();
@@ -520,6 +460,11 @@ impl Inner {
                 "done": p.done, "total": p.total, "current": p.current_name, "bytes": p.bytes_done,
             })),
             "launches": self.probes.as_ref().map(|p| p.launches().len()).unwrap_or(0),
+            "ui": self.ui_json(),
+            "index": self.index_json(),
+            "settingsProblem": self.settings_problem(),
+            "bars": json!({ "name": self.bars_current_name(), "isDefault": self.bars_is_default() }),
+            "theme": self.theme_summary_json(),
         })
     }
 }

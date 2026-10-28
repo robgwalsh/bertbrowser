@@ -42,8 +42,33 @@ pub trait AppConflictPrompt: Send + Sync {
     fn ask(&self, plan: &TransferPlan) -> Option<Resolutions>;
 }
 
+/// What Windows looks like. The host pushes it (`set`) when the OS says it changed; the harness
+/// poses it. Reading never touches the OS from here, so a scripted run cannot inherit the setting of
+/// whichever machine took the screenshots.
 pub trait SystemAppearanceSource: Send + Sync {
     fn current(&self) -> SystemAppearance;
+
+    /// Records a change the host observed.
+    fn set(&self, appearance: SystemAppearance);
+}
+
+/// The appearance the host last pushed; dark until it says otherwise.
+pub struct PushedAppearance(Mutex<SystemAppearance>);
+
+impl Default for PushedAppearance {
+    fn default() -> Self {
+        PushedAppearance(Mutex::new(SystemAppearance::DARK))
+    }
+}
+
+impl SystemAppearanceSource for PushedAppearance {
+    fn current(&self) -> SystemAppearance {
+        *lock(&self.0)
+    }
+
+    fn set(&self, appearance: SystemAppearance) {
+        *lock(&self.0) = appearance;
+    }
 }
 
 pub struct Seams {
@@ -76,7 +101,8 @@ impl Seams {
     /// declined, questions are answered "no" and clashes keep both. The native UI replaces these
     /// with event-raising ones (`NeedsAnswer`) when the dialogs land.
     pub fn unattended() -> Seams {
-        let (seams, _) = Seams::harness();
+        let (mut seams, _) = Seams::harness();
+        seams.appearance = Arc::new(PushedAppearance::default());
         seams
     }
 }
@@ -206,5 +232,9 @@ impl AppConflictPrompt for HarnessProbes {
 impl SystemAppearanceSource for HarnessProbes {
     fn current(&self) -> SystemAppearance {
         *lock(&self.appearance)
+    }
+
+    fn set(&self, appearance: SystemAppearance) {
+        *lock(&self.appearance) = appearance;
     }
 }

@@ -24,6 +24,11 @@ pub struct AppConfig {
     pub delete_staging_root: Option<String>,
     /// Worker threads for listings and searches.
     pub workers: usize,
+    /// How long the Settings page waits for quiet before writing the file. Zero writes at once.
+    pub settings_debounce_ms: u64,
+    /// Put the real index client behind a launcher that declines the elevation prompt (the
+    /// harness's `--index-declined`).
+    pub index_declined: bool,
 }
 
 impl AppConfig {
@@ -35,6 +40,8 @@ impl AppConfig {
             watch_debounce_ms: 250,
             delete_staging_root: None,
             workers: 4,
+            settings_debounce_ms: 400,
+            index_declined: false,
         }
     }
 

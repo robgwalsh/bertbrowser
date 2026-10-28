@@ -9,7 +9,7 @@ use bb_core::FileTime;
 use bb_core::attributes::{
     ARCHIVE, COMPRESSED, ENCRYPTED, HIDDEN, READONLY, REPARSE_POINT, SYSTEM,
 };
-use bb_core::columns::ColumnCatalog;
+use bb_core::columns::{ColumnCatalog, ColumnValue};
 use bb_core::data::SearchHit;
 use bb_core::format::byte_size;
 use bb_core::models::FileEntry;
@@ -81,12 +81,36 @@ pub struct Row {
     pub type_name: String,
     pub is_media: bool,
     pub content_match: Option<ContentMatch>,
+    /// Shell-property values the host has supplied, by upper-cased canonical name. `None` for a
+    /// property the handler had no value for: asked, answered, blank.
+    pub props: Option<Arc<RowProps>>,
     wide: OnceLock<Wide>,
 }
+
+/// The shell-property cells of one row.
+pub type RowProps = HashMap<String, Option<ColumnValue>>;
 
 impl Row {
     pub fn from_entry(entry: &FileEntry) -> Row {
         Row::build(entry, String::new(), None)
+    }
+
+    /// A copy with the same id and display state, for building the next snapshot of a listing.
+    pub fn duplicate(&self) -> Row {
+        let mut c = Row::from_entry(&self.to_entry());
+        c.id = self.id;
+        c.relative_dir = self.relative_dir.clone();
+        c.content_match = self.content_match.clone();
+        c.size = self.size;
+        c.size_incomplete = self.size_incomplete;
+        c.size_computed = self.size_computed;
+        c.props = self.props.clone();
+        c
+    }
+
+    /// The row's value for a property (upper-cased canonical name), when the host supplied one.
+    pub fn prop(&self, folded: &str) -> Option<&ColumnValue> {
+        self.props.as_ref()?.get(folded)?.as_ref()
     }
 
     pub fn from_hit(hit: &SearchHit) -> Row {
@@ -150,6 +174,7 @@ impl Row {
             type_name,
             is_media,
             content_match,
+            props: None,
             wide: OnceLock::new(),
         }
     }
@@ -282,9 +307,22 @@ pub struct Listing {
     pub is_flat_browse: bool,
     rows: Vec<Arc<Row>>,
     cells: Mutex<HashMap<u64, Box<[u16]>>>,
+    /// The shell-property columns showing when this snapshot was made (upper-cased canonical
+    /// names, in column order): cell index `CELL_COLUMNS.len() + k` is the k-th of these.
+    prop_ids: Vec<String>,
 }
 
 impl Listing {
+    /// The snapshot with its shell-property columns named.
+    pub fn with_props(mut self, prop_ids: Vec<String>) -> Listing {
+        self.prop_ids = prop_ids;
+        self
+    }
+
+    pub fn prop_ids(&self) -> &[String] {
+        &self.prop_ids
+    }
+
     pub fn new(
         tab: u64,
         version: u64,
@@ -299,6 +337,7 @@ impl Listing {
             is_flat_browse,
             rows,
             cells: Mutex::new(HashMap::new()),
+            prop_ids: Vec::new(),
         }
     }
 
@@ -327,9 +366,18 @@ impl Listing {
         let row = self.rows.get(index)?;
         let key = ((index as u64) << 8) | u64::from(column & 0xFF);
         let mut cells = self.cells.lock().unwrap_or_else(|p| p.into_inner());
-        let wide = cells
-            .entry(key)
-            .or_insert_with(|| row.cell_text(column).encode_utf16().collect());
+        let wide = cells.entry(key).or_insert_with(|| {
+            let text = match (column as usize).checked_sub(CELL_COLUMNS.len()) {
+                None => row.cell_text(column),
+                Some(k) => self
+                    .prop_ids
+                    .get(k)
+                    .and_then(|id| row.prop(id))
+                    .map(|v| v.display.clone())
+                    .unwrap_or_default(),
+            };
+            text.encode_utf16().collect()
+        });
         // SAFETY: the boxed slice's heap storage never moves or drops while the map lives, and
         // entries are never removed or replaced; the map lives exactly as long as `self`.
         let slice: &[u16] = unsafe { std::slice::from_raw_parts(wide.as_ptr(), wide.len()) };

@@ -109,7 +109,7 @@ impl Inner {
     }
 
     /// Accepts a job. `exclusive` jobs (rename, delete, undo) are refused while anything is draining.
-    fn submit(
+    pub(crate) fn submit(
         self: &Arc<Self>,
         kind: &'static str,
         exclusive: bool,

@@ -849,17 +849,16 @@ fn keys_resolve_to_commands_and_commands_explain_themselves() {
     assert_eq!(None, f.app.key_dispatch(&backspace, &typing));
 
     assert_eq!(
-        Some("Nothing to go back to.".to_string()),
+        Some("There is nowhere to go back to.".to_string()),
         f.app.command_why_not("nav.back").unwrap()
     );
     assert_eq!(None, f.app.command_why_not("nav.up").unwrap());
     assert!(f.app.command_why_not("no.such.command").is_err());
-    assert!(
-        f.app
-            .command_why_not("tools.duplicates")
-            .unwrap()
-            .unwrap()
-            .contains("native app")
+    // A window command is gated here and carried out by the host.
+    assert_eq!(None, f.app.command_why_not("tools.duplicates").unwrap());
+    assert_eq!(
+        bb_app::CommandOwner::Ui,
+        bb_app::command_owner("tools.duplicates")
     );
     assert_eq!(
         Some("Nothing is selected.".to_string()),
@@ -898,7 +897,7 @@ fn a_command_delete_goes_through_the_gate_and_undo_command_follows() {
     f.select_names(&["notes.txt"]);
     assert_eq!(None, f.app.command_why_not("file.delete").unwrap());
     assert_eq!(
-        Some("Nothing to undo.".to_string()),
+        Some("There is nothing to undo.".to_string()),
         f.app.command_why_not("edit.undo").unwrap()
     );
 }
@@ -928,9 +927,10 @@ fn settings_round_trip_and_hidden_items_refresh_every_tab() {
     f.settle();
     assert_eq!("true", f.app.settings_get("showHiddenItems").unwrap());
     assert!(f.names().contains(&"secret.txt".to_string()));
+    f.app.settings_flush();
     assert!(
         f.data.join("settings.json").exists(),
-        "a change is written at once"
+        "a change is written on the debounce, and at once when flushed"
     );
 
     assert!(f.app.settings_set("noSuchSetting", "1").is_err());

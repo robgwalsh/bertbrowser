@@ -21,7 +21,7 @@ use crate::app::{Inner, TabCell, TabData, lock};
 use crate::dirwatch::DirWatcher;
 use crate::events::AppEvent;
 use crate::ids::{AppError, AppResult, TabId};
-use crate::rows::{Listing, Row};
+use crate::rows::Row;
 use crate::sort::SortSpec;
 
 /// How a gesture changes the selection. Indices are positions in the listing the caller holds.
@@ -137,6 +137,12 @@ impl TabData {
     pub(crate) fn install(&mut self, mut rows: Vec<Row>, keep_selection: bool) {
         for row in rows.iter_mut() {
             row.id = intern(self, &row.key);
+            // What the host already read for this file survives the reload.
+            if row.props.is_none()
+                && let Some(known) = self.props.get(&row.key)
+            {
+                row.props = Some(Arc::new(known.clone()));
+            }
         }
         if keep_selection {
             let present: std::collections::HashSet<u64> = rows.iter().map(|r| r.id).collect();
@@ -145,16 +151,15 @@ impl TabData {
             self.selection.clear();
         }
         self.version += 1;
-        self.listing = Arc::new(Listing::new(
-            self.id.0,
-            self.version,
+        self.listing = self.make_listing(
             rows.into_iter().map(Arc::new).collect(),
             self.is_flattened,
             self.is_flat_browse,
-        ));
+        );
+        self.apply_pending_selection();
     }
 
-    fn reset_view_flags(&mut self) {
+    pub(crate) fn reset_view_flags(&mut self) {
         self.is_flattened = false;
         self.is_flat_browse = false;
         self.shows_content_matches = false;
@@ -163,7 +168,7 @@ impl TabData {
         self.notice = None;
     }
 
-    fn clear_search_state(&mut self) {
+    pub(crate) fn clear_search_state(&mut self) {
         self.search_gen += 1;
         self.search_text.clear();
         self.global_search_text.clear();
@@ -260,6 +265,8 @@ impl Inner {
             t.path = path.clone();
             t.interner.clear();
             t.selection.clear();
+            t.props.clear();
+            t.props_inflight.clear();
             // Restore this folder's tile/list preference.
             let key = PathKey::canonicalize(&path).unwrap_or_default();
             t.thumbnail_scale = lock(&self.settings)
@@ -359,6 +366,7 @@ impl Inner {
                 drop(t);
                 self.hub.emit(AppEvent::ListingChanged { tab, version });
                 self.hub.emit(AppEvent::TabChanged { tab });
+                self.props_after_install(tab);
             }
             Err(e) => {
                 let message = if e.kind() == std::io::ErrorKind::PermissionDenied {
@@ -476,7 +484,8 @@ impl Inner {
         t.selection.retain(|id| present.contains(id));
         t.version += 1;
         let count = rows.len();
-        t.listing = Arc::new(Listing::new(t.id.0, t.version, rows, false, false));
+        t.listing = t.make_listing(rows, false, false);
+        t.apply_pending_selection();
         t.empty_message = None;
         t.status = format!("{count} item(s)");
         let version = t.version;
@@ -703,6 +712,7 @@ impl Inner {
         drop(t);
         self.hub.emit(AppEvent::ListingChanged { tab, version });
         self.hub.emit(AppEvent::TabChanged { tab });
+        self.props_after_install(tab);
     }
 
     fn run_flat(self: &Arc<Self>, tab: TabId, generation: u64, token: CancelToken) {
@@ -811,6 +821,56 @@ impl Inner {
         drop(t);
         self.hub.emit(AppEvent::ListingChanged { tab, version });
         self.hub.emit(AppEvent::TabChanged { tab });
+        self.props_after_install(tab);
+    }
+
+    /// Ends a running search, keeping what it has found so far.
+    pub(crate) fn stop_search(&self, tab: TabId) -> AppResult<()> {
+        let cell = self.tab(tab)?;
+        {
+            let mut t = lock(&cell);
+            t.cancel.cancel();
+            t.is_search_running = false;
+            t.status = format!("{} \u{2014} stopped", t.status.trim_end_matches('\u{2026}'));
+        }
+        self.hub.emit(AppEvent::TabChanged { tab });
+        self.update_busy();
+        Ok(())
+    }
+
+    /// Marks `created` to be selected in every tab showing `directory` once its listing arrives.
+    pub(crate) fn select_after_refresh(&self, directory: &str, created: &str) {
+        let Ok(key) = PathKey::canonicalize(directory) else {
+            return;
+        };
+        for (_, cell) in self.all_tabs() {
+            let mut t = lock(&cell);
+            if PathKey::canonicalize(&t.path).is_ok_and(|k| k == key) {
+                t.pending_selection = vec![created.to_string()];
+            }
+        }
+    }
+
+    /// Goes to the folder a file is in and selects it: "show me where this is".
+    pub(crate) fn reveal_file(self: &Arc<Self>, tab: TabId, file: &str) -> AppResult<()> {
+        let Some(parent) = parent_path(file) else {
+            return Ok(());
+        };
+        {
+            let cell = self.tab(tab)?;
+            let mut t = lock(&cell);
+            t.clear_search_state();
+            t.is_flat_view = false;
+            t.pending_selection = vec![file.to_string()];
+        }
+        let tab_cell = self.tab(tab)?;
+        let current = lock(&tab_cell).path.clone();
+        if current.eq_ignore_ascii_case(&parent) {
+            self.refresh_view(tab);
+            Ok(())
+        } else {
+            self.navigate(tab, &parent)
+        }
     }
 
     // ---- sort, view options ----
@@ -1034,25 +1094,12 @@ fn resort(t: &mut TabData) {
     let mut rows: Vec<Arc<crate::rows::Row>> = t.listing.rows().to_vec();
     rows.sort_by(|a, b| spec.compare(a, b));
     t.version += 1;
-    t.listing = Arc::new(Listing::new(
-        t.id.0,
-        t.version,
-        rows,
-        t.is_flattened,
-        t.is_flat_browse,
-    ));
+    t.listing = t.make_listing(rows, t.is_flattened, t.is_flat_browse);
 }
 
 /// A copy of a row, id and all, for building the next snapshot of a streaming listing.
 fn clone_row(r: &Row) -> Row {
-    let mut c = Row::from_entry(&r.to_entry());
-    c.id = r.id;
-    c.relative_dir = r.relative_dir.clone();
-    c.content_match = r.content_match.clone();
-    c.size = r.size;
-    c.size_incomplete = r.size_incomplete;
-    c.size_computed = r.size_computed;
-    c
+    r.duplicate()
 }
 
 /// Index rows from the names-only fallback carry no times; stat just those.

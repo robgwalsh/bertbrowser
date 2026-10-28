@@ -48,6 +48,14 @@ typedef enum BbEventKind {
   BB_EVT_SETTINGS_CHANGED = 7,
   // A pane took the focus or changed its tab. `id` = pane.
   BB_EVT_PANE_CHANGED = 8,
+  // A service's state moved; re-read it. `a` = the service: 1 settings page, 2 theme (re-push the
+  // palette), 3 menu bar/toolbars, 4 keymap, 5 palette, 6 Keyboard page, 7 Menus and toolbars
+  // page, 8 saved searches/workspaces/bookmarks, 9 index banner/status, 10 columns, 11 compare,
+  // 12 command availability.
+  BB_EVT_MODEL_CHANGED = 9,
+  // A tab shows shell-property columns with cells the host has not read. `id` = tab. Ask with
+  // `bb_props_requests`, answer with `bb_props_supply`.
+  BB_EVT_PROPERTIES_NEEDED = 10,
 } BbEventKind;
 
 // The outcome of a call. Only `BB_OK` carries a result.
@@ -179,6 +187,17 @@ typedef struct BbAppConfig {
   uint32_t workers;
 } BbAppConfig;
 
+// As [`BbAppConfig`], with the settings the harness and the tests need beyond it.
+typedef struct BbAppConfigEx {
+  struct BbAppConfig base;
+  // How long the Settings page waits for quiet before writing the file. `UINT32_MAX` keeps the
+  // default (400); 0 writes at once.
+  uint32_t settings_debounce_ms;
+  // Put the real index client behind a launcher that declines the elevation prompt (the
+  // harness's `--index-declined`).
+  bool index_declined;
+} BbAppConfigEx;
+
 // The receiver of events. Called on Rust threads: enqueue and return, do nothing else.
 typedef void (*BbEventSink)(void *ctx, struct BbEvent *evt);
 
@@ -274,6 +293,9 @@ enum BbStatus bb_selftest_panic(void);
 
 // Builds the app. Free it with `bb_app_destroy`.
 enum BbStatus bb_app_create(const struct BbAppConfig *cfg, struct BbApp **out_app);
+
+// As `bb_app_create`, taking the extended configuration.
+enum BbStatus bb_app_create_ex(const struct BbAppConfigEx *cfg, struct BbApp **out_app);
 
 // Stops the app's threads and frees it. The handle is invalid afterwards. Events already queued by
 // the sink stay valid until freed.
@@ -465,7 +487,9 @@ enum BbStatus bb_command_why_not(struct BbApp *app, struct BbStr id, struct BbOw
 // One setting as JSON text (`null` for an unset optional). Keys are the settings file's.
 enum BbStatus bb_settings_get(struct BbApp *app, struct BbStr key, struct BbOwnedStr *out_json);
 
-// Sets one setting from JSON text, validating it against the model and writing the file at once.
+// Sets one setting from JSON text, validating it against the model. It takes effect at once; a
+// setting the Settings page owns is written on a 400 ms debounce (`bb_settings_flush` writes it
+// now), one a service owns (keymap, bars, theme) is written at once.
 enum BbStatus bb_settings_set(struct BbApp *app, struct BbStr key, struct BbStr json_value);
 
 // How many colour tokens a palette holds.
@@ -477,6 +501,248 @@ enum BbStatus bb_theme_palette(struct BbApp *app,
                                uint32_t *out_argb,
                                uint32_t cap,
                                uint32_t *out_count);
+
+// The name the New dialog opens with: the type's default, stepped aside to "(2)" if taken. `kind`
+// is 0 for a folder, 1 for a file; `extension` is the file type's, with its dot.
+enum BbStatus bb_new_item_suggest(struct BbApp *app,
+                                  uint64_t tab,
+                                  uint32_t kind,
+                                  struct BbStr extension,
+                                  struct BbOwnedStr *out_name);
+
+// What creating `name` would produce, without changing anything, as JSON
+// `{directory, name, target, ok, rejected}`.
+enum BbStatus bb_new_item_plan(struct BbApp *app,
+                               uint64_t tab,
+                               uint32_t kind,
+                               struct BbStr name,
+                               struct BbOwnedStr *out_json);
+
+// Creates a folder (`kind` 0) or file (1) in the folder the tab shows and selects it when its
+// listing arrives. Returns the operation.
+enum BbStatus bb_new_item(struct BbApp *app,
+                          uint64_t tab,
+                          uint32_t kind,
+                          struct BbStr name,
+                          uint64_t *out_op);
+
+// The file types the New submenu offers, as JSON `[{label, extension, templatePath}]`.
+enum BbStatus bb_new_file_types(struct BbApp *app, struct BbOwnedStr *out_json);
+
+// What closing the window would save, as the settings file spells it.
+enum BbStatus bb_session_capture(struct BbApp *app, struct BbOwnedStr *out_json);
+
+// Writes the pane and tab arrangement into the settings now.
+enum BbStatus bb_session_save(struct BbApp *app);
+
+// The launch rule: the saved session when asked for and usable, otherwise one tab at the startup
+// folder (or `fallback`). Returns the active tab.
+enum BbStatus bb_session_restore(struct BbApp *app, struct BbStr fallback, uint64_t *out_tab);
+
+// Captures, prunes and rebuilds the arrangement in place (the harness's `session`). `out_rebuilt`
+// is false when nothing in it was worth keeping and the arrangement was left alone.
+enum BbStatus bb_session_roundtrip(struct BbApp *app, bool *out_rebuilt);
+
+// Moves a tab to `index` within its pane (clamped).
+enum BbStatus bb_tab_move(struct BbApp *app, uint64_t tab, uint32_t index);
+
+// Moves a tab into another pane, activating it there; a pane it empties closes.
+enum BbStatus bb_tab_move_to_pane(struct BbApp *app, uint64_t tab, uint64_t pane);
+
+// Exchanges the active pane's place with the next one's.
+enum BbStatus bb_pane_swap(struct BbApp *app);
+
+// Gives every pane the same share of the space.
+enum BbStatus bb_pane_equalise(struct BbApp *app);
+
+// Every command in the state a menu would draw it, as JSON
+// `[{id, name, category, icon, gesture, context, owner, whyNot, checked, caption}]`. `whyNot` is
+// **the one gate**: the registry's answer plus "a dialog is up" and "Settings is open".
+enum BbStatus bb_command_list(struct BbApp *app, struct BbOwnedStr *out_json);
+
+// One command's state, as an element of `bb_command_list`. `BB_ERR` for an id nobody knows.
+enum BbStatus bb_command_state(struct BbApp *app, struct BbStr id, struct BbOwnedStr *out_json);
+
+// Runs a command through the gate. `out_needs_ui` is true when the command is the host's to carry
+// out (a dialog, the clipboard, focus): it was available, and nothing was done.
+enum BbStatus bb_command_execute(struct BbApp *app, struct BbStr id, bool *out_needs_ui);
+
+// A key press the way the window's one handler takes it: whose it is given what has focus, closing
+// the palette for anything but its own chord, then through the gate. JSON
+// `{claimed, command?, result?: "ran"|"ui"|"unavailable"|"ignored", reason?}`. A claimed chord is
+// the command's even when it cannot run; the host marks the key handled. `repeat` is a held key.
+enum BbStatus bb_key_press(struct BbApp *app,
+                           struct BbKeyChord chord,
+                           struct BbFocusState focus,
+                           bool repeat,
+                           struct BbOwnedStr *out_json);
+
+// Gives a command exactly these shortcuts (texts like `Ctrl+Shift+K`; none leaves it with no key),
+// taking each from whoever had it. Written at once.
+enum BbStatus bb_keymap_set_chords(struct BbApp *app,
+                                   struct BbStr id,
+                                   const struct BbStr *chords,
+                                   uint32_t count);
+
+// Puts one command back to the shortcuts it ships with (`id` empty: all of them).
+enum BbStatus bb_keymap_reset(struct BbApp *app, struct BbStr id);
+
+// The shortcut a menu prints beside a command (empty when it has none), for text that names a key.
+enum BbStatus bb_keymap_gesture(struct BbApp *app, struct BbStr id, struct BbOwnedStr *out_text);
+
+// The Keyboard page: `{filter, selected, recording, finding, capturing, canReassign, text,
+// hasChanged, rows:[{heading, name, id, category, chords, changed, ...}]}`.
+enum BbStatus bb_keys_page(struct BbApp *app, struct BbOwnedStr *out_json);
+
+// One verb of the Keyboard page: `filter <text>`, `select <id>`, `change`, `add`, `find`, `cancel`,
+// `press <chord>`, `reassign`, `remove`, `reset`, `reset-all`.
+enum BbStatus bb_keys_do(struct BbApp *app, struct BbStr verb, struct BbStr arg);
+
+// Opens the palette on `seed` (empty: the empty state).
+enum BbStatus bb_palette_open(struct BbApp *app, struct BbStr seed);
+
+// `{open, query, hint, empty, selected, rows:[{index, kind: heading|entry|category, text, id, icon,
+// gesture, detail, available, pinned, canPin, canBind, token, count, highlights, selected}]}`.
+enum BbStatus bb_palette_state(struct BbApp *app, struct BbOwnedStr *out_json);
+
+// One verb: `type <text>`, `down [n]`, `up [n]`, `home`, `end`, `select <row>`, `pick` (Enter),
+// `complete` (Tab), `pin`, `shortcut`, `close`. The result is JSON; `pick` answers
+// `{ran, ui?, command?, narrowed?, unavailable?}`.
+enum BbStatus bb_palette_do(struct BbApp *app,
+                            struct BbStr verb,
+                            struct BbStr arg,
+                            struct BbOwnedStr *out_json);
+
+// Reads the command bars. `what`: `state` (the arrangement in force), `menubar` (the headings),
+// `menu` (arg: a heading's name or position, as it would open now), `toolbar` (arg: `title` or
+// `row1`..., as it shows now), `list` (arg: a list id; the rows it expands to), `page` (the
+// Menus and toolbars page's editor).
+enum BbStatus bb_bars_query(struct BbApp *app,
+                            struct BbStr what,
+                            struct BbStr arg,
+                            struct BbOwnedStr *out_json);
+
+// One verb of the command-bar service: `reset`, `save <name>`, `apply <name>`,
+// `rename <old> to <new>`, `remove <name>`, `set-json <arrangement>`, `menu <caption> <tokens>`
+// (add or replace a top-level menu; tokens are command ids, `-` and `@list`).
+enum BbStatus bb_bars_do(struct BbApp *app, struct BbStr verb, struct BbStr arg);
+
+// Replaces one toolbar's items. `target`: `title` or `row1`...; `tokens`: command ids, `-` for a
+// separator, `@list` for a list; `show_text`: 1 buttons carry their names, 0 they do not, -1 keep.
+enum BbStatus bb_bars_set_toolbar(struct BbApp *app,
+                                  struct BbStr target,
+                                  struct BbStr tokens,
+                                  int32_t show_text);
+
+// One verb of the Menus and toolbars page's editor: `select <bar>`, `pick <row>`, `open <row>`,
+// `up`, `add <id|name>`, `add-separator`, `add-menu`, `remove [row]`, `nudge [row] up|down`,
+// `move <from> <to>`, `name <caption>`, `show-text on|off`, `row-show-text on|off`, `add-row`,
+// `remove-row`, `filter <text>`, `unplaced on|off`, `reset`, `apply-saved <name>`,
+// `remove-saved <name>`, `select-saved <name>`, `save <name>`, `rename-saved <old> to <new>`.
+enum BbStatus bb_barpage_do(struct BbApp *app, struct BbStr verb, struct BbStr arg);
+
+// The columns a tab shows: `{customized, columns:[{id, header, width, cell, rightAligned,
+// sortable, injected, property, canonical}]}`. `cell` is what `bb_listing_cell` takes.
+enum BbStatus bb_columns_state(struct BbApp *app, uint64_t tab, struct BbOwnedStr *out_json);
+
+// One verb on a tab's columns: `add <id>`, `remove <id>`, `move <id> <index>`, `width <id> <dips>`,
+// `reset`, `default` (make this the layout new tabs start from), `picked <id>,<id>...`,
+// `order <id>,<id>...` (after a header drag).
+enum BbStatus bb_columns_do(struct BbApp *app, uint64_t tab, struct BbStr verb, struct BbStr arg);
+
+// What the Add column popup offers for `search`: `{loading, full, groups:[{title, items:[{id,
+// header, detail}]}]}`.
+enum BbStatus bb_columns_candidates(struct BbApp *app,
+                                    uint64_t tab,
+                                    struct BbStr search,
+                                    struct BbOwnedStr *out_json);
+
+// The properties this machine reported, as JSON `[[canonical, display], ...]`.
+enum BbStatus bb_columns_set_machine_properties(struct BbApp *app, struct BbStr json);
+
+// The shell-property cells the host should read for rows `from..from+count` (count 0: the first
+// 256), as JSON `[[path, canonical], ...]`. Each cell is handed out once. Until the host has asked
+// (and while it owes answers) the tab counts as hydrating. Only meaningful after
+// `bb_ui_set_flag("propertyProvider", true)`.
+enum BbStatus bb_props_requests(struct BbApp *app,
+                                uint64_t tab,
+                                uint32_t from,
+                                uint32_t count,
+                                struct BbOwnedStr *out_json);
+
+// The host's answers, as JSON `[{path, canonical, value?: {display, number?, date?}}]`: `date` is
+// UTC FILETIME ticks, and a missing `value` means the handler had none (the cell stays blank and
+// is not asked again).
+enum BbStatus bb_props_supply(struct BbApp *app, uint64_t tab, struct BbStr json);
+
+// The thumbnail view's state: `{scale, isThumbnails, lastScale, aspect:{width, height, ratio,
+// text}}`. The thumbnails themselves are the host's.
+enum BbStatus bb_tab_tile_state(struct BbApp *app, uint64_t tab, struct BbOwnedStr *out_json);
+
+// `{searches:[{name, query, scope: current|folder|pc, scopePath, scopeText}], workspaces:[{name,
+// shape, folders}], workspacesPlacement, savedSearchesPlacement}`.
+enum BbStatus bb_saved_state(struct BbApp *app, struct BbOwnedStr *out_json);
+
+// One verb. On `tab` (0: none): `save-search <name> [current|folder|pc]` saves what the tab is
+// searching for. Otherwise: `run-search <name>`, `run-search-new-tab <name>`,
+// `rename-search <old> to <new>`, `remove-search <name>`, `save-workspace <name>`,
+// `switch-workspace <name>`, `rename-workspace <old> to <new>`, `remove-workspace <name>`,
+// `toggle-bookmark <path>`.
+enum BbStatus bb_saved_do(struct BbApp *app, uint64_t tab, struct BbStr verb, struct BbStr arg);
+
+// The name a new saved search (or, with `workspace`, a new workspace) starts with.
+enum BbStatus bb_saved_default_name(struct BbApp *app,
+                                    uint64_t tab,
+                                    bool workspace,
+                                    struct BbOwnedStr *out_name);
+
+// Writes what the Settings page still holds. Called on Back and on window close.
+enum BbStatus bb_settings_flush(struct BbApp *app);
+
+// `{open, page, pages:[{id, name, icon}], problem}`.
+enum BbStatus bb_settings_page_state(struct BbApp *app, struct BbOwnedStr *out_json);
+
+// Opens the Settings page on `page` (a page id; empty: General). While it is up only app-wide
+// commands run.
+enum BbStatus bb_settings_page_open(struct BbApp *app, struct BbStr page);
+
+// Back: flushes, and refuses with `BB_ERR` (the reason in `bb_last_error`) while a list the page
+// holds is still unwritable.
+enum BbStatus bb_settings_page_close(struct BbApp *app);
+
+// `{id, name, isDark, following, lightSlot, darkSlot, appearance:{dark, highContrast},
+// dimmedIconOpacity, available:[{id, name, isDark, builtIn, current}], overridden, dirty, issues}`.
+enum BbStatus bb_theme_state(struct BbApp *app, struct BbOwnedStr *out_json);
+
+// The host tells us what Windows looks like now. Following Windows swaps the theme (and raises
+// `BB_EVT_MODEL_CHANGED` 2: re-push the palette); high contrast wins over both slots.
+enum BbStatus bb_theme_set_system_appearance(struct BbApp *app, bool is_dark, bool high_contrast);
+
+// One verb: `select <id>`, `follow on|off`, `slot light|dark <id>`, `override <token> <#hex>`,
+// `clear-override <token>`, `persist`, `revert`, `reset-all`, `save-as <name>`, `import <path>`,
+// `delete <id>`. `save-as` and `import` answer the new theme's id in `out_result`.
+enum BbStatus bb_theme_do(struct BbApp *app,
+                          struct BbStr verb,
+                          struct BbStr arg,
+                          struct BbOwnedStr *out_result);
+
+// `{status, canRetry, canStart, presence, anyIndexed, building, banner:{show, message, canStart}}`.
+enum BbStatus bb_index_state(struct BbApp *app, struct BbOwnedStr *out_json);
+
+// `dismiss-banner` ("not now": not persisted), `start` (the one thing that raises the elevation
+// prompt), `retry`.
+enum BbStatus bb_index_do(struct BbApp *app, struct BbStr verb);
+
+// Tells us a fact about the window that decides what can run: `clipboardHasFiles`,
+// `previewHasMedia`, `propertyProvider` (the host reads shell properties for property columns).
+enum BbStatus bb_ui_set_flag(struct BbApp *app, struct BbStr name, bool value);
+
+// A modal dialog opened (`true`) or closed. While one is up nothing about the folders can run.
+enum BbStatus bb_ui_set_dialog_open(struct BbApp *app, bool open);
+
+// Starts or stops comparing the active pane with the next. (Only the switch and its gates live
+// here; the comparison engine is not part of this layer.)
+enum BbStatus bb_compare_toggle(struct BbApp *app);
 
 #ifdef __cplusplus
 }  // extern "C"

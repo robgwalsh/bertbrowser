@@ -99,6 +99,7 @@ dependencies = [
  "bb-app",
  "bb-core",
  "bb-test-support",
+ "serde_json",
 ]
 
 [[package]]

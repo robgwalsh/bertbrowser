@@ -5,6 +5,37 @@ use std::sync::{Arc, Mutex};
 
 use crate::ids::{OpId, PaneId, TabId};
 
+/// The services whose state a host re-reads when it hears `ModelChanged`. The numbers cross the C
+/// ABI (`BbEvent.a`), so they only ever grow.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Model {
+    /// The Settings page opened, closed or changed page.
+    SettingsPage = 1,
+    /// The theme in force, its slots or its colour tweaks changed: re-push the palette.
+    Theme = 2,
+    /// The menu bar or a toolbar arrangement (or the saved ones) changed.
+    Bars = 3,
+    /// What a key does changed.
+    Keymap = 4,
+    /// The command palette's rows or selection changed.
+    Palette = 5,
+    /// The Keyboard page's rows or recorder changed.
+    KeyPage = 6,
+    /// The Menus and toolbars page's editor changed.
+    BarPage = 7,
+    /// Saved searches, saved workspaces or bookmarks changed.
+    Saved = 8,
+    /// The index banner or status line changed.
+    Index = 9,
+    /// A tab's columns changed.
+    Columns = 10,
+    /// Two panes started or stopped being compared.
+    Compare = 11,
+    /// Something that decides whether a command can run changed (a dialog, the clipboard).
+    Commands = 12,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppEvent {
     /// The tab's listing was replaced or merged; drop the snapshot you hold and ask for a new one.
@@ -23,6 +54,11 @@ pub enum AppEvent {
     SettingsChanged { key: String },
     /// A pane's active tab changed or a pane got focus.
     PaneChanged { pane: PaneId },
+    /// A service's state moved; see [`Model`].
+    ModelChanged { model: Model },
+    /// The tab shows shell-property columns with cells the host has not read: ask
+    /// (`prop_requests`) and answer (`prop_supply`).
+    PropertiesNeeded { tab: TabId },
 }
 
 pub type EventSink = Arc<dyn Fn(AppEvent) + Send + Sync>;
@@ -43,5 +79,9 @@ impl EventHub {
         if let Some(sink) = sink {
             sink(event);
         }
+    }
+
+    pub fn model(&self, model: Model) {
+        self.emit(AppEvent::ModelChanged { model });
     }
 }

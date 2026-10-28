@@ -669,7 +669,10 @@ fn panes_tabs_commands_keys_settings_and_theme() {
             BbStatus::BB_OK,
             bb_command_why_not(rig.app, bs(&id), &mut reason)
         );
-        assert_eq!(Some("Nothing to go back to.".to_string()), take(reason));
+        assert_eq!(
+            Some("There is nowhere to go back to.".to_string()),
+            take(reason)
+        );
         assert_eq!(BbStatus::BB_ERR, bb_command_run(rig.app, bs(&id)));
         let up = w("nav.up");
         assert_eq!(

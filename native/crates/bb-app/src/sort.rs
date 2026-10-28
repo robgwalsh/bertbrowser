@@ -5,7 +5,7 @@
 
 use std::cmp::Ordering;
 
-use bb_core::columns::{ColumnCatalog, ColumnKind};
+use bb_core::columns::{ColumnCatalog, ColumnComparison, ColumnKind};
 use bb_paths::{fold_upper, natural_cmp};
 
 use crate::rows::Row;
@@ -46,8 +46,15 @@ impl SortSpec {
         }
         let spec = ColumnCatalog::sort_spec(Some(&self.column));
         let mut ordered = if spec.kind == ColumnKind::ShellProperty {
-            // Shell values are not read in this build, so every row is unknown and the name decides.
-            Ordering::Equal
+            let key = fold_upper(&spec.id);
+            let (left, right) = (a.prop(&key), b.prop(&key));
+            // A missing value sorts last in both directions: a blank is not a small value.
+            let known =
+                ColumnComparison::known_band(left).cmp(&ColumnComparison::known_band(right));
+            if known != Ordering::Equal {
+                return known;
+            }
+            ColumnComparison::compare(left, right, natural_cmp)
         } else {
             match spec.id.as_str() {
                 ColumnCatalog::SIZE => a.size_sort_key().cmp(&b.size_sort_key()),

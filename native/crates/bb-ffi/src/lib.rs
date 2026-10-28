@@ -32,6 +32,9 @@ use bb_core::commands::{ChordModifiers, FocusKind, FocusState, KeyChord};
 use bb_core::delete::DeleteMode;
 use bb_core::layout::SplitOrientation;
 
+mod features;
+pub use features::*;
+
 // ---- statuses and strings ----
 
 /// The outcome of a call. Only `BB_OK` carries a result.
@@ -131,6 +134,14 @@ pub enum BbEventKind {
     BB_EVT_SETTINGS_CHANGED = 7,
     /// A pane took the focus or changed its tab. `id` = pane.
     BB_EVT_PANE_CHANGED = 8,
+    /// A service's state moved; re-read it. `a` = the service: 1 settings page, 2 theme (re-push the
+    /// palette), 3 menu bar/toolbars, 4 keymap, 5 palette, 6 Keyboard page, 7 Menus and toolbars
+    /// page, 8 saved searches/workspaces/bookmarks, 9 index banner/status, 10 columns, 11 compare,
+    /// 12 command availability.
+    BB_EVT_MODEL_CHANGED = 9,
+    /// A tab shows shell-property columns with cells the host has not read. `id` = tab. Ask with
+    /// `bb_props_requests`, answer with `bb_props_supply`.
+    BB_EVT_PROPERTIES_NEEDED = 10,
 }
 
 /// An event delivered to the sink. Rust owns it; call `bb_event_free` when done. `text` is valid
@@ -217,6 +228,22 @@ fn forward(slot: &SinkSlot, event: AppEvent) {
         AppEvent::PaneChanged { pane } => {
             deliver(sink, ctx, BbEventKind::BB_EVT_PANE_CHANGED, pane.0, 0, "")
         }
+        AppEvent::ModelChanged { model } => deliver(
+            sink,
+            ctx,
+            BbEventKind::BB_EVT_MODEL_CHANGED,
+            0,
+            u64::from(model as u8),
+            "",
+        ),
+        AppEvent::PropertiesNeeded { tab } => deliver(
+            sink,
+            ctx,
+            BbEventKind::BB_EVT_PROPERTIES_NEEDED,
+            tab.0,
+            0,
+            "",
+        ),
     }
 }
 
@@ -417,7 +444,50 @@ pub unsafe extern "C" fn bb_app_create(
     cfg: *const BbAppConfig,
     out_app: *mut *mut BbApp,
 ) -> BbStatus {
+    guard(|| unsafe { build_app(cfg, u32::MAX, false, out_app) })
+}
+
+/// As [`BbAppConfig`], with the settings the harness and the tests need beyond it.
+#[repr(C)]
+pub struct BbAppConfigEx {
+    pub base: BbAppConfig,
+    /// How long the Settings page waits for quiet before writing the file. `UINT32_MAX` keeps the
+    /// default (400); 0 writes at once.
+    pub settings_debounce_ms: u32,
+    /// Put the real index client behind a launcher that declines the elevation prompt (the
+    /// harness's `--index-declined`).
+    pub index_declined: bool,
+}
+
+/// As `bb_app_create`, taking the extended configuration.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_app_create_ex(
+    cfg: *const BbAppConfigEx,
+    out_app: *mut *mut BbApp,
+) -> BbStatus {
     guard(|| {
+        if cfg.is_null() {
+            return Err("null config".into());
+        }
+        let ex = unsafe { &*cfg };
+        unsafe {
+            build_app(
+                &ex.base,
+                ex.settings_debounce_ms,
+                ex.index_declined,
+                out_app,
+            )
+        }
+    })
+}
+
+unsafe fn build_app(
+    cfg: *const BbAppConfig,
+    settings_debounce_ms: u32,
+    index_declined: bool,
+    out_app: *mut *mut BbApp,
+) -> Result<(), Fail> {
+    {
         let out_app = unsafe { out(out_app, "out_app")? };
         if cfg.is_null() {
             return Err("null config".into());
@@ -445,6 +515,10 @@ pub unsafe extern "C" fn bb_app_create(
         if cfg.workers != 0 {
             config.workers = cfg.workers as usize;
         }
+        if settings_debounce_ms != u32::MAX {
+            config.settings_debounce_ms = u64::from(settings_debounce_ms);
+        }
+        config.index_declined = index_declined;
         let app = App::new(config)?;
         let sink: SinkSlot = Arc::new(Mutex::new(None));
         {
@@ -453,7 +527,7 @@ pub unsafe extern "C" fn bb_app_create(
         }
         *out_app = Box::into_raw(Box::new(BbApp { app, sink }));
         Ok(())
-    })
+    }
 }
 
 /// Stops the app's threads and frees it. The handle is invalid afterwards. Events already queued by
@@ -839,11 +913,10 @@ pub unsafe extern "C" fn bb_tab_columns(
     guard(|| {
         let app = unsafe { app_of(app)? };
         let out_text = unsafe { out(out_text, "out_text")? };
-        let columns = app.app.columns(TabId(tab))?;
+        let columns = app.app.columns_with_cells(TabId(tab))?;
         let text = columns
             .iter()
-            .map(|c| {
-                let cell = bb_app::cell_index(c.id()).map_or(-1, i64::from);
+            .map(|(c, cell)| {
                 format!(
                     "{}\t{}\t{}\t{}\t{}\t{}",
                     c.spec.id,
@@ -1419,7 +1492,9 @@ pub unsafe extern "C" fn bb_settings_get(
     })
 }
 
-/// Sets one setting from JSON text, validating it against the model and writing the file at once.
+/// Sets one setting from JSON text, validating it against the model. It takes effect at once; a
+/// setting the Settings page owns is written on a 400 ms debounce (`bb_settings_flush` writes it
+/// now), one a service owns (keymap, bars, theme) is written at once.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_settings_set(
     app: *mut BbApp,

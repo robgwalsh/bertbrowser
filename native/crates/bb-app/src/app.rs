@@ -76,7 +76,22 @@ pub(crate) struct TabData {
     pub search_gen: u64,
     pub cancel: CancelToken,
     pub watcher: Option<DirWatcher>,
+    /// The columns this tab shows; None is the catalogue default. Arranged here (`columns_customized`)
+    /// or inherited from the saved default.
     pub columns: Option<Vec<ColumnSetting>>,
+    pub columns_customized: bool,
+    /// Shell-property values the host supplied, by row key.
+    pub props: HashMap<Arc<str>, crate::rows::RowProps>,
+    /// The host has not yet looked at the property cells this listing needs.
+    pub props_pending: bool,
+    /// Cells handed to the host and not yet answered: (row key, upper-cased canonical name).
+    pub props_inflight: HashSet<(Arc<str>, String)>,
+    /// Paths to select once the listing that contains them arrives.
+    pub pending_selection: Vec<String>,
+    /// The preview pane's mode (0 auto, 1 raw, 2 hex) and its two per-tab switches.
+    pub preview_mode: u8,
+    pub preview_wrap: bool,
+    pub preview_fit: bool,
 }
 
 impl TabData {
@@ -118,6 +133,38 @@ impl TabData {
             cancel: CancelToken::new(),
             watcher: None,
             columns: settings.file_list_columns.clone(),
+            columns_customized: false,
+            props: HashMap::new(),
+            props_pending: false,
+            props_inflight: HashSet::new(),
+            pending_selection: Vec::new(),
+            preview_mode: 0,
+            preview_wrap: false,
+            preview_fit: false,
+        }
+    }
+
+    /// Consumes the pending selection against the current listing.
+    pub(crate) fn apply_pending_selection(&mut self) {
+        if self.pending_selection.is_empty() {
+            return;
+        }
+        let wanted: HashSet<String> = self
+            .pending_selection
+            .iter()
+            .filter_map(|p| bb_paths::PathKey::canonicalize(p).ok())
+            .collect();
+        let found: Vec<u64> = self
+            .listing
+            .rows()
+            .iter()
+            .filter(|r| wanted.contains(&*r.key))
+            .map(|r| r.id)
+            .collect();
+        // Kept until it lands: a first listing that does not contain the item yet must not eat it.
+        if !found.is_empty() {
+            self.selection = found.into_iter().collect();
+            self.pending_selection.clear();
         }
     }
 
@@ -222,6 +269,8 @@ pub(crate) struct Inner {
     pub transfer_thread: Mutex<Option<JoinHandle<()>>>,
     pub db: Arc<Db>,
     pub keymap: Mutex<Arc<bb_core::commands::Keymap>>,
+    /// The state of the services this layer owns beyond tabs and operations.
+    pub extra: crate::state::Extra,
 }
 
 /// The app. Cheap to clone; every clone is the same app.
@@ -250,13 +299,16 @@ impl App {
         let repository = Arc::new(FsIndexRepository::new(db.clone()));
         let crawler = Arc::new(IndexCrawler::new(repository.clone()));
 
-        let (seams, probes) = match config.fakes {
+        let (mut seams, probes) = match config.fakes {
             Fakes::Harness => {
                 let (seams, probes) = Seams::harness();
                 (seams, Some(probes))
             }
             Fakes::None => (Seams::unattended(), None),
         };
+        if config.index_declined {
+            seams.index = crate::index::declined_index();
+        }
         let watchers: Arc<dyn IndexWatcher> = match config.fakes {
             Fakes::Harness => Arc::new(NoWatchers),
             Fakes::None => Arc::new(IndexWatcherService::new(repository.clone())),
@@ -305,12 +357,16 @@ impl App {
             keymap: Mutex::new(Arc::new(crate::commands::build_keymap(
                 settings.key_bindings.as_ref(),
             ))),
+            extra: crate::state::Extra::new(&settings, &paths, &config, &db),
             settings: Mutex::new(settings),
             settings_path,
             db,
             config,
         });
+        inner.rebuild_keymap();
+        inner.theme_initialize();
         inner.start_transfer_thread();
+        inner.index_attach();
         Ok(App { inner })
     }
 
@@ -431,6 +487,17 @@ impl Inner {
         path: &str,
         activate: bool,
     ) -> AppResult<TabId> {
+        self.open_tab_with(pane, path, activate, |_| {})
+    }
+
+    /// As `open_tab`, arranging the new tab (`init`) before it navigates.
+    pub(crate) fn open_tab_with(
+        self: &Arc<Self>,
+        pane: PaneId,
+        path: &str,
+        activate: bool,
+        init: impl FnOnce(&mut TabData),
+    ) -> AppResult<TabId> {
         let id = TabId(self.new_id());
         let data = {
             let settings = lock(&self.settings);
@@ -452,8 +519,11 @@ impl Inner {
                 mine.sort_by = t.sort_by.clone();
                 mine.sort_desc = t.sort_desc;
                 mine.side_pane = t.side_pane;
-                mine.columns = t.columns.clone();
+                mine.preview_mode = t.preview_mode;
+                mine.preview_wrap = t.preview_wrap;
+                mine.preview_fit = t.preview_fit;
             }
+            init(&mut lock(&cell));
             shell.tabs.insert(id, cell);
             let p = shell.panes.get_mut(&pane).ok_or(AppError::Stale)?;
             p.tabs.push(id);
@@ -604,6 +674,7 @@ impl Inner {
             t.cancel.cancel();
             t.watcher = None;
         }
+        self.compare_pane_closed(pane);
         self.hub.emit(AppEvent::LayoutChanged);
         Ok(())
     }
@@ -649,6 +720,11 @@ impl Inner {
     }
 
     fn shutdown(&self) {
+        // What closing the window saves: the arrangement, and anything the page still holds.
+        if !lock(&self.shell).tabs.is_empty() {
+            self.session_save();
+        }
+        let _ = self.save_settings_now();
         {
             let mut queue = lock(&self.queue.state);
             queue.shutdown = true;

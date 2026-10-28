@@ -16,3 +16,4 @@ bb-core = { path = "../bb-core" }
 
 [dev-dependencies]
 bb-test-support = { path = "../bb-test-support" }
+serde_json.workspace = true
