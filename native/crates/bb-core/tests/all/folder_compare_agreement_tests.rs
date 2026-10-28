@@ -247,10 +247,46 @@ fn a_file_against_a_folder_of_the_same_name_agrees() {
 struct AlwaysIndexed;
 
 impl MftIndex for AlwaysIndexed {
+    fn start_with(&self, mode: bb_core::mft::IndexStartMode) -> Result<(), String> {
+        NullMftIndex.start_with(mode)
+    }
+    fn stop(&self) {}
+    fn any_indexed(&self) -> bool {
+        true
+    }
     fn is_building(&self) -> bool {
         false
     }
+    fn building_drives(&self) -> Vec<String> {
+        Vec::new()
+    }
+    fn completed_roots(&self) -> Vec<String> {
+        Vec::new()
+    }
+    fn presence(&self) -> bb_core::mft::IndexerPresence {
+        NullMftIndex.presence()
+    }
     fn is_indexed(&self, _path_key: &str) -> bool {
         true
+    }
+    fn status_text(&self) -> String {
+        String::new()
+    }
+    fn can_retry(&self) -> bool {
+        false
+    }
+    fn can_start(&self) -> bool {
+        false
+    }
+    fn retry(&self) {}
+    fn change_log(&self) -> bb_core::changes::ChangeLogPolicy {
+        NullMftIndex.change_log()
+    }
+    fn set_change_log(&self, _policy: bb_core::changes::ChangeLogPolicy) {}
+    fn subscribe(&self, listener: std::sync::Arc<dyn bb_core::mft::IndexListener>) -> u64 {
+        NullMftIndex.subscribe(listener)
+    }
+    fn unsubscribe(&self, id: u64) {
+        NullMftIndex.unsubscribe(id)
     }
 }

@@ -3,12 +3,14 @@
 //! an unmeasured folder is `None`, never zero, all the way to the view.
 //! Spec: src/BertBrowser.Core/Services/DiskUsage/*, Core/Models/DiskUsageModels.cs.
 
+mod archives;
 mod models;
 mod rules;
 mod service;
 mod treemap_layout;
 mod treemap_palette;
 
+pub use archives::ArchiveUsage;
 pub use models::{DiskUsageAvailability, DiskUsageBreakdown, DiskUsageNode, LargestFilesOutcome};
 pub use rules::DiskUsageRules;
 pub use service::{

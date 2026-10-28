@@ -25,6 +25,13 @@ quick-xml = "0.42"
 base64 = "0.22"
 tempfile = "3"
 embed-manifest = "1.5"
+zip = { version = "9", default-features = false, features = ["aes-crypto", "deflate", "bzip2", "lzma"] }
+sevenz-rust2 = { version = "0.24", features = ["aes256", "compress"] }
+unrar = "0.5"
+tar = "0.4"
+flate2 = "1"
+bzip2 = "0.6"
+liblzma = "0.4"
 
 [profile.release]
 debug = 1

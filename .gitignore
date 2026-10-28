@@ -411,3 +411,6 @@ FodyWeavers.xsd
 # native rewrite build output
 native/target/
 native/out/
+
+# The native tree keeps cargo binaries under src/bin, which the C# bin/ rule above would hide.
+!native/crates/*/src/bin/

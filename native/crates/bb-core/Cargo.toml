@@ -43,6 +43,13 @@ windows = { workspace = true, features = [
     "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",
 ] }
+zip.workspace = true
+sevenz-rust2.workspace = true
+unrar.workspace = true
+tar.workspace = true
+flate2.workspace = true
+bzip2.workspace = true
+liblzma.workspace = true
 
 [dev-dependencies]
 bb-test-support = { path = "../bb-test-support" }
