@@ -142,6 +142,9 @@ Session::~Session() {
     if (view_) pump();
     guard_.reset();
     view_.reset();
+    // The widgets belong to the window's root and call into the core as they go (the preview pane closes its
+    // GIF), so they die here, while the core is alive, not when the window does after bb_app_destroy.
+    if (window_) window_->root().clear_content();
     core_.reset();
     if (app_) bb_app_destroy(app_);
     window_.reset();

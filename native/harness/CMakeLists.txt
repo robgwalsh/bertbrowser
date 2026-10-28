@@ -2,6 +2,7 @@
 # core built on its harness fakes; runs tools/ui/*.bbs. Never a mode of BertBrowser.exe.
 add_executable(bb-harness
   main.cpp
+  crash.cpp
   options.cpp
   sandbox.cpp
   session.cpp
@@ -16,4 +17,4 @@ add_executable(bb-harness
 )
 target_include_directories(bb-harness PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 # bbcore_harness: the same ABI as the product's bbcore, plus the fixtures only a script needs.
-target_link_libraries(bb-harness PRIVATE bbviews bbcore_harness psapi)
+target_link_libraries(bb-harness PRIVATE bbviews bbcore_harness psapi dbghelp)

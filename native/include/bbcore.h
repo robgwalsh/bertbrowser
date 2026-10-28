@@ -148,6 +148,9 @@ typedef enum BbFocusKind {
 // The app handle. One per process.
 typedef struct BbApp BbApp;
 
+// What one launch is: its request, whether another copy took it, and the instance claim.
+typedef struct BbLaunch BbLaunch;
+
 // An immutable, reference-counted snapshot of a tab's rows in display order. Every view it hands out
 // stays valid until the last reference is released.
 typedef struct BbListing BbListing;
@@ -967,6 +970,59 @@ enum BbStatus bb_metadata_peek(struct BbApp *app,
                                struct BbStr path,
                                struct BbStr what,
                                struct BbOwnedStr *out_text);
+
+// Runs the installer's hooks (`--veloapp-*`) and applies an update that is waiting. Call it first
+// in `WinMain`. Returns normally for an ordinary launch; for a hook the process exits inside it.
+// `argv` is the whole command line with the program name first, as `CommandLineToArgvW` gives it.
+enum BbStatus bb_startup(int32_t argc, const uint16_t *const *argv);
+
+// Parses the command line and claims the per-user instance. If another copy is running and takes
+// the request, `bb_launch_handed_off` is true and the caller should free this and exit. Otherwise
+// (this is the first copy, or the first could not be reached) carry on starting normally.
+enum BbStatus bb_launch_claim(int32_t argc,
+                              const uint16_t *const *argv,
+                              struct BbStr data_dir,
+                              struct BbLaunch **out_launch);
+
+// True when a running copy took this launch's request: free the launch and exit.
+bool bb_launch_handed_off(const struct BbLaunch *launch);
+
+// The folder the command line named for the window to open on, or empty. A view valid until
+// `bb_launch_free`.
+struct BbStr bb_launch_start_path(const struct BbLaunch *launch);
+
+// True when `BERTBROWSER_STARTUP_TRACE` is set: this launch is a measurement. The window is to be
+// parked offscreen without activation or a taskbar button.
+bool bb_trace_enabled(void);
+
+// Records a mark on the way up (`windowBuilt`, `windowShown`, `contentRendered`, ...) when tracing.
+void bb_trace_mark(struct BbStr name);
+
+// Carries out a command that starts another program for the user and that `bb_command_execute`
+// handed back as the host's (`file.run-as-admin`, `file.open-terminal`, `file.open-vscode`, a
+// `custom:` command): the program, its arguments and its working directory are decided in Rust
+// from the selection, and started through the one launcher. The outcome is on the status line.
+enum BbStatus bb_launch_command(struct BbApp *app, struct BbStr id);
+
+// Who opens folders and drives on this machine, as JSON: `{"state": "NotRegistered" |
+// "RegisteredToThisApp" | "RegisteredToThisAppStale" | "RegisteredToAnotherApp", "other": <program
+// or null>, "executable": <this app's path>}`. Reads the registry; free with `bb_str_free`. Product
+// only: the harness never calls it, so a script cannot read the machine's registry.
+enum BbStatus bb_folder_handler_state(struct BbOwnedStr *out_json);
+
+// Registers this app as the shell's handler for folders and drives (`open_here`), or removes
+// exactly what it registered. `BB_ERR` when the registry refused, in which case nothing is left
+// half-written. Writes `HKEY_CURRENT_USER` only. Product only, and only ever on the user's say-so.
+enum BbStatus bb_folder_handler_set(bool open_here);
+
+// Frees the launch and releases the per-user instance claim. Call it last, after the app.
+void bb_launch_free(struct BbLaunch *launch);
+
+// Once the main window exists: answer other launches (raising `hwnd`, unless the foreground is
+// full screen), open the rest of the command line, and start the background work. `app` must
+// outlive the launch. A benchmark launch (`bb_trace_enabled`) stops after the listener: everything
+// that acts on the machine is left out.
+enum BbStatus bb_launch_serve(struct BbLaunch *launch, struct BbApp *app, void *hwnd);
 
 // Runs one tool verb (`checksum.hash`, `filecompare.open`, `diskusage.model`, `changes.open`,
 // `compare.sync`, ...) with its JSON argument (empty for none) and answers JSON. Blocks for as long

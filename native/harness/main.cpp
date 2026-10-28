@@ -8,6 +8,7 @@
 #include <chrono>
 #include <thread>
 
+#include "crash.h"
 #include "options.h"
 #include "runner.h"
 #include "session.h"
@@ -38,6 +39,7 @@ int wmain(int argc, wchar_t** argv) {
     auto options = bbh::parse_options(argc, argv, exit_code);
     if (!options) return exit_code;
     const bbh::Options& o = *options;
+    bbh::install_crash_handler(o.out_dir);
 
     // Nothing here has a window the user could find and close, so a run that wedged would sit in the
     // background for ever. The watchdog is what makes an invisible process safe to start.

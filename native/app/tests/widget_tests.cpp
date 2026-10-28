@@ -620,3 +620,23 @@ TEST(widget_set_gallery_png) {
     CHECK(st.rig.bitmap().write_png(exe_dir() + L"widget_set.png"));
     st.layer->close_menu();
 }
+
+namespace {
+struct DeathFlag : Widget {
+    bool* flag;
+    explicit DeathFlag(bool* f) : flag(f) {}
+    ~DeathFlag() override { *flag = true; }
+};
+}  // namespace
+
+// The tree belongs to the window's root, which a host may outlive the services the widgets call as they go
+// (the preview pane closes its GIF through the core): clear_content is how it dies first.
+TEST(clear_content_destroys_the_tree_before_the_window) {
+    Rig rig(200, 100);
+    bool died = false;
+    rig.set(std::make_unique<DeathFlag>(&died));
+    CHECK(!died);
+    rig.root.clear_content();
+    CHECK(died);
+    CHECK(rig.root.content() == nullptr);
+}

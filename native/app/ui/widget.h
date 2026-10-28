@@ -208,6 +208,9 @@ public:
         return raw;
     }
     Widget* content() const { return content_.get(); }
+    // Destroys the widget tree now rather than with the root: a tree whose widgets call into the core
+    // (a preview pane closing its GIF) has to go before the core does.
+    void clear_content() { content_.reset(); }
     Widget* find(std::string_view n) { return content_ ? content_->find(n) : nullptr; }
     Widget* find_automation(std::string_view id) { return content_ ? content_->find_automation(id) : nullptr; }
 
