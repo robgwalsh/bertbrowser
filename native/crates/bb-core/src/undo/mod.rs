@@ -27,17 +27,12 @@ mod text;
 mod timestamp_record;
 mod transfer_record;
 
-pub use archive_edit_record::{
-    ArchiveEditOutcome, ArchiveEditRecord, ArchiveEditUndo, ArchiveEdits, UnportedArchiveEdits,
-};
+pub use archive_edit_record::ArchiveEditRecord;
 pub use budget::UndoBudget;
 pub use delete_record::DeleteRecord;
 pub use held_size::{HeldFolderSizes, HeldSizeEstimator};
 pub use host::{PlainUndoHost, ProgressSink, UndoHost};
-pub use metadata_edit_record::{
-    FailedMetadataEdit, HeldVersion, MetadataEditOutcome, MetadataEditRecord, MetadataEdits,
-    MetadataSwapResult, UnportedMetadataEdits,
-};
+pub use metadata_edit_record::MetadataEditRecord;
 pub use models::{
     HeldEntry, HeldSize, StepReport, StepResult, StepVerdict, UndoDirection, UndoItemDetail,
     UndoKind, UndoRefresh,

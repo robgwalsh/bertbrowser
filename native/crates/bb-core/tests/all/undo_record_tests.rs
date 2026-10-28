@@ -20,7 +20,6 @@ use bb_core::transfer::{
 use bb_core::undo::{
     DeleteRecord, HeldEntry, HeldFolderSizes, HeldSize, HeldSizeEstimator, PlainUndoHost,
     RenameRecord, StepVerdict, SyncRecord, TransferRecord, UndoBudget, UndoStack, UndoableRecord,
-    UnportedArchiveEdits,
 };
 use bb_paths::PathKey;
 use bb_test_support::unique_temp_path;
@@ -75,12 +74,7 @@ impl Fixture {
     }
 
     fn host(&self) -> PlainUndoHost<'_> {
-        PlainUndoHost::new(
-            &self.transfers,
-            &self.deletes,
-            &self.renames,
-            &UnportedArchiveEdits,
-        )
+        PlainUndoHost::without_archives(&self.transfers, &self.deletes, &self.renames)
     }
 
     fn transfer(
@@ -460,7 +454,7 @@ fn a_recycled_delete_is_redone_into_the_bin() {
         .staging_root(&f.root.to_string_lossy())
         .recycle_bin(&bin)
         .recycle_probe(&bin);
-    let host = PlainUndoHost::new(&f.transfers, &deletes, &f.renames, &UnportedArchiveEdits);
+    let host = PlainUndoHost::without_archives(&f.transfers, &deletes, &f.renames);
     f.file("a", &["work", "a.txt"]);
 
     let plan = DeletePlan {

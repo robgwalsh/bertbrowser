@@ -8,120 +8,8 @@ use bb_paths::file_name;
 use super::host::UndoHost;
 use super::models::{HeldEntry, StepReport, StepResult, UndoItemDetail, UndoKind, UndoRefresh};
 use super::record::UndoableRecord;
-use crate::fs::EntryStamp;
+use crate::archives::{ArchiveEditExecutor, ArchiveEditOutcome, ArchiveEditUndo};
 use crate::rename::paths::directory_name;
-
-// TODO(merge): replaced by crate::archives::ArchiveEditOutcome
-/// What an archive edit did, and what it left behind so it can be undone. `staged_original` is
-/// where the container that was replaced is being held, erased by `commit_staging` exactly one
-/// operation later. Spec: Core/Services/Archives/ArchiveEditModels.cs.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ArchiveEditOutcome {
-    pub archive_file: String,
-    pub staged_original: Option<String>,
-    pub entries_written: usize,
-    pub failure: Option<String>,
-    pub cancelled: bool,
-    /// The original container as it was before the swap: what a redo checks is still in place
-    /// before it takes the edit back in.
-    pub original: Option<EntryStamp>,
-    /// The edited container as the swap left it: what an undo checks is still in place before it
-    /// sets it aside. A container changed by anything else since is refused, not lost.
-    pub edited: Option<EntryStamp>,
-}
-
-impl ArchiveEditOutcome {
-    pub fn can_undo(&self) -> bool {
-        self.staged_original.is_some() && self.failure.is_none() && !self.cancelled
-    }
-
-    pub fn nothing(archive_file: &str) -> ArchiveEditOutcome {
-        ArchiveEditOutcome {
-            archive_file: archive_file.to_string(),
-            staged_original: None,
-            entries_written: 0,
-            failure: None,
-            cancelled: false,
-            original: None,
-            edited: None,
-        }
-    }
-}
-
-// TODO(merge): replaced by crate::archives::ArchiveEditUndo
-/// An archive edit that was undone: the original is back in place, and the edited container is
-/// held beside it so the edit can be redone. `staged_edited` is None when the undo did not
-/// happen, and `failure` says why.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ArchiveEditUndo {
-    pub archive_file: String,
-    pub staged_edited: Option<String>,
-    pub original: Option<EntryStamp>,
-    pub edited: Option<EntryStamp>,
-    pub failure: Option<String>,
-}
-
-impl ArchiveEditUndo {
-    pub fn can_redo(&self) -> bool {
-        self.staged_edited.is_some() && self.failure.is_none()
-    }
-}
-
-// TODO(merge): replaced by crate::archives::ArchiveEditExecutor (`undo`, `redo`)
-/// The archive-edit executor as the record drives it.
-pub trait ArchiveEdits {
-    fn undo(&self, applied: &ArchiveEditOutcome) -> ArchiveEditUndo;
-
-    fn redo(&self, undone: &ArchiveEditUndo) -> ArchiveEditOutcome;
-}
-
-// TODO(merge): replaced by crate::archives::ArchiveEditExecutor::commit_staging
-/// The markers the archive executor names its held containers with.
-const REPLACED_MARKER: &str = ".bertbrowser-replaced-";
-const EDITED_MARKER: &str = ".bertbrowser-edited-";
-
-/// Erases a staged original once the edit can no longer be undone. Named the way the executor
-/// names them, or it is not ours to erase: the guard every recursive delete in this codebase
-/// carries, applied to a single file.
-pub fn commit_applied(outcome: &ArchiveEditOutcome) {
-    if let Some(staged) = &outcome.staged_original
-        && file_name(staged).contains(REPLACED_MARKER)
-    {
-        let _ = std::fs::remove_file(staged);
-    }
-}
-
-/// Erases a held edited container once the undone edit can no longer be redone.
-pub fn commit_undone(undo: &ArchiveEditUndo) {
-    if let Some(edited) = &undo.staged_edited
-        && file_name(edited).contains(EDITED_MARKER)
-    {
-        let _ = std::fs::remove_file(edited);
-    }
-}
-
-// TODO(merge): replaced by crate::archives::ArchiveEditExecutor
-/// Stands in until the archive port lands: every step is refused, nothing is touched.
-pub struct UnportedArchiveEdits;
-
-impl ArchiveEdits for UnportedArchiveEdits {
-    fn undo(&self, applied: &ArchiveEditOutcome) -> ArchiveEditUndo {
-        ArchiveEditUndo {
-            archive_file: applied.archive_file.clone(),
-            staged_edited: None,
-            original: None,
-            edited: None,
-            failure: Some("Archive editing is not available in this build.".to_string()),
-        }
-    }
-
-    fn redo(&self, undone: &ArchiveEditUndo) -> ArchiveEditOutcome {
-        ArchiveEditOutcome {
-            failure: Some("Archive editing is not available in this build.".to_string()),
-            ..ArchiveEditOutcome::nothing(&undone.archive_file)
-        }
-    }
-}
 
 #[derive(Clone)]
 pub struct ArchiveEditRecord {
@@ -240,9 +128,9 @@ impl UndoableRecord for ArchiveEditRecord {
 
     fn retire(&self) {
         if let Some(applied) = &self.applied {
-            commit_applied(applied);
+            ArchiveEditExecutor::commit_staging(applied);
         } else if let Some(undone) = &self.undone {
-            commit_undone(undone);
+            ArchiveEditExecutor::commit_undo_staging(undone);
         }
     }
 }

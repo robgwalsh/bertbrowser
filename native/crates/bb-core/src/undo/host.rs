@@ -7,11 +7,13 @@
 //! pasted files back into the folder they came from instead of removing them, corrupting both
 //! sides. [`UndoHost::elevate_move_undo`] refuses anything but a move for the same reason.
 
-use super::archive_edit_record::{ArchiveEdits, UnportedArchiveEdits};
-use super::metadata_edit_record::{MetadataEdits, UnportedMetadataEdits};
+use std::sync::LazyLock;
+
+use crate::archives::{ArchiveEditExecutor, LibraryArchiveReader};
 use crate::compare::SyncRunner;
 use crate::delete::{DeleteExecutor, DeleteOutcome, DeletePlan, DeleteUndoResult};
 use crate::elevation::Elevated;
+use crate::metadata::MetadataEditExecutor;
 use crate::rename::{RenameExecutor, RenameOutcome, RenamePlan};
 use crate::timestamps::TimestampExecutor;
 use crate::transfer::{
@@ -29,10 +31,10 @@ pub trait UndoHost {
 
     fn renames(&self) -> &RenameExecutor;
 
-    fn archive_edits(&self) -> &dyn ArchiveEdits;
+    fn archive_edits(&self) -> &ArchiveEditExecutor<'_>;
 
     /// No elevated retry goes with this one, for the reason archives have none.
-    fn metadata_edits(&self) -> &dyn MetadataEdits;
+    fn metadata_edits(&self) -> &MetadataEditExecutor<'_>;
 
     fn timestamps(&self) -> &TimestampExecutor<'_>;
 
@@ -69,14 +71,18 @@ pub trait UndoHost {
     fn end_progress(&self);
 }
 
+static LOCAL_READER: LazyLock<LibraryArchiveReader> = LazyLock::new(LibraryArchiveReader::new);
+static LOCAL_ARCHIVE_EDITS: LazyLock<ArchiveEditExecutor<'static>> =
+    LazyLock::new(|| ArchiveEditExecutor::new(&*LOCAL_READER));
+
 /// A host with no elevation and no progress surface: every retry is a pass-through. For tests, and
 /// for anything that runs where there is nobody to ask.
 pub struct PlainUndoHost<'a> {
     transfers: &'a TransferExecutor,
     deletes: &'a DeleteExecutor<'a>,
     renames: &'a RenameExecutor,
-    archive_edits: &'a dyn ArchiveEdits,
-    metadata_edits: UnportedMetadataEdits,
+    archive_edits: &'a ArchiveEditExecutor<'a>,
+    metadata_edits: MetadataEditExecutor<'static>,
     timestamps: TimestampExecutor<'static>,
 }
 
@@ -85,25 +91,25 @@ impl<'a> PlainUndoHost<'a> {
         transfers: &'a TransferExecutor,
         deletes: &'a DeleteExecutor<'a>,
         renames: &'a RenameExecutor,
-        archive_edits: &'a dyn ArchiveEdits,
+        archive_edits: &'a ArchiveEditExecutor<'a>,
     ) -> PlainUndoHost<'a> {
         PlainUndoHost {
             transfers,
             deletes,
             renames,
             archive_edits,
-            metadata_edits: UnportedMetadataEdits,
+            metadata_edits: MetadataEditExecutor::local(),
             timestamps: TimestampExecutor::local(),
         }
     }
 
-    /// A host over the given executors with no archive editing behind it.
+    /// A host over the given executors and the library archive reader.
     pub fn without_archives(
         transfers: &'a TransferExecutor,
         deletes: &'a DeleteExecutor<'a>,
         renames: &'a RenameExecutor,
     ) -> PlainUndoHost<'a> {
-        Self::new(transfers, deletes, renames, &UnportedArchiveEdits)
+        Self::new(transfers, deletes, renames, &LOCAL_ARCHIVE_EDITS)
     }
 }
 
@@ -120,11 +126,11 @@ impl UndoHost for PlainUndoHost<'_> {
         self.renames
     }
 
-    fn archive_edits(&self) -> &dyn ArchiveEdits {
+    fn archive_edits(&self) -> &ArchiveEditExecutor<'_> {
         self.archive_edits
     }
 
-    fn metadata_edits(&self) -> &dyn MetadataEdits {
+    fn metadata_edits(&self) -> &MetadataEditExecutor<'_> {
         &self.metadata_edits
     }
 

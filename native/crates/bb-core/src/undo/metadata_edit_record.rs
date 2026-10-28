@@ -12,111 +12,8 @@ use bb_paths::file_name;
 use super::host::UndoHost;
 use super::models::{HeldEntry, StepReport, StepResult, UndoItemDetail, UndoKind, UndoRefresh};
 use super::record::UndoableRecord;
-use crate::fs::{EntryStamp, StagedReplace};
+use crate::metadata::{HeldVersion, MetadataEditExecutor, MetadataEditOutcome};
 use crate::rename::paths::directory_name;
-
-// TODO(merge): replaced by crate::metadata::HeldVersion
-/// One file whose other version is held beside it. Spec: Core/Services/Metadata/MetadataModels.cs.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HeldVersion {
-    pub path: String,
-    pub held_path: String,
-    pub in_place: EntryStamp,
-}
-
-// TODO(merge): replaced by crate::metadata::FailedMetadataEdit
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FailedMetadataEdit {
-    pub path: String,
-    pub message: String,
-    pub access_denied: bool,
-}
-
-// TODO(merge): replaced by crate::metadata::MetadataEditOutcome
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct MetadataEditOutcome {
-    pub edited: Vec<HeldVersion>,
-    pub failed: Vec<FailedMetadataEdit>,
-    pub cancelled: bool,
-    /// Files the edit was offered to and which already were as it asked: not changed, not failed,
-    /// and not in the history.
-    pub unchanged: Vec<String>,
-}
-
-impl MetadataEditOutcome {
-    pub fn can_undo(&self) -> bool {
-        !self.edited.is_empty()
-    }
-}
-
-// TODO(merge): replaced by crate::metadata::MetadataSwapResult
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct MetadataSwapResult {
-    pub swapped: Vec<HeldVersion>,
-    pub failed: Vec<FailedMetadataEdit>,
-}
-
-// TODO(merge): replaced by crate::metadata::MetadataEditExecutor (`undo`, `redo`)
-/// The metadata executor as the record drives it.
-pub trait MetadataEdits {
-    /// Puts the originals back, holding each edited file so the edit can be redone.
-    fn undo(&self, edited: &[HeldVersion]) -> MetadataSwapResult;
-
-    /// Takes undone edits back in, holding each original again.
-    fn redo(&self, restored: &[HeldVersion]) -> MetadataSwapResult;
-}
-
-// TODO(merge): replaced by crate::metadata::MetadataEditExecutor::commit_staging
-/// The markers the metadata executor names its held versions with.
-const REPLACED_MARKER: &str = ".bertbrowser-replaced-";
-const EDITED_MARKER: &str = ".bertbrowser-edited-";
-
-/// Erases held versions once the step that needs them can no longer be taken: when the undo
-/// history releases the entry, or the session ends. Named the way the executor names them, or it
-/// is not ours to erase.
-pub fn commit_staging(held: &[HeldVersion]) {
-    for version in held {
-        if !StagedReplace::is_marked(&version.held_path, REPLACED_MARKER)
-            && !StagedReplace::is_marked(&version.held_path, EDITED_MARKER)
-        {
-            continue;
-        }
-        let _ = std::fs::remove_file(&version.held_path);
-    }
-}
-
-// TODO(merge): replaced by crate::metadata::MetadataEditExecutor
-/// Stands in until the metadata port lands: every swap fails, nothing is touched.
-pub struct UnportedMetadataEdits;
-
-impl MetadataEdits for UnportedMetadataEdits {
-    fn undo(&self, edited: &[HeldVersion]) -> MetadataSwapResult {
-        Self::refuse(edited)
-    }
-
-    fn redo(&self, restored: &[HeldVersion]) -> MetadataSwapResult {
-        Self::refuse(restored)
-    }
-}
-
-impl UnportedMetadataEdits {
-    fn refuse(held: &[HeldVersion]) -> MetadataSwapResult {
-        MetadataSwapResult {
-            swapped: Vec::new(),
-            failed: held
-                .iter()
-                .map(|h| FailedMetadataEdit {
-                    path: h.path.clone(),
-                    message: format!(
-                        "{}: metadata editing is not available in this build.",
-                        file_name(&h.path)
-                    ),
-                    access_denied: false,
-                })
-                .collect(),
-        }
-    }
-}
 
 #[derive(Clone)]
 pub struct MetadataEditRecord {
@@ -207,6 +104,6 @@ impl UndoableRecord for MetadataEditRecord {
     }
 
     fn retire(&self) {
-        commit_staging(&self.held);
+        MetadataEditExecutor::commit_staging(&self.held);
     }
 }

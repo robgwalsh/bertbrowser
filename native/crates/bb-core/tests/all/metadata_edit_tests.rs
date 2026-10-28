@@ -1,6 +1,5 @@
 // Port of tests/BertBrowser.Core.Tests/MetadataEditTests.cs. The planner against a fake disk, and
-// the executor against a real one. The two tests about the undo record (`MetadataEditRecord`) belong
-// to the undo area and are listed in tools/parity/dropped.txt.
+// the executor and its undo record against a real one.
 use std::collections::HashMap;
 use std::fs::FileTimes;
 use std::os::windows::fs::{FileTimesExt, MetadataExt};
@@ -11,13 +10,17 @@ use bb_core::attributes::{
     ARCHIVE, DIRECTORY, HIDDEN, NORMAL, READONLY, RECALL_ON_DATA_ACCESS, REPARSE_POINT,
 };
 use bb_core::cancel::CancelToken;
+use bb_core::delete::{DeleteExecutor, FileSystemDeleteProbe};
 use bb_core::fs::{DirectoryRemoval, EntryStamp, ReadOnlyFile};
 use bb_core::metadata::{
     EDITED_MARKER, HeldVersion, MetadataCodecs, MetadataDocument, MetadataEdit,
     MetadataEditExecutor, MetadataEditOutcome, MetadataEditPlan, MetadataEditPlanner,
     MetadataField, MetadataProbe, MetadataRejection, REPLACED_MARKER,
 };
+use bb_core::rename::RenameExecutor;
 use bb_core::time::TICKS_PER_HOUR;
+use bb_core::transfer::TransferExecutor;
+use bb_core::undo::{MetadataEditRecord, PlainUndoHost, UndoKind, UndoableRecord};
 use bb_test_support::metadata_fixtures as fx;
 use bb_test_support::unique_temp_path;
 
@@ -534,4 +537,53 @@ fn committing_erases_only_files_named_the_way_this_names_them() {
     }]);
 
     assert!(std::path::Path::new(&photo).exists());
+}
+
+// ---- undo record -----------------------------------------------------------------------------
+
+#[test]
+fn the_record_steps_back_and_forth_and_retiring_it_erases_what_it_held() {
+    let x = Fixture::new();
+    let transfers = TransferExecutor::default();
+    let deletes = DeleteExecutor::new(&FileSystemDeleteProbe)
+        .protecting(&[])
+        .staging_root(&x.root.to_string_lossy());
+    let renames = RenameExecutor;
+    let host = PlainUndoHost::without_archives(&transfers, &deletes, &renames);
+
+    let photo = x.jpeg("photo.jpg");
+    let song = x.mp3("song.mp3");
+    let record = MetadataEditRecord::for_outcome(execute(&plan_for(
+        &[&photo, &song],
+        &edit(&[(MetadataField::Title, "New")]),
+    )))
+    .unwrap();
+
+    assert_eq!(UndoKind::MetadataEdit, record.kind());
+    assert!(record.is_applied());
+    assert_eq!(2, record.item_count());
+    assert_eq!(2, record.held().len());
+    assert_eq!("Edit metadata of 2 files", record.description());
+
+    let undone = record.step(&host);
+    assert!(undone.report.clean(), "{:?}", undone.report.failures);
+    assert!(!undone.next.is_applied());
+    assert_eq!("Old title", read(&photo).get(MetadataField::Title));
+    assert_eq!("Song", read(&song).get(MetadataField::Title));
+    assert_eq!(
+        vec![x.root.to_string_lossy().into_owned()],
+        undone.refresh.directories
+    );
+
+    let redone = undone.next.step(&host);
+    assert!(redone.next.is_applied());
+    assert_eq!("New", read(&photo).get(MetadataField::Title));
+
+    redone.next.retire();
+    assert!(x.leftovers().is_empty(), "{:?}", x.leftovers());
+}
+
+#[test]
+fn an_edit_that_changed_nothing_is_not_a_history_entry() {
+    assert!(MetadataEditRecord::for_outcome(MetadataEditOutcome::empty()).is_none());
 }
