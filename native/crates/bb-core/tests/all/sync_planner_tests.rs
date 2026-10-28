@@ -6,14 +6,17 @@
 use std::collections::HashSet;
 
 use bb_core::FileTime;
-use bb_core::compare::transfer_stubs::{
-    ConflictResolution, DeleteMode, DeletePlan, DeletePlanning, DeleteSource, PlannedDelete,
-    PlannedTransfer, RejectedDelete, RejectedTransfer, TransferPlan, TransferPlanning,
-    TransferVerb,
-};
 use bb_core::compare::{
-    CompareAvailability, CompareEntry, CompareSourceKind, CompareTolerance, FolderCompareOutcome,
-    FolderComparer, SyncAction, SyncActionKind, SyncPlanner, SyncPreview,
+    CompareAvailability, CompareEntry, CompareSourceKind, CompareTolerance, DeletePlanning,
+    FolderCompareOutcome, FolderComparer, SyncAction, SyncActionKind, SyncPlanner, SyncPreview,
+    TransferPlanning,
+};
+use bb_core::delete::{
+    DeleteMode, DeletePlan, DeleteRejection, DeleteSource, PlannedDelete, RejectedDelete,
+};
+use bb_core::transfer::{
+    ConflictResolution, PlannedTransfer, RejectedTransfer, TransferPlan, TransferRejection,
+    TransferVerb,
 };
 use bb_paths::{file_name, fold_upper};
 
@@ -400,20 +403,20 @@ impl TransferPlanning for FakeTransferPlanner {
         let mut plan = TransferPlan::empty(verb, destination);
         for source in sources {
             if !self.exists(source) {
-                plan.rejected.push(RejectedTransfer {
-                    source_path: source.clone(),
-                    message: format!("{source} does not exist"),
-                    is_benign: false,
-                });
+                plan.rejected.push(RejectedTransfer::new(
+                    source,
+                    TransferRejection::SourceMissing,
+                    format!("{source} does not exist"),
+                ));
                 continue;
             }
             let destination_path = format!("{destination}\\{}", file_name(source));
-            plan.transfers.push(PlannedTransfer {
-                source_path: source.clone(),
-                is_directory: self.dirs.contains(&fold_upper(source)),
-                conflicts: self.exists(&destination_path),
-                destination_path,
-            });
+            plan.transfers.push(PlannedTransfer::new(
+                source,
+                self.dirs.contains(&fold_upper(source)),
+                &destination_path,
+                self.exists(&destination_path),
+            ));
         }
         plan
     }
@@ -440,15 +443,13 @@ impl DeletePlanning for FakeDeletePlanner {
         for source in sources {
             let key = fold_upper(&source.path);
             if self.dirs.contains(&key) || self.files.contains(&key) {
-                plan.deletions.push(PlannedDelete {
-                    source_path: source.path.clone(),
-                    is_directory: source.is_directory,
-                });
+                plan.deletions
+                    .push(PlannedDelete::new(&source.path, source.is_directory));
             } else {
                 plan.rejected.push(RejectedDelete {
                     source_path: source.path.clone(),
+                    reason: DeleteRejection::SourceMissing,
                     message: format!("{} does not exist", source.path),
-                    is_benign: false,
                 });
             }
         }

@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bb_core::data::Db;
 
+pub mod duplex;
 pub mod pipe_fakes;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);

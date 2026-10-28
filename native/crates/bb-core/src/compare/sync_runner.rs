@@ -11,21 +11,19 @@
 //! than it started with rather than less, which is the direction to fail in: the copies can be
 //! repeated harmlessly, whereas a delete that ran before its replacement arrived is a gap.
 
+use std::cell::RefCell;
+
 use super::sync_models::{SyncOutcome, SyncPlans};
-use super::transfer_stubs::{
-    DeleteOutcome, DeleteProgress, DeleteUndoResult, SyncDeletes, SyncTransfers, TransferOutcome,
-    TransferProgress, TransferVerb,
-};
 use crate::cancel::CancelToken;
+use crate::delete::{DeleteExecutor, DeleteOutcome, DeleteProgress, DeleteRedo, DeleteUndoResult};
+use crate::transfer::{
+    TransferExecutor, TransferOutcome, TransferProgress, TransferRedo, TransferVerb,
+};
 
 pub struct SyncRunner<'a> {
-    transfers: &'a dyn SyncTransfers,
-    deletes: &'a dyn SyncDeletes,
+    transfers: &'a TransferExecutor,
+    deletes: &'a DeleteExecutor<'a>,
 }
-
-/// A progress report re-based onto the whole run's denominator.
-type OffsetTransfer<'p> = Box<dyn Fn(&TransferProgress) + 'p>;
-type OffsetDelete<'p> = Box<dyn Fn(&DeleteProgress) + 'p>;
 
 /// Reversing a sync: how many items came back, and what could not.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,7 +35,7 @@ pub struct SyncUndoResult {
 }
 
 impl<'a> SyncRunner<'a> {
-    pub fn new(transfers: &'a dyn SyncTransfers, deletes: &'a dyn SyncDeletes) -> SyncRunner<'a> {
+    pub fn new(transfers: &'a TransferExecutor, deletes: &'a DeleteExecutor<'a>) -> SyncRunner<'a> {
         SyncRunner { transfers, deletes }
     }
 
@@ -45,7 +43,7 @@ impl<'a> SyncRunner<'a> {
         &self,
         plans: &SyncPlans,
         cancel: &CancelToken,
-        progress: Option<&dyn Fn(&TransferProgress)>,
+        mut progress: Option<&mut (dyn FnMut(TransferProgress) + '_)>,
     ) -> SyncOutcome {
         // One denominator for the whole run, counted before it starts: a bar that restarts at
         // each destination folder would say a recursive sync was nearly done several times over.
@@ -60,10 +58,16 @@ impl<'a> SyncRunner<'a> {
                 break;
             }
 
-            let offset = Self::offset(progress, done, total);
-            let outcome =
-                self.transfers
-                    .execute(plan, &plans.resolutions, cancel, offset.as_deref());
+            let mut offset = Self::offset(progress.as_deref_mut(), done, total);
+            let outcome = self.transfers.execute(
+                plan,
+                Some(&plans.resolutions),
+                cancel,
+                offset
+                    .as_mut()
+                    .map(|f| f as &mut dyn FnMut(TransferProgress)),
+                None,
+            );
 
             done += plan.transfers.len();
             let stop = outcome.cancelled;
@@ -76,10 +80,7 @@ impl<'a> SyncRunner<'a> {
 
         let mut removals = DeleteOutcome::empty(plans.removals.permanent());
         if !cancelled && plans.removals.has_work() && !cancel.is_cancelled() {
-            let as_delete = Self::as_delete(progress, done, total);
-            removals = self
-                .deletes
-                .execute(&plans.removals, cancel, as_delete.as_deref());
+            removals = self.remove(&plans.removals, cancel, progress, done, total);
         }
 
         SyncOutcome {
@@ -100,11 +101,7 @@ impl<'a> SyncRunner<'a> {
         let delete_undo = if outcome.removals.can_undo() {
             self.deletes.undo(&outcome.removals, cancel)
         } else {
-            DeleteUndoResult {
-                restored: 0,
-                failed: Vec::new(),
-                reverted: Vec::new(),
-            }
+            DeleteUndoResult::default()
         };
 
         let mut restored = delete_undo.restored;
@@ -162,7 +159,7 @@ impl<'a> SyncRunner<'a> {
         &self,
         reverted: &SyncOutcome,
         cancel: &CancelToken,
-        progress: Option<&dyn Fn(&TransferProgress)>,
+        mut progress: Option<&mut (dyn FnMut(TransferProgress) + '_)>,
     ) -> SyncOutcome {
         let total = reverted
             .copies
@@ -180,15 +177,22 @@ impl<'a> SyncRunner<'a> {
                 break;
             }
 
-            let (plan, resolutions) = self.transfers.redo_plan(
+            let (plan, resolutions) = TransferRedo::plan_for(
                 TransferVerb::Copy,
                 &copy.destination_directory,
                 &copy.completed,
+                &[],
             );
-            let offset = Self::offset(progress, done, total);
-            let outcome = self
-                .transfers
-                .execute(&plan, &resolutions, cancel, offset.as_deref());
+            let mut offset = Self::offset(progress.as_deref_mut(), done, total);
+            let outcome = self.transfers.execute(
+                &plan,
+                Some(&resolutions),
+                cancel,
+                offset
+                    .as_mut()
+                    .map(|f| f as &mut dyn FnMut(TransferProgress)),
+                None,
+            );
             done += plan.transfers.len();
             let stop = outcome.cancelled;
             copies.push(outcome);
@@ -200,12 +204,8 @@ impl<'a> SyncRunner<'a> {
 
         let mut removals = DeleteOutcome::empty(reverted.removals.permanent);
         if !cancelled && !reverted.removals.deleted.is_empty() && !cancel.is_cancelled() {
-            let as_delete = Self::as_delete(progress, done, total);
-            removals = self.deletes.execute(
-                &self.deletes.redo_plan(&reverted.removals.deleted),
-                cancel,
-                as_delete.as_deref(),
-            );
+            let plan = DeleteRedo::plan_for(&reverted.removals.deleted);
+            removals = self.remove(&plan, cancel, progress, done, total);
         }
 
         SyncOutcome {
@@ -218,49 +218,58 @@ impl<'a> SyncRunner<'a> {
     /// Commits what the run set aside, once it can no longer be undone. Until this runs, a
     /// replaced file is still on disk in a staging folder and a removed one is still in the
     /// Recycle Bin.
-    pub fn retire(&self, outcome: &SyncOutcome) {
+    pub fn retire(outcome: &SyncOutcome) {
         for copy in &outcome.copies {
-            self.transfers.commit_staging(copy);
+            TransferExecutor::commit_staging(copy);
         }
-
-        self.deletes.commit_staging(&outcome.removals);
+        DeleteExecutor::commit_staging(&outcome.removals);
     }
 
-    fn offset<'p>(
-        inner: Option<&'p dyn Fn(&TransferProgress)>,
+    /// The removals, reported on the same bar as the copies. Byte figures are deliberately left at
+    /// zero: a delete moves no bytes, and carrying the copies' running total through would make the
+    /// throughput read as though it were still writing.
+    fn remove(
+        &self,
+        plan: &crate::delete::DeletePlan,
+        cancel: &CancelToken,
+        progress: Option<&mut (dyn FnMut(TransferProgress) + '_)>,
         done: usize,
         total: usize,
-    ) -> Option<OffsetTransfer<'p>> {
-        inner.map(move |report| {
-            Box::new(move |value: &TransferProgress| {
-                report(&TransferProgress {
+    ) -> DeleteOutcome {
+        let report = progress.map(RefCell::new);
+        let as_delete = report.as_ref().map(|report| {
+            move |value: DeleteProgress| {
+                (report.borrow_mut())(TransferProgress {
                     done: done + value.done,
                     total,
-                    ..value.clone()
-                })
-            }) as OffsetTransfer<'p>
-        })
-    }
-
-    /// The removals reported on the same bar as the copies. Byte figures are deliberately left at
-    /// zero: a delete moves no bytes, and carrying the copies' running total through would make
-    /// the throughput read as though it were still writing.
-    fn as_delete<'p>(
-        inner: Option<&'p dyn Fn(&TransferProgress)>,
-        done: usize,
-        total: usize,
-    ) -> Option<OffsetDelete<'p>> {
-        inner.map(move |report| {
-            Box::new(move |value: &DeleteProgress| {
-                report(&TransferProgress {
-                    done: done + value.done,
-                    total,
-                    current_name: value.current_name.clone(),
+                    current_name: value.current_name,
                     bytes_done: 0,
                     current_item_bytes: 0,
                     current_item_total: 0,
                 })
-            }) as OffsetDelete<'p>
+            }
+        });
+        self.deletes.execute(
+            plan,
+            cancel,
+            as_delete.as_ref().map(|f| f as &dyn Fn(DeleteProgress)),
+        )
+    }
+
+    /// A progress report re-based onto the whole run's denominator.
+    fn offset<'p, 'd: 'p>(
+        inner: Option<&'p mut (dyn FnMut(TransferProgress) + 'd)>,
+        done: usize,
+        total: usize,
+    ) -> Option<impl FnMut(TransferProgress) + 'p> {
+        inner.map(move |report| {
+            move |value: TransferProgress| {
+                report(TransferProgress {
+                    done: done + value.done,
+                    total,
+                    ..value
+                })
+            }
         })
     }
 }

@@ -5,9 +5,8 @@ use std::collections::HashMap;
 use bb_paths::file_name;
 
 use super::models::CompareVerdict;
-use super::transfer_stubs::{
-    ConflictResolution, DeleteOutcome, DeletePlan, FailedTransfer, TransferOutcome, TransferPlan,
-};
+use crate::delete::{DeleteOutcome, DeletePlan};
+use crate::transfer::{ConflictResolution, FailedTransfer, TransferOutcome, TransferPlan};
 
 /// What a sync would do about one entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

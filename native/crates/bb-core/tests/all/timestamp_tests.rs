@@ -7,12 +7,16 @@ use std::path::PathBuf;
 
 use bb_core::FileTime;
 use bb_core::attributes::{ARCHIVE, DIRECTORY, REPARSE_POINT};
+use bb_core::delete::{DeleteExecutor, FileSystemDeleteProbe};
 use bb_core::fs::DirectoryRemoval;
+use bb_core::rename::RenameExecutor;
 use bb_core::time::TICKS_PER_HOUR;
 use bb_core::timestamps::{
-    TimestampChange, TimestampEntry, TimestampExecutor, TimestampPlanner, TimestampProbe,
-    TimestampRejection,
+    TimestampChange, TimestampEntry, TimestampExecutor, TimestampOutcome, TimestampPlanner,
+    TimestampProbe, TimestampRejection,
 };
+use bb_core::transfer::TransferExecutor;
+use bb_core::undo::{PlainUndoHost, TimestampRecord, UndoKind, UndoableRecord};
 use bb_paths::fold_upper;
 use bb_test_support::unique_temp_path;
 
@@ -287,4 +291,38 @@ fn one_missing_file_does_not_stop_the_others() {
     assert_eq!(1, outcome.failed.len());
     assert_eq!(gone, outcome.failed[0].path);
     assert_eq!(noon().add_hours(1), last_write_utc(&kept));
+}
+
+// ---- undo record ----------------------------------------------------------------------------
+
+#[test]
+fn the_record_holds_nothing_and_steps_both_ways() {
+    let x = Fixture::new();
+    let transfers = TransferExecutor::default();
+    let deletes =
+        DeleteExecutor::new(&FileSystemDeleteProbe).staging_root(&x.root.to_string_lossy());
+    let renames = RenameExecutor;
+    let host = PlainUndoHost::without_archives(&transfers, &deletes, &renames);
+
+    let file = x.file("a.txt");
+    let outcome = TimestampExecutor::local().execute(&TimestampPlanner::local().plan(
+        std::slice::from_ref(&file),
+        &TimestampChange::shift(true, false, 3 * TICKS_PER_HOUR),
+    ));
+    let record = TimestampRecord::for_outcome(outcome).unwrap();
+
+    assert_eq!(UndoKind::Timestamps, record.kind());
+    assert!(record.held().is_empty());
+    assert_eq!("Change the date of a.txt", record.description());
+
+    let undone = record.step(&host);
+    assert!(undone.report.clean());
+    assert!(!undone.next.is_applied());
+    assert_eq!(noon(), last_write_utc(&file));
+
+    let redone = undone.next.step(&host);
+    assert!(redone.next.is_applied());
+    assert_eq!(noon().add_hours(3), last_write_utc(&file));
+
+    assert!(TimestampRecord::for_outcome(TimestampOutcome::empty()).is_none());
 }

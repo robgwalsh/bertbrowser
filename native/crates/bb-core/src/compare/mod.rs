@@ -19,7 +19,6 @@ mod service;
 mod sync_models;
 mod sync_planner;
 mod sync_runner;
-pub mod transfer_stubs;
 
 pub use content_settlement::ContentSettlement;
 pub use equality::{CompareEquality, CompareTolerance};
@@ -38,5 +37,5 @@ pub use service::{
     FolderCompareService,
 };
 pub use sync_models::{SyncAction, SyncActionKind, SyncOutcome, SyncPlans, SyncPreview};
-pub use sync_planner::SyncPlanner;
+pub use sync_planner::{DeletePlanning, SyncPlanner, TransferPlanning};
 pub use sync_runner::{SyncRunner, SyncUndoResult};

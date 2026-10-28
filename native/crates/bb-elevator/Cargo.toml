@@ -8,6 +8,15 @@ publish.workspace = true
 [dependencies]
 bb-paths = { path = "../bb-paths" }
 bb-core = { path = "../bb-core" }
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
 
 [build-dependencies]
 embed-manifest.workspace = true

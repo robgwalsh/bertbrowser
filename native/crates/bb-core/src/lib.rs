@@ -18,6 +18,7 @@ pub mod delete;
 pub mod diff;
 pub mod diskusage;
 pub mod duplicates;
+pub mod elevation;
 pub mod format;
 pub mod fs;
 pub mod ipc;
@@ -38,6 +39,7 @@ pub mod theming;
 pub mod time;
 pub mod timestamps;
 pub mod transfer;
+pub mod undo;
 
 pub use bb_paths as paths;
 pub use time::FileTime;

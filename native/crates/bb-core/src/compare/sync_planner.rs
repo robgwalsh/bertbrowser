@@ -10,10 +10,31 @@ use super::models::{CompareEntry, CompareKeys, CompareSide, CompareVerdict};
 use super::rules::CompareRules;
 use super::service::FolderCompareOutcome;
 use super::sync_models::{SyncAction, SyncActionKind, SyncPlans, SyncPreview};
-use super::transfer_stubs::{
-    ConflictResolution, DeleteMode, DeletePlan, DeletePlanning, DeleteSource, TransferPlan,
-    TransferPlanning, TransferVerb,
-};
+use crate::delete::{DeleteMode, DeletePlan, DeletePlanner, DeleteSource};
+use crate::transfer::{ConflictResolution, TransferPlan, TransferPlanner, TransferVerb};
+
+/// `TransferPlanner.Plan`, as a sync asks it: a seam so the planner's rules stay its own tests'
+/// business and `to_plans` can be pinned against an in-memory one.
+pub trait TransferPlanning {
+    fn plan(&self, sources: &[String], destination: &str, verb: TransferVerb) -> TransferPlan;
+}
+
+impl TransferPlanning for TransferPlanner {
+    fn plan(&self, sources: &[String], destination: &str, verb: TransferVerb) -> TransferPlan {
+        TransferPlanner::plan(self, sources, destination, verb)
+    }
+}
+
+/// `DeletePlanner.Plan`, as a sync asks it.
+pub trait DeletePlanning {
+    fn plan(&self, sources: &[DeleteSource], mode: DeleteMode) -> DeletePlan;
+}
+
+impl DeletePlanning for DeletePlanner<'_> {
+    fn plan(&self, sources: &[DeleteSource], mode: DeleteMode) -> DeletePlan {
+        DeletePlanner::plan(self, sources, mode)
+    }
+}
 
 pub struct SyncPlanner;
 
@@ -181,7 +202,7 @@ impl SyncPlanner {
         for (destination, sources) in &groups {
             let plan = transfers.plan(sources, destination, TransferVerb::Copy);
 
-            refused.extend(plan.problems().map(|p| p.message.clone()));
+            refused.extend(plan.problems().iter().map(|p| p.message.clone()));
 
             if !plan.has_work() {
                 continue;
@@ -200,10 +221,7 @@ impl SyncPlanner {
             .ticked()
             .into_iter()
             .filter(|a| a.kind == SyncActionKind::Delete)
-            .map(|a| DeleteSource {
-                path: a.target_path.clone(),
-                is_directory: a.is_directory,
-            })
+            .map(|a| DeleteSource::new(&a.target_path, a.is_directory))
             .collect();
         let delete_plan = if removals.is_empty() {
             DeletePlan::empty(mode)
@@ -211,7 +229,7 @@ impl SyncPlanner {
             deletes.plan(&removals, mode)
         };
 
-        refused.extend(delete_plan.problems().map(|p| p.message.clone()));
+        refused.extend(delete_plan.problems().iter().map(|p| p.message.clone()));
 
         SyncPlans {
             copies: plans,

@@ -2,9 +2,8 @@
 //! that opens a folder landing on a folder of the same name, the executor that carries the plan
 //! out against live disk state and records enough to undo it, and the small rules around them
 //! (the pause gate, progress coalescing, the queue, the rate, the estimate, the right-drag menu and
-//! the two drag-and-drop contracts). Spec: Core/Services/Transfer/*.cs, Core/Interop/CopyNative.cs.
-//!
-//! `TransferRedo` is not here: it waits for the undo-history port.
+//! the two drag-and-drop contracts, and the redo planner the undo history runs from).
+//! Spec: Core/Services/Transfer/*.cs, Core/Interop/CopyNative.cs.
 
 mod conflict_prompt;
 mod copier;
@@ -20,6 +19,7 @@ mod probe;
 mod progress;
 mod queue_rules;
 mod rate;
+mod redo;
 mod right_drop_menu;
 
 pub use conflict_prompt::{ConflictPrompt, KeepBothConflictPrompt};
@@ -40,4 +40,5 @@ pub use probe::{FileSystemTransferProbe, TransferEntry, TransferEntrySource, Tra
 pub use progress::ProgressCoalescer;
 pub use queue_rules::{QueuedJobState, QueuedJobSummary, TransferQueueRules};
 pub use rate::TransferRate;
+pub use redo::TransferRedo;
 pub use right_drop_menu::{RightDropContext, RightDropEntry, RightDropMenuRules, RightDropVerb};

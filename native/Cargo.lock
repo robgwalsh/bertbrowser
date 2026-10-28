@@ -73,6 +73,7 @@ dependencies = [
  "bb-core",
  "bb-paths",
  "embed-manifest",
+ "windows-sys",
 ]
 
 [[package]]

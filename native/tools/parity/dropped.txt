@@ -1,19 +1,4 @@
 # C# tests deliberately not ported, one per line: FileTests.cs::MethodName  reason
 # Everything else in a ported file must exist in Rust under the snake_cased name.
 
-# SyncOverwriteTests exercises TransferPlanner/TransferExecutor alone (ConflictResolution.Overwrite,
-# UndoCopies, CommitStaging, StagedItems) on real disk; nothing in Compare is under test. It belongs
-# beside transfer_executor_tests.rs and is deferred to the Transfer port, which owns those types.
-SyncOverwriteTests.cs::ACopyWithOverwriteTakesTheName  transfer executor, deferred to the Transfer port
-SyncOverwriteTests.cs::TheDisplacedFileIsIntactInStaging  transfer executor, deferred to the Transfer port
-SyncOverwriteTests.cs::ReplaceOnACopyIsStillDowngradedToKeepBoth  transfer executor, deferred to the Transfer port
-SyncOverwriteTests.cs::ACopyOutcomeIsStillNotUndoableOnItsOwn  transfer executor, deferred to the Transfer port
-SyncOverwriteTests.cs::AFolderCanBeOverwrittenToo  transfer executor, deferred to the Transfer port
-SyncOverwriteTests.cs::UndoPutsTheDisplacedFileBackAndRemovesTheCopy  transfer executor, deferred to the Transfer port
-SyncOverwriteTests.cs::UndoRemovesWhatTheCopyMerelyAdded  transfer executor, deferred to the Transfer port
-SyncOverwriteTests.cs::UndoRemovesAWholeCopiedFolder  transfer executor, deferred to the Transfer port
-SyncOverwriteTests.cs::UndoClearsTheStagingFolderItEmptied  transfer executor, deferred to the Transfer port
-SyncOverwriteTests.cs::UndoRefusesAMove  transfer executor, deferred to the Transfer port
-SyncOverwriteTests.cs::CommitStagingErasesTheDisplacedOriginalAndNothingElse  transfer executor, deferred to the Transfer port
 TimestampTests.cs::A_picture_can_be_dated_from_what_its_camera_wrote  needs the Metadata codecs and MetadataFixtures (not ported); FileSystemTimestampProbe::date_taken_of is a TODO(port) returning None until then
-TimestampTests.cs::The_record_holds_nothing_and_steps_both_ways  exercises UndoHistory (TimestampRecord, PlainUndoHost), not ported; belongs to that area
