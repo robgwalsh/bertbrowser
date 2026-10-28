@@ -16,5 +16,12 @@ windows-sys = { workspace = true, features = [
     "Win32_System_Threading",
 ] }
 
+# IShellLink: the shortcut writer.
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+] }
+
 [dev-dependencies]
 bb-test-support = { path = "../bb-test-support" }

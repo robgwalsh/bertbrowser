@@ -64,6 +64,8 @@ public:
     // A button was clicked (its row) / the overflow button was (the rows behind it, the button's rect).
     std::function<void(const BarRow&, ui::Rect)> on_activate;
     std::function<void(const std::vector<BarRow>&, ui::Rect)> on_overflow;
+    // A right click on a button (its row, its rect): the Undo and Redo buttons open their history list.
+    std::function<void(const BarRow&, ui::Rect)> on_context;
 
     ui::Size measure(ui::Size avail) override;
     void arrange(ui::Rect r) override;

@@ -39,6 +39,8 @@ pub(crate) struct Extra {
     pub gifs: Mutex<std::collections::HashMap<u64, Arc<crate::gif_player::GifPlayer>>>,
     /// The tool windows' state: checksums, the file compare, the change timeline.
     pub tools: crate::tools::ToolsState,
+    /// The operations UI: the transfer in flight, the queue, the questions a window answers.
+    pub ops: crate::ops_ui::OpsUi,
 }
 
 impl Extra {
@@ -47,6 +49,7 @@ impl Extra {
         paths: &AppPaths,
         _config: &AppConfig,
         _db: &Arc<Db>,
+        ops: crate::ops_ui::OpsUi,
     ) -> Extra {
         Extra {
             ui: Mutex::new(UiState::default()),
@@ -63,6 +66,7 @@ impl Extra {
             metadata: Default::default(),
             gifs: Default::default(),
             tools: Default::default(),
+            ops,
         }
     }
 }

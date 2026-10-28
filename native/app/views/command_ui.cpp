@@ -247,6 +247,14 @@ void CommandToolbar::paint(PaintContext& pc) {
 }
 
 bool CommandToolbar::on_mouse_down(const MouseEvent& e) {
+    if (e.button == MouseButton::Right && on_context) {
+        const int at = index_at(e.pt);
+        if (at >= 0 && at != kOverflow && items_[static_cast<size_t>(at)].row.kind == "command") {
+            on_context(items_[static_cast<size_t>(at)].row, item_rect(static_cast<size_t>(at)));
+            return true;
+        }
+        return false;
+    }
     if (e.button != MouseButton::Left) return false;
     pressed_ = index_at(e.pt);
     invalidate();

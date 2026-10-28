@@ -34,6 +34,8 @@ use bb_core::layout::SplitOrientation;
 
 mod features;
 pub use features::*;
+mod ops_ffi;
+pub use ops_ffi::*;
 mod panes;
 pub use panes::*;
 mod tools;
@@ -1301,7 +1303,8 @@ pub unsafe extern "C" fn bb_op_pause(app: *mut BbApp, paused: bool) -> BbStatus 
     })
 }
 
-/// Cancels a queued operation.
+/// Cancels an operation: one still waiting never starts, the running one is told to stop (and a
+/// pause is lifted so it can notice).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_op_cancel(app: *mut BbApp, op: u64) -> BbStatus {
     guard(|| Ok(unsafe { app_of(app)? }.app.op_cancel(OpId(op))?))

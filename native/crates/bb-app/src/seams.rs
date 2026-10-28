@@ -11,6 +11,9 @@ use bb_core::theming::SystemAppearance;
 use bb_core::transfer::{ConflictDefaults, ConflictResolution, Resolutions, TransferPlan};
 use bb_paths::PathKey;
 
+use crate::events::EventHub;
+use crate::ops_ui::Questions;
+
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
@@ -105,6 +108,35 @@ impl Seams {
         seams.appearance = Arc::new(PushedAppearance::default());
         seams
     }
+
+    /// A window that can ask: a clash or an offer of administrator rights parks the transfer
+    /// thread until the host answers (`ops_do`), and raises `Model::Conflicts` / `Model::Elevation`
+    /// so the host knows to put the question up.
+    pub(crate) fn interactive(hub: EventHub, questions: Arc<Questions>) -> Seams {
+        let mut seams = Seams::unattended();
+        let prompts = Arc::new(UiPrompts { hub, questions });
+        seams.conflicts = prompts.clone();
+        seams.elevation = prompts;
+        seams
+    }
+}
+
+struct UiPrompts {
+    hub: EventHub,
+    questions: Arc<Questions>,
+}
+
+impl AppConflictPrompt for UiPrompts {
+    fn ask(&self, plan: &TransferPlan) -> Option<Resolutions> {
+        self.questions.ask_conflicts(&self.hub, plan)
+    }
+}
+
+impl ElevationLauncher for UiPrompts {
+    fn offer(&self, what: &str) -> bool {
+        let model = serde_json::from_str(what).unwrap_or(serde_json::Value::Null);
+        self.questions.ask_elevation(&self.hub, model)
+    }
 }
 
 /// Everything the harness fakes, in one object, so a script can pose an answer and read back what
@@ -118,6 +150,9 @@ pub struct HarnessProbes {
     conflict_answers: Mutex<HashMap<String, ConflictResolution>>,
     conflict_cancel: Mutex<bool>,
     conflict_asks: Mutex<usize>,
+    conflict_all: Mutex<Option<ConflictResolution>>,
+    conflict_names: Mutex<HashMap<String, ConflictResolution>>,
+    conflict_model: Mutex<serde_json::Value>,
     appearance: Mutex<SystemAppearance>,
 }
 
@@ -132,6 +167,9 @@ impl Default for HarnessProbes {
             conflict_answers: Mutex::default(),
             conflict_cancel: Mutex::new(false),
             conflict_asks: Mutex::new(0),
+            conflict_all: Mutex::new(None),
+            conflict_names: Mutex::default(),
+            conflict_model: Mutex::new(serde_json::Value::Null),
             appearance: Mutex::new(SystemAppearance::DARK),
         }
     }
@@ -172,6 +210,37 @@ impl HarnessProbes {
 
     pub fn cancel_conflicts(&self, cancel: bool) {
         *lock(&self.conflict_cancel) = cancel;
+        if cancel {
+            lock(&self.conflict_names).clear();
+        }
+    }
+
+    /// Answers every clash the same way from now on.
+    pub fn answer_all_conflicts(&self, resolution: ConflictResolution) {
+        *lock(&self.conflict_all) = Some(resolution);
+        lock(&self.conflict_names).clear();
+        *lock(&self.conflict_cancel) = false;
+    }
+
+    /// Answers clashes by the label the dialog shows (`photos\2024\a.jpg`, `/` or `\`) or by
+    /// leaf name; what is not named keeps its default.
+    pub fn answer_named_conflicts(&self, answers: HashMap<String, ConflictResolution>) {
+        *lock(&self.conflict_names) = answers
+            .into_iter()
+            .map(|(k, v)| (crate::ops_ui::label_key(&k), v))
+            .collect();
+        *lock(&self.conflict_all) = None;
+        *lock(&self.conflict_cancel) = false;
+    }
+
+    /// The dialog's model for the last plan that was asked about (or `conflict-plan`ned).
+    pub fn last_conflict_model(&self) -> serde_json::Value {
+        lock(&self.conflict_model).clone()
+    }
+
+    /// Notes a plan as the last one offered without asking.
+    pub fn offer_conflicts(&self, plan: &TransferPlan) {
+        *lock(&self.conflict_model) = crate::ops_ui::conflict_model(plan, "Ctrl+Z");
     }
 
     pub fn set_appearance(&self, appearance: SystemAppearance) {
@@ -209,18 +278,25 @@ impl UserNotice for HarnessProbes {
 impl AppConflictPrompt for HarnessProbes {
     fn ask(&self, plan: &TransferPlan) -> Option<Resolutions> {
         *lock(&self.conflict_asks) += 1;
+        self.offer_conflicts(plan);
         if *lock(&self.conflict_cancel) {
             return None;
         }
         let posed = lock(&self.conflict_answers);
+        let named = lock(&self.conflict_names);
+        let all = *lock(&self.conflict_all);
         Some(
             plan.conflicts()
                 .into_iter()
                 .filter_map(|t| {
                     let key = PathKey::canonicalize(&t.source_path).ok()?;
-                    let answer = posed
-                        .get(&key)
-                        .copied()
+                    let by_name = named
+                        .get(&crate::ops_ui::label_key(&plan.label_for(t)))
+                        .or_else(|| named.get(&crate::ops_ui::label_key(t.name())))
+                        .copied();
+                    let answer = by_name
+                        .or_else(|| posed.get(&key).copied())
+                        .or(all)
                         .unwrap_or_else(|| ConflictDefaults::for_transfer(t));
                     Some((key, answer))
                 })

@@ -1088,6 +1088,10 @@ impl Inner {
                 self.set_paused(false);
                 Ok(())
             }
+            "tools.transfer-cancel" => {
+                self.cancel_running();
+                Ok(())
+            }
             "preview.mode-auto" | "preview.mode-raw" | "preview.mode-hex" => {
                 lock(&cell).preview_mode = match id {
                     "preview.mode-auto" => 0,

@@ -1,5 +1,7 @@
 #include "session.h"
 
+#include "canned_shell_menu.h"
+
 #include <windows.h>
 
 #include <chrono>
@@ -115,6 +117,7 @@ std::unique_ptr<Session> Session::start(const Options& options) {
     // Pictures are generated, so a capture never depends on what the machine's shell has cached.
     s->view_->set_thumbnail_source(bb::views::ThumbSource::Generated);
     s->view_->set_headless_dialogs(true);
+    s->view_->set_shell_source(std::make_unique<CannedShellMenuSource>());
     // The OS is posed by the script (`system-theme`), never read from this desk.
     s->view_->set_follow_windows(false);
     s->window_->show();

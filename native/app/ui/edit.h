@@ -14,6 +14,7 @@ public:
     std::wstring placeholder;
     bool multiline;
     bool read_only = false;
+    bool password = false;  // shows a dot per character (the archive password box)
     std::function<void(const std::wstring&)> on_changed;  // after any change to the text
     std::function<void()> on_commit;                      // Enter, single-line
     std::function<void()> on_cancel;                      // Escape

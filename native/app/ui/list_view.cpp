@@ -164,6 +164,10 @@ void ListView::paint(PaintContext& pc) {
             } else if (const Token tint = provider_->row_tint(row); tint != kNoToken) {
                 pc.fill(rr, tint);
             }
+            if (row == drop_row) {
+                pc.fill(rr, tok::ListSelectedInactiveBackground);
+                pc.stroke(rr, tok::AccentBackground, 2.0f);
+            }
             if (row == cursor_ && focused()) {
                 pc.stroke(rr, tok::BorderFocus);
             }
@@ -339,12 +343,32 @@ bool ListView::on_mouse_down(const MouseEvent& e) {
         } else if (e.mods.ctrl) {
             provider_->select(SelectOp::Toggle, row, row);
             anchor_ = cursor_ = row;
+        } else if (on_drag_start && e.button == MouseButton::Left && e.clicks < 2 && provider_->selected(row)) {
+            // Pressing on the selection must not narrow it yet: it may be about to be dragged whole.
+            deferred_row_ = row;
+            anchor_ = cursor_ = row;
         } else {
             provider_->select(SelectOp::Replace, row, row);
             anchor_ = cursor_ = row;
         }
         if (e.clicks >= 2 && e.button == MouseButton::Left && on_activate) on_activate(row);
-        if (e.button == MouseButton::Right && on_context) on_context(e.pt, row);
+        const bool may_drag = on_drag_start && e.clicks < 2 && (e.button == MouseButton::Left || e.button == MouseButton::Right);
+        if (may_drag) {
+            drag_armed_ = true;
+            drag_origin_ = e.pt;
+            drag_button_ = e.button;
+            root()->capture(this);
+        }
+        if (e.button == MouseButton::Right && on_context) {
+            if (may_drag) {
+                // The menu opens on release, once it is known the press was not the start of a drag.
+                context_pending_ = true;
+                context_point_ = e.pt;
+                context_row_ = row;
+            } else {
+                on_context(e.pt, row);
+            }
+        }
         invalidate();
         return true;
     }
@@ -391,6 +415,18 @@ void ListView::update_marquee(Point p) {
 }
 
 bool ListView::on_mouse_move(const MouseEvent& e) {
+    if (drag_armed_) {
+        if (std::abs(e.pt.x - drag_origin_.x) > kDragStart * 2 || std::abs(e.pt.y - drag_origin_.y) > kDragStart * 2) {
+            drag_armed_ = false;
+            context_pending_ = false;
+            deferred_row_ = npos;
+            const MouseButton button = drag_button_;
+            root()->release_capture();
+            // The drag runs OLE's own loop and returns when the button is released.
+            if (on_drag_start) on_drag_start(button);
+        }
+        return true;
+    }
     if (bar_drag_) {
         v_.mouse_move(e.pt);
         h_.mouse_move(e.pt);
@@ -433,6 +469,22 @@ bool ListView::on_mouse_move(const MouseEvent& e) {
 
 bool ListView::on_mouse_up(const MouseEvent& e) {
     bool handled = false;
+    if (drag_armed_) {
+        // A press that turned out to be a plain click: the selection change held back applies now, and so
+        // does the menu a right press asked for.
+        drag_armed_ = false;
+        root()->release_capture();
+        if (deferred_row_ != npos && provider_) {
+            provider_->select(SelectOp::Replace, deferred_row_, deferred_row_);
+            deferred_row_ = npos;
+        }
+        if (context_pending_ && on_context) {
+            context_pending_ = false;
+            on_context(context_point_, context_row_);
+        }
+        invalidate();
+        return true;
+    }
     if (bar_drag_) {
         v_.mouse_up();
         h_.mouse_up();

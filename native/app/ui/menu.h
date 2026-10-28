@@ -22,6 +22,7 @@ struct MenuItem {
     bool checked = false;  // a check mark, or a bullet when `radio`
     bool radio = false;
     bool enabled = true;
+    bool marked = false;  // drawn as hovered without being the selection (the undo list's "back to here")
     int id = 0;
     std::function<void()> on_invoke;
     MenuItems sub;  // non-empty = a submenu

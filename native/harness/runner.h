@@ -13,6 +13,9 @@
 
 namespace bbh {
 
+// Lifts the denials `deny` made (runner_ops.cpp); the run calls it before it ends.
+void release_denials();
+
 class Runner {
 public:
     Runner(Session& session, const Options& options);
@@ -29,6 +32,7 @@ private:
     void install_ui();
     void install_panes();
     void install_tools();
+    void install_ops();
 
     // ---- helpers ----
     static std::pair<std::wstring, std::wstring> split_first(const std::wstring& line);
@@ -50,7 +54,8 @@ private:
     bb::views::PreviewPane* preview_pane();
     bb::views::MetadataPane* metadata_pane();
     void press_metadata(bb::views::MetadataPane* pane, int action, const std::string& what);
-    void await_op(uint64_t op);
+    // A refused or failed operation is reported on the status line, not thrown: a script asserts what it expects.
+    void await_op(uint64_t op, bool tolerate_failure = false);
     void transfer(const std::wstring& rest, bool move);
     void erase(const std::wstring& rest, BbDeleteMode mode);
     void undo_step(int steps);

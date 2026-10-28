@@ -459,6 +459,9 @@ void SettingsView::page_history(Widget& p) {
     f::note(p, L"Undo lasts for this session. The budget is released oldest first; the next undo is never released.");
     number_row(p, L"Steps to remember", "undoMaxSteps");
     number_row(p, L"Most data to hold", "undoMaxHeldGigabytes", L"GB");
+    auto* clear = f::button(p, L"Clear the undo history now", [this] { bb_undo_clear(core_.app()); });
+    clear->name = "ClearUndoHistory";
+    clear->width = 220;
 }
 
 void SettingsView::page_new_items(Widget& p) {
@@ -547,22 +550,6 @@ void SettingsView::page_saved(Widget& p, bool workspaces) {
         f::ListEntry e;
         e.text = workspaces ? L"No saved workspaces yet" : L"No saved searches yet";
         e.muted = true;
-        entries.push_back(std::move(e));
-    }
-    list->set_entries(std::move(entries));
-}
-
-void SettingsView::page_context_menu(Widget& p) {
-    f::heading(p, L"Context menu");
-    f::note(p, L"What a right-click on a file offers. Entries added by other programs (7-Zip, Git, TortoiseSVN and the like) are listed "
-               L"with a tick beside each; untick one to hide it. Anything new that gets installed shows up without a visit here.");
-    bool_row(p, L"Show entries added by other programs", "showShellExtensions");
-    auto* list = p.emplace<f::ItemList>();
-    list->height = 200;
-    std::vector<f::ListEntry> entries;
-    for (const wchar_t* t : {L"Open", L"Cut", L"Copy", L"Paste", L"Rename…", L"Delete…", L"Copy as path", L"Bookmark", L"Properties"}) {
-        f::ListEntry e;
-        e.text = L"☑  " + std::wstring(t);
         entries.push_back(std::move(e));
     }
     list->set_entries(std::move(entries));

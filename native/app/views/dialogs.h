@@ -26,6 +26,8 @@ struct DialogContext {
     std::function<void()> close;  // dismisses the dialog (a no-op for a photograph)
 };
 
+using DialogBuilder = std::function<std::unique_ptr<ui::Widget>(DialogContext&)>;
+
 // Whether a kind of dialog exists.
 bool dialog_exists(const std::wstring& kind);
 // The kinds, for the error that names them.

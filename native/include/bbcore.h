@@ -490,7 +490,8 @@ enum BbStatus bb_op_rename(struct BbApp *app,
 // Pauses or resumes the running transfer, mid-file. The queue stays held while paused.
 enum BbStatus bb_op_pause(struct BbApp *app, bool paused);
 
-// Cancels a queued operation.
+// Cancels an operation: one still waiting never starts, the running one is told to stop (and a
+// pause is lifted so it can notice).
 enum BbStatus bb_op_cancel(struct BbApp *app, uint64_t op);
 
 // An operation's phase, and (in `out_message`, when non-NULL) the sentence it ended with.
@@ -797,6 +798,21 @@ enum BbStatus bb_ui_set_dialog_open(struct BbApp *app, bool open);
 // Starts or stops comparing the active pane with the next. (Only the switch and its gates live
 // here; the comparison engine is not part of this layer.)
 enum BbStatus bb_compare_toggle(struct BbApp *app);
+
+// A model of the operations UI as JSON text: `queue`, `history`, `conflicts`, `elevation`,
+// `right-drop-menu`, `drop-allowed`, `drop-decide`, `dragout-decide`, `rename-preview`,
+// `context-menu`, `menu-arrange`, `menu-tidy`, `compress-defaults`, `archive-of`.
+enum BbStatus bb_ops_query(struct BbApp *app,
+                           struct BbStr what,
+                           struct BbStr arg,
+                           struct BbOwnedStr *out_json);
+
+// A verb of the operations UI. `out_json` (when non-NULL) receives `{"op": N}` for a verb that
+// started work, `{}` otherwise.
+enum BbStatus bb_ops_do(struct BbApp *app,
+                        struct BbStr verb,
+                        struct BbStr arg,
+                        struct BbOwnedStr *out_json);
 
 // What the preview pane shows for the tab's selection, as JSON `{state, title, subtitle, message,
 // canChooseMode, path, lines, spans, footer, entries, ...}`; see `bb-app/src/preview.rs`. `mode` is

@@ -44,6 +44,7 @@ dependencies = [
  "bb-test-support",
  "serde",
  "serde_json",
+ "windows",
  "windows-sys",
 ]
 

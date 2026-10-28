@@ -261,7 +261,7 @@ pub(crate) struct Inner {
     pub search: SearchService,
     /// The real file system with archives made to look like folders (a path inside one lists its
     /// entries); an ordinary path never reaches the archive code.
-    pub fs: bb_core::archives::ArchiveAwareFileSystemService,
+    pub fs: Arc<bb_core::archives::ArchiveAwareFileSystemService>,
     pub pool: WorkerPool,
     pub shell: Mutex<Shell>,
     pub next_id: AtomicU64,
@@ -307,12 +307,15 @@ impl App {
         let repository = Arc::new(FsIndexRepository::new(db.clone()));
         let crawler = Arc::new(IndexCrawler::new(repository.clone()));
 
+        let hub = EventHub::default();
+        let questions = Arc::new(crate::ops_ui::Questions::default());
+        let passwords = Arc::new(crate::ops_arch::SessionPasswords::default());
         let (mut seams, probes) = match config.fakes {
             Fakes::Harness => {
                 let (seams, probes) = Seams::harness();
                 (seams, Some(probes))
             }
-            Fakes::None => (Seams::unattended(), None),
+            Fakes::None => (Seams::interactive(hub.clone(), questions.clone()), None),
         };
         if config.index_declined {
             seams.index = crate::index::declined_index();
@@ -322,8 +325,17 @@ impl App {
             Fakes::None => Arc::new(IndexWatcherService::new(repository.clone())),
         };
         let content_bytes = settings.search_content_max_bytes;
+        let fs = Arc::new(
+            bb_core::archives::ArchiveAwareFileSystemService::with_passwords(
+                Arc::new(LocalFileSystem),
+                Arc::new(bb_core::archives::LibraryArchiveReader::default()),
+                passwords.clone(),
+                bb_core::archives::ArchiveCache::default(),
+            ),
+        );
         let search = SearchService::new(repository, crawler, watchers, seams.index.clone())
-            .with_content_budget(Box::new(move || content_bytes.max(0) as u64));
+            .with_content_budget(Box::new(move || content_bytes.max(0) as u64))
+            .with_archives(fs.clone());
 
         let (layout, _) = LayoutTree::new(PaneId(1));
         let mut panes = HashMap::new();
@@ -339,15 +351,12 @@ impl App {
         let undo = UndoStack::new(settings.effective_undo_budget());
         let inner = Arc::new(Inner {
             pool: WorkerPool::new(config.workers),
-            hub: EventHub::default(),
+            hub,
             seams,
             probes,
             dir_sizes: DirSizeRepository::new(db.clone()),
             search,
-            fs: bb_core::archives::ArchiveAwareFileSystemService::new(
-                Arc::new(LocalFileSystem),
-                Arc::new(bb_core::archives::LibraryArchiveReader::default()),
-            ),
+            fs,
             shell: Mutex::new(Shell {
                 layout,
                 panes,
@@ -368,7 +377,13 @@ impl App {
             keymap: Mutex::new(Arc::new(crate::commands::build_keymap(
                 settings.key_bindings.as_ref(),
             ))),
-            extra: crate::state::Extra::new(&settings, &paths, &config, &db),
+            extra: crate::state::Extra::new(
+                &settings,
+                &paths,
+                &config,
+                &db,
+                crate::ops_ui::OpsUi::new(questions, passwords),
+            ),
             settings: Mutex::new(settings),
             settings_path,
             db,

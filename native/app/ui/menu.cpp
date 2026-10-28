@@ -141,7 +141,7 @@ void MenuPanel::paint(PaintContext& pc) {
             pc.line({r.l + 4, y}, {r.r - 4, y}, tok::MenuSeparator);
             continue;
         }
-        const bool sel = i == selected && it.enabled;
+        const bool sel = (i == selected || it.marked) && it.enabled;
         if (sel) pc.fill(r, tok::MenuHoverBackground);
         const Token fg = !it.enabled ? tok::MenuDisabledForeground : (sel ? tok::MenuHoverForeground : tok::MenuForeground);
         const Token icon_fg = !it.enabled ? tok::MenuDisabledForeground : (sel ? tok::MenuHoverForeground : tok::MenuIconForeground);

@@ -57,6 +57,12 @@ add_library(bbviews STATIC
   views/tool_dialogs.cpp
   views/tool_banner.cpp
   views/main_view.cpp
+  views/ops_dialogs.cpp
+  views/ops_forms.cpp
+  views/file_drag.cpp
+  views/ops_menus.cpp
+  views/shell_menu_real.cpp
+  views/settings_ctxmenu.cpp
 )
 target_include_directories(bbviews PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(bbviews PUBLIC bbapp bbcore mfplat mf mfuuid)

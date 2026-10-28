@@ -5,6 +5,7 @@
 #include "views/command_ui.h"
 #include "views/main_view.h"
 #include "views/tool_dialogs.h"
+#include "views/ops.h"
 
 #include <windows.h>
 
@@ -382,36 +383,6 @@ std::unique_ptr<Panel> theme_editor(DialogContext& cx) {
     return std::move(c.root);
 }
 
-std::unique_ptr<Panel> transfer(DialogContext& cx) {
-    const TransferPose& pose = cx.main.transfer_pose();
-    Card c = make_card(pose.active ? pose.headline : L"Transfers", 560);
-    if (!pose.active) {
-        f::note(*c.body, L"Nothing is being copied or moved.");
-    } else {
-        auto* bar = c.body->emplace<ProgressBar>();
-        bar->set_value(pose.fraction);
-        bar->set_indeterminate(pose.indeterminate);
-        bar->height = 8;
-        f::text(*c.body, pose.detail, tok::TextSecondary, 13.0f)->wrap = true;
-        f::text(*c.body, L"Items", tok::TextSecondary, 13.0f);
-        auto* list = c.body->emplace<f::ItemList>();
-        list->height = 26.0f * static_cast<float>(std::max<size_t>(3, pose.items.size())) + 4;
-        std::vector<f::ListEntry> entries;
-        for (const auto& it : pose.items) {
-            f::ListEntry e;
-            e.text = it.first;
-            e.detail = it.second == 2 ? L"done" : it.second == 1 ? L"copying\u2026" : L"waiting";
-            e.muted = it.second == 0;
-            entries.push_back(std::move(e));
-        }
-        list->set_entries(std::move(entries));
-        if (!pose.destination.empty()) f::text(*c.body, L"To  " + pose.destination, tok::TextMuted, 13.0f);
-    }
-    add_button(c, L"Pause", cx.close)->set_enabled(pose.active);
-    add_button(c, L"Cancel", cx.close)->set_enabled(pose.active);
-    add_button(c, L"Close", cx.close, true);
-    return std::move(c.root);
-}
 
 std::unique_ptr<Panel> search_syntax(DialogContext& cx) {
     Card c = make_card(L"Search syntax", 640);
@@ -591,7 +562,6 @@ const std::map<std::wstring, Builder>& builders() {
         {L"columns", columns_dialog},
         {L"properties", properties},
         {L"theme-editor", theme_editor},
-        {L"transfer", transfer},
         {L"search-syntax", search_syntax},
         {L"compress", compress},
         {L"extract", extract},
@@ -605,19 +575,35 @@ const std::map<std::wstring, Builder>& builders() {
     return table;
 }
 
+// The dialogs that live in their own files (views/ops_*.cpp); they win over a kind of the same name above.
+const std::map<std::wstring, DialogBuilder>& extra_builders() {
+    static const std::map<std::wstring, DialogBuilder> table = [] {
+        std::map<std::wstring, DialogBuilder> t;
+        ops::add_dialogs(t);
+        return t;
+    }();
+    return table;
+}
+
 }  // namespace
 
-bool dialog_exists(const std::wstring& kind) { return builders().count(kind) > 0 || tool_dialog_exists(kind); }
+bool dialog_exists(const std::wstring& kind) {
+    return builders().count(kind) > 0 || extra_builders().count(kind) > 0 || tool_dialog_exists(kind);
+}
 
 std::vector<std::wstring> dialog_kinds() {
     std::vector<std::wstring> out;
     for (const auto& kv : builders()) out.push_back(kv.first);
+    for (const auto& kv : extra_builders()) {
+        if (!builders().count(kv.first)) out.push_back(kv.first);
+    }
     for (const auto& kind : tool_dialog_kinds()) out.push_back(kind);
     std::sort(out.begin(), out.end());
     return out;
 }
 
 std::unique_ptr<Widget> build_dialog(const std::wstring& kind, DialogContext ctx) {
+    if (const auto it = extra_builders().find(kind); it != extra_builders().end()) return it->second(ctx);
     const auto it = builders().find(kind);
     if (it == builders().end()) return tool_build_dialog(kind, ctx);
     return it->second(ctx);

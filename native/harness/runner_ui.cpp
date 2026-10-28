@@ -656,6 +656,7 @@ void Runner::install_ui() {
         s_.view().sync_overlays();
         if (lower(tail) == L"dragging") s_.view().settings()->pose_column_drag(true);
         else s_.view().settings()->pose_column_drag(false);
+        if (lower(tail) == L"new-command") s_.view().settings()->open_new_command();
         s_.settle();
     };
     verbs_[L"assert-bar-rows"] = [this](const std::wstring& r) {
@@ -1244,44 +1245,6 @@ void Runner::install_ui() {
         auto bitmap = s_.view().render_dialog(k);
         if (!bitmap) throw AssertionError("the " + to_utf8(k) + " dialog could not be rendered.");
         write_shot(*bitmap, name.empty() ? L"dialog-" + k : name);
-    };
-    verbs_[L"progress-demo"] = [this](const std::wstring& r) {
-        const std::wstring arg = lower(trim(r));
-        if (arg == L"off") {
-            s_.view().set_transfer_pose({});
-            return;
-        }
-        if (!arg.empty() && arg != L"sized" && arg != L"unsized" && arg != L"queued") {
-            throw FormatError("progress-demo takes nothing, 'sized', 'unsized', 'queued' or 'off'.");
-        }
-        const bool sized = arg != L"unsized";
-        constexpr int64_t kTotal = 50LL * 1024 * 1024 * 1024, kDone = 4509715660LL, kRate = 117440512;
-        bb::views::TransferPose p;
-        p.active = true;
-        p.headline = L"Copying 3 items to Archive";
-        p.destination = (sandbox_.root() / "Archive").wstring();
-        p.items = {{L"archive.zip", 2}, {L"photo.jpg", 1}, {L"Pictures", 0}};
-        p.indeterminate = !sized;
-        p.fraction = sized ? static_cast<double>(kDone) / static_cast<double>(kTotal) : 0.0;
-        const int64_t left_s = (kTotal - kDone) / kRate;
-        p.detail = bb::views::format_bytes(kDone) + (sized ? L" of " + bb::views::format_bytes(kTotal) : L"") + L"  ·  " +
-                   std::to_wstring(kRate / (1024 * 1024)) + L" MB/s" +
-                   (sized ? L"  ·  about " + std::to_wstring(left_s / 60) + L" min left" : L"") + L"  ·  photo.jpg (2 of 3)";
-        s_.view().set_transfer_pose(std::move(p));
-        s_.settle();
-    };
-    verbs_[L"assert-transfer"] = [this](const std::wstring& r) {
-        const std::wstring expected = require(r, "assert-transfer");
-        const std::wstring actual = s_.view().transfer_text();
-        if (actual.empty()) throw AssertionError("expected a transfer showing '" + to_utf8(expected) + "', but none is running. Run 'progress-demo' first.");
-        if (!core::icontains(actual, expected)) throw AssertionError("expected the transfer to show '" + to_utf8(expected) + "', got '" + to_utf8(actual) + "'.");
-    };
-    verbs_[L"assert-transfer-indeterminate"] = [this](const std::wstring&) {
-        const auto& p = s_.view().transfer_pose();
-        if (!p.active) throw AssertionError("no transfer is running. Run 'progress-demo unsized' first.");
-        if (!p.indeterminate) {
-            throw AssertionError("the transfer bar is determinate, but its byte total was never established - a bar pinned at zero reads as a stall rather than as an unmeasured volume.");
-        }
     };
     verbs_[L"duplicates"] = [this](const std::wstring& r) {
         const fs::path path = r.empty() ? fs::path(s_.core().tab_text(tab(), BB_TEXT_PATH)) : sandbox_.resolve(r);
