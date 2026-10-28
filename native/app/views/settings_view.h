@@ -34,6 +34,8 @@ public:
     std::wstring recorder_text() const;
     bool key_row(const std::wstring& label, std::vector<std::wstring>* chords) const;
     bool dragging_pose() const { return dragging_pose_; }
+    // The Context menu page's New command button, pressed (the editor it opens is what gets photographed).
+    void open_new_command();
     void pose_column_drag(bool on);
     ui::Widget* body() { return body_; }
 
@@ -75,6 +77,8 @@ private:
     std::string page_;
     std::string signature_;
     bool dragging_pose_ = false;
+    int menu_selected_ = -1;
+    bool command_editor_ = false;
     ui::Widget* card_ = nullptr;
     ui::StackPanel* nav_ = nullptr;
     ui::ScrollViewer* scroll_ = nullptr;

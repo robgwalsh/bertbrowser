@@ -14,7 +14,9 @@
 #include "views/chrome.h"
 #include "views/command_ui.h"
 #include "views/dialogs.h"
+#include "views/file_drag.h"
 #include "views/palette_view.h"
+#include "views/shell_menu.h"
 #include "views/settings_view.h"
 #include "views/metadata_pane.h"
 #include "views/preview_pane.h"
@@ -34,6 +36,7 @@ namespace bb::views {
 
 constexpr UINT WM_BB_EVENT = WM_APP + 1;
 constexpr UINT WM_BB_BARS = WM_APP + 2;
+constexpr UINT WM_BB_DEFER = WM_APP + 30;
 
 class MainView;
 class FolderTreeProvider;
@@ -49,16 +52,6 @@ struct SelectedRow {
     std::wstring name, path;
     bool dir = false;
     int64_t size = -1, modified = 0, created = 0;
-};
-
-// What the transfer strip and its details window show. A real transfer fills it from the core; the
-// harness poses one (a transfer fast enough to be safe is over before a capture could catch it).
-struct TransferPose {
-    bool active = false;
-    std::wstring headline, detail, destination;
-    double fraction = 0;
-    bool indeterminate = false;
-    std::vector<std::pair<std::wstring, int>> items;  // name, 0 waiting / 1 running / 2 done
 };
 
 // The duplicate finder's last result and which copies are ticked for removal.
@@ -154,7 +147,7 @@ private:
     void sync_view_mode(const BbTabState& st);
     void sync_side_pane(const BbTabState& st);
     void on_search_changed(bool global);
-    void open_context(ui::Point p, bool header);
+    void open_context(ui::Point p, bool header, bool background = false);
     ui::Widget* active_view() const;
 
     MainView& main_;
@@ -168,8 +161,9 @@ private:
     BreadcrumbBar* crumbs_ = nullptr;
     PathEdit* path_ = nullptr;
     ui::Edit *search_ = nullptr, *gsearch_ = nullptr;
-    ui::Panel* banner_panel_ = nullptr;
+    ui::Widget* banner_panel_ = nullptr;
     ui::TextBlock* banner_ = nullptr;
+    ui::Button* unlock_ = nullptr;
     ui::DockPanel* body_ = nullptr;
     ui::Panel* view_area_ = nullptr;
     ui::ListView* list_ = nullptr;
@@ -271,9 +265,17 @@ public:
     SavedSidebar* sidebar() const { return sidebar_; }
     // ---- what dialogs and strips read ----
     std::vector<SelectedRow> selected_rows();
-    const TransferPose& transfer_pose() const { return transfer_; }
-    void set_transfer_pose(TransferPose p);
+    // The queue and the run in flight as the core describes them (`bb_ops_query("queue")`): what the
+    // strip and the Transfers window draw. Re-read on every `Model::Transfer` event.
+    const json::Value& queue_model() const { return queue_; }
+    void sync_transfer();
     std::wstring transfer_text() const;
+    // An open Transfers window refreshes itself through this; empty when none is open.
+    std::function<void()> on_transfer_changed;
+    // The same for an open History window.
+    std::function<void()> on_undo_changed;
+    // A question the core is waiting on (a clash, an offer of administrator rights) puts its dialog up.
+    void sync_questions(bool conflicts);
     DuplicatesState& duplicates() { return duplicates_; }
     // Tells the core which shell properties this machine has, once (the Add column list reads them).
     void ensure_machine_properties();
@@ -299,6 +301,19 @@ public:
     void open_dialog(const std::wstring& kind);
     // Opens a menu at a point (a right click), keeping its items alive while it is up.
     void show_context_menu(ui::MenuItems items, ui::Point at);
+    // Where other programs' menu entries come from: the product's registry-and-COM source until a harness
+    // poses a canned one. Null source = no extensions.
+    ShellMenuSource* shell_source();
+    // Drag and drop over OLE: the window becomes a drop target and the list can start a drag. The product turns
+    // it on; a scripted run has no pointer to drag with and never does.
+    void enable_file_drag_drop();
+    FileDrag* file_drag() const { return file_drag_.get(); }
+    void set_shell_source(std::unique_ptr<ShellMenuSource> source) { shell_source_ = std::move(source); }
+    // The shell session behind the menu just built; dropped after that menu closes (deferred), because the
+    // click that invokes an entry has to have run first.
+    void keep_menu_session(std::shared_ptr<void> session) { menu_session_ = std::move(session); }
+    // Runs `fn` on the UI thread after the current message.
+    void defer(std::function<void()> fn);
     // Thumbnails asked for and not yet drawn, across every tab (the harness waits for them to be none).
     size_t thumbnails_pending() const;
     // A preview scheduled or being read in any tab (the harness waits for it to land).
@@ -319,6 +334,7 @@ private:
     void sync_index();
     void open_toolbar_list(const BarRow& row, ui::Rect anchor);
     void open_overflow(const std::vector<BarRow>& rows, ui::Rect anchor);
+    void open_step_menu(const BarRow& row, ui::Rect anchor);
     void sync_row_toolbars(const json::Value& state);
     void handle(const BbEvent& e);
     void rebuild_layout(const json::Value& state);
@@ -343,10 +359,15 @@ private:
     bool bars_pending_ = false;
     bool headless_dialogs_ = false;
     bool follow_windows_ = true;
-    TransferPose transfer_;
+    std::unique_ptr<ShellMenuSource> shell_source_;
+    std::unique_ptr<FileDrag> file_drag_;
+    std::shared_ptr<void> menu_session_;
+    std::vector<std::function<void()>> deferred_;
+    json::Value queue_;
     ui::StackPanel* transfer_strip_ = nullptr;
     ui::TextBlock *transfer_head_ = nullptr, *transfer_detail_ = nullptr;
     ui::ProgressBar* transfer_bar_ = nullptr;
+    ui::Button *transfer_pause_ = nullptr, *transfer_cancel_ = nullptr;
     DuplicatesState duplicates_;
     bool machine_props_set_ = false;
     DialogLayer* dialogs_ = nullptr;
@@ -355,6 +376,7 @@ private:
     json::Value index_state_;
     ThumbSource thumb_source_ = ThumbSource::Shell;
     bool dialog_open_ = false;
+    std::wstring dialog_kind_;
     std::unique_ptr<ui::MenuItems> floating_menu_;
     StatusBar* status_ = nullptr;
     ui::Splitter* main_split_ = nullptr;

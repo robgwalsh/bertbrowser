@@ -8,6 +8,7 @@
 //! share the flag so Ctrl+Z cannot reach the previous record while one of them is running); a drop
 //! or paste queues behind the running job.
 
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock, Weak};
 
 use bb_core::FileTime;
@@ -15,10 +16,12 @@ use bb_core::cancel::CancelToken;
 use bb_core::delete::{
     DeleteExecutor, DeleteMode, DeletePlanner, DeleteSource, FileSystemDeleteProbe, ShellRecycleBin,
 };
+use bb_core::elevation::{ElevatedRetry, ElevationOperation};
 use bb_core::rename::{RenameExecutor, RenamePlanner, RenameRule, RenameSource};
 use bb_core::transfer::{
-    FileSystemTransferProbe, TransferExecutor, TransferMergeExpander, TransferPlanner,
-    TransferProgress, TransferVerb,
+    DirectorySize, FileSystemTransferProbe, QueuedJobState, TransferEstimate, TransferEstimator,
+    TransferExecutor, TransferMergeExpander, TransferPlanner, TransferProgress, TransferSizeSource,
+    TransferVerb,
 };
 use bb_core::undo::{
     DeleteRecord, HeldFolderSizes, HeldSizeEstimator, PlainUndoHost, RenameRecord, TransferRecord,
@@ -28,9 +31,29 @@ use bb_core::undo::{
 use crate::app::{Inner, Job, JobBody, OpState, UndoSummary, lock};
 use crate::events::AppEvent;
 use crate::ids::{AppError, AppResult, OpId};
+use crate::ops_ui::{JobMeta, TransferTracker};
 
 static RECYCLE_BIN: LazyLock<ShellRecycleBin> = LazyLock::new(ShellRecycleBin::new);
 static DELETE_PROBE: FileSystemDeleteProbe = FileSystemDeleteProbe;
+
+/// What a plan will write, as far as `dir_size_cache` can say: the bar is drawn against it.
+struct CachedSource<'a>(&'a bb_core::data::DirSizeRepository);
+
+impl TransferSizeSource for CachedSource<'_> {
+    fn directory(&self, path: &str) -> Option<DirectorySize> {
+        match self.0.get(path) {
+            Ok(Some(row)) if !row.incomplete => Some(DirectorySize {
+                bytes: row.size_bytes,
+                files: row.file_count.max(0) as usize,
+            }),
+            _ => None,
+        }
+    }
+
+    fn file(&self, path: &str) -> Option<i64> {
+        std::fs::metadata(path).ok().map(|m| m.len() as i64)
+    }
+}
 
 /// What `dir_size_cache` already knows about a folder, for sizing what an undo record holds.
 struct CachedSizes<'a>(&'a bb_core::data::DirSizeRepository);
@@ -71,7 +94,9 @@ impl Inner {
                                 state.draining = false;
                                 drop(state);
                                 if let Some(inner) = weak.upgrade() {
+                                    inner.queue_clear();
                                     inner.gate.resume();
+                                    inner.extra.ops.archive_gate.resume();
                                     inner.update_busy();
                                     inner.hub.emit(AppEvent::UndoChanged);
                                 }
@@ -92,7 +117,24 @@ impl Inner {
 
     fn run_job(self: &Arc<Self>, job: Job) {
         let id = job.id;
+        // Cancelled while it waited: it never starts.
+        if job.cancel.is_cancelled() {
+            lock(&self.queue.state).running = None;
+            lock(&self.ops).insert(
+                id,
+                OpState::Done {
+                    ok: false,
+                    message: "cancelled".to_string(),
+                },
+            );
+            self.queue_state_of(id.0, QueuedJobState::Cancelled);
+            self.hub.emit(AppEvent::OpFinished { op: id, ok: false });
+            return;
+        }
         lock(&self.ops).insert(id, OpState::Running);
+        *lock(&self.extra.ops.running_cancel) = Some((id.0, job.cancel.clone()));
+        self.extra.ops.cancelling.store(false, Ordering::SeqCst);
+        self.queue_state_of(id.0, QueuedJobState::Running);
         self.update_busy();
         let body = job.body;
         let cancel = job.cancel;
@@ -103,18 +145,39 @@ impl Inner {
             Err(_) => (false, "the operation failed unexpectedly".to_string()),
         };
         *lock(&self.transfer_progress) = None;
+        *lock(&self.extra.ops.running_cancel) = None;
+        self.tracker_end();
         lock(&self.queue.state).running = None;
         lock(&self.ops).insert(id, OpState::Done { ok, message });
+        self.queue_state_of(
+            id.0,
+            if cancel.is_cancelled() {
+                QueuedJobState::Cancelled
+            } else {
+                QueuedJobState::Done
+            },
+        );
         self.hub.emit(AppEvent::OpFinished { op: id, ok });
     }
 
-    /// Accepts a job. `exclusive` jobs (rename, delete, undo) are refused while anything is draining.
+    /// Accepts a job that is not a row of the queue.
     pub(crate) fn submit(
         self: &Arc<Self>,
         kind: &'static str,
         exclusive: bool,
         body: JobBody,
     ) -> AppResult<OpId> {
+        self.submit_with(JobMeta::hidden(kind), exclusive, body)
+    }
+
+    /// Accepts a job. `exclusive` jobs (rename, delete, undo) are refused while anything is draining.
+    pub(crate) fn submit_with(
+        self: &Arc<Self>,
+        meta: JobMeta,
+        exclusive: bool,
+        body: JobBody,
+    ) -> AppResult<OpId> {
+        let kind = meta.kind.as_str();
         let id = OpId(self.new_id());
         let mut state = lock(&self.queue.state);
         if state.shutdown {
@@ -129,6 +192,7 @@ impl Inner {
             return Err(AppError::Busy);
         }
         state.draining = true;
+        self.queue_add(id.0, &meta);
         state.jobs.push_back(Job {
             id,
             cancel: CancelToken::new(),
@@ -141,21 +205,25 @@ impl Inner {
         Ok(id)
     }
 
+    /// Stops an operation: one still waiting never starts, the running one is told to stop.
     pub(crate) fn cancel_op(&self, op: OpId) -> AppResult<()> {
-        let state = lock(&self.queue.state);
-        for job in &state.jobs {
-            if job.id == op {
-                job.cancel.cancel();
-                return Ok(());
-            }
+        let running = lock(&self.queue.state).running == Some(op);
+        if running {
+            self.cancel_running();
+            return Ok(());
         }
-        if state.running == Some(op) {
-            // The running job's token is held by the job; cancelling the gate wakes a paused one.
-            drop(state);
-            self.gate.resume();
-            return Err(AppError::Invalid(
-                "a running operation cannot be cancelled from here yet".into(),
-            ));
+        let waiting = {
+            let state = lock(&self.queue.state);
+            state
+                .jobs
+                .iter()
+                .find(|j| j.id == op)
+                .map(|j| j.cancel.cancel())
+                .is_some()
+        };
+        if waiting {
+            self.queue_state_of(op.0, QueuedJobState::Cancelled);
+            return Ok(());
         }
         Err(AppError::Stale)
     }
@@ -163,10 +231,16 @@ impl Inner {
     pub(crate) fn set_paused(&self, paused: bool) {
         if paused {
             self.gate.pause();
+            self.extra.ops.archive_gate.pause();
         } else {
             self.gate.resume();
+            self.extra.ops.archive_gate.resume();
+        }
+        if let Some(t) = lock(&self.extra.ops.tracker).as_mut() {
+            t.set_paused(paused);
         }
         self.update_busy();
+        self.transfer_changed();
     }
 
     // ---- recording ----
@@ -226,8 +300,18 @@ impl Inner {
         } else {
             "Copy"
         };
-        self.submit(
+        let meta = JobMeta::shown(
             kind,
+            format!(
+                "{} item(s) to {}",
+                count_text(sources.len()),
+                bb_paths::file_name(destination.trim_end_matches(['\\', '/']))
+            ),
+            sources.len(),
+            TransferEstimate::new(0, 0, false),
+        );
+        self.submit_with(
+            meta,
             false,
             Box::new(move |inner, _op, cancel| {
                 inner.run_transfer(&sources, &destination, verb, cancel)
@@ -298,8 +382,11 @@ impl Inner {
             count_text(total)
         );
         self.set_active_status(headline);
+        let estimate = TransferEstimator::estimate(&plan, &CachedSource(&self.dir_sizes));
+        self.tracker_begin(TransferTracker::for_plan(&plan, estimate));
         let me = self.clone();
         let mut on_progress = move |p: TransferProgress| {
+            me.tracker_apply(&p);
             if !p.current_name.is_empty() {
                 me.set_active_status(format!(
                     "{} {} of {} \u{2014} {}",
@@ -329,6 +416,26 @@ impl Inner {
         if plan.is_merged() && plan.verb == TransferVerb::Copy && !outcome.completed.is_empty() {
             outcome = TransferExecutor::stamp_copies(outcome);
             outcome.can_undo_copy = true;
+        }
+
+        // Refused for permissions: offer to try again with administrator rights, before the entry
+        // is recorded (a retry is one action to the user, however many passes it takes).
+        let mut elevated_note = "";
+        if let Some(retry) =
+            ElevatedRetry::retry_for_transfer(&plan, &outcome, resolutions.as_ref())
+        {
+            let items: Vec<String> = retry
+                .plan
+                .transfers
+                .iter()
+                .map(|t| t.source_path.clone())
+                .collect();
+            let operation = if verb == TransferVerb::Move {
+                ElevationOperation::TransferMove
+            } else {
+                ElevationOperation::TransferCopy
+            };
+            elevated_note = self.offer_elevation(operation, &items, false);
         }
 
         self.record(TransferRecord::for_outcome(outcome.clone()).map(|r| Box::new(r) as _));
@@ -381,7 +488,8 @@ impl Inner {
         } else if outcome.can_undo() || outcome.can_undo_copy {
             text.push_str(" \u{2014} this can be undone");
         }
-        self.set_active_status(text.clone());
+        text.push_str(elevated_note);
+        self.set_final_status(text.clone());
         (outcome.failed.is_empty() && !outcome.cancelled, text)
     }
 
@@ -394,6 +502,24 @@ impl Inner {
     ) -> AppResult<OpId> {
         if paths.is_empty() {
             return Err(AppError::Invalid("nothing to delete".into()));
+        }
+        // Inside a container a delete is a rewrite of it, held so it can be taken back.
+        if let Some(first) = crate::ops_arch::archive_of(&paths[0]) {
+            let mut edits = Vec::new();
+            for p in &paths {
+                match crate::ops_arch::archive_of(p) {
+                    Some(a) if a.archive_file.eq_ignore_ascii_case(&first.archive_file) => {
+                        edits.push(bb_core::archives::ArchiveEdit::remove(&a.entry_path));
+                    }
+                    _ => {
+                        return Err(AppError::Invalid(
+                            "Items from different places cannot be deleted together inside an archive."
+                                .into(),
+                        ));
+                    }
+                }
+            }
+            return self.op_archive_edit(first.archive_file, edits, "Deleted");
         }
         self.submit(
             "Delete",
@@ -456,6 +582,17 @@ impl Inner {
             .delete_executor()
             .execute(&plan, cancel, Some(&on_progress));
 
+        let mut elevated_note = "";
+        if let Some(retry) = ElevatedRetry::retry_for_delete(&plan, &outcome) {
+            let items: Vec<String> = retry
+                .plan
+                .deletions
+                .iter()
+                .map(|d| d.source_path.clone())
+                .collect();
+            elevated_note = self.offer_elevation(ElevationOperation::Delete, &items, false);
+        }
+
         self.record(DeleteRecord::for_outcome(outcome.clone(), None).map(|r| Box::new(r) as _));
 
         // Vacate first: a tab still pointing inside a folder that has gone would otherwise be
@@ -480,7 +617,8 @@ impl Inner {
         } else if outcome.can_undo() {
             text.push_str(" \u{2014} this can be undone");
         }
-        self.set_active_status(text.clone());
+        text.push_str(elevated_note);
+        self.set_final_status(text.clone());
         (outcome.failed.is_empty(), text)
     }
 
@@ -493,6 +631,21 @@ impl Inner {
     ) -> AppResult<OpId> {
         if paths.is_empty() {
             return Err(AppError::Invalid("nothing to rename".into()));
+        }
+        if let Some(a) = crate::ops_arch::archive_of(&paths[0]) {
+            if paths.len() != 1 {
+                return Err(AppError::Invalid(
+                    "Entries inside an archive are renamed one at a time.".into(),
+                ));
+            }
+            return self.op_archive_edit(
+                a.archive_file,
+                vec![bb_core::archives::ArchiveEdit::rename(
+                    &a.entry_path,
+                    &pattern,
+                )],
+                "Renamed",
+            );
         }
         self.submit(
             "Rename",
@@ -570,6 +723,17 @@ impl Inner {
         ));
         let outcome = RenameExecutor.execute(&plan);
 
+        let mut elevated_note = "";
+        if let Some(retry) = ElevatedRetry::retry_for_rename(&plan, &outcome) {
+            let items: Vec<String> = retry
+                .plan
+                .renames
+                .iter()
+                .map(|r| r.source_path.clone())
+                .collect();
+            elevated_note = self.offer_elevation(ElevationOperation::Rename, &items, false);
+        }
+
         self.record(RenameRecord::for_outcome(outcome.clone()).map(|r| Box::new(r) as _));
 
         let mut directories: Vec<String> = outcome
@@ -591,7 +755,8 @@ impl Inner {
         } else if outcome.can_undo() {
             text.push_str(" \u{2014} this can be undone");
         }
-        self.set_active_status(text.clone());
+        text.push_str(elevated_note);
+        self.set_final_status(text.clone());
         (outcome.failed.is_empty(), text)
     }
 
@@ -699,6 +864,7 @@ impl Inner {
         directories.sort_by_key(|d| d.to_uppercase());
         directories.dedup_by_key(|d| d.to_uppercase());
         self.refresh_tabs_showing(&directories);
+        self.refresh_archive_tabs();
 
         let did = if direction == UndoDirection::Undo {
             "Undone"
@@ -720,7 +886,7 @@ impl Inner {
             _ if span.len() == 1 => did.to_string(),
             _ => format!("{did} {} actions", span.len()),
         };
-        self.set_active_status(text.clone());
+        self.set_final_status(text.clone());
         self.hub.emit(AppEvent::UndoChanged);
         (result.stopped_at.is_none(), text)
     }

@@ -17,7 +17,7 @@ std::wstring Edit::selected_text() const {
 
 std::wstring Edit::display_text() const {
     if (!composing_) {
-        return text_;
+        return password ? std::wstring(text_.size(), L'•') : text_;
     }
     return text_.substr(0, caret_) + composition_ + text_.substr(caret_);
 }

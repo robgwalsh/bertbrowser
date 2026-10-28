@@ -140,12 +140,16 @@ fn open_bounded(inner: &Inner, path: &str, limit: i64) -> Result<Box<dyn Read>, 
     if let Some(entry) = inner.fs.resolve(path)
         && !entry.is_root()
     {
+        let password = bb_core::archives::ArchivePasswords::for_archive(
+            &*inner.extra.ops.passwords,
+            &entry.archive_file,
+        );
         let bytes = LibraryArchiveReader::default()
             .read_entry(
                 &entry.archive_file,
                 &entry.entry_path,
                 limit.saturating_add(1),
-                None,
+                password.as_deref(),
                 &CancelToken::new(),
             )
             .ok_or_else(|| {

@@ -3,6 +3,8 @@
 #include "gfx/icons.gen.h"
 #include "views/folder_tree.h"
 #include "views/media_pane.h"
+#include "views/ops.h"
+#include "views/ops_menus.h"
 #include "views/property_host.h"
 #include "views/shell_props.h"
 
@@ -274,7 +276,7 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     }
     add(std::move(nav));
 
-    auto banner = std::make_unique<Panel>();
+    auto banner = std::make_unique<StackPanel>(Orientation::Horizontal, 8.0f);
     banner->pad = 4;
     banner->height = 28;
     banner->dock = Dock::Top;
@@ -282,6 +284,12 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     banner->style.bg = tok::ErrorBackground;
     banner_ = banner->emplace<TextBlock>();
     banner_->style.fg = tok::ErrorForeground;
+    banner_->flex = 1;
+    unlock_ = banner->emplace<Button>(L"Enter password…");
+    unlock_->name = "UnlockArchive";
+    unlock_->width = 150;
+    unlock_->set_visible(false);
+    unlock_->on_click = [this] { main_.open_dialog(L"archive-password"); };
     banner->set_visible(false);
     banner_panel_ = add(std::move(banner));
 
@@ -333,7 +341,10 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     empty_->name = "EmptyMessage";
     empty_->set_visible(false);
     list_->on_header_menu = [this](Point p) { open_context(p, true); };
-    list_->on_context = [this](Point p, size_t) { open_context(p, false); };
+    list_->on_drag_start = [this](MouseButton b) {
+        if (FileDrag* d = main_.file_drag()) d->start(tab_, b);
+    };
+    list_->on_context = [this](Point p, size_t row) { open_context(p, false, row == static_cast<size_t>(-1)); };
     tiles_->on_activate = [this, app](size_t row) { bb_tab_open_item(app, tab_, static_cast<uint32_t>(row)); };
 
     list_->on_sort = [this, app](int column, bool) {
@@ -532,72 +543,15 @@ void TabView::refresh_tooltips() {
     }
 }
 
-void TabView::open_context(Point p, bool header) {
-    main_.show_context_menu(header ? build_column_menu() : build_files_menu(false), p);
-}
-
-static BarRow command_row(core::Core& core, const wchar_t* id) {
-    BarRow r;
-    const json::Value st = try_model([&](BbOwnedStr* o) { return bb_command_state(core.app(), core::s(std::wstring(id)), o); });
-    if (st.is_null()) return r;
-    r.kind = "command";
-    r.id = st["id"].str();
-    r.icon = st["icon"].str();
-    r.name = core::wide(st["name"].str());
-    r.caption = escape_caption(core::wide(st["caption"].is_null() ? st["name"].str() : st["caption"].str()));
-    r.gesture = core::wide(st["gesture"].str());
-    r.enabled = st["whyNot"].is_null();
-    r.reason = core::wide(st["whyNot"].str());
-    r.checked = st["checked"].boolean();
-    return r;
+void TabView::open_context(Point p, bool header, bool background) {
+    main_.show_context_menu(header ? build_column_menu() : build_files_menu(background), p);
 }
 
 MenuItems TabView::build_files_menu(bool background) {
-    std::vector<BarRow> rows;
-    auto add = [&](const wchar_t* id) {
-        BarRow r = command_row(core_, id);
-        if (!r.id.empty()) rows.push_back(std::move(r));
-    };
-    auto sep = [&] {
-        BarRow s;
-        s.kind = "separator";
-        if (!rows.empty() && rows.back().kind != "separator") rows.push_back(s);
-    };
-    auto submenu = [&](const wchar_t* caption, std::initializer_list<const wchar_t*> ids) {
-        BarRow m;
-        m.kind = "menu";
-        m.caption = caption;
-        for (const wchar_t* id : ids) {
-            BarRow r = command_row(core_, id);
-            if (!r.id.empty()) m.children.push_back(std::move(r));
-        }
-        if (!m.children.empty()) rows.push_back(std::move(m));
-    };
-    if (!background) {
-        add(L"file.open");
-        add(L"file.open-new-tab");
-        sep();
-        add(L"edit.cut");
-        add(L"edit.copy");
-        add(L"edit.paste");
-        sep();
-        add(L"edit.copy-path");
-        add(L"file.compress");
-        add(L"file.extract-here");
-        sep();
-        add(L"file.rename");
-        add(L"file.delete");
-        sep();
-    } else {
-        add(L"edit.paste");
-        sep();
-    }
-    submenu(L"N&ew", {L"file.new-folder", L"file.new-file"});
-    add(L"file.bookmark");
-    sep();
-    add(L"file.properties");
-    while (!rows.empty() && rows.back().kind == "separator") rows.pop_back();
-    return build_menu_items(main_.menu_env(), rows);
+    // Composed per opening: the app's entries, the user's commands and each extension's, in the saved order.
+    ops::ComposedMenu composed = ops::compose_context_menu(main_, background ? ops::MenuKind::Background : ops::MenuKind::Files);
+    main_.keep_menu_session(std::move(composed.keep));
+    return std::move(composed.items);
 }
 
 MenuItems TabView::build_column_menu() {
@@ -707,6 +661,7 @@ void TabView::reload_state() {
     const std::wstring error = core_.tab_text(tab_, BB_TEXT_ERROR);
     banner_->set_text(error);
     banner_panel_->set_visible(!error.empty());
+    unlock_->set_visible(!error.empty() && core::icontains(error, L"password"));
 
     adapter_.reload_selection();
     const std::wstring sort = core_.tab_text(tab_, BB_TEXT_SORT_BY);
@@ -837,6 +792,23 @@ MainView::MainView(core::Core& core, platform::Window& window)
         transfer_detail_ = strip->emplace<TextBlock>();
         transfer_detail_->flex = 1;
         transfer_detail_->style.fg = tok::TextSecondary;
+        transfer_pause_ = strip->emplace<Button>(L"Pause");
+        transfer_pause_->name = "TransferPause";
+        transfer_pause_->width = 80;
+        transfer_pause_->on_click = [this] {
+            const bool paused = queue_["paused"].boolean();
+            BbOwnedStr o{};
+            bb_ops_do(core_.app(), core::s(paused ? L"queue-resume" : L"queue-pause"), core::s(L""), &o);
+            bb_str_free(o);
+        };
+        transfer_cancel_ = strip->emplace<Button>(L"Cancel");
+        transfer_cancel_->name = "TransferCancel";
+        transfer_cancel_->width = 80;
+        transfer_cancel_->on_click = [this] {
+            BbOwnedStr o{};
+            bb_ops_do(core_.app(), core::s(L"cancel-running"), core::s(L""), &o);
+            bb_str_free(o);
+        };
         auto* details = strip->emplace<Button>(L"Details");
         details->name = "TransferDetails";
         details->width = 90;
@@ -877,6 +849,7 @@ MainView::MainView(core::Core& core, platform::Window& window)
     dialogs_->name = "DialogLayer";
     dialogs_->on_closed = [this] {
         dialog_open_ = false;
+        dialog_kind_.clear();
         bb_ui_set_dialog_open(core_.app(), false);
     };
     Widget* content = window_.root().set_content(std::move(outer));
@@ -889,6 +862,7 @@ MainView::MainView(core::Core& core, platform::Window& window)
         else execute_command(core::wide(r.id));
     };
     title_toolbar_->on_overflow = [this](const std::vector<BarRow>& rows, Rect anchor) { open_overflow(rows, anchor); };
+    title_toolbar_->on_context = [this](const BarRow& r, Rect anchor) { open_step_menu(r, anchor); };
 
     hwnd_ = window_.hwnd();
     window_.on_message = [this](UINT msg, WPARAM wp, LPARAM lp) { return on_window_message(msg, wp, lp); };
@@ -918,6 +892,12 @@ bool MainView::on_window_message(UINT msg, WPARAM wp, LPARAM lp) {
             refresh_bars();
         } catch (const std::exception&) {
         }
+        return true;
+    }
+    if (msg == WM_BB_DEFER) {
+        auto run = std::move(deferred_);
+        deferred_.clear();
+        for (auto& fn : run) fn();
         return true;
     }
     if (msg == WM_BB_THUMBS) {
@@ -986,6 +966,7 @@ void MainView::handle(const BbEvent& e) {
         case BB_EVT_UNDO_CHANGED:
         case BB_EVT_OP_FINISHED:
         case BB_EVT_BUSY_CHANGED:
+            if (e.kind != BB_EVT_BUSY_CHANGED && on_undo_changed) on_undo_changed();
             refresh_status();
             break;
         case BB_EVT_PROPERTIES_NEEDED:
@@ -997,6 +978,8 @@ void MainView::handle(const BbEvent& e) {
                 for (auto& kv : by_tab_) kv.second->reload_columns();
             }
             if (e.a == 4) refresh_tooltips();
+            if (e.a == 14) sync_transfer();
+            if (e.a == 15 || e.a == 16) sync_questions(e.a == 15);
             if (e.a == 13) {
                 for (auto& kv : by_tab_) {
                     if (kv.second->metadata()) kv.second->metadata()->refresh();
@@ -1192,6 +1175,22 @@ bool MainView::host_command(const std::wstring& id) {
         else tv->preview()->media()->set_full_screen(!tv->preview()->media()->full_screen());
         return true;
     }
+    // The operations the core runs but only the host can start: they need the selection or a confirmation.
+    if (id == L"edit.clear-undo-history") {
+        bb_undo_clear(core_.app());
+        return true;
+    }
+    if (id == L"tools.transfer-cancel") {
+        ops::run(core_, "cancel-running");
+        return true;
+    }
+    if (id == L"file.create-shortcut") {
+        std::vector<std::wstring> paths;
+        for (const auto& r : selected_rows()) paths.push_back(r.path);
+        if (paths.empty()) return false;
+        ops::run(core_, "shortcut", "{\"sources\":" + ops::qa(paths) + ",\"directory\":" + ops::q(core_.tab_text(active_tab_, BB_TEXT_PATH)) + "}");
+        return true;
+    }
     // Commands that put a dialog up. A run with no one to answer reports them instead.
     static const std::pair<const wchar_t*, const wchar_t*> dialogs[] = {
         {L"file.new-folder", L"new-folder"}, {L"file.new-file", L"new-file"},       {L"file.rename", L"rename"},
@@ -1199,7 +1198,7 @@ bool MainView::host_command(const std::wstring& id) {
         {L"file.extract-to", L"extract"},    {L"file.unlock-archive", L"archive-password"},
         {L"app.about", L"about"},            {L"search.syntax", L"search-syntax"},  {L"search.save", L"saved-search"},
         {L"select.pattern", L"select-pattern"}, {L"select.unpattern", L"select-pattern"},
-        {L"view.add-column", L"columns"},    {L"tools.transfer-details", L"transfer"},
+        {L"view.add-column", L"columns"},    {L"tools.transfer-details", L"transfer"}, {L"edit.undo-history", L"undo-history"},
         {L"app.customise-theme", L"theme-editor"},
     };
     for (const auto& [command, kind] : dialogs) {
@@ -1303,6 +1302,7 @@ void MainView::sync_row_toolbars(const json::Value& state) {
                 else execute_command(core::wide(r.id));
             };
             tb->on_overflow = [this](const std::vector<BarRow>& rows, Rect anchor) { open_overflow(rows, anchor); };
+            tb->on_context = [this](const BarRow& r, Rect anchor) { open_step_menu(r, anchor); };
             row_toolbars_.push_back(tb);
         }
         rows_panel_->height = static_cast<float>(want) * CommandToolbar::kHeight;
@@ -1322,6 +1322,18 @@ void MainView::open_toolbar_list(const BarRow& row, Rect anchor) {
     list.kind = "list";
     floating_menu_ = std::make_unique<MenuItems>(build_menu_items(menu_env(), {list}));
     if (floating_menu_->empty()) return;
+    MenuOpen o;
+    o.anchor = anchor;
+    popup_->open_menu(*floating_menu_, o);
+}
+
+// A right click on Undo or Redo: the list of what they would take back or put again, from the nearest.
+void MainView::open_step_menu(const BarRow& row, Rect anchor) {
+    const bool undo = row.id == "edit.undo";
+    if (!undo && row.id != "edit.redo") return;
+    MenuItems items;
+    if (!ops::build_step_menu(*this, undo ? L"undo" : L"redo", &items) || items.empty()) return;
+    floating_menu_ = std::make_unique<MenuItems>(std::move(items));
     MenuOpen o;
     o.anchor = anchor;
     popup_->open_menu(*floating_menu_, o);
@@ -1388,6 +1400,7 @@ void MainView::open_dialog(const std::wstring& kind) {
     auto card = build_dialog(kind, DialogContext{*this, [this] { close_dialog(); }});
     if (!card) return;
     dialog_open_ = true;
+    dialog_kind_ = kind;
     bb_ui_set_dialog_open(core_.app(), true);
     dialogs_->show(std::move(card));
 }
@@ -1422,18 +1435,37 @@ std::vector<SelectedRow> MainView::selected_rows() {
     return out;
 }
 
-void MainView::set_transfer_pose(TransferPose p) {
-    transfer_ = std::move(p);
-    transfer_strip_->set_visible(transfer_.active);
-    transfer_head_->set_text(transfer_.headline);
-    transfer_detail_->set_text(transfer_.detail);
-    transfer_bar_->set_indeterminate(transfer_.active && transfer_.indeterminate);
-    if (!transfer_.indeterminate) transfer_bar_->set_value(transfer_.fraction);
+void MainView::sync_transfer() {
+    queue_ = try_model([&](BbOwnedStr* o) { return bb_ops_query(core_.app(), core::s(L"queue"), core::s(L""), o); });
+    const bool active = queue_["active"].boolean();
+    const json::Value& v = queue_["view"];
+    transfer_strip_->set_visible(active);
+    transfer_head_->set_text(core::wide(v["headline"].str()));
+    transfer_detail_->set_text(core::wide(v["detail"].str()));
+    const bool paused = queue_["paused"].boolean();
+    transfer_bar_->set_indeterminate(active && v["indeterminate"].boolean());
+    if (!v["indeterminate"].boolean()) transfer_bar_->set_value(v["fraction"].num());
+    transfer_pause_->text = paused ? L"Resume" : L"Pause";
+    transfer_pause_->set_enabled(queue_["canPause"].boolean() || queue_["canResume"].boolean());
+    transfer_cancel_->set_enabled(queue_["canCancel"].boolean());
     browser_->request_layout();
+    if (on_transfer_changed) on_transfer_changed();
 }
 
 std::wstring MainView::transfer_text() const {
-    return transfer_.active ? transfer_.headline + L"  " + transfer_.detail : std::wstring();
+    if (!queue_["active"].boolean()) return {};
+    const json::Value& v = queue_["view"];
+    return core::wide(v["headline"].str()) + L"  " + core::wide(v["detail"].str());
+}
+
+void MainView::sync_questions(bool conflicts) {
+    if (headless_dialogs_) return;
+    // A transfer is parked until this is answered, so it replaces whatever dialog is up - unless that is
+    // already the question itself.
+    const wchar_t* kind = conflicts ? L"conflicts" : L"elevation";
+    const json::Value q = try_model([&](BbOwnedStr* o) { return bb_ops_query(core_.app(), core::s(kind), core::s(L""), o); });
+    if (q["pending"].is_null() || (dialog_open_ && dialog_kind_ == kind)) return;
+    open_dialog(kind);  // closes the one before it
 }
 
 void MainView::ensure_machine_properties() {
@@ -1449,8 +1481,27 @@ bool MainView::build_named_menu(const std::wstring& kind, MenuItems* out) {
     if (kind == L"columns") *out = tv->build_column_menu();
     else if (kind == L"files") *out = tv->build_files_menu(false);
     else if (kind == L"background") *out = tv->build_files_menu(true);
-    else return false;
+    else if (kind == L"tree") {
+        ops::ComposedMenu composed = ops::compose_context_menu(*this, ops::MenuKind::Tree);
+        keep_menu_session(std::move(composed.keep));
+        *out = std::move(composed.items);
+    } else if (!ops::build_step_menu(*this, kind, out)) return false;
     return true;
+}
+
+void MainView::enable_file_drag_drop() {
+    if (!file_drag_) file_drag_ = std::make_unique<FileDrag>(*this);
+    file_drag_->enable();
+}
+
+ShellMenuSource* MainView::shell_source() {
+    if (!shell_source_) shell_source_ = make_registry_shell_source(*this);
+    return shell_source_.get();
+}
+
+void MainView::defer(std::function<void()> fn) {
+    deferred_.push_back(std::move(fn));
+    if (hwnd_.load()) PostMessageW(hwnd_.load(), WM_BB_DEFER, 0, 0);
 }
 
 void MainView::show_context_menu(MenuItems items, Point at) {
@@ -1458,6 +1509,14 @@ void MainView::show_context_menu(MenuItems items, Point at) {
     if (floating_menu_->empty()) return;
     MenuOpen o;
     o.anchor = Rect{at.x, at.y, at.x, at.y};
+    // The shell session behind the entries is let go after the menu has closed - and only the one this menu
+    // opened with, since a right-click may have opened the next by then.
+    const auto session = menu_session_;
+    o.on_closed = [this, session](MenuClose) {
+        defer([this, session] {
+            if (menu_session_ == session) menu_session_.reset();
+        });
+    };
     popup_->open_menu(*floating_menu_, o);
 }
 

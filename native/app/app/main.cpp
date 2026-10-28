@@ -66,6 +66,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                 wchar_t profile[MAX_PATH];
                 const DWORD n = GetEnvironmentVariableW(L"USERPROFILE", profile, MAX_PATH);
                 view.start(n ? std::wstring(profile, n) : std::wstring(L"C:\\"));
+                view.enable_file_drag_drop();
                 window.show();
                 exit_code = platform::run_message_loop();
             } catch (const std::exception& e) {

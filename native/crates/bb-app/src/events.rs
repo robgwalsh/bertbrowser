@@ -36,6 +36,12 @@ pub enum Model {
     Commands = 12,
     /// The metadata pane's rows, boxes or files moved (an apply finished).
     Metadata = 13,
+    /// The transfer in flight, its queue or its pause moved.
+    Transfer = 14,
+    /// A transfer is waiting on the user's answer to a clash.
+    Conflicts = 15,
+    /// An operation was refused for permissions and is waiting on the user's answer.
+    Elevation = 16,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -66,9 +72,9 @@ pub enum AppEvent {
 pub type EventSink = Arc<dyn Fn(AppEvent) + Send + Sync>;
 
 /// The installed sink, swappable at any time.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct EventHub {
-    sink: Mutex<Option<EventSink>>,
+    sink: Arc<Mutex<Option<EventSink>>>,
 }
 
 impl EventHub {

@@ -125,17 +125,14 @@ impl Inner {
             Box::new(move |inner, _op, _cancel| {
                 let outcome = NewItemExecutor.execute(&plan);
                 let mut elevated = "";
-                let mut outcome = outcome;
-                if outcome.failed.as_ref().is_some_and(|f| f.access_denied)
-                    && inner
-                        .seams
-                        .elevation
-                        .offer(&format!("create '{}'", plan.name))
+                if bb_core::elevation::ElevatedRetry::retry_for_new_item(&plan, &outcome).is_some()
                 {
-                    // The Elevator helper carries the retried create; none is wired in this build,
-                    // so an accepted offer leaves the refusal standing.
-                    elevated = " (elevation is not available here)";
-                    outcome = NewItemExecutor.execute(&plan);
+                    let item = format!("{}\\{}", plan.directory.trim_end_matches('\\'), plan.name);
+                    elevated = inner.offer_elevation(
+                        bb_core::elevation::ElevationOperation::NewItem,
+                        &[item],
+                        false,
+                    );
                 }
                 if let Some(created) = &outcome.created_path {
                     inner.select_after_refresh(&plan.directory, created);

@@ -380,11 +380,16 @@ impl Inner {
                 self.props_after_install(tab);
             }
             Err(e) => {
-                let message = if e.kind() == std::io::ErrorKind::PermissionDenied {
-                    access_denied_message(&path)
-                } else {
-                    e.to_string()
-                };
+                // A container that wants a password is not a folder Windows closed: say so, and the
+                // host offers to ask for it.
+                let message =
+                    if let Some(locked) = bb_core::archives::ArchiveLockedError::in_error(&e) {
+                        locked.message.clone()
+                    } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                        access_denied_message(&path)
+                    } else {
+                        e.to_string()
+                    };
                 let mut t = lock(&cell);
                 if t.generation != generation {
                     return;
@@ -675,8 +680,30 @@ impl Inner {
             },
             content_progress: None,
         };
+        // Inside a container the answer comes from the index its listing was read from: instant, and
+        // nowhere near fs_entry, which must never learn a virtual path.
+        let archive_here = if global { None } else { self.fs.resolve(&path) };
         let result = if global {
             self.search.search_all(&text, false, progress, &token)
+        } else if let Some(a) = archive_here {
+            let index = self.fs.read_archive(&a.archive_file);
+            match bb_core::archives::ArchiveSearchScanner::search(
+                &index,
+                &a.archive_file,
+                &a.entry_path,
+                Some(&query),
+                5_000,
+                &token,
+                true,
+            ) {
+                Ok(hits) => Ok(Some(SearchOutcome::new(
+                    hits,
+                    false,
+                    bb_core::models::SearchResultSource::Index,
+                    false,
+                ))),
+                Err(_) => Ok(None),
+            }
         } else {
             self.search.search(&path, &text, false, progress, &token)
         };
@@ -793,14 +820,38 @@ impl Inner {
             live_batches: Some(&on_batch),
             content_progress: None,
         };
-        let outcome: SearchOutcome =
+        let outcome: SearchOutcome = if let Some(a) = self.fs.resolve(&path) {
+            // A container lists itself flat from the index its listing was read from.
+            let index = self.fs.read_archive(&a.archive_file);
+            match bb_core::archives::ArchiveSearchScanner::search(
+                &index,
+                &a.archive_file,
+                &a.entry_path,
+                None,
+                cap,
+                &token,
+                false,
+            ) {
+                Ok(hits) => {
+                    let truncated = hits.len() >= cap;
+                    SearchOutcome::new(
+                        hits,
+                        truncated,
+                        bb_core::models::SearchResultSource::Index,
+                        false,
+                    )
+                }
+                Err(_) => return,
+            }
+        } else {
             match self
                 .search
                 .list_subtree(&path, cap, include_hidden, progress, &token)
             {
                 Ok(outcome) => outcome,
                 Err(_) => return,
-            };
+            }
+        };
         if token.is_cancelled() {
             return;
         }

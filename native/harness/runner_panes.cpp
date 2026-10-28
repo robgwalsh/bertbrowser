@@ -475,8 +475,15 @@ void Runner::install_panes() {
             else if (key == L"replace") add("replace", json_quote(to_utf8(value)));
             else if (key == L"regex") add("useRegex", flag(value));
             else if (key == L"matchcase") add("matchCase", flag(value));
-            else if (key == L"scope") add("scope", json_quote(to_utf8(value)));
-            else if (key == L"case") add("case", json_quote(to_utf8(value)));
+            else if (key == L"scope") {
+                const std::wstring v = lower(value);
+                const char* name = v == L"extension" || v == L"ext" ? "Extension" : v == L"whole" || v == L"wholename" || v == L"full" ? "WholeName" : "Stem";
+                add("scope", json_quote(name));
+            } else if (key == L"case") {
+                const std::wstring v = lower(value);
+                const char* name = v == L"upper" ? "Upper" : v == L"lower" ? "Lower" : v == L"title" ? "Title" : v == L"sentence" ? "Sentence" : "AsIs";
+                add("case", json_quote(name));
+            }
             else if (key == L"start") add("counterStart", std::to_string(_wtoi(value.c_str())));
             else if (key == L"step") add("counterStep", std::to_string(_wtoi(value.c_str())));
             else {

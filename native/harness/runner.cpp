@@ -76,6 +76,7 @@ Runner::Runner(Session& session, const Options& options) : s_(session), o_(optio
     install_bench();
     install_ui();
     install_panes();
+    install_ops();
 }
 
 // ---- the loop ---------------------------------------------------------------------------------------
@@ -96,6 +97,7 @@ int Runner::run() {
             if (!o_.keep_going) break;
         }
     }
+    release_denials();
     return failed ? Exit::Failed : Exit::Ok;
 }
 
@@ -220,7 +222,7 @@ void Runner::invoke_settled(const std::function<void()>& fn) {
     s_.settle();
 }
 
-void Runner::await_op(uint64_t op) {
+void Runner::await_op(uint64_t op, bool tolerate_failure) {
     const auto start = Clock::now();
     BbOpInfo info{};
     std::wstring message;
@@ -236,7 +238,7 @@ void Runner::await_op(uint64_t op) {
         Sleep(1);
     }
     s_.settle();
-    if (!info.ok) throw AssertionError(message.empty() ? "the operation failed." : narrow(message));
+    if (!info.ok && !tolerate_failure) throw AssertionError(message.empty() ? "the operation failed." : narrow(message));
 }
 
 void Runner::transfer(const std::wstring& rest, bool move) {
@@ -250,7 +252,7 @@ void Runner::transfer(const std::wstring& rest, bool move) {
     const std::wstring t = target.wstring();
     uint64_t op = 0;
     core::check((move ? bb_op_move : bb_op_copy)(s_.core().app(), views.data(), static_cast<uint32_t>(views.size()), core::s(t), &op), verb);
-    await_op(op);
+    await_op(op, true);
 }
 
 void Runner::erase(const std::wstring& rest, BbDeleteMode mode) {
@@ -259,7 +261,7 @@ void Runner::erase(const std::wstring& rest, BbDeleteMode mode) {
     for (const auto& p : srcs) views.push_back(core::s(p));
     uint64_t op = 0;
     core::check(bb_op_delete(s_.core().app(), views.data(), static_cast<uint32_t>(views.size()), mode, &op), "delete");
-    await_op(op);
+    await_op(op, true);
 }
 
 void Runner::undo_step(int steps) {

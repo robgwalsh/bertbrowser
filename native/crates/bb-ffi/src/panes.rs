@@ -654,6 +654,14 @@ pub unsafe extern "C" fn bb_fixture_write(kind: BbStr, dir: BbStr) -> BbStatus {
                     m::bytes("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="),
                 )?;
             }
+            // The containers this repository cannot write: an encrypted zip, a header-encrypted 7z
+            // and an ordinary 7z, made by 7-Zip (see `bb_test_support::archive_fixtures`).
+            "archives" => {
+                use bb_test_support::archive_fixtures as a;
+                put("locked.zip", a::decode(a::ENCRYPTED_ZIP))?;
+                put("sealed.7z", a::decode(a::HEADER_ENCRYPTED_SEVEN_ZIP))?;
+                put("plain.7z", a::decode(a::PLAIN_SEVEN_ZIP))?;
+            }
             other => return Err(Fail::Err(format!("'{other}' is not a fixture set"))),
         }
         Ok(())

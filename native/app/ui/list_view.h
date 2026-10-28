@@ -56,6 +56,10 @@ public:
     std::function<void(const std::wstring&)> on_typeahead;  // the prefix typed so far; call select_row
     std::function<void(Point)> on_header_menu;               // a right click on the header strip
     std::function<void(Point, size_t row)> on_context;       // a right click on a row (npos: on empty space)
+    // A press on a row moved far enough to be a drag, with the button that started it. The selection change a
+    // press on a selected row would make is held back until release, so a multi-selection can be dragged.
+    std::function<void(MouseButton)> on_drag_start;
+    size_t drop_row = npos;  // the folder row a drag is hovering over (outlined)
 
     void set_provider(RowProvider* p);
     RowProvider* provider() const { return provider_; }
@@ -123,6 +127,14 @@ private:
     bool reordering_ = false;
     int drop_index_ = -1;
     bool marquee_ = false, marquee_add_ = false;
+    // A press on a row that may become a drag.
+    bool drag_armed_ = false;
+    Point drag_origin_;
+    MouseButton drag_button_ = MouseButton::Left;
+    size_t deferred_row_ = npos;
+    bool context_pending_ = false;
+    Point context_point_;
+    size_t context_row_ = npos;
     Point marquee_origin_;  // in content coordinates
     Rect marquee_rect_;     // window DIPs, for painting
     size_t marquee_first_ = npos, marquee_last_ = npos;
