@@ -125,6 +125,7 @@ mod property_fallback_tests;
 mod rate_formatter_tests;
 mod redo_plan_tests;
 mod relative_time_tests;
+mod release_channel_tests;
 mod rename_executor_tests;
 mod rename_pattern_tests;
 mod rename_planner_tests;

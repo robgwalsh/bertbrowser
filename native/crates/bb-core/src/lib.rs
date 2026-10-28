@@ -41,6 +41,7 @@ pub mod time;
 pub mod timestamps;
 pub mod transfer;
 pub mod undo;
+pub mod updates;
 
 pub use bb_paths as paths;
 pub use time::FileTime;
