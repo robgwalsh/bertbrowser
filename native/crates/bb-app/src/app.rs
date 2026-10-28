@@ -82,6 +82,8 @@ pub(crate) struct TabData {
     pub columns_customized: bool,
     /// Shell-property values the host supplied, by row key.
     pub props: HashMap<Arc<str>, crate::rows::RowProps>,
+    /// The (modified, size) of a file when the host read its properties: a file written since is read again.
+    pub prop_stamps: HashMap<Arc<str>, (i64, i64)>,
     /// The host has not yet looked at the property cells this listing needs.
     pub props_pending: bool,
     /// Cells handed to the host and not yet answered: (row key, upper-cased canonical name).
@@ -92,6 +94,8 @@ pub(crate) struct TabData {
     pub preview_mode: u8,
     pub preview_wrap: bool,
     pub preview_fit: bool,
+    /// What the comparison on screen says about this tab's rows, while there is one.
+    pub compare: Option<Arc<crate::compare_view::TabCompare>>,
 }
 
 impl TabData {
@@ -135,12 +139,14 @@ impl TabData {
             columns: settings.file_list_columns.clone(),
             columns_customized: false,
             props: HashMap::new(),
+            prop_stamps: HashMap::new(),
             props_pending: false,
             props_inflight: HashSet::new(),
             pending_selection: Vec::new(),
             preview_mode: 0,
             preview_wrap: false,
             preview_fit: false,
+            compare: None,
         }
     }
 

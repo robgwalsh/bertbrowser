@@ -34,6 +34,8 @@ pub enum Model {
     Compare = 11,
     /// Something that decides whether a command can run changed (a dialog, the clipboard).
     Commands = 12,
+    /// The metadata pane's rows, boxes or files moved (an apply finished).
+    Metadata = 13,
 }
 
 #[derive(Clone, Debug, PartialEq)]

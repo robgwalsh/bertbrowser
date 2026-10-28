@@ -225,6 +225,10 @@ typedef struct BbTabState {
   // 0 none, 1 preview, 2 metadata.
   uint32_t side_pane;
   double thumbnail_scale;
+  // The preview pane's mode (0 auto, 1 raw, 2 hex) and its two per-tab switches (wrap, 100%).
+  uint32_t preview_mode;
+  bool preview_wrap;
+  bool preview_fit;
 } BbTabState;
 
 // One row, as views into the snapshot. Ask for visible rows at paint time only.
@@ -270,6 +274,30 @@ typedef struct BbFocusState {
   enum BbFocusKind focus;
   uint32_t flags;
 } BbFocusState;
+
+// The host's side of the property system. Every callback returns `BB_OK` with `*out` set to a JSON
+// view that stays valid until the host's next call on that thread, or a failure status.
+//
+// - `details(user, path, out)`: `[{canonical, name, value}]` for every property with a value.
+// - `read_fields(user, path, canonicals_json, ask_writable, out)`: `null` when no store would open,
+//   else `{writable: [canonical]|null, values: [{canonical, text?, number?, utc?}]}`; `utc` is a
+//   FILETIME as a 64-bit integer. `writable` is only filled when `ask_writable` (it costs an
+//   exclusive write-open).
+// - `write_fields(user, path, values_json, out_error)`: sets `[{canonical, text?|number?|utc?}]`
+//   and commits in place; a failure puts the handler's words in `*out_error`.
+typedef struct BbPropertyHost {
+  void *user;
+  enum BbStatus (*details)(void *user, struct BbStr path, struct BbStr *out);
+  enum BbStatus (*read_fields)(void *user,
+                               struct BbStr path,
+                               struct BbStr canonicals_json,
+                               bool ask_writable,
+                               struct BbStr *out);
+  enum BbStatus (*write_fields)(void *user,
+                                struct BbStr path,
+                                struct BbStr values_json,
+                                struct BbStr *out_error);
+} BbPropertyHost;
 
 #ifdef __cplusplus
 extern "C" {
@@ -765,6 +793,160 @@ enum BbStatus bb_ui_set_dialog_open(struct BbApp *app, bool open);
 // Starts or stops comparing the active pane with the next. (Only the switch and its gates live
 // here; the comparison engine is not part of this layer.)
 enum BbStatus bb_compare_toggle(struct BbApp *app);
+
+// What the preview pane shows for the tab's selection, as JSON `{state, title, subtitle, message,
+// canChooseMode, path, lines, spans, footer, entries, ...}`; see `bb-app/src/preview.rs`. `mode` is
+// 0 auto, 1 raw text, 2 hex, 3 the document fallback (the shell declined; read the bytes as text).
+// Blocking: call it from a worker thread.
+enum BbStatus bb_preview_build(struct BbApp *app,
+                               uint64_t tab,
+                               uint32_t mode,
+                               struct BbOwnedStr *out_json);
+
+// As `bb_preview_build` for one path that need not be selected anywhere.
+enum BbStatus bb_preview_build_path(struct BbApp *app,
+                                    struct BbStr path,
+                                    uint32_t mode,
+                                    struct BbOwnedStr *out_json);
+
+// Starts playing the GIF at `path` and returns once its first frame is ready; the rest decode on
+// a thread of their own. `out_json` is `{animated, handle, width, height, frames, durationMs}`, or
+// `{animated: false, reason: "still"|"tooLarge"|"unreadable", frames}` with `handle` 0 when it
+// should be shown as a picture. Blocking: call it from a worker thread.
+enum BbStatus bb_gif_open(struct BbApp *app,
+                          struct BbStr path,
+                          uint64_t *out_handle,
+                          struct BbOwnedStr *out_json);
+
+// How many frames have been decoded, and `flags`: bit 0 all of them, bit 1 decoding ended early
+// (nothing more is coming).
+enum BbStatus bb_gif_ready(struct BbApp *app,
+                           uint64_t handle,
+                           uint32_t *out_ready,
+                           uint32_t *out_flags);
+
+// Copies frame `index` (BGRA, `width * height * 4` bytes) into `dst`, or the last one decoded if it
+// has not arrived yet; `out_index` says which it really was.
+enum BbStatus bb_gif_frame(struct BbApp *app,
+                           uint64_t handle,
+                           uint32_t index,
+                           uint8_t *dst,
+                           size_t capacity,
+                           uint32_t *out_index);
+
+// The loop arithmetic: the frame on screen at `position_ms` (any position; it wraps), how long
+// until the frame changes (at least 1), and where `frame` starts.
+enum BbStatus bb_gif_position(struct BbApp *app,
+                              uint64_t handle,
+                              int64_t position_ms,
+                              uint32_t *out_frame,
+                              int64_t *out_until_next);
+
+enum BbStatus bb_gif_start_of(struct BbApp *app, uint64_t handle, uint32_t frame, int64_t *out_ms);
+
+// Stops the decoding and lets the frames go.
+enum BbStatus bb_gif_close(struct BbApp *app, uint64_t handle);
+
+// Installs the host's window onto the Windows property system (all callbacks null removes it).
+enum BbStatus bb_set_property_host(struct BbApp *app, struct BbPropertyHost host);
+
+// Points the tab's metadata pane at its selection and reads it (blocking, but only as long as the
+// files take). Nothing happens when neither the selected paths nor their modified times moved,
+// unless `force`: a refresh that changes neither must not wipe what is half typed.
+enum BbStatus bb_metadata_load(struct BbApp *app, uint64_t tab, bool force);
+
+// The pane as JSON: `{title, summary, isBusy, isEmpty, files, fields, details, canHoldPicture,
+// hasPicture, pictureNote, located, locationNote, canApply, canRemove, canRemoveLocation,
+// canRemoveAll, canRemovePicture}`; see `bb-app/src/metadata_pane.rs`.
+enum BbStatus bb_metadata_model(struct BbApp *app, uint64_t tab, struct BbOwnedStr *out_json);
+
+// Types into a box. Only a change of the text counts as touching it.
+enum BbStatus bb_metadata_set_text(struct BbApp *app,
+                                   uint64_t tab,
+                                   struct BbStr id,
+                                   struct BbStr text);
+
+// Puts a box back to what the files hold.
+enum BbStatus bb_metadata_revert(struct BbApp *app, uint64_t tab, struct BbStr id);
+
+// A day chosen in a date box's calendar; the time already in the box is kept.
+enum BbStatus bb_metadata_pick_date(struct BbApp *app,
+                                    uint64_t tab,
+                                    struct BbStr id,
+                                    int32_t year,
+                                    uint32_t month,
+                                    uint32_t day);
+
+// Presses one of the pane's buttons: 0 Apply, 1 remove the location, 2 remove everything, 3 remove
+// the cover picture, 4 set the cover picture to the `len` bytes at `data`. Queued like any write
+// and recorded in the undo history; `BB_ERR` says why the button would not have worked. The pane
+// updates itself when the operation finishes and `BB_EVT_MODEL_CHANGED` 13 arrives.
+enum BbStatus bb_metadata_act(struct BbApp *app,
+                              uint64_t tab,
+                              uint32_t action,
+                              const uint8_t *data,
+                              size_t len,
+                              uint64_t *out_op);
+
+// The cover the selection shares, as the image file it is. Call with `dst` null to learn the
+// length; `*out_len` is 0 when there is none.
+enum BbStatus bb_metadata_picture(struct BbApp *app,
+                                  uint64_t tab,
+                                  uint8_t *dst,
+                                  size_t capacity,
+                                  size_t *out_len);
+
+// Reads both sides of each path and settles its verdict to "same" where the bytes are identical;
+// nothing else moves. `out_identical` is how many were. Blocking: call it from a worker.
+enum BbStatus bb_compare_settle(struct BbApp *app,
+                                const struct BbStr *paths,
+                                uint32_t n,
+                                uint32_t *out_identical);
+
+// Renames by the expanded panel's rule, given as the settings file spells it:
+// `{template, find, replace, useRegex, matchCase, scope, case, counterStart, counterStep}` (a
+// missing key keeps its default). A template that names a tag has each file's metadata read first.
+enum BbStatus bb_op_rename_rule(struct BbApp *app,
+                                const struct BbStr *src,
+                                uint32_t n,
+                                struct BbStr rule_json,
+                                uint64_t *out_op);
+
+// Commits what the undo history is holding and empties it (Settings, History, Clear).
+enum BbStatus bb_undo_clear(struct BbApp *app);
+
+// Writes a set of small real files into `dir` (created if need be): `metadata` (a camera picture,
+// a bare picture, two songs), `media` (the same tone as FLAC, WAV, M4A and WMA, and a two-track
+// MP4), `formats` (PNG, WebP, TIFF, a Word document, an EPUB, AIFF and Opus), `windows` (an `.asf`
+// and a GIF no codec writes). None of them is written by the code under test: Windows' own
+// encoders, or bytes laid out by hand from the specifications.
+enum BbStatus bb_fixture_write(struct BbStr kind, struct BbStr dir);
+
+// The scale after `notches` wheel notches, relative to "fit" (1). Pure arithmetic: the view owns
+// the transform, the core owns the rules.
+double bb_zoom_step(double scale, double notches, double min_scale);
+
+double bb_zoom_clamp(double scale, double min_scale);
+
+// The offset that keeps the image point under the cursor where it is when the scale changes.
+double bb_zoom_offset(double offset, double anchor, double old_scale, double new_scale);
+
+// Keeps the picture from being dragged out of view (centred where it is smaller than the pane).
+double bb_zoom_clamp_offset(double offset,
+                            double origin,
+                            double length,
+                            double scale,
+                            double viewport);
+
+// The row to select to go on to the next video after the selected one (`-1`: there is none).
+enum BbStatus bb_preview_next_media(struct BbApp *app, uint64_t tab, int64_t *out_row);
+
+// What the file holds now, read from disk through the codec that writes it: one field by id, or
+// `location` / `picture` as "yes" or an empty string. `BB_ERR` says why it could not be read.
+enum BbStatus bb_metadata_peek(struct BbApp *app,
+                               struct BbStr path,
+                               struct BbStr what,
+                               struct BbOwnedStr *out_text);
 
 #ifdef __cplusplus
 }  // extern "C"

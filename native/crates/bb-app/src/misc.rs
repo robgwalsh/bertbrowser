@@ -26,6 +26,12 @@ pub(crate) struct CompareState {
     pub left: PaneId,
     pub right: PaneId,
     pub differences_only: bool,
+    /// The verdicts, once the folders have been read; settling by content replaces them.
+    pub result: Option<std::sync::Arc<bb_core::compare::CompareResult>>,
+    pub left_root: String,
+    pub right_root: String,
+    pub left_tab: Option<crate::ids::TabId>,
+    pub right_tab: Option<crate::ids::TabId>,
 }
 
 /// What the host has told us about the window, and what the Settings page is showing.
@@ -190,10 +196,11 @@ impl Inner {
 
     // ---- comparing two panes ----
 
-    pub(crate) fn compare_toggle(&self) -> AppResult<()> {
+    pub(crate) fn compare_toggle(self: &std::sync::Arc<Self>) -> AppResult<()> {
         let mut ui = lock(&self.extra.ui);
         if ui.compare.take().is_some() {
             drop(ui);
+            self.compare_clear();
             self.hub.model(Model::Compare);
             return Ok(());
         }
@@ -206,13 +213,20 @@ impl Inner {
             left,
             right,
             differences_only: false,
+            result: None,
+            left_root: String::new(),
+            right_root: String::new(),
+            left_tab: None,
+            right_tab: None,
         });
         self.hub.model(Model::Compare);
+        self.compare_begin(left, right);
         Ok(())
     }
 
     pub(crate) fn compare_end(&self) {
         if lock(&self.extra.ui).compare.take().is_some() {
+            self.compare_clear();
             self.hub.model(Model::Compare);
         }
     }
@@ -226,6 +240,7 @@ impl Inner {
         {
             ui.compare = None;
             drop(ui);
+            self.compare_clear();
             self.hub.model(Model::Compare);
         }
     }

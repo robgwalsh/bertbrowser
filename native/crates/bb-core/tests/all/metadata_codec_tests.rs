@@ -857,3 +857,50 @@ fn the_extension_decides_which_codec() {
     assert_eq!(None, id(r"C:\x\a.txt"));
     assert_eq!(None, id(r"C:\x\noextension"));
 }
+
+// ---- an ASF header Windows itself reads ---------------------------------------------------------
+
+/// The Extended Content Description Object's GUID, D2D0A440-E307-11D2-97F0-00A0C95EA850, in the byte
+/// order a header stores it. The port once carried a different last half, which no reader of the file
+/// (Windows' own property handler included) would look for: the album was written and read back by the
+/// codec alone and never seen by anything else.
+const ECD_GUID: [u8; 16] = [
+    0x40, 0xA4, 0xD0, 0xD2, 0x07, 0xE3, 0xD2, 0x11, 0x97, 0xF0, 0x00, 0xA0, 0xC9, 0x5E, 0xA8, 0x50,
+];
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+#[test]
+fn a_wma_header_carries_its_descriptions_under_the_specifications_guid() {
+    let codec = AudioTagCodec::new(".wma");
+    let original = fixture(".wma");
+    assert!(
+        find(&original, &ECD_GUID).is_some(),
+        "the Windows-encoded fixture has an extended content description"
+    );
+
+    let written = write(
+        &codec,
+        &original,
+        &edit(&[(MetadataField::Album, "Five containers")]),
+    );
+    let header = &written[..written.len().min(4096)];
+    assert!(
+        find(header, &ECD_GUID).is_some(),
+        "the rewritten header names it the way the spec does"
+    );
+    assert_eq!(
+        "Five containers",
+        read(&codec, &written).get(MetadataField::Album)
+    );
+
+    // The fixture's own description (written by Windows, so under the right GUID) is read, not skipped.
+    let again = write(&codec, &written, &edit(&[(MetadataField::Year, "2024")]));
+    assert_eq!(
+        "Five containers",
+        read(&codec, &again).get(MetadataField::Album)
+    );
+    assert_eq!("2024", read(&codec, &again).get(MetadataField::Year));
+}

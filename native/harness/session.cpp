@@ -148,7 +148,7 @@ Session::~Session() {
 
 int Session::pump() { return bb::platform::pump_messages(); }
 
-bool Session::busy() { return core_->busy(); }
+bool Session::busy() { return core_->busy() || view_->preview_pending(); }
 
 void Session::settle(int quiet_ms) {
     const auto clock = Clock::now();

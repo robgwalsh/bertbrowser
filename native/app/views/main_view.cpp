@@ -2,6 +2,8 @@
 
 #include "gfx/icons.gen.h"
 #include "views/folder_tree.h"
+#include "views/media_pane.h"
+#include "views/property_host.h"
 #include "views/shell_props.h"
 
 #include <dwmapi.h>
@@ -95,6 +97,47 @@ std::string signature(const json::Value& node, const json::Value& panes) {
     for (size_t i = 0; i < kids.size(); ++i) s += signature(kids[i], panes) + ";";
     return s + ")";
 }
+
+// The edge of the side pane: a hairline that is also a handle. Dragging it resizes the pane; releasing it
+// is when the width is remembered.
+class SideGrip : public Widget {
+public:
+    SideGrip(std::function<void(float)> resized, std::function<void()> done, std::function<float()> right_edge)
+        : resized_(std::move(resized)), done_(std::move(done)), right_edge_(std::move(right_edge)) {}
+    void paint(PaintContext& pc) override {
+        pc.fill(Rect{bounds.l, bounds.t, bounds.l + 1.0f, bounds.b}, tok::BorderDefault);
+        if (dragging_ || hovered()) pc.fill(Rect{bounds.l, bounds.t, bounds.r, bounds.b}, tok::SplitterHoverBackground);
+    }
+    bool on_mouse_down(const MouseEvent& e) override {
+        if (e.button != MouseButton::Left) return false;
+        dragging_ = true;
+        root()->capture(this);
+        invalidate();
+        return true;
+    }
+    bool on_mouse_move(const MouseEvent& e) override {
+        if (!dragging_) return false;
+        resized_(right_edge_() - e.pt.x);
+        return true;
+    }
+    bool on_mouse_up(const MouseEvent&) override {
+        if (!dragging_) return false;
+        dragging_ = false;
+        root()->release_capture();
+        done_();
+        invalidate();
+        return true;
+    }
+    void on_mouse_enter() override { invalidate(); }
+    void on_mouse_leave() override { invalidate(); }
+    Cursor cursor_at(Point) const override { return Cursor::SizeWE; }
+
+private:
+    std::function<void(float)> resized_;
+    std::function<void()> done_;
+    std::function<float()> right_edge_;
+    bool dragging_ = false;
+};
 
 }  // namespace
 
@@ -245,22 +288,38 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     auto body = std::make_unique<DockPanel>();
     body->dock = Dock::Fill;
     body_ = add(std::move(body));
-    // The side pane sits at the right, shown for the preview and the metadata choices.
-    auto* side = body_->emplace<Panel>();
-    side->name = "PreviewPane";
+    // The side pane sits at the right, shown for the preview and the metadata choices. Its left edge is a
+    // grip: dragged, it resizes the pane, and the width it ends on is the one new tabs start from.
+    {
+        double saved = 0;
+        BbOwnedStr o{};
+        if (bb_settings_get(app, core::s(L"previewPaneWidth"), &o) == BB_OK) saved = _wtof(core::take(o).c_str());
+        if (saved > 0) side_width_ = static_cast<float>(std::clamp(saved, 180.0, 1200.0));
+    }
+    auto* side = body_->emplace<DockPanel>();
+    side->name = "SidePane";
     side->dock = Dock::Right;
-    side->width = 320;
-    side->pad = 12;
+    side->width = side_width_;
     side->style.bg = tok::SurfaceBackground;
     side->set_visible(false);
     side_pane_ = side;
-    auto* side_col = side->emplace<StackPanel>(Orientation::Vertical, 6.0f);
-    side_title_ = side_col->emplace<TextBlock>();
-    side_title_->style.font.size = 16.0f;
-    side_title_->style.font.weight = 600;
-    side_text_ = side_col->emplace<TextBlock>();
-    side_text_->wrap = true;
-    side_text_->style.fg = tok::TextSecondary;
+    {
+        auto* grip = side->emplace<SideGrip>(
+            [this](float wanted) {
+                side_width_ = std::clamp(wanted, 180.0f, std::max(180.0f, body_->bounds.width() - 140.0f));
+                side_pane_->width = side_width_;
+                body_->request_layout();
+            },
+            [this, app] {
+                char buf[32];
+                snprintf(buf, sizeof(buf), "%.0f", side_width_);
+                bb_settings_set(app, core::s(L"previewPaneWidth"), core::s(core::wide(buf)));
+            },
+            [this] { return side_pane_->bounds.r; });
+        grip->name = "SideGrip";
+        grip->dock = Dock::Left;
+        grip->width = 5;
+    }
     view_area_ = body_->emplace<Panel>();
     view_area_->dock = Dock::Fill;
     list_ = view_area_->emplace<ListView>();
@@ -316,7 +375,11 @@ void TabView::sync_columns() {
     list_->set_columns(std::move(out));
 }
 
-TabView::~TabView() { thumbs_.reset(); }
+TabView::~TabView() {
+    thumbs_.reset();
+    // Gone before its pane: the pane's worker posts here, and a full-screen video lent to the window comes home.
+    if (preview_) preview_->set_active(false);
+}
 
 void TabView::arrange(Rect r) {
     // A narrow pane gives up the whole-PC search box first, so the path never shrinks to nothing.
@@ -399,23 +462,63 @@ void TabView::sync_view_mode(const BbTabState& st) {
     view_area_->request_layout();
 }
 
+PreviewPane* TabView::ensure_preview() {
+    if (preview_) return preview_;
+    preview_ = side_pane_->emplace<PreviewPane>(core_, tab_, main_.window().hwnd());
+    preview_->on_fit_width = [this] { fit_side_width(); };
+    preview_->on_next_media = [this] { select_next_media(); };
+    return preview_;
+}
+
+MetadataPane* TabView::ensure_metadata() {
+    if (metadata_) return metadata_;
+    metadata_ = side_pane_->emplace<MetadataPane>(core_, tab_);
+    return metadata_;
+}
+
 void TabView::sync_side_pane(const BbTabState& st) {
     side_mode_ = static_cast<int>(st.side_pane);
     side_pane_->set_visible(side_mode_ != 0);
     for (int i = 0; i < 3; ++i) side_buttons_[i]->primary = i == side_mode_;
-    if (side_mode_ == 0) return;
-    side_title_->set_text(side_mode_ == 1 ? L"Preview" : L"Metadata");
-    const auto sel = core_.selection(tab_);
-    std::wstring text = L"Select a file to see it here.";
-    if (!sel.empty() && adapter_.listing()) {
-        BbRow r{};
-        if (adapter_.listing()->row(sel[0], r)) {
-            text = core::w(r.name) + (sel.size() > 1 ? L"\n+ " + std::to_wstring(sel.size() - 1) + L" more" : L"");
-            if (!(r.flags & BB_ROW_DIRECTORY) && r.size >= 0) text += L"\n" + std::to_wstring(r.size) + L" bytes";
-            text += L"\n" + core::w(r.full_path);
+
+    // Built the first time it is shown, not declared with the tab: most tabs never show one.
+    if (side_mode_ == 1) ensure_preview();
+    if (side_mode_ == 2) ensure_metadata();
+    if (preview_) preview_->set_visible(side_mode_ == 1);
+    if (metadata_) metadata_->set_visible(side_mode_ == 2);
+    if (preview_) {
+        preview_->set_active(side_mode_ == 1);
+        if (side_mode_ == 1) {
+            preview_->apply_view_state(static_cast<int>(st.preview_mode), st.preview_wrap, st.preview_fit);
+            preview_->show();
         }
     }
-    side_text_->set_text(text);
+    if (metadata_) {
+        metadata_->set_active(side_mode_ == 2);
+        if (side_mode_ == 2) metadata_->follow_selection(false);
+    }
+    // What the commands that act on a playing video ask before they say yes.
+    bb_ui_set_flag(core_.app(), core::s(L"previewHasMedia"), preview_ && side_mode_ == 1 && preview_->state_name() == "media");
+}
+
+void TabView::fit_side_width() {
+    if (!preview_) return;
+    const float wanted = preview_->desired_width() + 16.0f;
+    side_width_ = std::clamp(wanted, 180.0f, std::max(180.0f, body_->bounds.width() - 140.0f));
+    side_pane_->width = side_width_;
+    body_->request_layout();
+}
+
+void TabView::select_next_media() {
+    int64_t row = -1;
+    if (bb_preview_next_media(core_.app(), tab_, &row) != BB_OK || row < 0) return;
+    const auto& listing = adapter_.listing();
+    BbRow r{};
+    if (!listing || !listing->row(static_cast<size_t>(row), r)) return;
+    // The file that arrives is the one that plays: a path, not a flag, so a selection the user makes in the
+    // meantime is never auto-played.
+    if (preview_) preview_->play_when_loaded(core::w(r.full_path));
+    reveal_row(static_cast<size_t>(row));
 }
 
 void TabView::refresh_tooltips() {
@@ -808,7 +911,7 @@ void MainView::sink(void* ctx, BbEvent* evt) {
     }
 }
 
-bool MainView::on_window_message(UINT msg, WPARAM, LPARAM lp) {
+bool MainView::on_window_message(UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_BB_BARS) {
         bars_pending_ = false;
         try {
@@ -821,6 +924,10 @@ bool MainView::on_window_message(UINT msg, WPARAM, LPARAM lp) {
         for (auto& kv : by_tab_) kv.second->drain_thumbnails();
         return true;
     }
+    if (msg == WM_BB_PREVIEW) {
+        deliver_preview(static_cast<uint64_t>(wp), reinterpret_cast<PreviewResult*>(lp));
+        return true;
+    }
     if (msg != WM_BB_EVENT) return false;
     auto* evt = reinterpret_cast<BbEvent*>(lp);
     try {
@@ -831,6 +938,17 @@ bool MainView::on_window_message(UINT msg, WPARAM, LPARAM lp) {
     ++handled_;
     bb_event_free(evt);
     return true;
+}
+
+void MainView::deliver_preview(uint64_t tab, PreviewResult* raw) {
+    std::unique_ptr<PreviewResult> result(raw);
+    TabView* tv = tab_view(tab);
+    if (!tv || !tv->preview()) {
+        // The tab went away (or is parked) while its answer was on the way.
+        if (result->gif) bb_gif_close(core_.app(), static_cast<uint64_t>(result->gif));
+        return;
+    }
+    tv->preview()->apply(std::move(result));
 }
 
 void MainView::handle(const BbEvent& e) {
@@ -879,6 +997,11 @@ void MainView::handle(const BbEvent& e) {
                 for (auto& kv : by_tab_) kv.second->reload_columns();
             }
             if (e.a == 4) refresh_tooltips();
+            if (e.a == 13) {
+                for (auto& kv : by_tab_) {
+                    if (kv.second->metadata()) kv.second->metadata()->refresh();
+                }
+            }
             if (e.a == 1 || e.a == 2 || e.a == 4 || e.a == 5 || e.a == 6 || e.a == 7 || e.a == 8 || e.a == 9 || e.a == 10) sync_overlays();
             break;
         default:
@@ -903,6 +1026,7 @@ void MainView::push_system_appearance() {
 
 void MainView::start(const std::wstring& path) {
     bb_ui_set_flag(core_.app(), core::s(L"propertyProvider"), true);
+    bb_set_property_host(core_.app(), make_property_host());
     if (follow_windows_) {
         push_system_appearance();
         window_.on_system_settings_changed = [this] { push_system_appearance(); };
@@ -1056,6 +1180,16 @@ bool MainView::host_command(const std::wstring& id) {
     if (id == L"app.settings") {
         bb_settings_page_open(core_.app(), core::s(L""));
         sync_overlays();
+        return true;
+    }
+    // The side pane's own: the core only decides whether they may run (a pane is open, something plays).
+    if (id == L"preview.fit-width" || id == L"preview.play" || id == L"preview.play-next" || id == L"preview.fullscreen") {
+        TabView* tv = active_view();
+        if (!tv || !tv->preview()) return false;
+        if (id == L"preview.fit-width") tv->fit_side_width();
+        else if (id == L"preview.play-next") tv->select_next_media();
+        else if (id == L"preview.play") tv->preview()->media()->toggle_play();
+        else tv->preview()->media()->set_full_screen(!tv->preview()->media()->full_screen());
         return true;
     }
     // Commands that put a dialog up. A run with no one to answer reports them instead.
@@ -1325,6 +1459,13 @@ void MainView::show_context_menu(MenuItems items, Point at) {
     MenuOpen o;
     o.anchor = Rect{at.x, at.y, at.x, at.y};
     popup_->open_menu(*floating_menu_, o);
+}
+
+bool MainView::preview_pending() const {
+    for (const auto& kv : by_tab_) {
+        if (kv.second->side_pending()) return true;
+    }
+    return false;
 }
 
 size_t MainView::thumbnails_pending() const {

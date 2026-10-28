@@ -33,6 +33,10 @@ pub(crate) struct Extra {
     /// How many rows a flat listing shows before it stops and says so. The harness lowers it so a
     /// dozen files can reach the truncated case; a person never changes it.
     pub flat_cap: std::sync::atomic::AtomicUsize,
+    /// The metadata pane of each tab, and the host's window onto the Windows property system.
+    pub metadata: crate::metadata_pane::MetadataState,
+    /// The animated GIFs being played, by handle.
+    pub gifs: Mutex<std::collections::HashMap<u64, Arc<crate::gif_player::GifPlayer>>>,
 }
 
 impl Extra {
@@ -54,6 +58,8 @@ impl Extra {
             last_thumbnail_scale: Mutex::new(0.3),
             machine_props: Mutex::new((Vec::new(), false)),
             flat_cap: std::sync::atomic::AtomicUsize::new(crate::tabs::FLAT_ENTRY_CAP),
+            metadata: Default::default(),
+            gifs: Default::default(),
         }
     }
 }

@@ -27,6 +27,7 @@ private:
     void install_asserts();
     void install_bench();
     void install_ui();
+    void install_panes();
 
     // ---- helpers ----
     static std::pair<std::wstring, std::wstring> split_first(const std::wstring& line);
@@ -43,6 +44,11 @@ private:
     std::wstring row_path(const std::wstring& name);
     std::vector<std::wstring> sources_for(const std::wstring& names, const char* verb);
     void invoke_settled(const std::function<void()>& fn);
+    // The side panes (runner_panes.cpp).
+    void settle_preview();
+    bb::views::PreviewPane* preview_pane();
+    bb::views::MetadataPane* metadata_pane();
+    void press_metadata(bb::views::MetadataPane* pane, int action, const std::string& what);
     void await_op(uint64_t op);
     void transfer(const std::wstring& rest, bool move);
     void erase(const std::wstring& rest, BbDeleteMode mode);

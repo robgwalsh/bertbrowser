@@ -700,9 +700,7 @@ pub unsafe extern "C" fn bb_duplicates_scan(
 /// the parser reads, so the help cannot advertise a key the parser does not implement.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_search_syntax_help(out_json: *mut BbOwnedStr) -> BbStatus {
-    guard(|| {
-        unsafe { put(out_json, &bb_app::App::search_syntax_json()) }
-    })
+    guard(|| unsafe { put(out_json, &bb_app::App::search_syntax_json()) })
 }
 
 /// Every colour token, for the theme editor: `[{key, group, name, description, core, argb,

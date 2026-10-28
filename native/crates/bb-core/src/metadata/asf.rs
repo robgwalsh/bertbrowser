@@ -23,7 +23,10 @@ const CONTENT_DESCRIPTION: [u8; 16] = [
     0x33, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11, 0xA6, 0xD9, 0x00, 0xAA, 0x00, 0x62, 0xCE, 0x6C,
 ];
 const EXTENDED_CONTENT_DESCRIPTION: [u8; 16] = [
-    0x40, 0xA4, 0xD0, 0xD2, 0x07, 0xE3, 0xD2, 0x11, 0x97, 0xF0, 0x00, 0x0F, 0x8C, 0x2C, 0xB4, 0xD5,
+    0x40, 0xA4, 0xD0, 0xD2, 0x07, 0xE3, 0xD2, 0x11, 0x97, 0xF0, 0x00, 0xA0, 0xC9, 0x5E, 0xA8, 0x50,
+];
+const HEADER_EXTENSION: [u8; 16] = [
+    0xB5, 0x03, 0xBF, 0x5F, 0x2E, 0xA9, 0xCF, 0x11, 0x8E, 0xE3, 0x00, 0xC0, 0x0C, 0x20, 0x53, 0x65,
 ];
 const FILE_PROPERTIES: [u8; 16] = [
     0xA1, 0xDC, 0xAB, 0x8C, 0x47, 0xA9, 0xCF, 0x11, 0x8E, 0xE4, 0x00, 0xC0, 0x0C, 0x20, 0x53, 0x65,
@@ -441,17 +444,29 @@ pub fn rewrite(
         end
     };
 
-    let mut objects: Vec<Object> = header
-        .objects
-        .into_iter()
-        .filter(|o| o.guid != CONTENT_DESCRIPTION && o.guid != EXTENDED_CONTENT_DESCRIPTION)
-        .collect();
-    if let Some(cd) = content_description(tags) {
-        objects.push(cd);
+    // The two description objects go where the originals were, or ahead of the header extension: a
+    // reader that walks the header in order (Windows' own) is only certain to look in the places the
+    // specification puts them.
+    let mut cd = content_description(tags);
+    let mut ecd = extended_content_description(tags)?;
+    let mut objects: Vec<Object> = Vec::new();
+    for object in header.objects {
+        if object.guid == CONTENT_DESCRIPTION {
+            objects.extend(cd.take());
+            continue;
+        }
+        if object.guid == EXTENDED_CONTENT_DESCRIPTION {
+            objects.extend(ecd.take());
+            continue;
+        }
+        if object.guid == HEADER_EXTENSION {
+            objects.extend(cd.take());
+            objects.extend(ecd.take());
+        }
+        objects.push(object);
     }
-    if let Some(ecd) = extended_content_description(tags)? {
-        objects.push(ecd);
-    }
+    objects.extend(cd);
+    objects.extend(ecd);
 
     let header_size: u64 = 30
         + objects

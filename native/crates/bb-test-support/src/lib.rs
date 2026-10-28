@@ -2,7 +2,7 @@
 //! verbatim from MetadataFixtures and ArchiveFixtures, in-memory probes. A dev-dependency only.
 
 pub mod metadata_fixtures;
-mod metadata_fixtures_data;
+pub mod metadata_fixtures_data;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

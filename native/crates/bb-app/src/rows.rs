@@ -84,6 +84,10 @@ pub struct Row {
     /// Shell-property values the host has supplied, by upper-cased canonical name. `None` for a
     /// property the handler had no value for: asked, answered, blank.
     pub props: Option<Arc<RowProps>>,
+    /// What a comparison says about this row (`compare_view::state_number`), 0 when it says nothing.
+    /// Stamped when a listing is made or the result changes; not part of the file, so it is not part
+    /// of what a refresh weighs.
+    pub compare: std::sync::atomic::AtomicU8,
     wide: OnceLock<Wide>,
 }
 
@@ -105,6 +109,9 @@ impl Row {
         c.size_incomplete = self.size_incomplete;
         c.size_computed = self.size_computed;
         c.props = self.props.clone();
+        c.compare = std::sync::atomic::AtomicU8::new(
+            self.compare.load(std::sync::atomic::Ordering::Relaxed),
+        );
         c
     }
 
@@ -175,6 +182,7 @@ impl Row {
             is_media,
             content_match,
             props: None,
+            compare: std::sync::atomic::AtomicU8::new(0),
             wide: OnceLock::new(),
         }
     }
@@ -255,6 +263,10 @@ impl Row {
                 .as_ref()
                 .map(|m| m.line.clone())
                 .unwrap_or_default(),
+            Some(ColumnCatalog::COMPARE_STATUS) => crate::compare_view::state_words(
+                self.compare.load(std::sync::atomic::Ordering::Relaxed),
+            )
+            .to_string(),
             Some(ColumnCatalog::SIZE) => self.size_text(),
             Some(ColumnCatalog::TYPE) => self.type_name.clone(),
             Some(ColumnCatalog::MODIFIED) => stamp(self.modified),

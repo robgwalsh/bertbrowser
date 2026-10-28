@@ -8,10 +8,10 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
+use bb_core::archives::ArchiveBrowser;
 use bb_core::attributes::HIDDEN;
 use bb_core::cancel::CancelToken;
 use bb_core::data::SearchHit;
-use bb_core::archives::ArchiveBrowser;
 use bb_core::fs::{FileListDiff, FileSystemService, SearchProgress, SearchService};
 use bb_core::models::SearchOutcome;
 use bb_core::rules::FlatViewRules;
@@ -138,7 +138,16 @@ impl TabData {
     pub(crate) fn install(&mut self, mut rows: Vec<Row>, keep_selection: bool) {
         for row in rows.iter_mut() {
             row.id = intern(self, &row.key);
-            // What the host already read for this file survives the reload.
+            // What the host already read for this file survives the reload, unless the file has been
+            // written since: a title edited in place must not go on reading as it did.
+            if self
+                .prop_stamps
+                .get(&row.key)
+                .is_some_and(|stamp| *stamp != (row.modified.0, row.size.unwrap_or(-1)))
+            {
+                self.props.remove(&row.key);
+                self.prop_stamps.remove(&row.key);
+            }
             if row.props.is_none()
                 && let Some(known) = self.props.get(&row.key)
             {
@@ -461,11 +470,15 @@ impl Inner {
         let mut rows: Vec<Arc<Row>> = Vec::with_capacity(t.listing.len() + added.len());
         let mut replacements: std::collections::HashMap<Arc<str>, Row> =
             updated.drain(..).map(|r| (r.key.clone(), r)).collect();
+        let mut stale: Vec<Arc<str>> = Vec::new();
         for existing in t.listing.rows() {
             if removed.contains(&*existing.key) {
                 continue;
             }
             if let Some(mut replacement) = replacements.remove(&existing.key) {
+                if replacement.modified != existing.modified || replacement.size != existing.size {
+                    stale.push(existing.key.clone());
+                }
                 if replacement.is_directory {
                     replacement.size = existing.size;
                     replacement.size_incomplete = existing.size_incomplete;
@@ -476,6 +489,10 @@ impl Inner {
             } else {
                 rows.push(existing.clone());
             }
+        }
+        for key in stale {
+            t.props.remove(&key);
+            t.prop_stamps.remove(&key);
         }
         for mut row in added {
             row.id = intern(&mut t, &row.key);
@@ -494,6 +511,7 @@ impl Inner {
         drop(t);
         self.hub.emit(AppEvent::ListingChanged { tab, version });
         self.hub.emit(AppEvent::TabChanged { tab });
+        self.props_after_install(tab);
     }
 
     // ---- search ----
@@ -728,7 +746,10 @@ impl Inner {
         };
 
         let estimate = self.dir_sizes.get(&path).ok().flatten();
-        let cap = self.extra.flat_cap.load(std::sync::atomic::Ordering::Relaxed);
+        let cap = self
+            .extra
+            .flat_cap
+            .load(std::sync::atomic::Ordering::Relaxed);
         let preflight = FlatViewRules::decide(&path, estimate.as_ref(), cap as i64);
         if preflight.confirm
             && !self
@@ -808,10 +829,7 @@ impl Inner {
             )
         });
         let truncated = if outcome.truncated {
-            format!(
-                " (first {})",
-                bb_core::format::thousands(cap as i64)
-            )
+            format!(" (first {})", bb_core::format::thousands(cap as i64))
         } else {
             String::new()
         };

@@ -43,10 +43,19 @@ add_library(bbviews STATIC
   views/thumbs.cpp
   views/shell_props.cpp
   views/folder_tree.cpp
+  views/pane_images.cpp
+  views/code_view.cpp
+  views/image_view.cpp
+  views/font_view.cpp
+  views/media_player.cpp
+  views/media_pane.cpp
+  views/preview_pane.cpp
+  views/metadata_pane.cpp
+  views/property_host.cpp
   views/main_view.cpp
 )
 target_include_directories(bbviews PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(bbviews PUBLIC bbapp bbcore)
+target_link_libraries(bbviews PUBLIC bbapp bbcore mfplat mf mfuuid)
 
 # The product. Never launched to check UI work; the harness is the way to see the interface.
 add_executable(BertBrowser WIN32 app/main.cpp app/version.cpp)

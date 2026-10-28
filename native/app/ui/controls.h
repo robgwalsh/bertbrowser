@@ -11,6 +11,7 @@ public:
     void set_text(std::wstring t);
     gfx::TextAlign align = gfx::TextAlign::Leading;
     bool wrap = false;
+    bool vcenter = false;  // a wrapped block sits in the middle of its bounds instead of at the top
 
     Size measure(Size avail) override;
     void paint(PaintContext& pc) override;

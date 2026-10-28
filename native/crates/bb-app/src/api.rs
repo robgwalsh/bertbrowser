@@ -43,6 +43,10 @@ pub struct TabInfo {
     pub sort_desc: bool,
     pub thumbnail_scale: f64,
     pub side_pane: u8,
+    /// The preview pane's mode (0 auto, 1 raw, 2 hex) and its two per-tab switches.
+    pub preview_mode: u8,
+    pub preview_wrap: bool,
+    pub preview_fit: bool,
     pub shows_content_matches: bool,
     pub is_search_running: bool,
 }
@@ -203,6 +207,9 @@ impl App {
             sort_desc: t.sort_desc,
             thumbnail_scale: t.thumbnail_scale,
             side_pane: t.side_pane,
+            preview_mode: t.preview_mode,
+            preview_wrap: t.preview_wrap,
+            preview_fit: t.preview_fit,
             shows_content_matches: t.shows_content_matches,
             is_search_running: t.is_search_running,
         })

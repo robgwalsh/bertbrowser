@@ -43,3 +43,9 @@ codegen-units = 4
 # Dependencies (sqlite, compressors) are built optimised even in debug so test runs stay fast.
 [profile.dev.package."*"]
 opt-level = 2
+
+# bb-core holds the decoders a window waits on (a GIF's LZW, a hex dump's formatting, the syntax
+# tokenizer): unoptimised, the 150-frame GIF the animation script plays took longer to decode than
+# the script waits. One level of optimisation is most of the win for a fraction of the compile cost.
+[profile.dev.package.bb-core]
+opt-level = 1

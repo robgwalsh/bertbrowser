@@ -47,7 +47,7 @@ impl TabData {
             self.column_layout(),
             self.is_flattened,
             self.shows_content_matches,
-            false,
+            self.compare.is_some(),
         )
     }
 
@@ -67,6 +67,9 @@ impl TabData {
         flattened: bool,
         flat_browse: bool,
     ) -> Arc<Listing> {
+        if let Some(compare) = &self.compare {
+            compare.stamp(&rows);
+        }
         Arc::new(
             Listing::new(self.id.0, self.version, rows, flattened, flat_browse)
                 .with_props(self.prop_ids()),
@@ -353,6 +356,14 @@ impl Inner {
                     .insert(folded, s.value);
                 touched.insert(key);
             }
+            let stamps: Vec<(Arc<str>, (i64, i64))> = t
+                .listing
+                .rows()
+                .iter()
+                .filter(|r| touched.contains(&r.key))
+                .map(|r| (r.key.clone(), (r.modified.0, r.size.unwrap_or(-1))))
+                .collect();
+            t.prop_stamps.extend(stamps);
             let spec = t.sort_spec();
             let mut rows: Vec<Arc<Row>> = Vec::with_capacity(t.listing.len());
             for row in t.listing.rows() {

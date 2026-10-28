@@ -38,8 +38,12 @@ void TextBlock::paint(PaintContext& pc) {
     opt.align = align;
     auto layout = pc.res.text.make_layout(text_, style.font, opt);
     if (layout) {
-        pc.dc->DrawTextLayout(D2D1::Point2F(bounds.l, bounds.t), layout.Get(), pc.brush(style.fg),
-                              D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        float y = bounds.t;
+        if (vcenter) {
+            DWRITE_TEXT_METRICS m{};
+            if (SUCCEEDED(layout->GetMetrics(&m))) y += std::max(0.0f, (bounds.height() - m.height) / 2);
+        }
+        pc.dc->DrawTextLayout(D2D1::Point2F(bounds.l, y), layout.Get(), pc.brush(style.fg), D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
 }
 

@@ -15,17 +15,22 @@ mod app;
 mod bars;
 mod columns;
 mod commands;
+mod compare_view;
 mod config;
 mod dirwatch;
 mod events;
+mod gif_player;
 mod ids;
 mod index;
 mod keys;
+mod metadata_pane;
 mod misc;
 mod newitem;
 mod ops;
 mod palette;
+mod panes_api;
 mod pool;
+mod preview;
 mod rows;
 mod saved;
 mod seams;
@@ -46,7 +51,10 @@ pub use commands::{
 };
 pub use config::{AppConfig, Fakes};
 pub use events::{AppEvent, EventSink, Model};
+pub use gif_player::{GifOpenError, GifPlayer};
 pub use ids::{AppError, AppResult, OpId, PaneId, TabId};
+pub use metadata_pane::{HostReading, HostValue, MetadataAction, ShellPropertyHost};
+pub use preview::{MODE_AUTO, MODE_GUESS, MODE_HEX, MODE_RAW};
 pub use rows::{CELL_COLUMNS, Listing, Row, cell_index, stamp};
 pub use seams::{
     AppConflictPrompt, ElevationLauncher, HarnessProbes, ProcessLauncher, PushedAppearance, Seams,

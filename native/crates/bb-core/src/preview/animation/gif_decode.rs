@@ -74,12 +74,59 @@ impl GifDecoder {
         })
     }
 
-    /// Every frame, decoded. A stream that ends early yields the frames before the cut.
-    pub fn decode(bytes: &[u8], cancel: &CancelToken) -> Result<GifAnimation, GifError> {
+    /// The header and every frame's declared delay in milliseconds, walking the block structure
+    /// without decoding a pixel: the seek bar needs the whole length before the last frame exists.
+    pub fn scan(bytes: &[u8]) -> Result<(GifHeader, Vec<i32>), GifError> {
         let mut reader = Reader::new(bytes)?;
         let (width, height) = (reader.width, reader.height);
+        let mut delays = Vec::new();
+        let mut control = GraphicControl::default();
+        while let Some(block) = reader.next_block() {
+            match block {
+                Block::Control(c) => control = c,
+                Block::Image { .. } => {
+                    delays.push(i32::from(control.delay_cs) * 10);
+                    control = GraphicControl::default();
+                }
+            }
+        }
+        Ok((
+            GifHeader {
+                width,
+                height,
+                frame_count: delays.len(),
+            },
+            delays,
+        ))
+    }
+
+    /// Every frame, decoded. A stream that ends early yields the frames before the cut.
+    pub fn decode(bytes: &[u8], cancel: &CancelToken) -> Result<GifAnimation, GifError> {
         let mut frames = Vec::new();
         let mut delays_ms = Vec::new();
+        let (width, height) = Self::decode_each(bytes, cancel, &mut |frame, delay| {
+            frames.push(frame);
+            delays_ms.push(delay);
+            true
+        })?;
+        Ok(GifAnimation {
+            width,
+            height,
+            frames,
+            delays_ms,
+        })
+    }
+
+    /// Decodes frame by frame, handing each to `each` with its delay as soon as it exists, so a
+    /// caller can show the first picture while the rest are still being read. `each` returning
+    /// false stops the walk. Returns the canvas size.
+    pub fn decode_each(
+        bytes: &[u8],
+        cancel: &CancelToken,
+        each: &mut dyn FnMut(GifSubFrame, i32) -> bool,
+    ) -> Result<(u32, u32), GifError> {
+        let mut reader = Reader::new(bytes)?;
+        let (width, height) = (reader.width, reader.height);
         let mut control = GraphicControl::default();
 
         while let Some(block) = reader.next_block() {
@@ -106,27 +153,24 @@ impl GifDecoder {
                         &data,
                         control.transparent_index,
                     );
-                    frames.push(GifSubFrame {
+                    let frame = GifSubFrame {
                         left: i32::from(left),
                         top: i32::from(top),
                         width: i32::from(width),
                         height: i32::from(height),
                         pixels,
                         disposal: control.disposal,
-                    });
-                    delays_ms.push(i32::from(control.delay_cs) * 10);
+                    };
+                    let delay = i32::from(control.delay_cs) * 10;
                     // A graphic control extension governs the one image that follows it.
                     control = GraphicControl::default();
+                    if !each(frame, delay) {
+                        break;
+                    }
                 }
             }
         }
-
-        Ok(GifAnimation {
-            width,
-            height,
-            frames,
-            delays_ms,
-        })
+        Ok((width, height))
     }
 
     /// The frame's BGRA32 pixels. An index the LZW stream never produced stays transparent.

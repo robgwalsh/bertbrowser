@@ -15,7 +15,7 @@ use bb_core::cancel::CancelToken;
 use bb_core::delete::{
     DeleteExecutor, DeleteMode, DeletePlanner, DeleteSource, FileSystemDeleteProbe, ShellRecycleBin,
 };
-use bb_core::rename::{RenameExecutor, RenamePlanner, RenameSource};
+use bb_core::rename::{RenameExecutor, RenamePlanner, RenameRule, RenameSource};
 use bb_core::transfer::{
     FileSystemTransferProbe, TransferExecutor, TransferMergeExpander, TransferPlanner,
     TransferProgress, TransferVerb,
@@ -497,22 +497,63 @@ impl Inner {
         self.submit(
             "Rename",
             true,
-            Box::new(move |inner, _op, _cancel| inner.run_rename(&paths, &pattern)),
+            Box::new(move |inner, _op, _cancel| {
+                inner.run_rename(&paths, &|sources| {
+                    RenamePlanner::local().plan_simple(sources, &pattern)
+                })
+            }),
         )
     }
 
-    fn run_rename(self: &Arc<Self>, paths: &[String], pattern: &str) -> (bool, String) {
+    /// The expanded panel's rename: a template, a find and replace, a case and a counter. A
+    /// template that names a tag has each file's own metadata read onto it first.
+    pub(crate) fn op_rename_rule(
+        self: &Arc<Self>,
+        paths: Vec<String>,
+        rule: RenameRule,
+    ) -> AppResult<OpId> {
+        if paths.is_empty() {
+            return Err(AppError::Invalid("nothing to rename".into()));
+        }
+        self.submit(
+            "Rename",
+            true,
+            Box::new(move |inner, _op, _cancel| {
+                let uses_tags = bb_core::rename::RenameTemplate::uses_tags(&rule.template);
+                inner.run_rename(&paths, &|sources| {
+                    let mut sources = sources.to_vec();
+                    if uses_tags {
+                        for s in &mut sources {
+                            s.tags = Some(crate::metadata_pane::tags_of(&s.path, s.is_directory));
+                        }
+                    }
+                    RenamePlanner::local().plan(&sources, &rule)
+                })
+            }),
+        )
+    }
+
+    fn run_rename(
+        self: &Arc<Self>,
+        paths: &[String],
+        make_plan: &dyn Fn(&[RenameSource]) -> bb_core::rename::RenamePlan,
+    ) -> (bool, String) {
         let sources: Vec<RenameSource> = paths
             .iter()
             .map(|p| {
-                if std::path::Path::new(p).is_dir() {
+                let mut source = if std::path::Path::new(p).is_dir() {
                     RenameSource::dir(p)
                 } else {
                     RenameSource::file(p)
-                }
+                };
+                source.modified = std::fs::metadata(p)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .map(|t| FileTime::from_system_time(t).to_local());
+                source
             })
             .collect();
-        let plan = RenamePlanner::local().plan_simple(&sources, pattern);
+        let plan = make_plan(&sources);
         if !plan.has_work() {
             let why = plan
                 .rejected

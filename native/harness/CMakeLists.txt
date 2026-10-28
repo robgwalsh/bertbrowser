@@ -8,6 +8,7 @@ add_executable(bb-harness
   runner.cpp
   bench.cpp
   runner_ui.cpp
+  runner_panes.cpp
   ../app/app/version.cpp
 )
 target_include_directories(bb-harness PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")

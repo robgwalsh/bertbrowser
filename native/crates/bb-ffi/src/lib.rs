@@ -34,6 +34,8 @@ use bb_core::layout::SplitOrientation;
 
 mod features;
 pub use features::*;
+mod panes;
+pub use panes::*;
 
 // ---- statuses and strings ----
 
@@ -806,6 +808,10 @@ pub struct BbTabState {
     /// 0 none, 1 preview, 2 metadata.
     pub side_pane: u32,
     pub thumbnail_scale: f64,
+    /// The preview pane's mode (0 auto, 1 raw, 2 hex) and its two per-tab switches (wrap, 100%).
+    pub preview_mode: u32,
+    pub preview_wrap: bool,
+    pub preview_fit: bool,
 }
 
 #[unsafe(no_mangle)]
@@ -837,6 +843,9 @@ pub unsafe extern "C" fn bb_tab_state(
             has_error: i.error.is_some(),
             side_pane: u32::from(i.side_pane),
             thumbnail_scale: i.thumbnail_scale,
+            preview_mode: u32::from(i.preview_mode),
+            preview_wrap: i.preview_wrap,
+            preview_fit: i.preview_fit,
         };
         Ok(())
     })

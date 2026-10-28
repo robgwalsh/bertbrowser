@@ -75,6 +75,7 @@ Runner::Runner(Session& session, const Options& options) : s_(session), o_(optio
     install_asserts();
     install_bench();
     install_ui();
+    install_panes();
 }
 
 // ---- the loop ---------------------------------------------------------------------------------------
@@ -359,6 +360,7 @@ std::string Runner::state_json() {
         for (size_t i = 0; i < columns.size(); ++i) cols += (i ? ", " : "") + narrow(columns[i].id);
     }
     const int64_t side = tab["sidePane"].i64();
+    bb::views::PreviewPane* preview = s_.view().active_view() ? s_.view().active_view()->preview() : nullptr;
     const auto titles = s_.view().tab_titles_in_active_pane();
     std::wstring hidden_text;
     {
@@ -391,12 +393,12 @@ std::string Runner::state_json() {
         {"hidden", boolean(trim(hidden_text) == L"true")},
         {"thumbnails", scale},
         {"preview", boolean(side == 1)},
-        {"previewState", quote(std::string())},
-        {"previewMode", quote(std::string())},
-        {"previewTitle", quote(std::string())},
-        {"previewMessage", quote(std::string())},
-        {"previewFooter", quote(std::string())},
-        {"previewPaneWidth", "0"},
+        {"previewState", quote(preview ? preview->state_name() : std::string("none"))},
+        {"previewMode", quote(std::string(preview && preview->mode() == 1 ? "Text" : preview && preview->mode() == 2 ? "Hex" : "Auto"))},
+        {"previewTitle", quote(preview ? preview->title() : std::wstring())},
+        {"previewMessage", quote(preview ? preview->message() : std::wstring())},
+        {"previewFooter", quote(preview ? preview->footer() : std::wstring())},
+        {"previewPaneWidth", preview ? shortest(static_cast<double>(preview->bounds.width())) : std::string("0")},
         {"sidePane", quote(std::string(side == 1 ? "Preview" : side == 2 ? "Metadata" : "None"))},
         {"canUndo", boolean(st["canUndo"].boolean())},
         {"undo", quote(st["undo"].str())},

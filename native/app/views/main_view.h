@@ -16,6 +16,8 @@
 #include "views/dialogs.h"
 #include "views/palette_view.h"
 #include "views/settings_view.h"
+#include "views/metadata_pane.h"
+#include "views/preview_pane.h"
 #include "views/thumbs.h"
 #include "views/sidebar.h"
 #include "views/core.h"
@@ -134,6 +136,18 @@ public:
     void set_thumbnail_source(ThumbSource s);
     const std::wstring& path_text() const { return path_text_; }
 
+    // ---- the side pane ----
+    // Null until the pane has been shown once: both are built on first show, not with the tab.
+    PreviewPane* preview() const { return preview_; }
+    MetadataPane* metadata() const { return metadata_; }
+    PreviewPane* ensure_preview();
+    MetadataPane* ensure_metadata();
+    // Widens the side pane to fit what the preview holds, or as far as the tab allows.
+    void fit_side_width();
+    // Selects what plays next in the list, and plays it when it arrives.
+    void select_next_media();
+    bool side_pending() const { return preview_ && preview_->pending(); }
+
 private:
     void end_path_edit();
     void sync_columns();
@@ -162,9 +176,11 @@ private:
     ui::TileView* tiles_ = nullptr;
     std::unique_ptr<ThumbnailService> thumbs_;
     ThumbSource thumb_source_ = ThumbSource::Shell;
-    ui::Panel* side_pane_ = nullptr;
-    ui::TextBlock *side_title_ = nullptr, *side_text_ = nullptr;
+    ui::DockPanel* side_pane_ = nullptr;
+    PreviewPane* preview_ = nullptr;
+    MetadataPane* metadata_ = nullptr;
     int side_mode_ = 0;
+    float side_width_ = 360.0f;
     bool tiles_on_ = false;
     Overlay* empty_ = nullptr;
     std::vector<core::ColumnInfo> columns_;
@@ -285,6 +301,8 @@ public:
     void show_context_menu(ui::MenuItems items, ui::Point at);
     // Thumbnails asked for and not yet drawn, across every tab (the harness waits for them to be none).
     size_t thumbnails_pending() const;
+    // A preview scheduled or being read in any tab (the harness waits for it to land).
+    bool preview_pending() const;
     // Where tile thumbnails come from: the shell (the product) or a generator (the harness).
     void set_thumbnail_source(ThumbSource s);
     ThumbSource thumbnail_source() const { return thumb_source_; }
@@ -297,6 +315,7 @@ private:
     bool on_window_message(UINT msg, WPARAM wp, LPARAM lp);
     bool on_preview_key(const ui::KeyEvent& e);
     void supply_properties(uint64_t tab);
+    void deliver_preview(uint64_t tab, PreviewResult* result);
     void sync_index();
     void open_toolbar_list(const BarRow& row, ui::Rect anchor);
     void open_overflow(const std::vector<BarRow>& rows, ui::Rect anchor);
