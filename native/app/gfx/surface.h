@@ -54,7 +54,8 @@ public:
     bool is_flat() { return count_non_background() == 0; }
     // 0xAARRGGBB of one pixel (reads the whole surface back; for tests).
     uint32_t pixel(UINT x, UINT y);
-    bool write_png(const std::wstring& path);
+    // Writes the whole surface, or just `region` (device pixels, clamped).
+    bool write_png(const std::wstring& path, const RECT* region = nullptr);
 
 private:
     using Surface::Surface;

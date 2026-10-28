@@ -52,6 +52,9 @@ public:
     ui::Point to_dip(int x, int y) const;
 
     std::function<void()> on_close;  // WM_CLOSE; default destroys the window
+    // Application messages (WM_APP..0xBFFF), seen before anything else; true = handled. How the core's
+    // events reach the UI thread: its sink PostMessages here and this handler drains them.
+    std::function<bool(UINT msg, WPARAM wp, LPARAM lp)> on_message;
 
 private:
     static void register_class();

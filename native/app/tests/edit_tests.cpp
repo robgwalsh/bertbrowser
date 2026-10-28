@@ -218,10 +218,10 @@ TEST(edit_paints_selection_composition_and_placeholder) {
     rig.set(std::move(col));
     rig.root.set_focus(sel);
     rig.render();
-    const uint32_t s = Env::get().res->palette.argb(tok::SelectionBg);
+    const uint32_t s = Env::get().res->palette.argb(tok::InputSelectionBackground);
     CHECK(count_pixels(rig, (s >> 16) & 255, (s >> 8) & 255, s & 255, 4) > 100);  // selection highlight
-    const uint32_t c = Env::get().res->palette.argb(tok::Composition);
+    const uint32_t c = Env::get().res->palette.argb(tok::BorderActive);
     CHECK(count_pixels(rig, (c >> 16) & 255, (c >> 8) & 255, c & 255, 6) > 20);   // composition, underlined
-    const uint32_t p = Env::get().res->palette.argb(tok::Placeholder);
+    const uint32_t p = Env::get().res->palette.argb(tok::TextPlaceholder);
     CHECK(count_pixels(rig, (p >> 16) & 255, (p >> 8) & 255, p & 255, 30) > 20);  // placeholder text
 }

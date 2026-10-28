@@ -372,7 +372,7 @@ TEST(gallery_png) {
     bar->height = 44;
     bar->pad = 8;
     bar->nc_hit = HTCAPTION;
-    bar->style.bg = tok::HeaderBg;
+    bar->style.bg = tok::ListHeaderBackground;
     auto* ok = bar->emplace<Button>(L"Copy");
     ok->primary = true;
     bar->emplace<Button>(L"Move");

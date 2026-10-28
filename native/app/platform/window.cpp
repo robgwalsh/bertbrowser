@@ -272,6 +272,9 @@ LRESULT CALLBACK Window::static_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
 
 LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
     const bool chrome = options_.custom_chrome;
+    if (on_message && msg >= WM_APP && msg < 0xC000 && on_message(msg, wp, lp)) {
+        return 0;
+    }
     switch (msg) {
         case WM_NCCALCSIZE:
             if (chrome && wp) {

@@ -3,34 +3,46 @@
 namespace bb::gfx {
 
 std::vector<uint32_t> default_dark_argb() {
+    // Only until the theme arrives (and in the widget tests): every token magenta, then the ones a bare
+    // tree needs set to something legible.
     std::vector<uint32_t> c(tok::Count, 0xFFFF00FFu);
-    c[tok::WindowBg] = 0xFF1E1E1E;
-    c[tok::Text] = 0xFFE6E6E6;
-    c[tok::TextMuted] = 0xFF9A9A9A;
-    c[tok::Border] = 0xFF4A4A4A;
-    c[tok::ControlBg] = 0xFF2D2D2D;
-    c[tok::ControlHover] = 0xFF3A3A3A;
-    c[tok::ControlPressed] = 0xFF4A4A4A;
-    c[tok::Accent] = 0xFF3A7BD5;
-    c[tok::AccentText] = 0xFFFFFFFF;
-    c[tok::SelectionBg] = 0xFF2F5C9E;
-    c[tok::SelectionText] = 0xFFFFFFFF;
-    c[tok::SelectionInactiveBg] = 0xFF3A3A3A;
-    c[tok::Caret] = 0xFFFFFFFF;
-    c[tok::Composition] = 0xFFF2BF4D;
-    c[tok::Placeholder] = 0xFF8C8C8C;
-    c[tok::HeaderBg] = 0xFF2A2A2A;
-    c[tok::HeaderText] = 0xFFCFCFCF;
-    c[tok::RowAlt] = 0xFF232323;
-    c[tok::FocusRing] = 0xFF6AA0F0;
-    c[tok::ScrollTrack] = 0xFF262626;
-    c[tok::ScrollThumb] = 0xFF5A5A5A;
-    c[tok::ScrollThumbHot] = 0xFF7A7A7A;
-    c[tok::Marquee] = 0x553A7BD5;
-    c[tok::SplitterBar] = 0xFF333333;
+    auto set = [&](Token t, uint32_t v) { c[t] = v; };
+    set(tok::WindowBackground, 0xFF1E1E1E);
+    set(tok::SurfaceBackground, 0xFF1E1E1E);
+    set(tok::SurfaceRaised, 0xFF232323);
+    set(tok::TextPrimary, 0xFFE6E6E6);
+    set(tok::TextMuted, 0xFF9A9A9A);
+    set(tok::TextPlaceholder, 0xFF8C8C8C);
+    set(tok::BorderDefault, 0xFF4A4A4A);
+    set(tok::BorderFocus, 0xFF6AA0F0);
+    set(tok::BorderActive, 0xFFF2BF4D);
+    set(tok::AccentBackground, 0xFF3A7BD5);
+    set(tok::AccentForeground, 0xFFFFFFFF);
+    set(tok::ListBackground, 0xFF1E1E1E);
+    set(tok::ListSelectedBackground, 0xFF2F5C9E);
+    set(tok::ListSelectedForeground, 0xFFFFFFFF);
+    set(tok::ListSelectedInactiveBackground, 0xFF3A3A3A);
+    set(tok::ListHeaderBackground, 0xFF2A2A2A);
+    set(tok::ListHeaderForeground, 0xFFCFCFCF);
+    set(tok::ListHeaderHoverBackground, 0xFF3A3A3A);
+    set(tok::ListHeaderBorder, 0xFF4A4A4A);
+    set(tok::TreeChevronForeground, 0xFF9A9A9A);
+    set(tok::InputBackground, 0xFF2D2D2D);
+    set(tok::InputForeground, 0xFFE6E6E6);
+    set(tok::InputBorder, 0xFF4A4A4A);
+    set(tok::InputSelectionBackground, 0xFF2F5C9E);
+    set(tok::InputSelectionForeground, 0xFFFFFFFF);
+    set(tok::InputCaret, 0xFFFFFFFF);
+    set(tok::ButtonSecondaryBackground, 0xFF2D2D2D);
+    set(tok::ButtonSecondaryHoverBackground, 0xFF3A3A3A);
+    set(tok::ButtonSecondaryPressedBackground, 0xFF4A4A4A);
+    set(tok::ScrollBarBackground, 0xFF262626);
+    set(tok::ScrollBarThumb, 0xFF5A5A5A);
+    set(tok::ScrollBarThumbHover, 0xFF7A7A7A);
+    set(tok::MarqueeFill, 0x553A7BD5);
+    set(tok::SplitterBackground, 0xFF333333);
     return c;
 }
-
 Palette::Palette(GfxDevice& dev) : dev_(dev), colors_(default_dark_argb()) {
     brushes_.resize(colors_.size());
 }

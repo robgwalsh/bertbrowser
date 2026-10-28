@@ -147,7 +147,7 @@ Cursor ListView::cursor_at(Point p) const {
 // ---- painting --------------------------------------------------------------------------------------
 
 void ListView::paint(PaintContext& pc) {
-    pc.fill(bounds, style.bg != kNoToken ? style.bg : tok::WindowBg);
+    pc.fill(bounds, style.bg != kNoToken ? style.bg : tok::ListBackground);
     painted_rows_ = 0;
     if (provider_ && !columns_.empty()) {
         pc.clip(body_.intersect(pc.dirty));
@@ -160,12 +160,12 @@ void ListView::paint(PaintContext& pc) {
             const bool sel = provider_->selected(row);
             const uint64_t id = provider_->row_id(row);
             if (sel) {
-                pc.fill(rr, focused() ? tok::SelectionBg : tok::SelectionInactiveBg);
+                pc.fill(rr, focused() ? tok::ListSelectedBackground : tok::ListSelectedInactiveBackground);
             }
             if (row == cursor_ && focused()) {
-                pc.stroke(rr, tok::FocusRing);
+                pc.stroke(rr, tok::BorderFocus);
             }
-            ID2D1SolidColorBrush* brush = pc.brush(sel ? tok::SelectionText : style.fg);
+            ID2D1SolidColorBrush* brush = pc.brush(sel ? tok::ListSelectedForeground : style.fg);
             float x = x0;
             for (const Column& col : columns_) {
                 if (x + col.width > body_.l && x < body_.r) {
@@ -190,8 +190,8 @@ void ListView::paint(PaintContext& pc) {
             }
         }
         if (marquee_) {
-            pc.fill(marquee_rect_, tok::Marquee);
-            pc.stroke(marquee_rect_, tok::Accent);
+            pc.fill(marquee_rect_, tok::MarqueeFill);
+            pc.stroke(marquee_rect_, tok::AccentBackground);
         }
         pc.unclip();
     }
@@ -203,18 +203,18 @@ void ListView::paint(PaintContext& pc) {
 void ListView::paint_header(PaintContext& pc) {
     if (!show_header) return;
     const Rect hr = header_rect();
-    pc.fill(hr, tok::HeaderBg);
+    pc.fill(hr, tok::ListHeaderBackground);
     pc.clip(hr.intersect(pc.dirty));
     for (size_t i = 0; i < columns_.size(); ++i) {
         const Column& col = columns_[i];
         const Rect rc = column_header_rect(i);
         if (rc.r < hr.l || rc.l > hr.r) continue;
         if (reordering_ && static_cast<int>(i) == press_col_) {
-            pc.fill(rc, tok::ControlHover);
+            pc.fill(rc, tok::ListHeaderHoverBackground);
         }
         const bool sorted = col.id == sort_column_;
         pc.text(col.title, Rect{rc.l + kCellPad, rc.t, rc.r - (sorted ? 22.0f : kCellPad), rc.b}, style.font,
-                tok::HeaderText, col.right_align ? gfx::TextAlign::Trailing : gfx::TextAlign::Leading);
+                tok::ListHeaderForeground, col.right_align ? gfx::TextAlign::Trailing : gfx::TextAlign::Leading);
         if (sorted) {
             const float cx = rc.r - 12.0f, cy = (rc.t + rc.b) / 2;
             ComPtr<ID2D1PathGeometry> geo;
@@ -228,16 +228,16 @@ void ListView::paint_header(PaintContext& pc) {
                 sink->AddLine(D2D1::Point2F(cx, apex));
                 sink->EndFigure(D2D1_FIGURE_END_CLOSED);
                 sink->Close();
-                if (ID2D1SolidColorBrush* b = pc.brush(tok::HeaderText)) pc.dc->FillGeometry(geo.Get(), b);
+                if (ID2D1SolidColorBrush* b = pc.brush(tok::ListHeaderForeground)) pc.dc->FillGeometry(geo.Get(), b);
             }
         }
-        pc.line({rc.r - 0.5f, rc.t + 4}, {rc.r - 0.5f, rc.b - 4}, tok::Border);
+        pc.line({rc.r - 0.5f, rc.t + 4}, {rc.r - 0.5f, rc.b - 4}, tok::ListHeaderBorder);
     }
-    pc.line({hr.l, hr.b - 0.5f}, {hr.r, hr.b - 0.5f}, tok::Border);
+    pc.line({hr.l, hr.b - 0.5f}, {hr.r, hr.b - 0.5f}, tok::ListHeaderBorder);
     if (reordering_ && drop_index_ >= 0) {
         const size_t di = static_cast<size_t>(drop_index_);
         const float x = di < columns_.size() ? column_header_rect(di).l : column_header_rect(columns_.size() - 1).r;
-        pc.fill(Rect{x - 1, hr.t, x + 1, hr.b}, tok::Accent);
+        pc.fill(Rect{x - 1, hr.t, x + 1, hr.b}, tok::AccentBackground);
     }
     pc.unclip();
 }

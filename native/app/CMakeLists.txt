@@ -21,9 +21,20 @@ target_link_libraries(bbapp PUBLIC
   shell32 ole32 oleaut32 uuid propsys shlwapi comctl32 imm32 uxtheme user32 gdi32
 )
 
+# bbviews: the main window's view over the FFI. Separate from bbapp so the widget tests stay free of the
+# Rust core; the product and the harness link it.
+add_library(bbviews STATIC
+  views/core.cpp
+  views/chrome.cpp
+  views/folder_tree.cpp
+  views/main_view.cpp
+)
+target_include_directories(bbviews PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(bbviews PUBLIC bbapp bbcore)
+
 # The product. Never launched to check UI work; the harness is the way to see the interface.
 add_executable(BertBrowser WIN32 app/main.cpp app/version.cpp)
-target_link_libraries(BertBrowser PRIVATE bbapp bbcore)
+target_link_libraries(BertBrowser PRIVATE bbviews)
 
 # Tests of the widget framework: plain C++ exe, no framework; renders offscreen on WARP.
 enable_testing()

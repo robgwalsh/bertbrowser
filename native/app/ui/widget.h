@@ -54,7 +54,7 @@ struct Flags {
 
 struct Style {
     Token bg = kNoToken;
-    Token fg = tok::Text;
+    Token fg = tok::TextPrimary;
     Token border = kNoToken;
     gfx::FontSpec font;
 };
@@ -232,6 +232,8 @@ public:
     // Keys: modifiers are tracked from the messages seen, so a posted key sequence behaves like a pressed one.
     bool key_down(unsigned vk);
     bool key_up(unsigned vk);
+    // Sees a key before the focused widget does (the app's one shortcut dispatcher); true = handled.
+    std::function<bool(const KeyEvent&)> on_preview_key;
     bool char_input(wchar_t c);
     Mods mods() const { return mods_; }
     void set_mods(Mods m) { mods_ = m; }

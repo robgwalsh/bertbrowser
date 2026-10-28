@@ -17,9 +17,9 @@ Rect ScrollBar::thumb() const {
 
 void ScrollBar::paint(PaintContext& pc) const {
     if (!needed()) return;
-    pc.fill(area, tok::ScrollTrack);
+    pc.fill(area, tok::ScrollBarBackground);
     const Rect t = thumb().inflate(-2.0f);
-    pc.fill(t, dragging_ ? tok::ScrollThumbHot : tok::ScrollThumb);
+    pc.fill(t, dragging_ ? tok::ScrollBarThumbHover : tok::ScrollBarThumb);
 }
 
 bool ScrollBar::mouse_down(Point p) {
@@ -207,7 +207,7 @@ void Splitter::arrange(Rect r) {
 
 void Splitter::paint_children(PaintContext& pc) {
     Widget::paint_children(pc);
-    pc.fill(bar(), (dragging_ || hovered()) ? tok::Accent : tok::SplitterBar);
+    pc.fill(bar(), (dragging_ || hovered()) ? tok::AccentBackground : tok::SplitterBackground);
 }
 
 Widget* Splitter::hit_test(Point p) {

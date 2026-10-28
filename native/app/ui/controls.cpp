@@ -133,18 +133,18 @@ Size Button::measure(Size) {
 }
 
 void Button::paint(PaintContext& pc) {
-    Token bg = primary ? tok::Accent : tok::ControlBg;
+    Token bg = primary ? tok::AccentBackground : tok::ButtonSecondaryBackground;
     if (!flags.enabled) {
-        bg = tok::ControlBg;
+        bg = tok::ButtonSecondaryBackground;
     } else if (pressed_) {
-        bg = tok::ControlPressed;
+        bg = tok::ButtonSecondaryPressedBackground;
     } else if (hovered()) {
-        bg = primary ? tok::FocusRing : tok::ControlHover;
+        bg = primary ? tok::BorderFocus : tok::ButtonSecondaryHoverBackground;
     }
     if (style.bg != kNoToken && !hovered() && !pressed_) bg = style.bg;
     pc.fill(bounds, bg);
-    pc.stroke(bounds, focused() ? tok::FocusRing : (style.border != kNoToken ? style.border : tok::Border));
-    const Token fg = !flags.enabled ? tok::TextMuted : (primary ? tok::AccentText : style.fg);
+    pc.stroke(bounds, focused() ? tok::BorderFocus : (style.border != kNoToken ? style.border : tok::BorderDefault));
+    const Token fg = !flags.enabled ? tok::TextMuted : (primary ? tok::AccentForeground : style.fg);
     const D2D1_SIZE_F t = pc.res.text.measure(text, style.font);
     const float tw = text.empty() ? 0.0f : t.width;
     const float iw = icon ? 16.0f : 0.0f;
@@ -212,11 +212,11 @@ Size CheckBox::measure(Size) {
 void CheckBox::paint(PaintContext& pc) {
     Widget::paint(pc);
     const Rect box = Rect::xywh(bounds.l, bounds.t + (bounds.height() - kBox) / 2, kBox, kBox);
-    pc.fill(box, checked_ ? tok::Accent : (hovered() ? tok::ControlHover : tok::ControlBg));
-    pc.stroke(box, focused() ? tok::FocusRing : tok::Border);
+    pc.fill(box, checked_ ? tok::AccentBackground : (hovered() ? tok::ButtonSecondaryHoverBackground : tok::ButtonSecondaryBackground));
+    pc.stroke(box, focused() ? tok::BorderFocus : tok::BorderDefault);
     if (checked_) {
-        pc.line({box.l + 3.5f, box.t + 8.5f}, {box.l + 6.5f, box.t + 11.5f}, tok::AccentText, 1.6f);
-        pc.line({box.l + 6.5f, box.t + 11.5f}, {box.l + 12.5f, box.t + 4.5f}, tok::AccentText, 1.6f);
+        pc.line({box.l + 3.5f, box.t + 8.5f}, {box.l + 6.5f, box.t + 11.5f}, tok::AccentForeground, 1.6f);
+        pc.line({box.l + 6.5f, box.t + 11.5f}, {box.l + 12.5f, box.t + 4.5f}, tok::AccentForeground, 1.6f);
     }
     pc.text(text, Rect{box.r + kGap, bounds.t, bounds.r, bounds.b}, style.font, flags.enabled ? style.fg : tok::TextMuted);
 }

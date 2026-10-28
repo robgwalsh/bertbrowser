@@ -149,15 +149,15 @@ TEST(repaint_touches_only_the_dirty_rect) {
     auto root = std::make_unique<StackPanel>(Orientation::Horizontal, 0.0f);
     auto* left = root->emplace<Panel>();
     left->width = 150;
-    left->style.bg = tok::Accent;
+    left->style.bg = tok::AccentBackground;
     auto* right = root->emplace<Panel>();
     right->flex = 1;
-    right->style.bg = tok::ControlBg;
+    right->style.bg = tok::ButtonSecondaryBackground;
     rig.set(std::move(root));
     rig.render();
     const uint32_t before_left = rig.bitmap().pixel(50, 50);
-    left->style.bg = tok::Marquee;  // changed, but never invalidated...
-    right->style.bg = tok::SelectionBg;
+    left->style.bg = tok::MarqueeFill;  // changed, but never invalidated...
+    right->style.bg = tok::ListSelectedBackground;
     right->invalidate();  // ...so only the right half is repainted
     rig.render();
     CHECK_EQ(rig.bitmap().pixel(50, 50), before_left);
@@ -247,11 +247,11 @@ TEST(icon_geometry_from_data) {
     Rig rig(120, 120);
     auto root = std::make_unique<Panel>();
     auto* icon = root->emplace<Icon>(&data, 100.0f);
-    icon->style.fg = tok::Accent;
+    icon->style.fg = tok::AccentBackground;
     icon->width = icon->height = 100;
     rig.set(std::move(root));
     rig.render();
-    const uint32_t accent = Env::get().res->palette.argb(tok::Accent);
+    const uint32_t accent = Env::get().res->palette.argb(tok::AccentBackground);
     const Rect b = icon->bounds;
     CHECK_EQ(rig.bitmap().pixel(static_cast<UINT>((b.l + b.r) / 2), static_cast<UINT>((b.t + b.b) / 2)), accent);
     // The square spans 2..18 of 20: a 5% margin of the 100 px box is empty.
@@ -306,8 +306,8 @@ TEST(splitter_drag_and_clamp) {
     auto sp = std::make_unique<Splitter>(Orientation::Horizontal);
     auto* first = sp->emplace<Panel>();
     auto* second = sp->emplace<Panel>();
-    first->style.bg = tok::ControlBg;
-    second->style.bg = tok::RowAlt;
+    first->style.bg = tok::ButtonSecondaryBackground;
+    second->style.bg = tok::SurfaceRaised;
     sp->set_position(200);
     auto* s = rig.set(std::move(sp));
     expect_rect(first->bounds, 0, 0, 200, 300, "first");

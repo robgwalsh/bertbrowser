@@ -1,48 +1,17 @@
 // The theme as brushes indexed by a token id. Widgets hold token ids and never a brush: a theme change
 // is `set_colors`, a device loss is `rebuild`, and nothing that draws has to hear about either.
 //
-// The size and order of the array come from the Rust theme later (126 tokens); the constants in `tok`
-// are the ones the foundation widgets need and give the first slots. The FFI side supplies the real
-// order and these become aliases into it.
+// The size and order of the array are the Rust theme's: `tok` (tokens.h) lists the 126 tokens in palette
+// order and the app fills the palette from bb_theme_palette.
 #pragma once
 #include "gfx/device.h"
+#include "gfx/tokens.h"
 
 #include <vector>
 
 namespace bb::gfx {
 
-using Token = uint16_t;
 constexpr Token kNoToken = 0xFFFF;
-
-namespace tok {
-enum : Token {
-    WindowBg,
-    Text,
-    TextMuted,
-    Border,
-    ControlBg,
-    ControlHover,
-    ControlPressed,
-    Accent,
-    AccentText,
-    SelectionBg,
-    SelectionText,
-    SelectionInactiveBg,
-    Caret,
-    Composition,
-    Placeholder,
-    HeaderBg,
-    HeaderText,
-    RowAlt,
-    FocusRing,
-    ScrollTrack,
-    ScrollThumb,
-    ScrollThumbHot,
-    Marquee,
-    SplitterBar,
-    Count
-};
-}  // namespace tok
 
 // A dark default so a bare tree is legible before the theme arrives. ARGB, 0xAARRGGBB.
 std::vector<uint32_t> default_dark_argb();

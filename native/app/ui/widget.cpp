@@ -309,7 +309,7 @@ HRESULT UiRoot::paint(gfx::Surface& surface) {
     ID2D1DeviceContext* dc = surface.context();
     PaintContext pc{dc, res_, *this, d};
     dc->PushAxisAlignedClip(d.d2d(), D2D1_ANTIALIAS_MODE_ALIASED);
-    pc.fill(all, tok::WindowBg);
+    pc.fill(all, tok::WindowBackground);
     content_->paint_tree(pc);
     dc->PopAxisAlignedClip();
     const float s = surface.scale();
@@ -399,6 +399,9 @@ bool UiRoot::key_down(unsigned vk) {
     if (vk == VK_CONTROL) { mods_.ctrl = true; return true; }
     if (vk == VK_MENU) { mods_.alt = true; return true; }
     const KeyEvent ev{vk, mods_};
+    if (on_preview_key && on_preview_key(ev)) {
+        return true;
+    }
     Widget* target = focus_ ? focus_ : content_.get();
     if (target && bubble(target, [&](Widget* w) { return w->flags.enabled && w->on_key_down(ev); })) {
         return true;

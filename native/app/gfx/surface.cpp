@@ -114,10 +114,29 @@ uint32_t BitmapSurface::pixel(UINT x, UINT y) {
     return v;
 }
 
-bool BitmapSurface::write_png(const std::wstring& path) {
+bool BitmapSurface::write_png(const std::wstring& path, const RECT* region) {
     std::vector<uint8_t> px;
     if (!read_pixels(px)) {
         return false;
+    }
+    UINT out_w = w_, out_h = h_;
+    if (region) {
+        // Crop (clamped to the surface) into a tightly packed copy.
+        const LONG l = std::clamp<LONG>(region->left, 0, static_cast<LONG>(w_));
+        const LONG t = std::clamp<LONG>(region->top, 0, static_cast<LONG>(h_));
+        const LONG r = std::clamp<LONG>(region->right, l, static_cast<LONG>(w_));
+        const LONG b = std::clamp<LONG>(region->bottom, t, static_cast<LONG>(h_));
+        out_w = static_cast<UINT>(r - l);
+        out_h = static_cast<UINT>(b - t);
+        if (out_w == 0 || out_h == 0) {
+            return false;
+        }
+        std::vector<uint8_t> cropped(static_cast<size_t>(out_w) * out_h * 4);
+        for (UINT y = 0; y < out_h; ++y) {
+            std::memcpy(&cropped[static_cast<size_t>(y) * out_w * 4], &px[(static_cast<size_t>(t) + y) * w_ * 4 + static_cast<size_t>(l) * 4],
+                        static_cast<size_t>(out_w) * 4);
+        }
+        px = std::move(cropped);
     }
     IWICImagingFactory* wic = dev_.wic();
     if (!wic) {
@@ -138,10 +157,10 @@ bool BitmapSurface::write_png(const std::wstring& path) {
     if (!frame || FAILED(frame->Initialize(nullptr))) {
         return false;
     }
-    frame->SetSize(w_, h_);
+    frame->SetSize(out_w, out_h);
     WICPixelFormatGUID pf = GUID_WICPixelFormat32bppPBGRA;
     frame->SetPixelFormat(&pf);
-    if (FAILED(frame->WritePixels(h_, w_ * 4, static_cast<UINT>(px.size()), px.data()))) {
+    if (FAILED(frame->WritePixels(out_h, out_w * 4, static_cast<UINT>(px.size()), px.data()))) {
         return false;
     }
     frame->Commit();

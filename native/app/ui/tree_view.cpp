@@ -111,7 +111,7 @@ void TreeView::set_scroll_y(float y) {
 }
 
 void TreeView::paint(PaintContext& pc) {
-    pc.fill(bounds, style.bg != kNoToken ? style.bg : tok::WindowBg);
+    pc.fill(bounds, style.bg != kNoToken ? style.bg : tok::ListBackground);
     painted_rows_ = 0;
     pc.clip(bounds.intersect(pc.dirty));
     const auto [first, last] = visible_range();
@@ -121,11 +121,11 @@ void TreeView::paint(PaintContext& pc) {
         ++painted_rows_;
         const Entry& e = rows_[i];
         const bool sel = e.id == selected_;
-        if (sel) pc.fill(rr, focused() ? tok::SelectionBg : tok::SelectionInactiveBg);
+        if (sel) pc.fill(rr, focused() ? tok::ListSelectedBackground : tok::ListSelectedInactiveBackground);
         const Rect cv = chevron_rect(i);
         if (e.has_children) {
             const float cx = cv.l + 8.0f, cy = (cv.t + cv.b) / 2;
-            const Token t = sel ? tok::SelectionText : tok::TextMuted;
+            const Token t = sel ? tok::ListSelectedForeground : tok::TreeChevronForeground;
             if (expanded_.count(e.id)) {
                 pc.line({cx - 4, cy - 2}, {cx, cy + 2}, t, 1.3f);
                 pc.line({cx, cy + 2}, {cx + 4, cy - 2}, t, 1.3f);
@@ -135,8 +135,8 @@ void TreeView::paint(PaintContext& pc) {
             }
         }
         pc.text(provider_->label(e.id), Rect{cv.r + 2.0f, rr.t, rr.r, rr.b}, style.font,
-                sel ? tok::SelectionText : style.fg);
-        if (sel && focused()) pc.stroke(rr, tok::FocusRing);
+                sel ? tok::ListSelectedForeground : style.fg);
+        if (sel && focused()) pc.stroke(rr, tok::BorderFocus);
     }
     pc.unclip();
     v_.paint(pc);

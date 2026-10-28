@@ -7,7 +7,7 @@ namespace bb::ui {
 Edit::Edit(bool multiline_) : multiline(multiline_) {
     flags.focusable = true;
     flags.tab_stop = true;
-    style.bg = tok::ControlBg;
+    style.bg = tok::InputBackground;
 }
 
 std::wstring Edit::selected_text() const {
@@ -109,28 +109,28 @@ std::vector<DWRITE_HIT_TEST_METRICS> Edit::range_metrics(size_t start, size_t le
 void Edit::paint(PaintContext& pc) {
     ensure_layout();
     pc.fill(bounds, style.bg);
-    pc.stroke(bounds, focused() ? tok::FocusRing : (style.border != kNoToken ? style.border : tok::Border));
+    pc.stroke(bounds, focused() ? tok::BorderFocus : (style.border != kNoToken ? style.border : tok::InputBorder));
     const Rect inner = bounds.deflate(kPadX, 1, kPadX, 1);
     pc.clip(inner.intersect(pc.dirty));
     const Point o = origin();
     if (display_text().empty() && !placeholder.empty()) {
-        pc.text(placeholder, Rect{o.x, bounds.t, inner.r, bounds.b}, style.font, tok::Placeholder);
+        pc.text(placeholder, Rect{o.x, bounds.t, inner.r, bounds.b}, style.font, tok::TextPlaceholder);
     }
     const auto [lo, hi] = selection();
     if (hi > lo && !composing_) {
         for (const auto& m : range_metrics(lo, hi - lo)) {
             pc.fill({o.x + m.left, o.y + m.top, o.x + m.left + m.width, o.y + m.top + m.height},
-                    focused() ? tok::SelectionBg : tok::SelectionInactiveBg);
+                    focused() ? tok::InputSelectionBackground : tok::ListSelectedInactiveBackground);
         }
     }
     if (composing_) {
         const DWRITE_TEXT_RANGE range{static_cast<UINT32>(caret_), static_cast<UINT32>(composition_.size())};
         layout_->SetUnderline(TRUE, range);
-        layout_->SetDrawingEffect(pc.brush(tok::Composition), range);
+        layout_->SetDrawingEffect(pc.brush(tok::BorderActive), range);
     }
     pc.dc->DrawTextLayout(D2D1::Point2F(o.x, o.y), layout_.Get(), pc.brush(flags.enabled ? style.fg : tok::TextMuted));
     if (focused() && caret_on_) {
-        pc.fill(caret_rect(), tok::Caret);
+        pc.fill(caret_rect(), tok::InputCaret);
     }
     pc.unclip();
 }
