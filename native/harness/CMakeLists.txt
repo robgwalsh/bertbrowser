@@ -7,6 +7,7 @@ add_executable(bb-harness
   session.cpp
   runner.cpp
   bench.cpp
+  runner_bench.cpp
   runner_ui.cpp
   runner_panes.cpp
   runner_tools.cpp

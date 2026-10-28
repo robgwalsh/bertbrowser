@@ -80,6 +80,10 @@ void Runner::time_verb(const std::wstring& rest) {
 Runner::MemorySample Runner::read_memory() {
     // What is held, not what is about to be: let the core's own queued events land first.
     s_.pump();
+    // The managed harness collects fully before it reads; the native analogue is dropping what is only
+    // cached. The layout LRU is bounded (4096 layouts, tens of MB of DirectWrite objects) and fills to its
+    // cap whatever the folder, so left in it would read as growth in a soak that is not one.
+    s_.resources().layouts.clear();
     MemorySample m;
     HEAP_SUMMARY hs{};
     hs.cb = sizeof(hs);
@@ -206,6 +210,7 @@ void Runner::install_bench() {
     verbs_[L"mem"] = [this](const std::wstring& r) { mem_verb(r); };
     verbs_[L"assert-mem"] = [this](const std::wstring& r) { assert_mem(r); };
     verbs_[L"bench-fixture"] = [this](const std::wstring& r) { bench_fixture(r); };
+    install_bench_settle();
 }
 
 }  // namespace bbh
