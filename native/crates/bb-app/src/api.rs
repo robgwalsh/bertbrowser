@@ -328,6 +328,29 @@ impl App {
         self.inner.run_command(id).map(|_| ())
     }
 
+    /// Carries out one of the commands the host hands back because it needs the selection and a
+    /// program to start (`is_launch_command`): Run as administrator, Open in Terminal, Open in VS
+    /// Code, a user's own command. Through the launcher seam, so the harness refuses and records.
+    pub fn launch_command(&self, id: &str) -> AppResult<()> {
+        self.inner.run_launch_command(id)
+    }
+
+    /// Opens what the command line (or a second launch's hand-off) named: a tab, a pane or the
+    /// active tab per the request's mode, with a file highlighted when asked.
+    pub fn open_request(&self, request: &bb_core::cli::CommandLineRequest) -> AppResult<()> {
+        self.inner.open_request(request)
+    }
+
+    /// Puts a sentence on the active tab's status line, for something the host did on its own.
+    pub fn post_status(&self, text: &str) {
+        self.inner.set_active_status(text);
+    }
+
+    /// Asks the user a yes/no question through the confirm seam (the window's, or the harness's).
+    pub fn ask(&self, message: &str, title: &str, confirm_label: &str) -> bool {
+        self.inner.seams.confirm.ask(message, title, confirm_label)
+    }
+
     // ---- settings ----
 
     /// One setting as JSON text (`null` for an unset optional). Keys are the settings file's.

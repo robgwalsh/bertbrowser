@@ -1209,6 +1209,11 @@ bool MainView::host_command(const std::wstring& id) {
         ops::run(core_, "shortcut", "{\"sources\":" + ops::qa(paths) + ",\"directory\":" + ops::q(core_.tab_text(active_tab_, BB_TEXT_PATH)) + "}");
         return true;
     }
+    // Commands that start another program for the user: the core decides what from the selection and
+    // starts it through the one launcher (the harness's refuses and records).
+    if (id == L"file.run-as-admin" || id == L"file.open-terminal" || id == L"file.open-vscode" || id.rfind(L"custom:", 0) == 0) {
+        return bb_launch_command(core_.app(), core::s(id)) == BB_OK;
+    }
     // Commands that put a dialog up. A run with no one to answer reports them instead.
     static const std::pair<const wchar_t*, const wchar_t*> dialogs[] = {
         {L"file.new-folder", L"new-folder"}, {L"file.new-file", L"new-file"},       {L"file.rename", L"rename"},

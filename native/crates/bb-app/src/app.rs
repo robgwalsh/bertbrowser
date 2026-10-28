@@ -289,6 +289,12 @@ pub struct App {
 
 impl App {
     pub fn new(config: AppConfig) -> AppResult<App> {
+        App::with_seams(config, |_| {})
+    }
+
+    /// As `new`, letting the caller swap any seam before the app is built over them (a test's fake
+    /// elevated runner, a host's own launcher).
+    pub fn with_seams(config: AppConfig, adjust: impl FnOnce(&mut Seams)) -> AppResult<App> {
         let invalid =
             |what: &str, e: &dyn std::fmt::Display| AppError::Invalid(format!("{what}: {e}"));
 
@@ -315,11 +321,15 @@ impl App {
                 let (seams, probes) = Seams::harness();
                 (seams, Some(probes))
             }
-            Fakes::None => (Seams::interactive(hub.clone(), questions.clone()), None),
+            Fakes::None => (
+                Seams::interactive(hub.clone(), questions.clone(), paths.data_dir()),
+                None,
+            ),
         };
         if config.index_declined {
             seams.index = crate::index::declined_index();
         }
+        adjust(&mut seams);
         let watchers: Arc<dyn IndexWatcher> = match config.fakes {
             Fakes::Harness => Arc::new(NoWatchers),
             Fakes::None => Arc::new(IndexWatcherService::new(repository.clone())),

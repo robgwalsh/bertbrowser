@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use bb_core::FileTime;
 use bb_core::archives::{ArchiveEdit, ArchiveFormats, ArchivePath, ArchiveWriteRules};
-use bb_core::elevation::ElevationOperation;
+use bb_core::elevation::{ElevatedOperationRunner, ElevatedRun, ElevationOperation};
 use bb_core::format;
 use bb_core::rename::{
     RenamePart, RenamePattern, RenamePlanner, RenameRule, RenameSource, RenameTemplate,
@@ -62,15 +62,46 @@ fn op_json(op: crate::ids::OpId) -> String {
 }
 
 impl Inner {
-    /// Asks whether to try again with administrator rights. Remembers the offer for the dialog and
-    /// for a script. The helper that would carry the retry out is not wired to a transport in this
-    /// build, so an accepted offer is reported rather than carried out.
-    pub(crate) fn offer_elevation(
+    /// Offers a second, elevated pass over whatever Windows refused, and runs it if the user agrees.
+    /// `Some` is what the helper did, for the caller to fold into the first pass's outcome; `None`
+    /// is "no second pass", with a note saying why when the user would otherwise wonder (the account
+    /// cannot elevate, the helper failed). Declining is the user's choice and needs no note.
+    ///
+    /// **The account is checked before the dialog, never after.** A standard user shown a shield
+    /// gets a credential prompt for somebody else's password, which is a good deal worse than
+    /// quietly saying it cannot be done.
+    pub(crate) fn elevate<T>(
         &self,
         operation: ElevationOperation,
         items: &[String],
         is_undo: bool,
-    ) -> &'static str {
+        run: impl FnOnce(&dyn ElevatedOperationRunner) -> ElevatedRun<T>,
+    ) -> (Option<T>, String) {
+        if !self.seams.elevated.can_elevate() {
+            return (
+                None,
+                " \u{2014} and this account cannot provide administrator permission".to_string(),
+            );
+        }
+        if !self.offer_elevation(operation, items, is_undo) {
+            return (None, String::new());
+        }
+        let ran = run(self.seams.elevated.as_ref());
+        match ran.result {
+            Some(second) => (Some(second), String::new()),
+            None if ran.detail.is_empty() => (None, String::new()),
+            None => (None, format!(" \u{2014} {}", ran.detail)),
+        }
+    }
+
+    /// Asks whether to try again with administrator rights. Remembers the offer for the dialog and
+    /// for a script. `true` means "retry it elevated".
+    fn offer_elevation(
+        &self,
+        operation: ElevationOperation,
+        items: &[String],
+        is_undo: bool,
+    ) -> bool {
         let count = items.len();
         let noun = if count == 1 {
             "1 item".to_string()
@@ -112,11 +143,7 @@ impl Inner {
             "items": items,
         });
         *lock(&self.extra.ops.elevation_offer) = Some(model.clone());
-        if self.seams.elevation.offer(&model.to_string()) {
-            " \u{2014} administrator rights were agreed to, but the elevated helper is not connected in this build"
-        } else {
-            ""
-        }
+        self.seams.elevation.offer(&model.to_string())
     }
 
     pub(crate) fn history_json(&self) -> Value {
@@ -932,7 +959,15 @@ impl App {
                     |p| std::path::Path::new(p).exists(),
                 )
                 .ok_or_else(|| invalid("That entry's command could not be read."))?;
-                match inner.seams.launcher.launch(&resolved.executable, false) {
+                // The program with its arguments and the folder the menu was over: "Git Bash Here"
+                // takes its folder from the working directory.
+                let request = crate::LaunchRequest {
+                    file: resolved.executable.clone(),
+                    arguments: resolved.arguments.clone(),
+                    working_directory: text(&a["workingDirectory"]).to_string(),
+                    elevated: false,
+                };
+                match inner.seams.launcher.start(&request) {
                     Ok(()) => inner
                         .set_active_status(format!("Started {}", file_name(&resolved.executable))),
                     Err(e) => inner.set_active_status(e),

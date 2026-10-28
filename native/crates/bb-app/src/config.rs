@@ -29,6 +29,11 @@ pub struct AppConfig {
     /// Put the real index client behind a launcher that declines the elevation prompt (the
     /// harness's `--index-declined`).
     pub index_declined: bool,
+    /// Whether startup may act on the machine rather than on this process's own data directory:
+    /// attach to the index helper, push the change-log policy to it. False for a benchmark launch
+    /// (`BERTBROWSER_STARTUP_TRACE`), whose scratch data directory would otherwise be used to push
+    /// "recording off" at the user's real helper and wipe their change log.
+    pub machine_effects: bool,
 }
 
 impl AppConfig {
@@ -42,6 +47,7 @@ impl AppConfig {
             workers: 4,
             settings_debounce_ms: 400,
             index_declined: false,
+            machine_effects: true,
         }
     }
 

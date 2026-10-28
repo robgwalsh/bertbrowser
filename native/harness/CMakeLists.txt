@@ -14,4 +14,5 @@ add_executable(bb-harness
   ../app/app/version.cpp
 )
 target_include_directories(bb-harness PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(bb-harness PRIVATE bbviews psapi)
+# bbcore_harness: the same ABI as the product's bbcore, plus the fixtures only a script needs.
+target_link_libraries(bb-harness PRIVATE bbviews bbcore_harness psapi)

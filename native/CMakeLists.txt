@@ -30,22 +30,49 @@ else()
 endif()
 set(CARGO_TARGET_DIR "${CMAKE_SOURCE_DIR}/target")
 set(BBCORE_LIB "${CARGO_TARGET_DIR}/${CARGO_PROFILE_DIR}/bbcore.lib")
+set(BBCORE_HARNESS_LIB "${CARGO_TARGET_DIR}/${CARGO_PROFILE_DIR}/bbcore_harness.lib")
 set(BBCORE_HEADER "${CMAKE_SOURCE_DIR}/include/bbcore.h")
+set(BB_INDEXER_EXE "${CARGO_TARGET_DIR}/${CARGO_PROFILE_DIR}/bb-indexer.exe")
+set(BB_ELEVATOR_EXE "${CARGO_TARGET_DIR}/${CARGO_PROFILE_DIR}/bb-elevator.exe")
 
+# The product's staticlib: bb-ffi without its test fixtures, plus the two elevated helpers that sit
+# beside BertBrowser.exe (found there and nowhere else: they get an administrator token).
 add_custom_target(cargo_build ALL
-  COMMAND ${CMAKE_COMMAND} -E env "CARGO_TARGET_DIR=${CARGO_TARGET_DIR}" cargo build -p bb-ffi ${CARGO_PROFILE_FLAG}
+  COMMAND ${CMAKE_COMMAND} -E env "CARGO_TARGET_DIR=${CARGO_TARGET_DIR}" cargo build -p bb-ffi -p bb-indexer -p bb-elevator ${CARGO_PROFILE_FLAG}
   COMMAND cbindgen --config cbindgen.toml --crate bb-ffi --output "${BBCORE_HEADER}"
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-  BYPRODUCTS "${BBCORE_LIB}" "${BBCORE_HEADER}"
+  BYPRODUCTS "${BBCORE_LIB}" "${BBCORE_HEADER}" "${BB_INDEXER_EXE}" "${BB_ELEVATOR_EXE}"
   USES_TERMINAL
-  COMMENT "cargo build -p bb-ffi (${CARGO_PROFILE_DIR}) and cbindgen")
+  COMMENT "cargo build -p bb-ffi -p bb-indexer -p bb-elevator (${CARGO_PROFILE_DIR}) and cbindgen")
+
+# The harness's staticlib: the same ABI with the fixtures turned on (crate bb-ffi-harness). Two
+# archives each carry their own copy of the Rust runtime, so an executable links exactly one of them.
+# Built after the first so the two cargo runs never fight over the target directory lock.
+add_custom_target(cargo_build_harness ALL
+  COMMAND ${CMAKE_COMMAND} -E env "CARGO_TARGET_DIR=${CARGO_TARGET_DIR}" cargo build -p bb-ffi-harness ${CARGO_PROFILE_FLAG}
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  BYPRODUCTS "${BBCORE_HARNESS_LIB}"
+  USES_TERMINAL
+  COMMENT "cargo build -p bb-ffi-harness (${CARGO_PROFILE_DIR})")
+add_dependencies(cargo_build_harness cargo_build)
+
+# The header and the system libraries Rust's crates link against (cargo reports them as
+# native-static-libs); the include directory is all a library that only calls the ABI needs.
+add_library(bbcore_abi INTERFACE)
+target_include_directories(bbcore_abi INTERFACE "${CMAKE_SOURCE_DIR}/include")
+target_link_libraries(bbcore_abi INTERFACE kernel32 advapi32 ntdll userenv ws2_32 bcrypt synchronization shell32 ole32 oleaut32 user32 secur32 crypt32 version)
+
+add_dependencies(bbcore_abi cargo_build)
 
 add_library(bbcore STATIC IMPORTED GLOBAL)
 set_target_properties(bbcore PROPERTIES IMPORTED_LOCATION "${BBCORE_LIB}")
-target_include_directories(bbcore INTERFACE "${CMAKE_SOURCE_DIR}/include")
-# What the Rust standard library and its crates link against (cargo reports them as native-static-libs).
-target_link_libraries(bbcore INTERFACE kernel32 advapi32 ntdll userenv ws2_32 bcrypt synchronization)
+target_link_libraries(bbcore INTERFACE bbcore_abi)
 add_dependencies(bbcore cargo_build)
+
+add_library(bbcore_harness STATIC IMPORTED GLOBAL)
+set_target_properties(bbcore_harness PROPERTIES IMPORTED_LOCATION "${BBCORE_HARNESS_LIB}")
+target_link_libraries(bbcore_harness INTERFACE bbcore_abi)
+add_dependencies(bbcore_harness cargo_build_harness)
 
 add_subdirectory(app)
 add_subdirectory(harness)

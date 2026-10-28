@@ -184,7 +184,7 @@ impl ElevationLauncher for ShellExecuteLauncher {
 /// The Win32 behind the real launcher: the token's elevation type, `ShellExecuteExW` with `runas`,
 /// and a wait on the handle it hands back rather than a reopen of the process, since a
 /// medium-integrity process cannot count on opening a high-integrity one at all.
-mod win32 {
+pub mod win32 {
     use std::ptr::null_mut;
     use std::time::Duration;
 

@@ -23,6 +23,7 @@ mod gif_player;
 mod ids;
 mod index;
 mod keys;
+mod launching;
 mod metadata_pane;
 mod misc;
 mod newitem;
@@ -34,6 +35,7 @@ mod palette;
 mod panes_api;
 mod pool;
 mod preview;
+mod requests;
 mod rows;
 mod saved;
 mod seams;
@@ -62,12 +64,15 @@ pub use config::{AppConfig, Fakes};
 pub use events::{AppEvent, EventSink, Model};
 pub use gif_player::{GifOpenError, GifPlayer};
 pub use ids::{AppError, AppResult, OpId, PaneId, TabId};
+pub use launching::is_launch_command;
 pub use metadata_pane::{HostReading, HostValue, MetadataAction, ShellPropertyHost};
 pub use preview::{MODE_AUTO, MODE_GUESS, MODE_HEX, MODE_RAW};
+pub use requests::remaining_after_start;
 pub use rows::{CELL_COLUMNS, Listing, Row, cell_index, stamp};
 pub use seams::{
-    AppConflictPrompt, ElevationLauncher, HarnessProbes, ProcessLauncher, PushedAppearance, Seams,
-    SystemAppearanceSource, UserConfirm, UserNotice,
+    AppConflictPrompt, ElevatedRunner, ElevationLauncher, HarnessProbes, LaunchRequest,
+    NoElevation, ProcessLauncher, PushedAppearance, Seams, SystemAppearanceSource,
+    SystemProcessLauncher, UserConfirm, UserNotice,
 };
 pub use settings_svc::{PAGE_KEYS, SETTINGS_PAGES};
 pub use sort::SortSpec;

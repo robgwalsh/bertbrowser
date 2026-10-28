@@ -13,11 +13,20 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 bb-app = { path = "../bb-app" }
 bb-core = { path = "../bb-core" }
+bb-shell = { path = "../bb-shell" }
 serde_json.workspace = true
-# The small real files the harness drops into a sandbox (`bb_fixture_write`). On by default so one
-# staticlib serves the app and the harness; they are a few hundred kilobytes of base64.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+# The small real files the harness drops into a sandbox (`bb_fixture_write`). **Off by default**: the
+# product's staticlib (`bbcore.lib`, linked into BertBrowser.exe) carries none of them. The harness
+# links `bbcore_harness.lib` (crate `bb-ffi-harness`), which turns this on.
 bb-test-support = { path = "../bb-test-support", optional = true }
 
 [features]
-default = ["fixtures"]
+default = []
 fixtures = ["dep:bb-test-support"]
+
+[dev-dependencies]
+# The integration tests write the fixtures too, so they need the feature on whichever way they are
+# run (`cargo test -p bb-ffi` alone does not unify features with the harness crate).
+bb-ffi = { path = ".", features = ["fixtures"] }
+bb-test-support = { path = "../bb-test-support" }

@@ -65,11 +65,19 @@ add_library(bbviews STATIC
   views/settings_ctxmenu.cpp
 )
 target_include_directories(bbviews PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(bbviews PUBLIC bbapp bbcore mfplat mf mfuuid)
+# Header and system libraries only: the Rust archive itself is linked by the executable, because the
+# product and the harness link different builds of it (the harness's carries the test fixtures).
+target_link_libraries(bbviews PUBLIC bbapp bbcore_abi mfplat mf mfuuid)
 
 # The product. Never launched to check UI work; the harness is the way to see the interface.
 add_executable(BertBrowser WIN32 app/main.cpp app/version.cpp)
-target_link_libraries(BertBrowser PRIVATE bbviews)
+target_link_libraries(BertBrowser PRIVATE bbviews bbcore)
+
+# The elevated helpers sit beside the app and are found there and nowhere else: what they are
+# started to do is the one thing that gets an administrator token.
+add_custom_command(TARGET BertBrowser POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${BB_INDEXER_EXE}" "${BB_ELEVATOR_EXE}" "$<TARGET_FILE_DIR:BertBrowser>"
+  COMMENT "bb-indexer.exe and bb-elevator.exe beside BertBrowser.exe")
 
 # Tests of the widget framework: plain C++ exe, no framework; renders offscreen on WARP.
 enable_testing()

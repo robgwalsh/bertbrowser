@@ -406,9 +406,16 @@ impl Inner {
                         } else {
                             ctx.single_is_archive = ArchiveFormats::is_archive_name(&row.name);
                             let lower = row.name.to_lowercase();
-                            ctx.single_runnable = [".exe", ".bat", ".cmd", ".com", ".msi", ".ps1"]
-                                .iter()
-                                .any(|e| lower.ends_with(e));
+                            // The launcher knows the registry; without one the well-known list.
+                            ctx.single_runnable = self
+                                .seams
+                                .launcher
+                                .can_run_elevated(&row.full_path)
+                                .unwrap_or_else(|| {
+                                    [".exe", ".bat", ".cmd", ".com", ".msi", ".ps1"]
+                                        .iter()
+                                        .any(|e| lower.ends_with(e))
+                                });
                         }
                     }
                 }

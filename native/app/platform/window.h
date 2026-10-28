@@ -20,6 +20,9 @@ struct WindowOptions {
     int width_dip = 1100;
     int height_dip = 700;
     bool parked = false;
+    // The real window (hardware surface) put out of sight and never activated: a benchmark launch
+    // (BERTBROWSER_STARTUP_TRACE). Unlike `parked` it is a normal window in every other way.
+    bool offscreen = false;
     bool custom_chrome = true;  // no caption, DWM resize frame kept; widgets with nc_hit make the bar
     bool activate = true;       // show() takes the foreground (never when parked)
     unsigned dpi_override = 0;  // 0 = the monitor's; the harness pins 96 so captures do not depend on the desktop
@@ -52,6 +55,8 @@ public:
     ui::Point to_dip(int x, int y) const;
 
     std::function<void()> on_close;  // WM_CLOSE; default destroys the window
+    // Called once, after the first paint has reached the surface (the content has been rendered).
+    std::function<void()> on_first_paint;
     // Windows' light/dark, accent or high-contrast setting moved (WM_SETTINGCHANGE and friends).
     std::function<void()> on_system_settings_changed;
     // Application messages (WM_APP..0xBFFF), seen before anything else; true = handled. How the core's

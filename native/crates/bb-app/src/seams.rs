@@ -6,10 +6,22 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use bb_core::cancel::CancelToken;
+use bb_core::delete::{DeleteOutcome, DeleteProgress, DeleteUndoResult};
+use bb_core::elevation::{
+    DeleteRetry, ElevatedOperationRunner, ElevatedRun, NewItemRetry, RenameRetry, TransferRetry,
+};
+use bb_core::launch::ExecutablePath;
 use bb_core::mft::{MftIndex, NullMftIndex};
+use bb_core::newitem::NewItemOutcome;
+use bb_core::rename::RenameOutcome;
 use bb_core::theming::SystemAppearance;
-use bb_core::transfer::{ConflictDefaults, ConflictResolution, Resolutions, TransferPlan};
+use bb_core::transfer::{
+    ConflictDefaults, ConflictResolution, Resolutions, TransferOutcome, TransferPlan,
+    TransferProgress, TransferUndoResult,
+};
 use bb_paths::PathKey;
+pub use bb_shell::LaunchRequest;
 
 use crate::events::EventHub;
 use crate::ops_ui::Questions;
@@ -22,6 +34,115 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// line.
 pub trait ProcessLauncher: Send + Sync {
     fn launch(&self, path: &str, elevated: bool) -> Result<(), String>;
+
+    /// As `launch`, with arguments and a working directory (an editor on a file, a user's command).
+    fn start(&self, request: &LaunchRequest) -> Result<(), String> {
+        self.launch(&request.file, request.elevated)
+    }
+
+    /// The absolute path `program` resolves to against `PATH`, or None. Callers with a fallback
+    /// chain ("Windows Terminal, else PowerShell") ask this first.
+    fn resolve(&self, program: &str) -> Option<String> {
+        ExecutablePath::resolve_on_disk(program)
+    }
+
+    /// Whether Windows could run this file as administrator, when this launcher knows; None leaves
+    /// the decision to the well-known list.
+    fn can_run_elevated(&self, _path: &str) -> Option<bool> {
+        None
+    }
+}
+
+/// The real launcher: `ShellExecuteExW`, through the one launcher in `bb-shell`.
+pub struct SystemProcessLauncher(bb_shell::SystemLauncher);
+
+impl SystemProcessLauncher {
+    pub fn new() -> SystemProcessLauncher {
+        SystemProcessLauncher(bb_shell::SystemLauncher::new())
+    }
+}
+
+impl Default for SystemProcessLauncher {
+    fn default() -> Self {
+        SystemProcessLauncher::new()
+    }
+}
+
+impl ProcessLauncher for SystemProcessLauncher {
+    fn launch(&self, path: &str, elevated: bool) -> Result<(), String> {
+        self.0.start(&LaunchRequest {
+            file: path.to_string(),
+            elevated,
+            ..LaunchRequest::default()
+        })
+    }
+
+    fn start(&self, request: &LaunchRequest) -> Result<(), String> {
+        self.0.start(request)
+    }
+
+    fn resolve(&self, program: &str) -> Option<String> {
+        self.0.resolve(program)
+    }
+
+    fn can_run_elevated(&self, path: &str) -> Option<bool> {
+        Some(self.0.can_run_elevated(path))
+    }
+}
+
+/// Runs an offered retry with an administrator token. The harness's runner never has one.
+pub type ElevatedRunner = Arc<dyn ElevatedOperationRunner + Send + Sync>;
+
+/// What the harness and the tests get: nothing is ever run. It says it *could* elevate, so that the
+/// offer is still made and recorded; the harness's prompt is what declines it.
+pub struct NoElevation;
+
+fn none<T>() -> ElevatedRun<T> {
+    ElevatedRun::unavailable("elevation is not available in this run")
+}
+
+impl ElevatedOperationRunner for NoElevation {
+    fn can_elevate(&self) -> bool {
+        true
+    }
+
+    fn run_transfer(
+        &self,
+        _: &TransferRetry,
+        _: Option<&mut dyn FnMut(TransferProgress)>,
+        _: &CancelToken,
+    ) -> ElevatedRun<TransferOutcome> {
+        none()
+    }
+
+    fn run_delete(
+        &self,
+        _: &DeleteRetry,
+        _: Option<&mut dyn FnMut(DeleteProgress)>,
+        _: &CancelToken,
+    ) -> ElevatedRun<DeleteOutcome> {
+        none()
+    }
+
+    fn run_rename(&self, _: &RenameRetry, _: &CancelToken) -> ElevatedRun<RenameOutcome> {
+        none()
+    }
+
+    fn run_new_item(&self, _: &NewItemRetry, _: &CancelToken) -> ElevatedRun<NewItemOutcome> {
+        none()
+    }
+
+    fn undo_transfer(
+        &self,
+        _: &TransferOutcome,
+        _: &CancelToken,
+    ) -> ElevatedRun<TransferUndoResult> {
+        none()
+    }
+
+    fn undo_delete(&self, _: &DeleteOutcome, _: &CancelToken) -> ElevatedRun<DeleteUndoResult> {
+        none()
+    }
 }
 
 /// Offered when an operation was refused for permissions. `true` means "retry it elevated".
@@ -82,6 +203,8 @@ pub struct Seams {
     pub conflicts: Arc<dyn AppConflictPrompt>,
     pub appearance: Arc<dyn SystemAppearanceSource>,
     pub index: Arc<dyn MftIndex>,
+    /// Runs a retry the user agreed to with administrator rights.
+    pub elevated: ElevatedRunner,
 }
 
 impl Seams {
@@ -96,24 +219,41 @@ impl Seams {
             conflicts: probes.clone(),
             appearance: probes.clone(),
             index: Arc::new(NullMftIndex),
+            elevated: Arc::new(NoElevation),
         };
         (seams, probes)
     }
 
-    /// What a build with no window to ask through gets for now: nothing is launched, elevation is
-    /// declined, questions are answered "no" and clashes keep both. The native UI replaces these
-    /// with event-raising ones (`NeedsAnswer`) when the dialogs land.
+    /// What a build with no window to ask through gets: nothing is launched, elevation is declined,
+    /// questions are answered "no" and clashes keep both. Used by tests of the layers above.
     pub fn unattended() -> Seams {
         let (mut seams, _) = Seams::harness();
         seams.appearance = Arc::new(PushedAppearance::default());
         seams
     }
 
+    /// The product's: the real launcher, the real elevated-retry runner and the real index client
+    /// (which only ever *attaches* at startup; the banner offers the prompt). Questions are still
+    /// the unattended answers until [`interactive`](Self::interactive) puts a window behind them.
+    pub fn system(data_dir: &std::path::Path) -> Seams {
+        let mut seams = Seams::unattended();
+        seams.launcher = Arc::new(SystemProcessLauncher::new());
+        seams.elevated = Arc::new(bb_shell::SystemElevation::new());
+        seams.index = Arc::new(bb_shell::indexing::real_index_client(
+            &data_dir.to_string_lossy(),
+        ));
+        seams
+    }
+
     /// A window that can ask: a clash or an offer of administrator rights parks the transfer
     /// thread until the host answers (`ops_do`), and raises `Model::Conflicts` / `Model::Elevation`
     /// so the host knows to put the question up.
-    pub(crate) fn interactive(hub: EventHub, questions: Arc<Questions>) -> Seams {
-        let mut seams = Seams::unattended();
+    pub(crate) fn interactive(
+        hub: EventHub,
+        questions: Arc<Questions>,
+        data_dir: &std::path::Path,
+    ) -> Seams {
+        let mut seams = Seams::system(data_dir);
         let prompts = Arc::new(UiPrompts { hub, questions });
         seams.conflicts = prompts.clone();
         seams.elevation = prompts;

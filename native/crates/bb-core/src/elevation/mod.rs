@@ -19,6 +19,7 @@ mod wire;
 
 pub use client::{ElevatedOperationRunner, ElevationClient};
 pub use host::ElevationHost;
+pub use launcher::win32 as elevated_process;
 pub use launcher::{
     ElevationLaunch, ElevationLaunchResult, ElevationLauncher, ElevationStream, ElevationTransport,
     ElevationTransportFactory, ShellExecuteLauncher,
