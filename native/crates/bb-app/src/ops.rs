@@ -29,8 +29,8 @@ use crate::app::{Inner, Job, JobBody, OpState, UndoSummary, lock};
 use crate::events::AppEvent;
 use crate::ids::{AppError, AppResult, OpId};
 
-static RECYCLE_BIN: LazyLock<ShellRecycleBin> = LazyLock::new(ShellRecycleBin::new);
-static DELETE_PROBE: FileSystemDeleteProbe = FileSystemDeleteProbe;
+pub(crate) static RECYCLE_BIN: LazyLock<ShellRecycleBin> = LazyLock::new(ShellRecycleBin::new);
+pub(crate) static DELETE_PROBE: FileSystemDeleteProbe = FileSystemDeleteProbe;
 
 /// What `dir_size_cache` already knows about a folder, for sizing what an undo record holds.
 struct CachedSizes<'a>(&'a bb_core::data::DirSizeRepository);
@@ -402,7 +402,7 @@ impl Inner {
         )
     }
 
-    fn delete_executor(&self) -> DeleteExecutor<'static> {
+    pub(crate) fn delete_executor(&self) -> DeleteExecutor<'static> {
         let mut executor = DeleteExecutor::new(&DELETE_PROBE)
             .recycle_bin(&*RECYCLE_BIN)
             .recycle_probe(&*RECYCLE_BIN);

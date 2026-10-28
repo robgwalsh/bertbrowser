@@ -401,6 +401,13 @@ fn comparing_panes_stops_them_changing_places() {
     f.app.command_run("pane.split-right").unwrap();
     f.settle();
     assert_eq!(None, why(&f, "pane.swap"));
+    // Two panes on one folder are refused (a folder compared with itself says nothing); give each
+    // somewhere different to be.
+    for (pane, folder) in f.app.panes().into_iter().zip(["Documents", "Pictures"]) {
+        let tab = f.app.active_tab_of(pane).unwrap().unwrap();
+        f.app.navigate(tab, &f.path(folder)).unwrap();
+    }
+    f.settle();
     f.app.command_run("tools.compare").unwrap();
     assert!(
         why(&f, "pane.swap")

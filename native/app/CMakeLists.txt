@@ -52,6 +52,10 @@ add_library(bbviews STATIC
   views/preview_pane.cpp
   views/metadata_pane.cpp
   views/property_host.cpp
+  views/tool_widgets.cpp
+  views/tool_state.cpp
+  views/tool_dialogs.cpp
+  views/tool_banner.cpp
   views/main_view.cpp
 )
 target_include_directories(bbviews PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")

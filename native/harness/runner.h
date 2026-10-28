@@ -28,6 +28,7 @@ private:
     void install_bench();
     void install_ui();
     void install_panes();
+    void install_tools();
 
     // ---- helpers ----
     static std::pair<std::wstring, std::wstring> split_first(const std::wstring& line);

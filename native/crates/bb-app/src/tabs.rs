@@ -289,6 +289,7 @@ impl Inner {
         }
         let watcher = self.start_watching(id, &path);
         lock(cell).watcher = watcher;
+        self.compare_tab_moved(id, &path);
         self.hub.emit(AppEvent::TabChanged { tab: id });
         self.refresh_view(id);
     }
@@ -445,7 +446,7 @@ impl Inner {
             .into_iter()
             .filter(|e| include_hidden || e.attributes & HIDDEN == 0)
             .collect();
-        let current: Vec<_> = listing.rows().iter().map(|r| r.to_entry()).collect();
+        let current: Vec<_> = listing.source_rows().iter().map(|r| r.to_entry()).collect();
         let Ok(changes) = FileListDiff::compute(&current, &entries) else {
             return;
         };
@@ -471,7 +472,7 @@ impl Inner {
         let mut replacements: std::collections::HashMap<Arc<str>, Row> =
             updated.drain(..).map(|r| (r.key.clone(), r)).collect();
         let mut stale: Vec<Arc<str>> = Vec::new();
-        for existing in t.listing.rows() {
+        for existing in t.listing.source_rows() {
             if removed.contains(&*existing.key) {
                 continue;
             }
@@ -657,6 +658,7 @@ impl Inner {
             };
             let version = t.version;
             drop(t);
+            self.compare_tab_flattened(tab, false);
             self.hub.emit(AppEvent::ListingChanged { tab, version });
         }
 
@@ -780,6 +782,7 @@ impl Inner {
             t.status = format!("Listing everything under {folder}\u{2026}");
             let version = t.version;
             drop(t);
+            self.compare_tab_flattened(tab, true);
             self.hub.emit(AppEvent::ListingChanged { tab, version });
         }
 
@@ -1079,6 +1082,8 @@ impl Inner {
                 self.refresh_view(id);
             }
         }
+        // A comparison over these folders is a verdict about a disk that just changed.
+        self.compare_directories_changed(&keys);
     }
 
     /// Steps any tab that is inside a folder that just went away out to the nearest parent that
@@ -1123,7 +1128,7 @@ enum Kind {
 /// Re-sorts the tab's rows in place (a new snapshot, same ids and selection).
 fn resort(t: &mut TabData) {
     let spec = t.sort_spec();
-    let mut rows: Vec<Arc<crate::rows::Row>> = t.listing.rows().to_vec();
+    let mut rows: Vec<Arc<crate::rows::Row>> = t.listing.source_rows().to_vec();
     rows.sort_by(|a, b| spec.compare(a, b));
     t.version += 1;
     t.listing = t.make_listing(rows, t.is_flattened, t.is_flat_browse);

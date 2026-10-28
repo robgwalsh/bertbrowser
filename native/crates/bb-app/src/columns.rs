@@ -69,6 +69,22 @@ impl TabData {
     ) -> Arc<Listing> {
         if let Some(compare) = &self.compare {
             compare.stamp(&rows);
+            // "Differences only" hides the rows the comparison has nothing to say about, but the
+            // snapshot keeps all of them: the next rebuild starts from `source_rows`.
+            if compare.differences_only {
+                let shown: Vec<Arc<Row>> = rows
+                    .iter()
+                    .filter(|r| compare.shows_when_filtered(r))
+                    .cloned()
+                    .collect();
+                if shown.len() != rows.len() {
+                    return Arc::new(
+                        Listing::new(self.id.0, self.version, shown, flattened, flat_browse)
+                            .with_props(self.prop_ids())
+                            .with_source(rows),
+                    );
+                }
+            }
         }
         Arc::new(
             Listing::new(self.id.0, self.version, rows, flattened, flat_browse)
@@ -153,7 +169,7 @@ impl Inner {
         let version = {
             let mut t = lock(&cell);
             t.version += 1;
-            let rows = t.listing.rows().to_vec();
+            let rows = t.listing.source_rows().to_vec();
             let (fl, fb) = (t.listing.is_flattened, t.listing.is_flat_browse);
             let spec = t.sort_spec();
             let mut rows = rows;
@@ -366,7 +382,7 @@ impl Inner {
             t.prop_stamps.extend(stamps);
             let spec = t.sort_spec();
             let mut rows: Vec<Arc<Row>> = Vec::with_capacity(t.listing.len());
-            for row in t.listing.rows() {
+            for row in t.listing.source_rows() {
                 if touched.contains(&row.key) {
                     let mut next = row.duplicate();
                     let map: RowProps = t.props.get(&row.key).cloned().unwrap_or_default();

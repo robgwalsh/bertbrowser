@@ -83,6 +83,7 @@ public:
     uint64_t row_id(size_t row) const override;
     std::wstring cell_text(size_t row, int column_id) const override;
     const ui::IconData* row_icon(size_t row) const override;
+    ui::Token row_tint(size_t row) const override;
     std::wstring row_path(size_t row) const;
     bool selected(size_t row) const override { return row < sel_.size() && sel_[row]; }
     void select(ui::SelectOp op, size_t first, size_t last) override;

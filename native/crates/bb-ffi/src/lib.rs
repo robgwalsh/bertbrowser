@@ -36,6 +36,8 @@ mod features;
 pub use features::*;
 mod panes;
 pub use panes::*;
+mod tools;
+pub use tools::*;
 
 // ---- statuses and strings ----
 
@@ -1017,6 +1019,9 @@ pub const BB_ROW_HIDDEN: u32 = 2;
 pub const BB_ROW_MEDIA: u32 = 4;
 /// A folder size that is a floor, because some folders could not be read.
 pub const BB_ROW_SIZE_INCOMPLETE: u32 = 8;
+/// Bits 4..6 are what a folder comparison says about the row (`compare_view::state_number`: 0 nothing,
+/// 1 not compared, 2 same, 3 only here, 4 newer, 5 older, 6 differs): `(flags >> 4) & 7`.
+pub const BB_ROW_COMPARE_SHIFT: u32 = 4;
 
 /// One row, as views into the snapshot. Ask for visible rows at paint time only.
 #[repr(C)]
@@ -1065,6 +1070,8 @@ pub unsafe extern "C" fn bb_listing_row(
         if row.size_incomplete {
             flags |= BB_ROW_SIZE_INCOMPLETE;
         }
+        flags |= (u32::from(row.compare.load(std::sync::atomic::Ordering::Relaxed)) & 7)
+            << BB_ROW_COMPARE_SHIFT;
         *out_row = BbRow {
             row_id: row.id,
             name: BbStr::of(row.name_wide()),

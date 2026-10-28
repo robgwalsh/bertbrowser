@@ -322,9 +322,23 @@ pub struct Listing {
     /// The shell-property columns showing when this snapshot was made (upper-cased canonical
     /// names, in column order): cell index `CELL_COLUMNS.len() + k` is the k-th of these.
     prop_ids: Vec<String>,
+    /// Every row, when a filter (the comparison's "differences only") hides some of `rows`. A
+    /// rebuild of the snapshot starts from `source_rows()`, never from what was shown.
+    source: Option<Vec<Arc<Row>>>,
 }
 
 impl Listing {
+    /// The snapshot as a filtered view of `source`.
+    pub fn with_source(mut self, source: Vec<Arc<Row>>) -> Listing {
+        self.source = Some(source);
+        self
+    }
+
+    /// Every row the tab holds, shown or not.
+    pub fn source_rows(&self) -> &[Arc<Row>] {
+        self.source.as_deref().unwrap_or(&self.rows)
+    }
+
     /// The snapshot with its shell-property columns named.
     pub fn with_props(mut self, prop_ids: Vec<String>) -> Listing {
         self.prop_ids = prop_ids;
@@ -350,6 +364,7 @@ impl Listing {
             rows,
             cells: Mutex::new(HashMap::new()),
             prop_ids: Vec::new(),
+            source: None,
         }
     }
 

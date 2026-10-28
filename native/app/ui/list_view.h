@@ -27,6 +27,8 @@ public:
     virtual void select(SelectOp op, size_t first, size_t last) = 0;
     // An icon drawn before the first column's text, or null for none.
     virtual const IconData* row_icon(size_t /*row*/) const { return nullptr; }
+    // A faint fill behind the row (what a folder comparison says about it), or kNoToken for none.
+    virtual Token row_tint(size_t /*row*/) const { return kNoToken; }
 };
 
 struct Column {

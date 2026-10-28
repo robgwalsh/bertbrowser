@@ -76,6 +76,7 @@ Runner::Runner(Session& session, const Options& options) : s_(session), o_(optio
     install_bench();
     install_ui();
     install_panes();
+    install_tools();
 }
 
 // ---- the loop ---------------------------------------------------------------------------------------

@@ -610,6 +610,13 @@ fn comparing_panes_gates_swapping_them() {
     });
     rig.settle();
     assert_eq!(None, rig.gate("pane.swap"));
+    // A folder and one inside it are not a pair (it would be compared with itself): move the first
+    // pane somewhere beside Documents.
+    let pictures = w(&rig.path("Pictures"));
+    assert_eq!(BbStatus::BB_OK, unsafe {
+        bb_tab_navigate(rig.app, rig.tab, bs(&pictures))
+    });
+    rig.settle();
     assert_eq!(BbStatus::BB_OK, unsafe { bb_compare_toggle(rig.app) });
     assert!(
         rig.gate("pane.swap")
@@ -715,4 +722,63 @@ fn the_duplicate_scan_finds_copies_without_an_index_helper() {
         "photo.jpg", groups[0]["files"][shallowest]["name"],
         "the copy nearest the top is kept"
     );
+}
+
+#[test]
+fn the_tool_door_runs_a_verb_and_refuses_one_it_does_not_know() {
+    let rig = Rig::new();
+    let run = |verb: &str, args: &str| {
+        let (v, a) = (w(verb), w(args));
+        let mut out = none();
+        let st = unsafe { bb_tools(rig.app, bs(&v), bs(&a), &mut out) };
+        (st, unsafe { take(out) })
+    };
+    let notes = serde_json::json!({"paths": [rig.path("notes.txt")], "algorithms": ["Sha1"]});
+    let (st, text) = run("checksum.hash", &notes.to_string());
+    assert_eq!(BbStatus::BB_OK, st);
+    let model: Value = serde_json::from_str(&text.unwrap()).unwrap();
+    assert_eq!("notes.txt", model["rows"][0]["name"]);
+    assert_eq!(
+        40,
+        model["rows"][0]["digests"][0]["digest"]
+            .as_str()
+            .unwrap()
+            .len()
+    );
+
+    let (st, _) = run("not.a.verb", "{}");
+    assert_eq!(BbStatus::BB_ERR, st);
+    let (st, _) = run("checksum.hash", "{broken");
+    assert_eq!(
+        BbStatus::BB_ERR,
+        st,
+        "arguments that are not JSON are refused"
+    );
+}
+
+#[test]
+fn a_row_carries_what_the_comparison_says_about_it_in_its_flag_bits() {
+    let rig = Rig::new();
+    let docs = w(&rig.path("Documents"));
+    let mut pane = 0u64;
+    assert_eq!(BbStatus::BB_OK, unsafe {
+        bb_pane_split(rig.app, 0, BbOrientation::BB_VERTICAL, bs(&docs), &mut pane)
+    });
+    rig.settle();
+    let pictures = w(&rig.path("Pictures"));
+    assert_eq!(BbStatus::BB_OK, unsafe {
+        bb_tab_navigate(rig.app, rig.tab, bs(&pictures))
+    });
+    rig.settle();
+    assert_eq!(BbStatus::BB_OK, unsafe { bb_compare_toggle(rig.app) });
+    rig.settle();
+    let listing = unsafe { bb_tab_listing(rig.app, rig.tab) };
+    assert!(!listing.is_null());
+    let mut row: BbRow = unsafe { std::mem::zeroed() };
+    assert_eq!(BbStatus::BB_OK, unsafe {
+        bb_listing_row(listing, 0, &mut row)
+    });
+    // holiday.png is in Pictures and nowhere in Documents: only here.
+    assert_eq!(3, (row.flags >> BB_ROW_COMPARE_SHIFT) & 7);
+    unsafe { bb_listing_release(listing) };
 }

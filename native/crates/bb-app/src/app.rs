@@ -575,6 +575,7 @@ impl Inner {
             }
             cell
         };
+        self.compare_tab_closed(tab);
         {
             let mut t = removed.lock().unwrap_or_else(|p| p.into_inner());
             t.cancel.cancel();

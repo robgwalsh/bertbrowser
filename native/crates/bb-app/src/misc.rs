@@ -32,6 +32,14 @@ pub(crate) struct CompareState {
     pub right_root: String,
     pub left_tab: Option<crate::ids::TabId>,
     pub right_tab: Option<crate::ids::TabId>,
+    /// What the folder service answered, before any settling: what a sync is planned from.
+    pub outcome: Option<std::sync::Arc<bb_core::compare::FolderCompareOutcome>>,
+    /// A caveat to show with the summary (a partial scan, a drive still building).
+    pub message: Option<String>,
+    /// A scan is running.
+    pub comparing: bool,
+    /// Something compared has changed on disk since the scan; the verdicts on screen are older.
+    pub stale: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// What the host has told us about the window, and what the Settings page is showing.
@@ -205,23 +213,24 @@ impl Inner {
             return Ok(());
         }
         drop(ui);
+        // Always runnable, so pressing it can explain itself: a disabled button with a tooltip
+        // nobody hovers is how "why is this greyed out?" happens.
+        let panes = lock(&self.shell).layout.leaves().len();
+        if panes != 2 {
+            let why = if panes < 2 {
+                "Comparing needs two panes side by side. Split this one with the split button above the file list, and open the other folder in it.".to_string()
+            } else {
+                format!(
+                    "Comparing works between exactly two panes, and there are {panes} open. Close the ones you are not comparing."
+                )
+            };
+            return Err(self.compare_refused(why));
+        }
         let left = lock(&self.shell).active_pane;
         let right = self.other_pane(left).ok_or_else(|| {
             AppError::Invalid("There is no other pane \u{2014} split this one first.".into())
         })?;
-        lock(&self.extra.ui).compare = Some(CompareState {
-            left,
-            right,
-            differences_only: false,
-            result: None,
-            left_root: String::new(),
-            right_root: String::new(),
-            left_tab: None,
-            right_tab: None,
-        });
-        self.hub.model(Model::Compare);
-        self.compare_begin(left, right);
-        Ok(())
+        self.compare_start(left, right)
     }
 
     pub(crate) fn compare_end(&self) {

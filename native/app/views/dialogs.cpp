@@ -4,6 +4,7 @@
 #include "ui/pickers.h"
 #include "views/command_ui.h"
 #include "views/main_view.h"
+#include "views/tool_dialogs.h"
 
 #include <windows.h>
 
@@ -412,40 +413,6 @@ std::unique_ptr<Panel> transfer(DialogContext& cx) {
     return std::move(c.root);
 }
 
-std::unique_ptr<Panel> duplicates(DialogContext& cx) {
-    Card c = make_card(L"Duplicate files", 720);
-    DuplicatesState& d = cx.main.duplicates();
-    if (!d.has) {
-        f::note(*c.body, L"Nothing has been scanned yet. Find duplicates looks under the folder you are in.");
-    } else {
-        const json::Value& groups = d.result["groups"];
-        f::text(*c.body, std::to_wstring(groups.size()) + L" groups \u2014 " + format_bytes(static_cast<int64_t>(d.result["wastedBytes"].num())) + L" could be reclaimed.", tok::TextSecondary, 13.0f);
-        auto* list = c.body->emplace<f::ItemList>();
-        list->name = "DuplicateRows";
-        list->height = 320;
-        std::vector<f::ListEntry> entries;
-        for (size_t g = 0; g < groups.size(); ++g) {
-            f::ListEntry h;
-            h.heading = true;
-            h.text = std::to_wstring(groups[g]["files"].size()) + L" copies of " + format_bytes(static_cast<int64_t>(groups[g]["sizeBytes"].num()));
-            entries.push_back(std::move(h));
-            for (size_t i = 0; i < groups[g]["files"].size(); ++i) {
-                const json::Value& file = groups[g]["files"][i];
-                f::ListEntry e;
-                const bool ticked = d.ticked.count({g, i}) > 0;
-                e.text = std::wstring(ticked ? L"\u2611  " : L"\u2610  ") + core::wide(file["name"].str());
-                e.detail = core::wide(file["dir"].str().empty() ? file["path"].str() : file["dir"].str());
-                e.muted = !ticked;
-                entries.push_back(std::move(e));
-            }
-        }
-        list->set_entries(std::move(entries));
-    }
-    add_button(c, L"Remove ticked", cx.close)->set_enabled(d.has && !d.ticked.empty());
-    add_button(c, L"Close", cx.close, true);
-    return std::move(c.root);
-}
-
 std::unique_ptr<Panel> search_syntax(DialogContext& cx) {
     Card c = make_card(L"Search syntax", 640);
     const json::Value sections = try_model([&](BbOwnedStr* o) { return bb_search_syntax_help(o); });
@@ -625,7 +592,6 @@ const std::map<std::wstring, Builder>& builders() {
         {L"properties", properties},
         {L"theme-editor", theme_editor},
         {L"transfer", transfer},
-        {L"duplicates", duplicates},
         {L"search-syntax", search_syntax},
         {L"compress", compress},
         {L"extract", extract},
@@ -641,17 +607,19 @@ const std::map<std::wstring, Builder>& builders() {
 
 }  // namespace
 
-bool dialog_exists(const std::wstring& kind) { return builders().count(kind) > 0; }
+bool dialog_exists(const std::wstring& kind) { return builders().count(kind) > 0 || tool_dialog_exists(kind); }
 
 std::vector<std::wstring> dialog_kinds() {
     std::vector<std::wstring> out;
     for (const auto& kv : builders()) out.push_back(kv.first);
+    for (const auto& kind : tool_dialog_kinds()) out.push_back(kind);
+    std::sort(out.begin(), out.end());
     return out;
 }
 
 std::unique_ptr<Widget> build_dialog(const std::wstring& kind, DialogContext ctx) {
     const auto it = builders().find(kind);
-    if (it == builders().end()) return nullptr;
+    if (it == builders().end()) return tool_build_dialog(kind, ctx);
     return it->second(ctx);
 }
 

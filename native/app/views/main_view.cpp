@@ -1,3 +1,5 @@
+#include "views/tool_dialogs.h"
+#include "views/tool_state.h"
 #include "views/main_view.h"
 
 #include "gfx/icons.gen.h"
@@ -164,6 +166,20 @@ std::wstring ListAdapter::cell_text(size_t row, int column_id) const {
     if (!listing_ || column_id < 0 || static_cast<size_t>(column_id) >= cells_.size()) return {};
     const int cell = cells_[static_cast<size_t>(column_id)];
     return cell < 0 ? std::wstring() : listing_->cell(row, static_cast<uint32_t>(cell));
+}
+
+Token ListAdapter::row_tint(size_t row) const {
+    BbRow r{};
+    if (!listing_ || !listing_->row(row, r)) return gfx::kNoToken;
+    // What a folder comparison says about the row, in the bits above the row flags.
+    switch ((r.flags >> BB_ROW_COMPARE_SHIFT) & 7) {
+        case 1: return tok::CompareUnknown;
+        case 3: return tok::CompareOnlyHere;
+        case 4: return tok::CompareNewer;
+        case 5: return tok::CompareOlder;
+        case 6: return tok::CompareDiffers;
+        default: return gfx::kNoToken;
+    }
 }
 
 const IconData* ListAdapter::row_icon(size_t row) const {
@@ -813,6 +829,7 @@ MainView::MainView(core::Core& core, platform::Window& window)
         dismiss->width = 90;
         dismiss->on_click = [this] { bb_index_do(core_.app(), core::s(L"dismiss-banner")); };
     }
+    browser_dock->add(make_compare_banner(*this));
     status_ = browser_dock->emplace<StatusBar>();
     status_->name = "StatusBar";
     status_->dock = Dock::Bottom;
@@ -997,6 +1014,7 @@ void MainView::handle(const BbEvent& e) {
                 for (auto& kv : by_tab_) kv.second->reload_columns();
             }
             if (e.a == 4) refresh_tooltips();
+            if (e.a == 11) compare_banner_sync(browser_->find("CompareBanner"));
             if (e.a == 13) {
                 for (auto& kv : by_tab_) {
                     if (kv.second->metadata()) kv.second->metadata()->refresh();
@@ -1219,7 +1237,7 @@ bool MainView::host_command(const std::wstring& id) {
         open_dialog(L"duplicates");
         return true;
     }
-    return false;
+    return tool_host_command(*this, id);
 }
 
 // ---- the menu bar and the toolbars ----------------------------------------------------------------------

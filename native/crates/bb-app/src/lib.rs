@@ -40,6 +40,11 @@ mod sort;
 mod state;
 mod tabs;
 mod themes;
+mod tools;
+mod tools_changes;
+mod tools_checksum;
+mod tools_disk;
+mod tools_filecompare;
 
 pub use api::TabInfo;
 pub use api_ext::parse_aspect;

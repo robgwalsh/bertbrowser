@@ -15,6 +15,10 @@
 // A folder size that is a floor, because some folders could not be read.
 #define BB_ROW_SIZE_INCOMPLETE 8
 
+// Bits 4..6 are what a folder comparison says about the row (`compare_view::state_number`: 0 nothing,
+// 1 not compared, 2 same, 3 only here, 4 newer, 5 older, 6 differs): `(flags >> 4) & 7`.
+#define BB_ROW_COMPARE_SHIFT 4
+
 // `BbFocusState.flags` bits.
 #define BB_FOCUS_SETTINGS_OPEN 1
 
@@ -947,6 +951,15 @@ enum BbStatus bb_metadata_peek(struct BbApp *app,
                                struct BbStr path,
                                struct BbStr what,
                                struct BbOwnedStr *out_text);
+
+// Runs one tool verb (`checksum.hash`, `filecompare.open`, `diskusage.model`, `changes.open`,
+// `compare.sync`, ...) with its JSON argument (empty for none) and answers JSON. Blocks for as long
+// as the files take: call it from a worker. A verb that starts an operation answers `{op}` and the
+// operation finishes with `BB_EVT_OP_FINISHED`; the vocabulary is `bb-app/src/tools.rs`.
+enum BbStatus bb_tools(struct BbApp *app,
+                       struct BbStr verb,
+                       struct BbStr args_json,
+                       struct BbOwnedStr *out_json);
 
 #ifdef __cplusplus
 }  // extern "C"

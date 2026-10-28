@@ -448,7 +448,12 @@ void SettingsView::page_history(Widget& p) {
     bool_row(p, L"Record file changes", "recordFileChanges");
     f::note(p, L"Recording continues while BertBrowser is closed, so the timeline has no holes. Turning it off deletes what was recorded.");
     number_row(p, L"Keep changes for", "fileChangeRetentionHours", L"hours");
-    f::button(p, L"Clear history now", [] {});
+    f::button(p, L"Clear history now", [this] {
+        // The recorded changes, gone; recording itself stays as the switch above has it.
+        BbOwnedStr out{};
+        const std::wstring verb = L"changes.clear", args = L"{}";
+        if (bb_tools(core_.app(), core::s(verb), core::s(args), &out) == BB_OK) bb_str_free(out);
+    });
     f::gap(p, 6);
     f::text(p, L"Undo", tok::TextSecondary, 14.0f, 600);
     f::note(p, L"Undo lasts for this session. The budget is released oldest first; the next undo is never released.");

@@ -37,6 +37,8 @@ pub(crate) struct Extra {
     pub metadata: crate::metadata_pane::MetadataState,
     /// The animated GIFs being played, by handle.
     pub gifs: Mutex<std::collections::HashMap<u64, Arc<crate::gif_player::GifPlayer>>>,
+    /// The tool windows' state: checksums, the file compare, the change timeline.
+    pub tools: crate::tools::ToolsState,
 }
 
 impl Extra {
@@ -60,6 +62,7 @@ impl Extra {
             flat_cap: std::sync::atomic::AtomicUsize::new(crate::tabs::FLAT_ENTRY_CAP),
             metadata: Default::default(),
             gifs: Default::default(),
+            tools: Default::default(),
         }
     }
 }

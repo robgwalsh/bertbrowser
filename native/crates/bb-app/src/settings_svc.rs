@@ -217,6 +217,7 @@ impl Inner {
             "commandBars" => self.reload_bars(),
             "fileListColumns" => self.columns_default_changed(),
             "searchContentMaxBytes" => {}
+            "recordFileChanges" | "fileChangeRetentionHours" => self.change_log_policy_changed(),
             k if THEME_KEYS.contains(&k) => self.theme_settings_changed(),
             _ => {}
         }

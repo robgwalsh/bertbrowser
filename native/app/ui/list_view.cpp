@@ -161,6 +161,8 @@ void ListView::paint(PaintContext& pc) {
             const uint64_t id = provider_->row_id(row);
             if (sel) {
                 pc.fill(rr, focused() ? tok::ListSelectedBackground : tok::ListSelectedInactiveBackground);
+            } else if (const Token tint = provider_->row_tint(row); tint != kNoToken) {
+                pc.fill(rr, tint);
             }
             if (row == cursor_ && focused()) {
                 pc.stroke(rr, tok::BorderFocus);
