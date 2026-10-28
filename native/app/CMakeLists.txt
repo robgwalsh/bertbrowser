@@ -3,6 +3,7 @@
 add_library(bbapp STATIC
   platform/application.cpp
   platform/window.cpp
+  platform/popup_window.cpp
   gfx/device.cpp
   gfx/palette.cpp
   gfx/text_cache.cpp
@@ -14,6 +15,13 @@ add_library(bbapp STATIC
   ui/edit.cpp
   ui/list_view.cpp
   ui/tree_view.cpp
+  ui/menu.cpp
+  ui/popup_layer.cpp
+  ui/menu_bar.cpp
+  ui/inputs.cpp
+  ui/tabs.cpp
+  ui/pickers.cpp
+  ui/tile_view.cpp
 )
 target_include_directories(bbapp PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(bbapp PUBLIC

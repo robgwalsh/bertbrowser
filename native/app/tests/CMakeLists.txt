@@ -7,6 +7,10 @@ add_executable(bbapp_tests
   ui_tests.cpp
   edit_tests.cpp
   list_tests.cpp
+  menu_tests.cpp
+  widget_tests.cpp
+  tile_tests.cpp
+  icon_tests.cpp
 )
 target_link_libraries(bbapp_tests PRIVATE bbapp)
 add_test(NAME bbapp_tests COMMAND bbapp_tests)

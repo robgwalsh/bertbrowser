@@ -87,6 +87,7 @@ public:
     // ---- identity and data ----
     std::string name;
     std::string automation_id;
+    std::wstring tooltip;  // shown by a TooltipHost once the pointer rests on the widget
     Rect bounds;  // absolute, window DIPs; set by arrange
     Flags flags;
     Style style;
@@ -159,6 +160,8 @@ public:
     virtual bool on_char(wchar_t) { return false; }
     virtual void on_focus(bool) {}
     virtual void on_timer(int) {}
+    // The root took the modal away from this widget (window deactivated, capture cancelled by the system).
+    virtual void on_modal_cancel() {}
     virtual Cursor cursor_at(Point) const { return Cursor::Arrow; }
     // IME: where the caret is (window DIPs) and the composition string as it changes. Edit implements.
     virtual bool ime_caret_rect(Rect*) { return false; }
@@ -246,6 +249,22 @@ public:
     Widget* captured() const { return capture_; }
     void capture(Widget* w) { capture_ = w; }
     void release_capture() { capture_ = nullptr; }
+    // A modal (an open menu) takes every mouse, wheel and key event until it is cleared, whatever is
+    // under the pointer: hover stops following the pointer, the preview-key dispatcher stands down, and
+    // a release does not end it the way it ends a capture. cancel_modal() is what the window calls on
+    // deactivation; it tells the widget through on_modal_cancel().
+    Widget* modal() const { return modal_; }
+    void set_modal(Widget* w);
+    void cancel_modal();
+    std::function<void(bool)> on_modal_changed;  // the window takes / gives back the OS mouse capture
+    // The widget popups are shown in (a PopupLayer); widgets that open popups look it up here.
+    Widget* popup_layer() const { return popup_layer_; }
+    void set_popup_layer(Widget* w) { popup_layer_ = w; }
+    Point pointer() const { return last_pt_; }  // the last pointer position seen
+    // Fired when the widget under the pointer changes, and with null on a press (a tooltip listens).
+    std::function<void(Widget*)> on_hover_changed;
+    // Alt went down (true) or up (false), by itself; the menu bar's Alt-tap mode listens.
+    std::function<void(bool)> on_alt_key;
     Widget* hit_test(Point p) const { return content_ ? content_->hit_test(p) : nullptr; }
 
     // IME, forwarded to the focused widget.
@@ -292,6 +311,8 @@ private:
     Widget* focus_ = nullptr;
     Widget* hover_ = nullptr;
     Widget* capture_ = nullptr;
+    Widget* modal_ = nullptr;
+    Widget* popup_layer_ = nullptr;
     std::vector<Timer> timers_;
     std::function<uint64_t()> clock_;
     std::unique_ptr<Widget> content_;  // last: destroyed first, while the rest is still alive

@@ -63,6 +63,16 @@ Window::Window(gfx::Resources& res, const WindowOptions& options) : res_(res), o
         if (hwnd_ && !in_render_) InvalidateRect(hwnd_, nullptr, FALSE);
     };
     root_.on_timers_changed = [this] { update_tick_timer(); };
+    // An open menu owns the mouse the way a Win32 menu does: the OS capture follows the modal, so a click
+    // anywhere (outside this window too) reaches the menu, which closes itself.
+    root_.on_modal_changed = [this](bool on) {
+        if (options_.parked || !hwnd_) return;
+        if (on) {
+            SetCapture(hwnd_);
+        } else if (GetCapture() == hwnd_) {
+            ReleaseCapture();
+        }
+    };
 
     if (options_.custom_chrome) {
         SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
@@ -228,7 +238,8 @@ bool Window::mouse_button(UINT msg, WPARAM wp, LPARAM lp) {
         return root_.mouse_down(p, b, m, clicks);
     }
     const bool handled = root_.mouse_up(p, b, m);
-    if (!options_.parked && (wp & (MK_LBUTTON | MK_RBUTTON | MK_MBUTTON)) == 0 && GetCapture() == hwnd_) {
+    if (!options_.parked && !root_.modal() && (wp & (MK_LBUTTON | MK_RBUTTON | MK_MBUTTON)) == 0 &&
+        GetCapture() == hwnd_) {
         ReleaseCapture();
     }
     return handled;
@@ -422,6 +433,12 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             root_.char_input(static_cast<wchar_t>(wp));
             position_ime();
             return 0;
+        case WM_CANCELMODE:
+            root_.cancel_modal();
+            break;
+        case WM_ACTIVATE:
+            if (LOWORD(wp) == WA_INACTIVE) root_.cancel_modal();
+            break;
         case WM_SETFOCUS:
         case WM_KILLFOCUS:
             root_.set_mods({});  // a key released while elsewhere never reached us

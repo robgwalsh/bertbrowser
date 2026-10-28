@@ -1,5 +1,6 @@
 // Shared test fixtures: one WARP device for the process, and a Rig = a parked window with a widget tree.
 #pragma once
+#include "dark_plus.h"
 #include "gfx/resources.h"
 #include "platform/application.h"
 #include "platform/window.h"
@@ -35,6 +36,13 @@ private:
         }
         res = std::make_unique<bb::gfx::Resources>(*dev);
     }
+};
+
+// The Dark+ theme for the length of a test, so a photograph shows the app's colours and a pixel check can tell
+// two tokens apart (the bare default is magenta for everything it does not name).
+struct ThemeScope {
+    ThemeScope() { Env::get().res->palette.set_colors(bb::gfx::dark_plus_argb()); }
+    ~ThemeScope() { Env::get().res->palette.set_colors(bb::gfx::default_dark_argb()); }
 };
 
 inline std::wstring exe_dir() {

@@ -335,11 +335,12 @@ static Mods merge(Mods a, Mods b) { return {a.shift || b.shift, a.ctrl || b.ctrl
 
 bool UiRoot::mouse_down(Point p, MouseButton b, Mods m, int clicks) {
     last_pt_ = p;
-    Widget* target = capture_ ? capture_ : hit_test(p);
+    if (!modal_ && on_hover_changed) on_hover_changed(nullptr);
+    Widget* target = modal_ ? modal_ : (capture_ ? capture_ : hit_test(p));
     if (!target) {
         return false;
     }
-    for (Widget* w = target; w; w = w->parent_) {
+    for (Widget* w = modal_ ? nullptr : target; w; w = w->parent_) {
         if (w->flags.focusable && w->flags.enabled) {
             set_focus(w);
             break;
@@ -351,7 +352,7 @@ bool UiRoot::mouse_down(Point p, MouseButton b, Mods m, int clicks) {
 
 bool UiRoot::mouse_up(Point p, MouseButton b, Mods m) {
     last_pt_ = p;
-    Widget* target = capture_ ? capture_ : hit_test(p);
+    Widget* target = modal_ ? modal_ : (capture_ ? capture_ : hit_test(p));
     bool handled = false;
     if (target) {
         const MouseEvent ev{p, b, merge(m, mods_), 1};
@@ -363,12 +364,17 @@ bool UiRoot::mouse_up(Point p, MouseButton b, Mods m) {
 
 bool UiRoot::mouse_move(Point p, Mods m) {
     last_pt_ = p;
+    if (modal_) {
+        const MouseEvent ev{p, MouseButton::Left, merge(m, mods_), 1};
+        return modal_->on_mouse_move(ev);
+    }
     Widget* h = hit_test(p);
     if (h != hover_) {
         Widget* old = hover_;
         hover_ = h;
         if (old) old->on_mouse_leave();
         if (h) h->on_mouse_enter();
+        if (on_hover_changed) on_hover_changed(h);
     }
     Widget* target = capture_ ? capture_ : h;
     if (!target) {
@@ -383,13 +389,14 @@ bool UiRoot::mouse_leave() {
         Widget* old = hover_;
         hover_ = nullptr;
         old->on_mouse_leave();
+        if (on_hover_changed) on_hover_changed(nullptr);
     }
     return true;
 }
 
 bool UiRoot::wheel(Point p, int delta, Mods m) {
     last_pt_ = p;
-    Widget* target = hit_test(p);
+    Widget* target = modal_ ? modal_ : hit_test(p);
     const Mods eff = merge(m, mods_);
     return target && bubble(target, [&](Widget* w) { return w->flags.enabled && w->on_wheel(p, delta, eff); });
 }
@@ -397,9 +404,18 @@ bool UiRoot::wheel(Point p, int delta, Mods m) {
 bool UiRoot::key_down(unsigned vk) {
     if (vk == VK_SHIFT) { mods_.shift = true; return true; }
     if (vk == VK_CONTROL) { mods_.ctrl = true; return true; }
-    if (vk == VK_MENU) { mods_.alt = true; return true; }
+    if (vk == VK_MENU) {
+        const bool first = !mods_.alt;
+        mods_.alt = true;
+        if (first && on_alt_key) on_alt_key(true);
+        return true;
+    }
     const KeyEvent ev{vk, mods_};
-    if (on_preview_key && on_preview_key(ev)) {
+    if (!modal_ && on_preview_key && on_preview_key(ev)) {
+        return true;
+    }
+    if (modal_) {
+        modal_->on_key_down(ev);  // an open menu swallows every key
         return true;
     }
     Widget* target = focus_ ? focus_ : content_.get();
@@ -415,20 +431,45 @@ bool UiRoot::key_down(unsigned vk) {
 bool UiRoot::key_up(unsigned vk) {
     if (vk == VK_SHIFT) { mods_.shift = false; return true; }
     if (vk == VK_CONTROL) { mods_.ctrl = false; return true; }
-    if (vk == VK_MENU) { mods_.alt = false; return true; }
+    if (vk == VK_MENU) {
+        const bool was = mods_.alt;
+        mods_.alt = false;
+        if (was && on_alt_key) on_alt_key(false);
+        return true;
+    }
     const KeyEvent ev{vk, mods_};
-    Widget* target = focus_ ? focus_ : content_.get();
+    Widget* target = modal_ ? modal_ : (focus_ ? focus_ : content_.get());
     return target && bubble(target, [&](Widget* w) { return w->flags.enabled && w->on_key_up(ev); });
 }
 
 bool UiRoot::char_input(wchar_t c) {
-    Widget* target = focus_ ? focus_ : content_.get();
+    Widget* target = modal_ ? modal_ : (focus_ ? focus_ : content_.get());
     return target && bubble(target, [&](Widget* w) { return w->flags.enabled && w->on_char(c); });
 }
 
 Cursor UiRoot::cursor() const {
     Widget* w = capture_ ? capture_ : hover_;
     return w ? w->cursor_at(last_pt_) : Cursor::Arrow;
+}
+
+void UiRoot::set_modal(Widget* w) {
+    const bool was = modal_ != nullptr;
+    modal_ = w;
+    capture_ = nullptr;
+    if (w && hover_) {
+        Widget* old = hover_;
+        hover_ = nullptr;
+        old->on_mouse_leave();
+    }
+    if (was != (w != nullptr) && on_modal_changed) on_modal_changed(w != nullptr);
+}
+
+void UiRoot::cancel_modal() {
+    if (Widget* m = modal_) {
+        modal_ = nullptr;
+        if (on_modal_changed) on_modal_changed(false);
+        m->on_modal_cancel();
+    }
 }
 
 void UiRoot::set_focus(Widget* w) {
@@ -516,6 +557,11 @@ void UiRoot::forget(Widget* w) {
     if (focus_ == w) focus_ = nullptr;
     if (hover_ == w) hover_ = nullptr;
     if (capture_ == w) capture_ = nullptr;
+    if (modal_ == w) {
+        modal_ = nullptr;
+        if (on_modal_changed) on_modal_changed(false);
+    }
+    if (popup_layer_ == w) popup_layer_ = nullptr;
     const auto n = std::erase_if(timers_, [&](const Timer& t) { return t.w == w; });
     if (n && on_timers_changed) on_timers_changed();
 }
