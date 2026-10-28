@@ -29,6 +29,9 @@ else()
   set(CARGO_PROFILE_DIR "release")
 endif()
 set(CARGO_TARGET_DIR "${CMAKE_SOURCE_DIR}/target")
+# cargo gets the native spelling: a forward-slash target dir becomes \\?\C:/... inside build
+# scripts (embed-manifest), a path the linker cannot open, which failed both helpers with LNK1104.
+file(TO_NATIVE_PATH "${CARGO_TARGET_DIR}" CARGO_TARGET_DIR_NATIVE)
 set(BBCORE_LIB "${CARGO_TARGET_DIR}/${CARGO_PROFILE_DIR}/bbcore.lib")
 set(BBCORE_HARNESS_LIB "${CARGO_TARGET_DIR}/${CARGO_PROFILE_DIR}/bbcore_harness.lib")
 set(BBCORE_HEADER "${CMAKE_SOURCE_DIR}/include/bbcore.h")
@@ -38,7 +41,7 @@ set(BB_ELEVATOR_EXE "${CARGO_TARGET_DIR}/${CARGO_PROFILE_DIR}/bb-elevator.exe")
 # The product's staticlib: bb-ffi without its test fixtures, plus the two elevated helpers that sit
 # beside BertBrowser.exe (found there and nowhere else: they get an administrator token).
 add_custom_target(cargo_build ALL
-  COMMAND ${CMAKE_COMMAND} -E env "CARGO_TARGET_DIR=${CARGO_TARGET_DIR}" cargo build -p bb-ffi -p bb-indexer -p bb-elevator ${CARGO_PROFILE_FLAG}
+  COMMAND ${CMAKE_COMMAND} -E env "CARGO_TARGET_DIR=${CARGO_TARGET_DIR_NATIVE}" cargo build -p bb-ffi -p bb-indexer -p bb-elevator ${CARGO_PROFILE_FLAG}
   COMMAND cbindgen --config cbindgen.toml --crate bb-ffi --output "${BBCORE_HEADER}"
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
   BYPRODUCTS "${BBCORE_LIB}" "${BBCORE_HEADER}" "${BB_INDEXER_EXE}" "${BB_ELEVATOR_EXE}"
@@ -49,7 +52,7 @@ add_custom_target(cargo_build ALL
 # archives each carry their own copy of the Rust runtime, so an executable links exactly one of them.
 # Built after the first so the two cargo runs never fight over the target directory lock.
 add_custom_target(cargo_build_harness ALL
-  COMMAND ${CMAKE_COMMAND} -E env "CARGO_TARGET_DIR=${CARGO_TARGET_DIR}" cargo build -p bb-ffi-harness ${CARGO_PROFILE_FLAG}
+  COMMAND ${CMAKE_COMMAND} -E env "CARGO_TARGET_DIR=${CARGO_TARGET_DIR_NATIVE}" cargo build -p bb-ffi-harness ${CARGO_PROFILE_FLAG}
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
   BYPRODUCTS "${BBCORE_HARNESS_LIB}"
   USES_TERMINAL
