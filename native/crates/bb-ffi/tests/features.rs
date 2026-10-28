@@ -620,3 +620,72 @@ fn comparing_panes_gates_swapping_them() {
     assert_eq!(None, rig.gate("pane.swap"));
     assert_eq!(BbStatus::BB_OK, unsafe { bb_pane_swap(rig.app) });
 }
+
+#[test]
+fn a_lowered_flat_cap_truncates_the_flat_listing_and_says_so() {
+    let rig = Rig::new();
+    unsafe {
+        assert_eq!(BbStatus::BB_ERR, bb_flat_set_cap(rig.app, 0), "a cap of nothing is refused");
+        assert_eq!(BbStatus::BB_OK, bb_flat_set_cap(rig.app, 2));
+        assert_eq!(BbStatus::BB_OK, bb_tab_set_flat(rig.app, rig.tab, true));
+    }
+    rig.settle();
+    let mut state: BbTabState = unsafe { std::mem::zeroed() };
+    assert_eq!(BbStatus::BB_OK, unsafe { bb_tab_state(rig.app, rig.tab, &mut state) });
+    assert_eq!(2, state.count, "the listing stops at the cap");
+    let mut out = none();
+    assert_eq!(BbStatus::BB_OK, unsafe {
+        bb_tab_text(rig.app, rig.tab, BbTabText::BB_TEXT_STATUS, &mut out)
+    });
+    let status = unsafe { take(out) }.unwrap();
+    assert!(status.contains("first 2"), "{status}");
+    let mut notice = none();
+    assert_eq!(BbStatus::BB_OK, unsafe {
+        bb_tab_text(rig.app, rig.tab, BbTabText::BB_TEXT_NOTICE, &mut notice)
+    });
+    assert!(unsafe { take(notice) }.is_some(), "the banner says it is not everything");
+}
+
+#[test]
+fn the_theme_editor_can_list_every_token_with_its_colour() {
+    let rig = Rig::new();
+    let mut out = none();
+    assert_eq!(BbStatus::BB_OK, unsafe { bb_theme_tokens(rig.app, &mut out) });
+    let tokens: Value = serde_json::from_str(&unsafe { take(out) }.unwrap()).unwrap();
+    let tokens = tokens.as_array().unwrap();
+    assert_eq!(bb_theme_token_count() as usize, tokens.len());
+    assert_eq!("Theme.Window.Background", tokens[0]["key"]);
+    assert!(tokens[0]["argb"].as_u64().unwrap() > 0, "a colour, not nothing");
+    assert!(tokens.iter().all(|t| t["overridden"] == false));
+}
+
+#[test]
+fn the_search_syntax_help_is_the_parsers_own_table() {
+    let mut out = none();
+    assert_eq!(BbStatus::BB_OK, unsafe { bb_search_syntax_help(&mut out) });
+    let sections: Value = serde_json::from_str(&unsafe { take(out) }.unwrap()).unwrap();
+    let sections = sections.as_array().unwrap();
+    assert!(!sections.is_empty());
+    let all = sections.iter().flat_map(|s| s["entries"].as_array().unwrap()).count();
+    assert!(all > 5, "{all} help lines");
+    assert!(sections[0]["title"].as_str().is_some_and(|t| !t.is_empty()));
+}
+
+#[test]
+fn the_duplicate_scan_finds_copies_without_an_index_helper() {
+    let rig = Rig::new();
+    std::fs::create_dir_all(rig.tree.join("Copies")).unwrap();
+    std::fs::copy(rig.tree.join("photo.jpg"), rig.tree.join("Copies/photo again.jpg")).unwrap();
+    let path = w(&rig.tree.to_string_lossy());
+    let mut out = none();
+    assert_eq!(BbStatus::BB_OK, unsafe {
+        bb_duplicates_scan(rig.app, bs(&path), 1, &mut out)
+    }, "{}", last_error());
+    let result: Value = serde_json::from_str(&unsafe { take(out) }.unwrap()).unwrap();
+    let groups = result["groups"].as_array().unwrap();
+    assert_eq!(1, groups.len(), "{result}");
+    assert_eq!(2, groups[0]["files"].as_array().unwrap().len());
+    assert_eq!(5000, groups[0]["sizeBytes"]);
+    let shallowest = groups[0]["keep"]["shallowest"].as_u64().unwrap() as usize;
+    assert_eq!("photo.jpg", groups[0]["files"][shallowest]["name"], "the copy nearest the top is kept");
+}

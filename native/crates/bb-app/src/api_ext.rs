@@ -566,6 +566,106 @@ impl App {
         text(&self.inner.theme_json())
     }
 
+    /// Finds the files under `root` that are byte-for-byte the same: crawls the folder into the index (so
+    /// the scan works without the MFT helper), then runs the real finder. JSON `{availability,
+    /// incomplete, wastedBytes, groups:[{sizeBytes, hash, keep:{newest, oldest, shallowest},
+    /// files:[{path, name, dir, sizeBytes, modified, hidden, hardlinks}]}]}`; `keep` is the index of
+    /// the copy each strategy keeps. `min_size_bytes` floors the files considered.
+    pub fn duplicates_scan(&self, root: &str, min_size_bytes: i64) -> AppResult<String> {
+        use bb_core::cancel::CancelToken;
+        use bb_core::data::FsIndexRepository;
+        use bb_core::duplicates::{
+            DuplicateFinder, DuplicateIndexFacts, DuplicateRules, DuplicateScanRequest,
+            IndexedDuplicateCandidateSource, KeepStrategy,
+        };
+        use bb_core::fs::IndexCrawler;
+
+        struct Facts;
+        impl DuplicateIndexFacts for Facts {
+            fn is_building(&self) -> bool {
+                false
+            }
+            fn any_indexed(&self) -> bool {
+                true
+            }
+            fn is_indexed(&self, _path_key: &str) -> bool {
+                true
+            }
+        }
+
+        let invalid = |e: &dyn std::fmt::Display| AppError::Invalid(e.to_string());
+        let repo = std::sync::Arc::new(FsIndexRepository::new(self.inner.db.clone()));
+        let none = CancelToken::none();
+        IndexCrawler::new(repo.clone())
+            .crawl(root, &none, None)
+            .map_err(|e| invalid(&e))?;
+        let candidates = IndexedDuplicateCandidateSource::new(&repo);
+        let hasher = bb_core::checksums::FileSystemFileHasher::new();
+        let request = DuplicateScanRequest {
+            root_path: Some(root.to_string()),
+            min_size_bytes,
+            include_hidden: false,
+            skip_system_folders: true,
+        };
+        let outcome = DuplicateFinder::new(&candidates, &hasher, &Facts)
+            .scan(&request, None, &none)
+            .map_err(|e| invalid(&e))?;
+        let groups: Vec<Value> = outcome
+            .groups
+            .iter()
+            .map(|g| {
+                json!({
+                    "sizeBytes": g.size_bytes,
+                    "hash": g.hash,
+                    "keep": {
+                        "newest": DuplicateRules::choose_keeper(g, KeepStrategy::Newest),
+                        "oldest": DuplicateRules::choose_keeper(g, KeepStrategy::Oldest),
+                        "shallowest": DuplicateRules::choose_keeper(g, KeepStrategy::Shallowest),
+                    },
+                    "files": g.files.iter().map(|f| json!({
+                        "path": f.display_path,
+                        "name": f.name,
+                        "dir": f.relative_dir_display,
+                        "sizeBytes": f.size_bytes,
+                        "modified": f.modified_utc.0,
+                        "hidden": f.hidden,
+                        "hardlinks": f.hardlink_paths,
+                    })).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        Ok(text(&json!({
+            "availability": format!("{:?}", outcome.availability),
+            "incomplete": outcome.incomplete,
+            "wastedBytes": outcome.wasted_bytes(),
+            "groups": groups,
+        })))
+    }
+
+    /// The search syntax help, grouped, from the table the parser reads: `[{title, blurb,
+    /// entries:[{example, meaning}]}]`.
+    pub fn search_syntax_json() -> String {
+        let sections: Vec<Value> = bb_core::search::SearchSyntax::SECTIONS
+            .iter()
+            .map(|s| {
+                json!({
+                    "title": s.title,
+                    "blurb": s.blurb,
+                    "entries": s.entries.iter()
+                        .map(|e| json!({ "example": e.example, "meaning": e.meaning }))
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        text(&Value::Array(sections))
+    }
+
+    /// Every colour token the theme is made of, for the theme editor: `[{key, group, name,
+    /// description, core, argb, overridden}]` in editor display order.
+    pub fn theme_tokens_json(&self) -> String {
+        text(&self.inner.theme_tokens_json())
+    }
+
     /// The host tells us what Windows looks like now.
     pub fn theme_set_system_appearance(&self, is_dark: bool, high_contrast: bool) {
         self.inner.theme_system_changed(SystemAppearance {

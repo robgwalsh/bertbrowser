@@ -74,6 +74,7 @@ Runner::Runner(Session& session, const Options& options) : s_(session), o_(optio
     install();
     install_asserts();
     install_bench();
+    install_ui();
 }
 
 // ---- the loop ---------------------------------------------------------------------------------------
@@ -279,7 +280,7 @@ void Runner::select_names(const std::wstring& names) {
 
 void Runner::search(const std::wstring& rest, bool global) {
     const std::wstring query = require(rest, global ? "gsearch" : "search");
-    if (global) {
+    if (global && !o_.index_declined) {
         throw AssertionError(
             "Whole-PC search reads the MFT index, which this run did not build. The native harness has no index service "
             "yet; use 'search', which walks the current folder.");
@@ -380,7 +381,7 @@ std::string Runner::state_json() {
         {"flat", boolean(tab["flatView"].boolean())},
         {"notice", quote(tab["notice"].str())},
         {"columns", quote(cols)},
-        {"insideArchive", "false"},
+        {"insideArchive", boolean(tab["insideArchive"].boolean())},
         {"search", quote(tab["search"].str())},
         {"globalSearch", boolean(tab["globalSearch"].boolean())},
         {"savedSearches", quote(std::string())},
@@ -684,7 +685,19 @@ void Runner::install_asserts() {
     verbs_[L"assert-not-flat"] = [this](const std::wstring&) {
         if (s_.core().tab_state(tab()).is_flat_view) throw AssertionError("expected the flat view to be off, got on.");
     };
-    verbs_[L"assert-not-inside-archive"] = [](const std::wstring&) {};  // archives are not browsable in this build
+    auto inside_archive = [this](bool expected) {
+        const bb::json::Value st = bb::json::parse(s_.core().state_json());
+        const uint64_t active = static_cast<uint64_t>(st["activeTab"].i64());
+        bool actual = false;
+        for (size_t i = 0; i < st["tabs"].size(); ++i) {
+            if (static_cast<uint64_t>(st["tabs"][i]["id"].i64()) == active) actual = st["tabs"][i]["insideArchive"].boolean();
+        }
+        if (actual != expected) {
+            throw AssertionError(expected ? "the tab is not inside an archive." : "the tab is inside an archive.");
+        }
+    };
+    verbs_[L"assert-inside-archive"] = [inside_archive](const std::wstring&) { inside_archive(true); };
+    verbs_[L"assert-not-inside-archive"] = [inside_archive](const std::wstring&) { inside_archive(false); };
     verbs_[L"assert-exists"] = [this](const std::wstring& r) {
         const fs::path p = sandbox_.resolve(require(r, "assert-exists"));
         std::error_code ec;

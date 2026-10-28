@@ -55,17 +55,25 @@ void TitleBar::arrange(Rect r) {
     bounds = r;
     float right = r.r;
     for (auto it = children().rbegin(); it != children().rend(); ++it) {
+        if (it->get() == left || it->get() == middle) continue;
         const float w = (*it)->width > 0 ? (*it)->width : 46.0f;
         (*it)->arrange(Rect{right - w, r.t, right, r.b});
         right -= w;
     }
+    float x = r.l + 8;
+    if (left) {
+        const float w = left->measure_tree({kInf, r.height()}).w;
+        left->arrange(Rect{x, r.t, x + w, r.b});
+        x += w + 4;
+    }
+    if (middle) middle->arrange(Rect{x, r.t, std::max(x, right - 4), r.b});
 }
 
 void TitleBar::paint(PaintContext& pc) {
     Widget::paint(pc);
     gfx::FontSpec font;
     font.size = 13.0f;
-    pc.text(title, Rect{bounds.l + 12, bounds.t, bounds.r - 150, bounds.b}, font, tok::TitleBarForeground);
+    if (show_title) pc.text(title, Rect{bounds.l + 12, bounds.t, bounds.r - 150, bounds.b}, font, tok::TitleBarForeground);
     pc.line({bounds.l, bounds.b - 0.5f}, {bounds.r, bounds.b - 0.5f}, tok::TitleBarBorder);
 }
 
@@ -82,8 +90,8 @@ void StatusBar::paint(PaintContext& pc) {
     pc.fill(bounds, tok::StatusBarBackground);
     gfx::FontSpec font;
     font.size = 12.5f;
-    const float split = std::max(bounds.l + 12, bounds.r - 260);
-    pc.text(left_, Rect{bounds.l + 12, bounds.t, right_.empty() ? bounds.r - 12 : split, bounds.b}, font,
+    const float split = right_split();
+    pc.text(left_, Rect{bounds.l + 12, bounds.t, right_.empty() ? bounds.r - 12 : split - 8, bounds.b}, font,
             tok::StatusBarForeground);
     if (!right_.empty()) {
         pc.text(right_, Rect{split, bounds.t, bounds.r - 12, bounds.b}, font, tok::StatusBarMutedForeground,
@@ -91,12 +99,35 @@ void StatusBar::paint(PaintContext& pc) {
     }
 }
 
+float StatusBar::right_split() const {
+    if (right_.empty()) return bounds.r;
+    gfx::FontSpec font;
+    font.size = 12.5f;
+    const float w = std::ceil(res().text.measure(right_, font).width) + 12.0f;
+    return std::max(bounds.l + 12 + 200.0f, bounds.r - 12 - w);
+}
+
+bool StatusBar::on_mouse_down(const MouseEvent& e) {
+    if (e.button != MouseButton::Left || right_.empty() || !on_right_click || e.pt.x < right_split()) return false;
+    on_right_click();
+    return true;
+}
+
 // ---- tab strip ---------------------------------------------------------------------------------------
+
+void TabStrip::paint(PaintContext& pc) {
+    paint_tabs(pc);
+    if (drag_gap_ < 0) return;
+    const size_t gap = static_cast<size_t>(drag_gap_);
+    const float x = gap == 0 ? bounds.l + 2 : gap >= tabs_.size() ? tab_rect(tabs_.size() - 1).r + 1 : tab_rect(gap).l - 1;
+    pc.fill(Rect{x - 1, bounds.t + 4, x + 1, bounds.b - 2}, tok::AccentBackground);
+}
 
 void TabStrip::set_tabs(std::vector<TabEntry> tabs, bool pane_active) {
     tabs_ = std::move(tabs);
     pane_active_ = pane_active;
     hot_ = kNone;
+    drag_gap_ = -1;
     invalidate();
 }
 
@@ -118,7 +149,7 @@ size_t TabStrip::index_at(Point p) const {
     return kNone;
 }
 
-void TabStrip::paint(PaintContext& pc) {
+void TabStrip::paint_tabs(PaintContext& pc) {
     pc.fill(bounds, tok::TabStripBackground);
     for (size_t i = 0; i < tabs_.size(); ++i) {
         const Rect r = tab_rect(i);

@@ -30,6 +30,9 @@ pub(crate) struct Extra {
     pub last_thumbnail_scale: Mutex<f64>,
     /// The properties this machine reported for the Add column popup, and whether it has.
     pub machine_props: Mutex<(Vec<(String, String)>, bool)>,
+    /// How many rows a flat listing shows before it stops and says so. The harness lowers it so a
+    /// dozen files can reach the truncated case; a person never changes it.
+    pub flat_cap: std::sync::atomic::AtomicUsize,
 }
 
 impl Extra {
@@ -50,6 +53,7 @@ impl Extra {
             recents: Mutex::new(Vec::new()),
             last_thumbnail_scale: Mutex::new(0.3),
             machine_props: Mutex::new((Vec::new(), false)),
+            flat_cap: std::sync::atomic::AtomicUsize::new(crate::tabs::FLAT_ENTRY_CAP),
         }
     }
 }

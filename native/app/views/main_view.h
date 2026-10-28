@@ -7,22 +7,64 @@
 #include "ui/edit.h"
 #include "ui/layout.h"
 #include "ui/list_view.h"
+#include "ui/menu_bar.h"
 #include "ui/scroll.h"
+#include "ui/tile_view.h"
 #include "ui/tree_view.h"
 #include "views/chrome.h"
+#include "views/command_ui.h"
+#include "views/dialogs.h"
+#include "views/palette_view.h"
+#include "views/settings_view.h"
+#include "views/thumbs.h"
+#include "views/sidebar.h"
 #include "views/core.h"
 #include "views/json.h"
 
+#include "ui/inputs.h"
+
 #include <atomic>
 #include <memory>
+#include <set>
 #include <unordered_map>
 
 namespace bb::views {
 
 constexpr UINT WM_BB_EVENT = WM_APP + 1;
+constexpr UINT WM_BB_BARS = WM_APP + 2;
 
 class MainView;
 class FolderTreeProvider;
+
+struct IndexerBannerInfo {
+    bool shown = false;
+    std::wstring message;
+    bool can_start = false;
+};
+
+// One selected row, copied out of the listing so a dialog does not hold the snapshot.
+struct SelectedRow {
+    std::wstring name, path;
+    bool dir = false;
+    int64_t size = -1, modified = 0, created = 0;
+};
+
+// What the transfer strip and its details window show. A real transfer fills it from the core; the
+// harness poses one (a transfer fast enough to be safe is over before a capture could catch it).
+struct TransferPose {
+    bool active = false;
+    std::wstring headline, detail, destination;
+    double fraction = 0;
+    bool indeterminate = false;
+    std::vector<std::pair<std::wstring, int>> items;  // name, 0 waiting / 1 running / 2 done
+};
+
+// The duplicate finder's last result and which copies are ticked for removal.
+struct DuplicatesState {
+    bool has = false;
+    json::Value result;
+    std::set<std::pair<size_t, size_t>> ticked;  // group, file
+};
 
 // Rows and selection of one tab, for the details list. Cells come from the snapshot; selection is the
 // core's, mirrored here so painting a row costs an array read.
@@ -38,6 +80,8 @@ public:
     size_t row_count() const override { return listing_ ? listing_->size() : 0; }
     uint64_t row_id(size_t row) const override;
     std::wstring cell_text(size_t row, int column_id) const override;
+    const ui::IconData* row_icon(size_t row) const override;
+    std::wstring row_path(size_t row) const;
     bool selected(size_t row) const override { return row < sel_.size() && sel_[row]; }
     void select(ui::SelectOp op, size_t first, size_t last) override;
 
@@ -53,23 +97,51 @@ private:
 class TabView : public ui::DockPanel {
 public:
     TabView(MainView& main, core::Core& core, uint64_t tab);
+    ~TabView() override;
+    void arrange(ui::Rect r) override;
 
     uint64_t tab() const { return tab_; }
     ui::ListView* list() const { return list_; }
+    ui::TileView* tiles() const { return tiles_; }
+    bool tiles_mode() const { return tiles_on_; }
     ListAdapter& adapter() { return adapter_; }
     ui::Edit* search_box() const { return search_; }
     ui::Edit* global_search_box() const { return gsearch_; }
 
     void reload_listing();  // a new snapshot (and its columns)
     void reload_state();    // path, history, search text, selection, sort, messages
+    void reload_columns();  // the column set moved
     // Types into a search box exactly as a person would: the text lands in the box and the core hears it.
     void type_search(const std::wstring& text, bool global);
     void begin_path_edit();
 
+    // What the list is showing: column ids in order, and how many rows have a container.
+    std::vector<std::wstring> column_ids() const;
+    // What the cell of a row under a column reads, as the list would draw it.
+    std::wstring cell_by_id(size_t row, const std::wstring& column_id) const;
+    size_t realized_rows() const;
+    void scroll_to_offset(float y);
+    void reveal_row(size_t row);
+    // The checklist a right-click on a column header opens, and the one a right-click on a file opens.
+    ui::MenuItems build_column_menu();
+    ui::MenuItems build_files_menu(bool background);
+    // Whether a right-click on the header strip past the last column would open the column menu.
+    bool header_opens_column_menu() const { return static_cast<bool>(list_->on_header_menu); }
+    void refresh_tooltips();
+    ui::Button* side_button(int which) const { return side_buttons_[which]; }
+    void drain_thumbnails();
+    size_t thumbnails_pending() const { return thumbs_ ? thumbs_->pending() : 0; }
+    void set_thumbnail_source(ThumbSource s);
+    const std::wstring& path_text() const { return path_text_; }
+
 private:
     void end_path_edit();
     void sync_columns();
+    void sync_view_mode(const BbTabState& st);
+    void sync_side_pane(const BbTabState& st);
     void on_search_changed(bool global);
+    void open_context(ui::Point p, bool header);
+    ui::Widget* active_view() const;
 
     MainView& main_;
     core::Core& core_;
@@ -77,14 +149,23 @@ private:
     ListAdapter adapter_;
     ui::StackPanel* nav_ = nullptr;
     ui::Button *back_ = nullptr, *forward_ = nullptr, *up_ = nullptr, *refresh_ = nullptr;
+    ui::Button* side_buttons_[3] = {nullptr, nullptr, nullptr};
     ui::Panel* path_bar_ = nullptr;
     BreadcrumbBar* crumbs_ = nullptr;
     PathEdit* path_ = nullptr;
     ui::Edit *search_ = nullptr, *gsearch_ = nullptr;
     ui::Panel* banner_panel_ = nullptr;
     ui::TextBlock* banner_ = nullptr;
-    ui::Panel* body_ = nullptr;
+    ui::DockPanel* body_ = nullptr;
+    ui::Panel* view_area_ = nullptr;
     ui::ListView* list_ = nullptr;
+    ui::TileView* tiles_ = nullptr;
+    std::unique_ptr<ThumbnailService> thumbs_;
+    ThumbSource thumb_source_ = ThumbSource::Shell;
+    ui::Panel* side_pane_ = nullptr;
+    ui::TextBlock *side_title_ = nullptr, *side_text_ = nullptr;
+    int side_mode_ = 0;
+    bool tiles_on_ = false;
     Overlay* empty_ = nullptr;
     std::vector<core::ColumnInfo> columns_;
     std::wstring path_text_;
@@ -142,13 +223,84 @@ public:
 
     // Runs one command against the active tab through the one gate the keys and menus share.
     bool run_command(const std::wstring& id);
+    // As run_command, but a command that is the host's to carry out is carried out here. `reason` says why
+    // a command that could not run could not; `ui` is set when the host did it.
+    bool execute_command(const std::wstring& id, std::wstring* reason = nullptr, bool* ui = nullptr);
     void activate_tab(uint64_t tab);
     void close_tab(uint64_t tab);
     void activate_pane(uint64_t pane);
 
+    // ---- menu bar and toolbars (the core's bars model drawn) ----
+    ui::MenuBar* menu_bar() const { return menu_bar_; }
+    TitleBar* title_bar() const { return title_; }
+    CommandToolbar* title_toolbar() const { return title_toolbar_; }
+    const std::vector<CommandToolbar*>& row_toolbars() const { return row_toolbars_; }
+    // Re-reads the menu bar's headings and every toolbar now (they are otherwise refreshed once the
+    // events that change them have been handled).
+    void refresh_bars();
+    std::vector<std::wstring> menu_bar_captions() const;
+    // The rows a click on a heading would show, built exactly as the dropdown builds them. Empty when the
+    // bar has no such menu.
+    ui::MenuItems build_main_menu(const std::wstring& name, bool* found = nullptr);
+    MenuBuildEnv menu_env();
+    // The flags the core wants beside a key: what overlay is up.
+    uint32_t focus_flags();
+    BbFocusKind focus_kind() const;
+    // Carries out a command that is the host's to carry out. false when it wants a person (a dialog) and was not.
+    bool host_command(const std::wstring& id);
+    // A context menu by kind (files, background, columns) as it would be built now; false for an unknown kind.
+    bool build_named_menu(const std::wstring& kind, ui::MenuItems* out);
+    SettingsView* settings() const { return settings_; }
+    PaletteView* palette() const { return palette_; }
+    SavedSidebar* sidebar() const { return sidebar_; }
+    // ---- what dialogs and strips read ----
+    std::vector<SelectedRow> selected_rows();
+    const TransferPose& transfer_pose() const { return transfer_; }
+    void set_transfer_pose(TransferPose p);
+    std::wstring transfer_text() const;
+    DuplicatesState& duplicates() { return duplicates_; }
+    // Tells the core which shell properties this machine has, once (the Add column list reads them).
+    void ensure_machine_properties();
+    // Detached photograph of a dialog (null for an unknown kind).
+    std::unique_ptr<gfx::BitmapSurface> render_dialog(const std::wstring& kind);
+    void close_dialog();
+    bool dialog_showing() const { return dialog_open_; }
+    // Tells the core what Windows looks like now (light or dark, high contrast); the window does it at
+    // start and whenever Windows says it changed. The harness poses the answer instead (`system-theme`).
+    void push_system_appearance();
+    void set_follow_windows(bool on) { follow_windows_ = on; }
+    // The harness never opens a dialog nobody could answer: a command that would is reported instead.
+    void set_headless_dialogs(bool on) { headless_dialogs_ = on; }
+    // Poses the insertion line on the active pane's tab strip (see TabStrip::set_drag_gap). false if no such gap.
+    bool pose_tab_drag(int gap);
+    // The search index offer and line, as the window shows them.
+    IndexerBannerInfo indexer_banner() const;
+    std::wstring indexing_status() const;
+    bool indexing_can_retry() const;
+    // Brings every overlay (Settings, palette) in step with the core's models now.
+    void sync_overlays();
+    // Opens a dialog by kind in the window's dialog layer (modal until closed).
+    void open_dialog(const std::wstring& kind);
+    // Opens a menu at a point (a right click), keeping its items alive while it is up.
+    void show_context_menu(ui::MenuItems items, ui::Point at);
+    // Thumbnails asked for and not yet drawn, across every tab (the harness waits for them to be none).
+    size_t thumbnails_pending() const;
+    // Where tile thumbnails come from: the shell (the product) or a generator (the harness).
+    void set_thumbnail_source(ThumbSource s);
+    ThumbSource thumbnail_source() const { return thumb_source_; }
+    // Re-reads the keymap into the tooltips that name a key.
+    void refresh_tooltips();
+    // A list row (a drive, a workspace, a saved search) was picked from a menu or toolbar.
+    void pick_list_item(const std::string& list_id, const std::wstring& id, const std::wstring& name);
+
 private:
     bool on_window_message(UINT msg, WPARAM wp, LPARAM lp);
     bool on_preview_key(const ui::KeyEvent& e);
+    void supply_properties(uint64_t tab);
+    void sync_index();
+    void open_toolbar_list(const BarRow& row, ui::Rect anchor);
+    void open_overflow(const std::vector<BarRow>& rows, ui::Rect anchor);
+    void sync_row_toolbars(const json::Value& state);
     void handle(const BbEvent& e);
     void rebuild_layout(const json::Value& state);
     std::unique_ptr<ui::Widget> build_node(const json::Value& node, const json::Value& panes);
@@ -159,6 +311,32 @@ private:
     platform::Window& window_;
     std::atomic<HWND> hwnd_{nullptr};
     TitleBar* title_ = nullptr;
+    ui::MenuBar* menu_bar_ = nullptr;
+    CommandToolbar* title_toolbar_ = nullptr;
+    ui::StackPanel* rows_panel_ = nullptr;
+    std::vector<CommandToolbar*> row_toolbars_;
+    ui::Panel* browser_ = nullptr;
+    ui::PopupLayer* popup_ = nullptr;
+    SettingsView* settings_ = nullptr;
+    PaletteView* palette_ = nullptr;
+    SavedSidebar* sidebar_ = nullptr;
+    std::string menu_sig_;
+    bool bars_pending_ = false;
+    bool headless_dialogs_ = false;
+    bool follow_windows_ = true;
+    TransferPose transfer_;
+    ui::StackPanel* transfer_strip_ = nullptr;
+    ui::TextBlock *transfer_head_ = nullptr, *transfer_detail_ = nullptr;
+    ui::ProgressBar* transfer_bar_ = nullptr;
+    DuplicatesState duplicates_;
+    bool machine_props_set_ = false;
+    DialogLayer* dialogs_ = nullptr;
+    ui::StackPanel* indexer_banner_ = nullptr;
+    ui::TextBlock* indexer_text_ = nullptr;
+    json::Value index_state_;
+    ThumbSource thumb_source_ = ThumbSource::Shell;
+    bool dialog_open_ = false;
+    std::unique_ptr<ui::MenuItems> floating_menu_;
     StatusBar* status_ = nullptr;
     ui::Splitter* main_split_ = nullptr;
     ui::TreeView* tree_ = nullptr;

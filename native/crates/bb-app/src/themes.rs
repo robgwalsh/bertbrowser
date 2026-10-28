@@ -566,6 +566,28 @@ impl Inner {
         json!({ "id": st.definition_id, "following": st.following })
     }
 
+    pub(crate) fn theme_tokens_json(&self) -> Value {
+        self.theme_sync_appearance();
+        let st = lock(&self.extra.theme);
+        let resolved = st.resolved();
+        Value::Array(
+            ThemeToken::DESCRIPTORS
+                .iter()
+                .map(|d| {
+                    json!({
+                        "key": d.key,
+                        "group": d.group,
+                        "name": d.display_name,
+                        "description": d.description,
+                        "core": d.is_core,
+                        "argb": argb(resolved.color(d.token)),
+                        "overridden": st.overrides.contains_key(d.key),
+                    })
+                })
+                .collect(),
+        )
+    }
+
     pub(crate) fn theme_json(&self) -> Value {
         self.theme_sync_appearance();
         let st = lock(&self.extra.theme);

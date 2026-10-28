@@ -675,6 +675,46 @@ pub unsafe extern "C" fn bb_theme_state(app: *mut BbApp, out_json: *mut BbOwnedS
     })
 }
 
+/// Finds the files under `path` that are byte-for-byte the same (the folder is crawled first, so no index
+/// helper is needed). `min_size_bytes` floors the files considered. JSON `{availability, incomplete,
+/// wastedBytes, groups:[{sizeBytes, hash, keep:{newest, oldest, shallowest}, files:[{path, name, dir,
+/// sizeBytes, modified, hidden, hardlinks}]}]}`; `keep` is the index of the copy each strategy keeps.
+/// Blocks: call it from a worker.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_duplicates_scan(
+    app: *mut BbApp,
+    path: BbStr,
+    min_size_bytes: i64,
+    out_json: *mut BbOwnedStr,
+) -> BbStatus {
+    guard(|| {
+        let app = unsafe { app_of(app)? };
+        let json = app
+            .app
+            .duplicates_scan(&unsafe { path.to_string_lossy() }, min_size_bytes)?;
+        unsafe { put(out_json, &json) }
+    })
+}
+
+/// The search syntax help, grouped: `[{title, blurb, entries:[{example, meaning}]}]`. The same table
+/// the parser reads, so the help cannot advertise a key the parser does not implement.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_search_syntax_help(out_json: *mut BbOwnedStr) -> BbStatus {
+    guard(|| {
+        unsafe { put(out_json, &bb_app::App::search_syntax_json()) }
+    })
+}
+
+/// Every colour token, for the theme editor: `[{key, group, name, description, core, argb,
+/// overridden}]` in editor display order.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_theme_tokens(app: *mut BbApp, out_json: *mut BbOwnedStr) -> BbStatus {
+    guard(|| {
+        let app = unsafe { app_of(app)? };
+        unsafe { put(out_json, &app.app.theme_tokens_json()) }
+    })
+}
+
 /// The host tells us what Windows looks like now. Following Windows swaps the theme (and raises
 /// `BB_EVT_MODEL_CHANGED` 2: re-push the palette); high contrast wins over both slots.
 #[unsafe(no_mangle)]

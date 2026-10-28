@@ -359,6 +359,11 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_SIZE:
             if (wp != SIZE_MINIMIZED) on_size();
             return 0;
+        case WM_SETTINGCHANGE:
+        case WM_SYSCOLORCHANGE:
+        case WM_THEMECHANGED:
+            if (on_system_settings_changed) on_system_settings_changed();
+            break;
         case WM_DPICHANGED:
             if (!options_.dpi_override) {
                 dpi_ = HIWORD(wp);

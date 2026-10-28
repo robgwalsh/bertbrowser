@@ -253,7 +253,9 @@ pub(crate) struct Inner {
     pub settings_path: std::path::PathBuf,
     pub dir_sizes: DirSizeRepository,
     pub search: SearchService,
-    pub fs: LocalFileSystem,
+    /// The real file system with archives made to look like folders (a path inside one lists its
+    /// entries); an ordinary path never reaches the archive code.
+    pub fs: bb_core::archives::ArchiveAwareFileSystemService,
     pub pool: WorkerPool,
     pub shell: Mutex<Shell>,
     pub next_id: AtomicU64,
@@ -336,7 +338,10 @@ impl App {
             probes,
             dir_sizes: DirSizeRepository::new(db.clone()),
             search,
-            fs: LocalFileSystem,
+            fs: bb_core::archives::ArchiveAwareFileSystemService::new(
+                Arc::new(LocalFileSystem),
+                Arc::new(bb_core::archives::LibraryArchiveReader::default()),
+            ),
             shell: Mutex::new(Shell {
                 layout,
                 panes,

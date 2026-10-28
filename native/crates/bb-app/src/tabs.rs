@@ -11,6 +11,7 @@ use std::time::Duration;
 use bb_core::attributes::HIDDEN;
 use bb_core::cancel::CancelToken;
 use bb_core::data::SearchHit;
+use bb_core::archives::ArchiveBrowser;
 use bb_core::fs::{FileListDiff, FileSystemService, SearchProgress, SearchService};
 use bb_core::models::SearchOutcome;
 use bb_core::rules::FlatViewRules;
@@ -195,7 +196,8 @@ impl Inner {
                 return Ok(());
             }
         }
-        if !std::path::Path::new(path).is_dir() {
+        // A real folder, or somewhere inside a readable archive (which opens the container).
+        if !std::path::Path::new(path).is_dir() && !self.fs.can_list(path) {
             self.set_status(tab, format!("Folder not found: {path}"));
             return Err(AppError::Invalid(format!("Folder not found: {path}")));
         }
@@ -726,7 +728,8 @@ impl Inner {
         };
 
         let estimate = self.dir_sizes.get(&path).ok().flatten();
-        let preflight = FlatViewRules::decide(&path, estimate.as_ref(), FLAT_ENTRY_CAP as i64);
+        let cap = self.extra.flat_cap.load(std::sync::atomic::Ordering::Relaxed);
+        let preflight = FlatViewRules::decide(&path, estimate.as_ref(), cap as i64);
         if preflight.confirm
             && !self
                 .seams
@@ -772,7 +775,7 @@ impl Inner {
         let outcome: SearchOutcome =
             match self
                 .search
-                .list_subtree(&path, FLAT_ENTRY_CAP, include_hidden, progress, &token)
+                .list_subtree(&path, cap, include_hidden, progress, &token)
             {
                 Ok(outcome) => outcome,
                 Err(_) => return,
@@ -801,13 +804,13 @@ impl Inner {
         t.notice = outcome.truncated.then(|| {
             format!(
                 "Showing the first {} of a larger tree. Open a folder further in, or search to narrow it.",
-                bb_core::format::thousands(FLAT_ENTRY_CAP as i64)
+                bb_core::format::thousands(cap as i64)
             )
         });
         let truncated = if outcome.truncated {
             format!(
                 " (first {})",
-                bb_core::format::thousands(FLAT_ENTRY_CAP as i64)
+                bb_core::format::thousands(cap as i64)
             )
         } else {
             String::new()
@@ -1014,6 +1017,17 @@ impl Inner {
             .ok_or(AppError::Stale)?;
         if row.is_directory {
             return self.navigate(tab, &row.full_path);
+        }
+        // An archive opens as a folder when the setting says so and the container can be read (or only
+        // needs its password). One that cannot be read goes to whatever owns the extension, rather than
+        // taking the tab inside it to show an empty folder.
+        if bb_core::archives::ArchiveFormats::is_archive_name(&row.name)
+            && lock(&self.settings).enter_archives_on_double_click
+        {
+            let index = self.fs.read_archive(&row.full_path);
+            if index.ok() || index.failure == bb_core::archives::ArchiveFailure::PasswordRequired {
+                return self.navigate(tab, &row.full_path);
+            }
         }
         match self.seams.launcher.launch(&row.full_path, false) {
             Ok(()) => Ok(()),

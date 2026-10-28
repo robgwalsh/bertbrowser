@@ -58,8 +58,8 @@ std::unique_ptr<Session> Session::start(const Options& options) {
     fs::create_directories(options.state_dir);
     fs::create_directories(options.sandbox_dir);
 
-    if (options.index || options.index_declined) {
-        say("# NOTE: the native harness has no index service yet; --index and --index-declined are accepted and ignored.");
+    if (options.index) {
+        say("# NOTE: the native harness has no index service yet; --index is accepted and ignored.");
     }
 
     if (!bb::platform::init_process()) throw std::runtime_error("could not initialise COM and DPI awareness");
@@ -92,7 +92,11 @@ std::unique_ptr<Session> Session::start(const Options& options) {
     cfg.data_dir = bb::core::s(state);
     cfg.fakes = BB_FAKES_HARNESS;
     cfg.search_debounce_ms = 0;
-    if (bb_app_create(&cfg, &s->app_) != BB_OK) {
+    BbAppConfigEx ex{};
+    ex.base = cfg;
+    ex.settings_debounce_ms = UINT32_MAX;  // the page's own debounce
+    ex.index_declined = options.index_declined;
+    if (bb_app_create_ex(&ex, &s->app_) != BB_OK) {
         throw std::runtime_error("bb_app_create refused: " + bb::core::utf8(bb::core::last_error()));
     }
     s->core_ = std::make_unique<bb::core::Core>(s->app_);
@@ -108,6 +112,11 @@ std::unique_ptr<Session> Session::start(const Options& options) {
     s->guard_ = std::make_unique<ForegroundGuard>(before);
 
     s->view_ = std::make_unique<bb::views::MainView>(*s->core_, *s->window_);
+    // Pictures are generated, so a capture never depends on what the machine's shell has cached.
+    s->view_->set_thumbnail_source(bb::views::ThumbSource::Generated);
+    s->view_->set_headless_dialogs(true);
+    // The OS is posed by the script (`system-theme`), never read from this desk.
+    s->view_->set_follow_windows(false);
     s->window_->show();
     s->view_->start(options.start_path.empty() ? options.sandbox_dir.wstring() : options.start_path);
 
@@ -165,6 +174,16 @@ void Session::settle(int quiet_ms) {
     // And one more look: an event handled above may have started more work.
     if (busy()) settle(0);
     window_->render();
+    // Tiles ask for their pictures as they are painted; wait for those too, then paint them in.
+    for (int i = 0; i < 400 && view_->thumbnails_pending() > 0; ++i) {
+        pump();
+        Sleep(5);
+        window_->render();
+    }
+    if (view_->thumbnails_pending() == 0) {
+        pump();
+        window_->render();
+    }
 }
 
 }  // namespace bbh

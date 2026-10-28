@@ -3,7 +3,13 @@
 // indicator and can be resized and reordered; a drag from empty space is a marquee that selects with one
 // bulk provider call; typing within 700 ms builds a prefix handed to a hook.
 #pragma once
+#include "ui/controls.h"
+#include "ui/controls.h"
 #include "ui/scroll.h"
+
+#include <unordered_map>
+
+#include <unordered_map>
 
 namespace bb::ui {
 
@@ -19,6 +25,8 @@ public:
     virtual std::wstring cell_text(size_t row, int column_id) const = 0;
     virtual bool selected(size_t row) const = 0;
     virtual void select(SelectOp op, size_t first, size_t last) = 0;
+    // An icon drawn before the first column's text, or null for none.
+    virtual const IconData* row_icon(size_t /*row*/) const { return nullptr; }
 };
 
 struct Column {
@@ -46,6 +54,8 @@ public:
     std::function<void(size_t row)> on_activate;       // Enter, double click
     std::function<void()> on_columns_changed;          // resize or reorder finished
     std::function<void(const std::wstring&)> on_typeahead;  // the prefix typed so far; call select_row
+    std::function<void(Point)> on_header_menu;               // a right click on the header strip
+    std::function<void(Point, size_t row)> on_context;       // a right click on a row (npos: on empty space)
 
     void set_provider(RowProvider* p);
     RowProvider* provider() const { return provider_; }
@@ -118,6 +128,11 @@ private:
     size_t marquee_first_ = npos, marquee_last_ = npos;
     std::wstring typed_;
     uint64_t typed_at_ = 0;
+    struct IconCache {
+        ComPtr<ID2D1PathGeometry> geometry;
+        uint32_t generation = 0;
+    };
+    std::unordered_map<const IconData*, IconCache> icon_cache_;
 };
 
 }  // namespace bb::ui

@@ -354,6 +354,10 @@ enum BbStatus bb_tab_set_search(struct BbApp *app, uint64_t tab, struct BbStr te
 // Turns the flat branch view on or off.
 enum BbStatus bb_tab_set_flat(struct BbApp *app, uint64_t tab, bool on);
 
+// Lowers how many rows a flat listing shows before it stops and says so (the harness's `flat-cap`);
+// takes effect on the next flat listing. The default is the real ceiling, 50,000.
+enum BbStatus bb_flat_set_cap(struct BbApp *app, uint32_t cap);
+
 // Sorts by a column id; the same column again flips the direction.
 enum BbStatus bb_tab_set_sort(struct BbApp *app, uint64_t tab, struct BbStr column);
 
@@ -713,6 +717,24 @@ enum BbStatus bb_settings_page_close(struct BbApp *app);
 // `{id, name, isDark, following, lightSlot, darkSlot, appearance:{dark, highContrast},
 // dimmedIconOpacity, available:[{id, name, isDark, builtIn, current}], overridden, dirty, issues}`.
 enum BbStatus bb_theme_state(struct BbApp *app, struct BbOwnedStr *out_json);
+
+// Finds the files under `path` that are byte-for-byte the same (the folder is crawled first, so no index
+// helper is needed). `min_size_bytes` floors the files considered. JSON `{availability, incomplete,
+// wastedBytes, groups:[{sizeBytes, hash, keep:{newest, oldest, shallowest}, files:[{path, name, dir,
+// sizeBytes, modified, hidden, hardlinks}]}]}`; `keep` is the index of the copy each strategy keeps.
+// Blocks: call it from a worker.
+enum BbStatus bb_duplicates_scan(struct BbApp *app,
+                                 struct BbStr path,
+                                 int64_t min_size_bytes,
+                                 struct BbOwnedStr *out_json);
+
+// The search syntax help, grouped: `[{title, blurb, entries:[{example, meaning}]}]`. The same table
+// the parser reads, so the help cannot advertise a key the parser does not implement.
+enum BbStatus bb_search_syntax_help(struct BbOwnedStr *out_json);
+
+// Every colour token, for the theme editor: `[{key, group, name, description, core, argb,
+// overridden}]` in editor display order.
+enum BbStatus bb_theme_tokens(struct BbApp *app, struct BbOwnedStr *out_json);
 
 // The host tells us what Windows looks like now. Following Windows swaps the theme (and raises
 // `BB_EVT_MODEL_CHANGED` 2: re-push the palette); high contrast wins over both slots.

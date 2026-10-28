@@ -34,6 +34,14 @@ target_link_libraries(bbapp PUBLIC
 add_library(bbviews STATIC
   views/core.cpp
   views/chrome.cpp
+  views/command_ui.cpp
+  views/forms.cpp
+  views/settings_view.cpp
+  views/palette_view.cpp
+  views/sidebar.cpp
+  views/dialogs.cpp
+  views/thumbs.cpp
+  views/shell_props.cpp
   views/folder_tree.cpp
   views/main_view.cpp
 )

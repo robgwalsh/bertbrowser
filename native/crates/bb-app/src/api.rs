@@ -143,6 +143,19 @@ impl App {
         self.inner.set_flat_view(tab, on)
     }
 
+    /// Lowers (or restores) how many rows a flat listing shows before it stops and says so; takes
+    /// effect on the next flat listing. For the harness: a dozen files cannot reach the real ceiling.
+    pub fn set_flat_cap(&self, cap: usize) -> AppResult<()> {
+        if cap == 0 {
+            return Err(AppError::Invalid("the flat cap must be at least 1".into()));
+        }
+        self.inner
+            .extra
+            .flat_cap
+            .store(cap, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+
     /// Sorts by a column id; the same column again flips the direction.
     pub fn set_sort(&self, tab: TabId, column: &str) -> AppResult<()> {
         self.inner.set_sort(tab, column)
@@ -410,6 +423,7 @@ impl Inner {
                     "flattened": t.is_flattened,
                     "flatBrowse": t.is_flat_browse,
                     "flatView": t.is_flat_view,
+                    "insideArchive": crate::commands::ArchivePathCheck::in_archive(&t.path),
                     "globalSearch": t.is_global_search(),
                     "search": t.active_search_text(),
                     "status": t.status,

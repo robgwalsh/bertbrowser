@@ -167,11 +167,21 @@ void ListView::paint(PaintContext& pc) {
             }
             ID2D1SolidColorBrush* brush = pc.brush(sel ? tok::ListSelectedForeground : style.fg);
             float x = x0;
+            bool first_column = true;
             for (const Column& col : columns_) {
                 if (x + col.width > body_.l && x < body_.r) {
                     const std::wstring text = provider_->cell_text(row, col.id);
+                    float icon_w = 0;
+                    if (first_column) {
+                        if (const IconData* icon = provider_->row_icon(row)) {
+                            IconCache& cache = icon_cache_[icon];
+                            Icon::draw(pc, *icon, Rect::xywh(x + kCellPad, rr.t + (row_height - 16.0f) / 2, 16.0f, 16.0f),
+                                       sel ? tok::ListSelectedForeground : tok::TextSecondary, cache.geometry, cache.generation);
+                            icon_w = 22.0f;
+                        }
+                    }
                     if (!text.empty()) {
-                        const float w = std::max(1.0f, col.width - 2 * kCellPad);
+                        const float w = std::max(1.0f, col.width - 2 * kCellPad - icon_w);
                         gfx::LayoutOptions opt;
                         opt.max_width = w;
                         opt.max_height = row_height;
@@ -181,11 +191,12 @@ void ListView::paint(PaintContext& pc) {
                         IDWriteTextLayout* layout = pc.res.layouts.get(
                             gfx::LayoutKey{id, static_cast<uint32_t>(col.id), w}, text, style.font, opt);
                         if (layout && brush) {
-                            pc.dc->DrawTextLayout(D2D1::Point2F(x + kCellPad, rr.t), layout, brush,
+                            pc.dc->DrawTextLayout(D2D1::Point2F(x + kCellPad + icon_w, rr.t), layout, brush,
                                                   D2D1_DRAW_TEXT_OPTIONS_CLIP);
                         }
                     }
                 }
+                first_column = false;
                 x += col.width;
             }
         }
@@ -296,6 +307,7 @@ bool ListView::on_mouse_down(const MouseEvent& e) {
         return true;
     }
     if (show_header && header_rect().contains(e.pt)) {
+        if (e.button == MouseButton::Right && on_header_menu) on_header_menu(e.pt);
         if (e.button != MouseButton::Left) return true;
         const int zone = resize_zone(e.pt);
         if (zone >= 0) {
@@ -330,7 +342,12 @@ bool ListView::on_mouse_down(const MouseEvent& e) {
             anchor_ = cursor_ = row;
         }
         if (e.clicks >= 2 && e.button == MouseButton::Left && on_activate) on_activate(row);
+        if (e.button == MouseButton::Right && on_context) on_context(e.pt, row);
         invalidate();
+        return true;
+    }
+    if (e.button == MouseButton::Right) {
+        if (on_context) on_context(e.pt, npos);
         return true;
     }
     if (e.button != MouseButton::Left) return true;

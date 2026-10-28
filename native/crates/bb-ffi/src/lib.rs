@@ -734,6 +734,13 @@ pub unsafe extern "C" fn bb_tab_set_flat(app: *mut BbApp, tab: u64, on: bool) ->
     guard(|| Ok(unsafe { app_of(app)? }.app.set_flat_view(TabId(tab), on)?))
 }
 
+/// Lowers how many rows a flat listing shows before it stops and says so (the harness's `flat-cap`);
+/// takes effect on the next flat listing. The default is the real ceiling, 50,000.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_flat_set_cap(app: *mut BbApp, cap: u32) -> BbStatus {
+    guard(|| Ok(unsafe { app_of(app)? }.app.set_flat_cap(cap as usize)?))
+}
+
 /// Sorts by a column id; the same column again flips the direction.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_tab_set_sort(app: *mut BbApp, tab: u64, column: BbStr) -> BbStatus {

@@ -1,6 +1,8 @@
 #include "views/main_view.h"
 
+#include "gfx/icons.gen.h"
 #include "views/folder_tree.h"
+#include "views/shell_props.h"
 
 #include <dwmapi.h>
 
@@ -121,6 +123,26 @@ std::wstring ListAdapter::cell_text(size_t row, int column_id) const {
     return cell < 0 ? std::wstring() : listing_->cell(row, static_cast<uint32_t>(cell));
 }
 
+const IconData* ListAdapter::row_icon(size_t row) const {
+    BbRow r{};
+    if (!listing_ || !listing_->row(row, r)) return nullptr;
+    static const IconData* const folder = icons::find("Folder");
+    static const IconData* const archive = icons::find("Archive");
+    static const IconData* const file = icons::find("NewFile");
+    if (r.flags & BB_ROW_DIRECTORY) return folder;
+    const std::wstring name = core::w(r.name);
+    for (const wchar_t* ext : {L".zip", L".7z", L".rar", L".tar", L".gz", L".tgz", L".bz2", L".xz"}) {
+        const size_t n = wcslen(ext);
+        if (name.size() > n && _wcsicmp(name.c_str() + name.size() - n, ext) == 0) return archive;
+    }
+    return file;
+}
+
+std::wstring ListAdapter::row_path(size_t row) const {
+    BbRow r{};
+    return listing_ && listing_->row(row, r) ? core::w(r.full_path) : std::wstring();
+}
+
 void ListAdapter::select(SelectOp op, size_t first, size_t last) {
     if (op == SelectOp::Clear) {
         core_.select(tab_, BB_SELECT_CLEAR, {});
@@ -186,14 +208,27 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
 
     search_ = nav_->emplace<Edit>();
     search_->name = "SearchBox";
-    search_->width = 200;
+    search_->width = 170;
     search_->placeholder = L"Search";
     search_->on_changed = [this](const std::wstring&) { on_search_changed(false); };
     gsearch_ = nav_->emplace<Edit>();
     gsearch_->name = "GlobalSearchBox";
-    gsearch_->width = 200;
+    gsearch_->width = 170;
     gsearch_->placeholder = L"Search this PC";
     gsearch_->on_changed = [this](const std::wstring&) { on_search_changed(true); };
+    {
+        // Three buttons choose what the right-hand pane shows: nothing, the preview, or the metadata.
+        const char* names[3] = {"SidePaneNone", "SidePanePreview", "SidePaneMetadata"};
+        const char* icons_[3] = {"SidePaneNone", "PreviewPane", "Metadata"};
+        for (int i = 0; i < 3; ++i) {
+            auto* b = nav_->emplace<Button>();
+            b->name = names[i];
+            b->width = 34;
+            b->icon = icons::find(icons_[i]);
+            b->on_click = [this, app, i] { bb_tab_set_side_pane(app, tab_, static_cast<uint32_t>(i)); };
+            side_buttons_[i] = b;
+        }
+    }
     add(std::move(nav));
 
     auto banner = std::make_unique<Panel>();
@@ -207,15 +242,40 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     banner->set_visible(false);
     banner_panel_ = add(std::move(banner));
 
-    auto body = std::make_unique<Panel>();
+    auto body = std::make_unique<DockPanel>();
     body->dock = Dock::Fill;
     body_ = add(std::move(body));
-    list_ = body_->emplace<ListView>();
+    // The side pane sits at the right, shown for the preview and the metadata choices.
+    auto* side = body_->emplace<Panel>();
+    side->name = "PreviewPane";
+    side->dock = Dock::Right;
+    side->width = 320;
+    side->pad = 12;
+    side->style.bg = tok::SurfaceBackground;
+    side->set_visible(false);
+    side_pane_ = side;
+    auto* side_col = side->emplace<StackPanel>(Orientation::Vertical, 6.0f);
+    side_title_ = side_col->emplace<TextBlock>();
+    side_title_->style.font.size = 16.0f;
+    side_title_->style.font.weight = 600;
+    side_text_ = side_col->emplace<TextBlock>();
+    side_text_->wrap = true;
+    side_text_->style.fg = tok::TextSecondary;
+    view_area_ = body_->emplace<Panel>();
+    view_area_->dock = Dock::Fill;
+    list_ = view_area_->emplace<ListView>();
     list_->name = "FileListView";
     list_->set_provider(&adapter_);
-    empty_ = body_->emplace<Overlay>();
+    tiles_ = view_area_->emplace<TileView>();
+    tiles_->name = "FileTileView";
+    tiles_->set_provider(&adapter_);
+    tiles_->set_visible(false);
+    empty_ = view_area_->emplace<Overlay>();
     empty_->name = "EmptyMessage";
     empty_->set_visible(false);
+    list_->on_header_menu = [this](Point p) { open_context(p, true); };
+    list_->on_context = [this](Point p, size_t) { open_context(p, false); };
+    tiles_->on_activate = [this, app](size_t row) { bb_tab_open_item(app, tab_, static_cast<uint32_t>(row)); };
 
     list_->on_sort = [this, app](int column, bool) {
         if (column < 0 || static_cast<size_t>(column) >= columns_.size()) return;
@@ -256,10 +316,254 @@ void TabView::sync_columns() {
     list_->set_columns(std::move(out));
 }
 
+TabView::~TabView() { thumbs_.reset(); }
+
+void TabView::arrange(Rect r) {
+    // A narrow pane gives up the whole-PC search box first, so the path never shrinks to nothing.
+    const bool narrow = r.width() < 700.0f;
+    if (gsearch_->flags.visible == narrow) gsearch_->set_visible(!narrow);
+    DockPanel::arrange(r);
+}
+
+void TabView::reload_columns() {
+    sync_columns();
+    list_->invalidate();
+}
+
+std::vector<std::wstring> TabView::column_ids() const {
+    std::vector<std::wstring> out;
+    for (const auto& c : columns_) out.push_back(c.id);
+    return out;
+}
+
+std::wstring TabView::cell_by_id(size_t row, const std::wstring& column_id) const {
+    for (size_t i = 0; i < columns_.size(); ++i) {
+        if (core::iequals(columns_[i].id, column_id)) return adapter_.cell_text(row, static_cast<int>(i));
+    }
+    return {};
+}
+
+size_t TabView::realized_rows() const {
+    if (tiles_on_) {
+        const auto r = tiles_->realized();
+        return r.second - r.first;
+    }
+    const auto v = list_->visible_range();
+    return v.second - v.first;
+}
+
+void TabView::scroll_to_offset(float y) {
+    if (tiles_on_) tiles_->set_scroll_y(y);
+    else list_->set_scroll_y(y);
+}
+
+void TabView::reveal_row(size_t row) {
+    core_.select(tab_, BB_SELECT_REPLACE, {static_cast<uint32_t>(row)});
+    adapter_.reload_selection();
+    if (tiles_on_) tiles_->scroll_to_row(row);
+    else list_->scroll_to_row(row);
+    list_->invalidate();
+    tiles_->invalidate();
+}
+
+void TabView::set_thumbnail_source(ThumbSource s) {
+    thumb_source_ = s;
+    thumbs_.reset();
+    tiles_->set_thumbnails(nullptr);
+}
+
+void TabView::drain_thumbnails() {
+    if (thumbs_) thumbs_->drain();
+}
+
+Widget* TabView::active_view() const { return tiles_on_ ? static_cast<Widget*>(tiles_) : static_cast<Widget*>(list_); }
+
+void TabView::sync_view_mode(const BbTabState& st) {
+    const bool want = st.thumbnail_scale > 0.0;
+    const float image = 64.0f + static_cast<float>(st.thumbnail_scale) * 160.0f;
+    if (want && !thumbs_) {
+        thumbs_ = std::make_unique<ThumbnailService>(main_.window().hwnd(), thumb_source_, [this](size_t row) { return adapter_.row_path(row); });
+        tiles_->set_thumbnails(thumbs_.get());
+        tiles_->dpi_scale = static_cast<float>(main_.window().dpi()) / 96.0f;
+    }
+    if (want && std::fabs(tiles_->metrics.image - image) > 0.5f) {
+        tiles_->metrics.image = image;
+        tiles_->refresh();
+    }
+    if (want == tiles_on_) return;
+    tiles_on_ = want;
+    list_->set_visible(!want);
+    tiles_->set_visible(want);
+    if (want) tiles_->refresh();
+    else list_->refresh();
+    view_area_->request_layout();
+}
+
+void TabView::sync_side_pane(const BbTabState& st) {
+    side_mode_ = static_cast<int>(st.side_pane);
+    side_pane_->set_visible(side_mode_ != 0);
+    for (int i = 0; i < 3; ++i) side_buttons_[i]->primary = i == side_mode_;
+    if (side_mode_ == 0) return;
+    side_title_->set_text(side_mode_ == 1 ? L"Preview" : L"Metadata");
+    const auto sel = core_.selection(tab_);
+    std::wstring text = L"Select a file to see it here.";
+    if (!sel.empty() && adapter_.listing()) {
+        BbRow r{};
+        if (adapter_.listing()->row(sel[0], r)) {
+            text = core::w(r.name) + (sel.size() > 1 ? L"\n+ " + std::to_wstring(sel.size() - 1) + L" more" : L"");
+            if (!(r.flags & BB_ROW_DIRECTORY) && r.size >= 0) text += L"\n" + std::to_wstring(r.size) + L" bytes";
+            text += L"\n" + core::w(r.full_path);
+        }
+    }
+    side_text_->set_text(text);
+}
+
+void TabView::refresh_tooltips() {
+    static const wchar_t* ids[3] = {L"view.side-none", L"view.preview", L"view.metadata"};
+    static const wchar_t* names[3] = {L"Hide the side pane", L"Preview pane", L"Metadata pane"};
+    for (int i = 0; i < 3; ++i) {
+        BbOwnedStr o{};
+        std::wstring gesture;
+        if (bb_keymap_gesture(core_.app(), core::s(ids[i]), &o) == BB_OK) gesture = core::take(o);
+        side_buttons_[i]->tooltip = names[i] + (gesture.empty() ? std::wstring() : L" (" + gesture + L")");
+    }
+}
+
+void TabView::open_context(Point p, bool header) {
+    main_.show_context_menu(header ? build_column_menu() : build_files_menu(false), p);
+}
+
+static BarRow command_row(core::Core& core, const wchar_t* id) {
+    BarRow r;
+    const json::Value st = try_model([&](BbOwnedStr* o) { return bb_command_state(core.app(), core::s(std::wstring(id)), o); });
+    if (st.is_null()) return r;
+    r.kind = "command";
+    r.id = st["id"].str();
+    r.icon = st["icon"].str();
+    r.name = core::wide(st["name"].str());
+    r.caption = escape_caption(core::wide(st["caption"].is_null() ? st["name"].str() : st["caption"].str()));
+    r.gesture = core::wide(st["gesture"].str());
+    r.enabled = st["whyNot"].is_null();
+    r.reason = core::wide(st["whyNot"].str());
+    r.checked = st["checked"].boolean();
+    return r;
+}
+
+MenuItems TabView::build_files_menu(bool background) {
+    std::vector<BarRow> rows;
+    auto add = [&](const wchar_t* id) {
+        BarRow r = command_row(core_, id);
+        if (!r.id.empty()) rows.push_back(std::move(r));
+    };
+    auto sep = [&] {
+        BarRow s;
+        s.kind = "separator";
+        if (!rows.empty() && rows.back().kind != "separator") rows.push_back(s);
+    };
+    auto submenu = [&](const wchar_t* caption, std::initializer_list<const wchar_t*> ids) {
+        BarRow m;
+        m.kind = "menu";
+        m.caption = caption;
+        for (const wchar_t* id : ids) {
+            BarRow r = command_row(core_, id);
+            if (!r.id.empty()) m.children.push_back(std::move(r));
+        }
+        if (!m.children.empty()) rows.push_back(std::move(m));
+    };
+    if (!background) {
+        add(L"file.open");
+        add(L"file.open-new-tab");
+        sep();
+        add(L"edit.cut");
+        add(L"edit.copy");
+        add(L"edit.paste");
+        sep();
+        add(L"edit.copy-path");
+        add(L"file.compress");
+        add(L"file.extract-here");
+        sep();
+        add(L"file.rename");
+        add(L"file.delete");
+        sep();
+    } else {
+        add(L"edit.paste");
+        sep();
+    }
+    submenu(L"N&ew", {L"file.new-folder", L"file.new-file"});
+    add(L"file.bookmark");
+    sep();
+    add(L"file.properties");
+    while (!rows.empty() && rows.back().kind == "separator") rows.pop_back();
+    return build_menu_items(main_.menu_env(), rows);
+}
+
+MenuItems TabView::build_column_menu() {
+    BbApp* app = core_.app();
+    const uint64_t tab = tab_;
+    const json::Value st = try_model([&](BbOwnedStr* o) { return bb_columns_state(app, tab, o); });
+    const json::Value cands = try_model([&](BbOwnedStr* o) { return bb_columns_candidates(app, tab, core::s(L""), o); });
+    std::vector<std::wstring> shown;
+    for (size_t i = 0; i < st["columns"].size(); ++i) {
+        if (!st["columns"][i]["injected"].boolean()) shown.push_back(core::wide(st["columns"][i]["id"].str()));
+    }
+    auto is_shown = [&](const std::wstring& id) {
+        for (const auto& s : shown) {
+            if (core::iequals(s, id)) return true;
+        }
+        return false;
+    };
+    MenuItems out;
+    auto entry = [&](const std::wstring& id, const std::wstring& header, bool locked) {
+        MenuItem m = MenuItem::make(escape_caption(header));
+        m.checked = is_shown(id);
+        m.enabled = !locked;
+        m.on_invoke = [app, tab, id, on = !m.checked] {
+            bb_columns_do(app, tab, core::s(on ? L"add" : L"remove"), core::s(id));
+        };
+        out.push_back(std::move(m));
+    };
+    entry(L"Name", L"Name", true);
+    entry(L"Size", L"Size", false);
+    entry(L"Type", L"Type", false);
+    entry(L"Modified", L"Modified", false);
+    std::vector<std::wstring> listed = {L"Name", L"Size", L"Type", L"Modified"};
+    for (size_t g = 0; g < cands["groups"].size(); ++g) {
+        const json::Value& items = cands["groups"][g]["items"];
+        for (size_t i = 0; i < items.size(); ++i) {
+            const std::wstring id = core::wide(items[i]["id"].str());
+            entry(id, core::wide(items[i]["header"].str()), false);
+            listed.push_back(id);
+        }
+    }
+    // A property added through the picker is showing but is on neither list: without a row here there
+    // would be no way to turn it off again.
+    bool any_extra = false;
+    for (const auto& id : shown) {
+        bool known = false;
+        for (const auto& l : listed) known = known || core::iequals(l, id);
+        if (known) continue;
+        if (!any_extra) {
+            out.push_back(MenuItem::separator());
+            any_extra = true;
+        }
+        std::wstring header = id;
+        for (size_t i = 0; i < st["columns"].size(); ++i) {
+            if (core::iequals(core::wide(st["columns"][i]["id"].str()), id)) header = core::wide(st["columns"][i]["header"].str());
+        }
+        entry(id, header, false);
+    }
+    out.push_back(MenuItem::separator());
+    out.push_back(MenuItem::make(L"More columns…", [this] { main_.open_dialog(L"columns"); }));
+    out.push_back(MenuItem::make(L"Reset to default", [app, tab] { bb_columns_do(app, tab, core::s(L"reset"), core::s(L"")); }));
+    out.push_back(MenuItem::make(L"Use for new tabs", [app, tab] { bb_columns_do(app, tab, core::s(L"default"), core::s(L"")); }));
+    return out;
+}
+
 void TabView::reload_listing() {
     adapter_.reset(core_.listing(tab_));
     sync_columns();
     list_->refresh();
+    tiles_->refresh();
     const bool none = adapter_.row_count() == 0;
     std::wstring message = none ? core_.tab_text(tab_, BB_TEXT_EMPTY) : std::wstring();
     empty_->set_message(std::move(message));
@@ -282,6 +586,7 @@ void TabView::reload_state() {
         crumbs_->set_crumbs(core_.breadcrumb(tab_));
         if (!path_->flags.visible) path_->set_text(path);
         list_->set_provider(&adapter_);  // a different place: back to the top, no cursor
+        tiles_->set_provider(&adapter_);
         main_.tab_navigated(tab_, path);
     }
 
@@ -305,7 +610,11 @@ void TabView::reload_state() {
     for (size_t i = 0; i < columns_.size(); ++i) {
         if (columns_[i].id == sort) list_->set_sort(static_cast<int>(i), !st.sort_descending);
     }
+    sync_view_mode(st);
+    sync_side_pane(st);
+    refresh_tooltips();
     list_->invalidate();
+    tiles_->invalidate();
 }
 
 void TabView::on_search_changed(bool global) {
@@ -351,19 +660,95 @@ bool PaneView::on_mouse_down(const MouseEvent&) {
 
 MainView::MainView(core::Core& core, platform::Window& window)
     : core_(core), window_(window), tree_provider_(std::make_unique<FolderTreeProvider>()) {
-    auto root = std::make_unique<DockPanel>();
+    // WindowRoot holds the window and, last, the popup layer that covers it.
+    auto outer = std::make_unique<Panel>();
+    outer->name = "WindowRoot";
+    auto* root = outer->emplace<DockPanel>();
+    root->name = "MainDock";
     root->style.bg = tok::WindowBackground;
     title_ = root->emplace<TitleBar>();
     title_->name = "TitleBarRoot";
     title_->dock = Dock::Top;
-    status_ = root->emplace<StatusBar>();
+    title_->show_title = false;
+    menu_bar_ = title_->emplace<MenuBar>();
+    menu_bar_->name = "MainMenu";
+    menu_bar_->nc_hit = HTCLIENT;
+    title_->left = menu_bar_;
+    title_toolbar_ = title_->emplace<CommandToolbar>("title");
+    title_toolbar_->name = "TitleToolbar";
+    title_toolbar_->style.bg = gfx::kNoToken;
+    title_toolbar_->nc_hit = HTCLIENT;
+    title_->middle = title_toolbar_;
+    browser_ = root->emplace<Panel>();
+    browser_->name = "BrowserRoot";
+    browser_->dock = Dock::Fill;
+    auto* browser_dock = browser_->emplace<DockPanel>();
+    browser_dock->name = "BrowserDock";
+    rows_panel_ = browser_dock->emplace<StackPanel>(Orientation::Vertical, 0.0f);
+    rows_panel_->name = "ToolbarRows";
+    rows_panel_->dock = Dock::Top;
+    rows_panel_->set_visible(false);
+    {
+        // The offer to start the search index helper: shown until answered, "not now" lasts the session.
+        auto* banner = browser_dock->emplace<StackPanel>(Orientation::Horizontal, 10.0f);
+        banner->name = "IndexerBanner";
+        banner->dock = Dock::Top;
+        banner->height = 36;
+        banner->pad = 6;
+        banner->style.bg = tok::WarningBackground;
+        banner->set_visible(false);
+        indexer_banner_ = banner;
+        indexer_text_ = banner->emplace<TextBlock>();
+        indexer_text_->style.fg = tok::WarningForeground;
+        indexer_text_->flex = 1;
+        auto* start = banner->emplace<Button>(L"Start");
+        start->name = "IndexerStart";
+        start->width = 90;
+        start->on_click = [this] { bb_index_do(core_.app(), core::s(L"start")); };
+        auto* dismiss = banner->emplace<Button>(L"Not now");
+        dismiss->name = "IndexerDismiss";
+        dismiss->width = 90;
+        dismiss->on_click = [this] { bb_index_do(core_.app(), core::s(L"dismiss-banner")); };
+    }
+    status_ = browser_dock->emplace<StatusBar>();
     status_->name = "StatusBar";
     status_->dock = Dock::Bottom;
-    main_split_ = root->emplace<Splitter>(Orientation::Horizontal);
+    status_->on_right_click = [this] {
+        if (index_state_["canRetry"].boolean()) bb_index_do(core_.app(), core::s(L"retry"));
+    };
+    {
+        // What a copy or move is doing: the headline, a bar, and the numbers. Above the status line.
+        auto* strip = browser_dock->emplace<StackPanel>(Orientation::Horizontal, 14.0f);
+        strip->name = "TransferStrip";
+        strip->dock = Dock::Bottom;
+        strip->height = 36;
+        strip->pad = 8;
+        strip->style.bg = tok::SurfaceRaised;
+        strip->set_visible(false);
+        transfer_strip_ = strip;
+        transfer_head_ = strip->emplace<TextBlock>();
+        transfer_head_->width = 250;
+        transfer_head_->style.font.weight = 600;
+        transfer_bar_ = strip->emplace<ProgressBar>();
+        transfer_bar_->width = 220;
+        transfer_detail_ = strip->emplace<TextBlock>();
+        transfer_detail_->flex = 1;
+        transfer_detail_->style.fg = tok::TextSecondary;
+        auto* details = strip->emplace<Button>(L"Details");
+        details->name = "TransferDetails";
+        details->width = 90;
+        details->on_click = [this] { open_dialog(L"transfer"); };
+    }
+    main_split_ = browser_dock->emplace<Splitter>(Orientation::Horizontal);
     main_split_->dock = Dock::Fill;
     main_split_->name = "MainSplitter";
     main_split_->set_position(240);
-    tree_ = main_split_->emplace<TreeView>();
+    auto* sidebar_column = main_split_->emplace<DockPanel>();
+    sidebar_column->name = "SidebarColumn";
+    sidebar_ = sidebar_column->emplace<SavedSidebar>(*this, core_);
+    sidebar_->dock = Dock::Bottom;
+    tree_ = sidebar_column->emplace<TreeView>();
+    tree_->dock = Dock::Fill;
     tree_->name = "FolderTree";
     tree_->set_provider(tree_provider_.get());
     pane_host_ = main_split_->emplace<Panel>();
@@ -379,7 +764,28 @@ MainView::MainView(core::Core& core, platform::Window& window)
             }
         }
     };
-    window_.root().set_content(std::move(root));
+    // The overlays sit over everything under the title bar, in the order they stack: Settings, then (later)
+    // the palette and the dialog layer.
+    settings_ = browser_->emplace<SettingsView>(*this, core_);
+    settings_->name = "SettingsLayer";
+    palette_ = browser_->emplace<PaletteView>(*this, core_);
+    palette_->name = "PaletteLayer";
+    dialogs_ = browser_->emplace<DialogLayer>();
+    dialogs_->name = "DialogLayer";
+    dialogs_->on_closed = [this] {
+        dialog_open_ = false;
+        bb_ui_set_dialog_open(core_.app(), false);
+    };
+    Widget* content = window_.root().set_content(std::move(outer));
+    popup_ = PopupLayer::install(*content);
+
+    menu_bar_->hook(window_.root());
+    menu_bar_->allows_mode = [this] { return (focus_flags() & (BB_FOCUS_PALETTE_OPEN | BB_FOCUS_CONTENT_BLOCKED | BB_FOCUS_RECORDING)) == 0; };
+    title_toolbar_->on_activate = [this](const BarRow& r, Rect anchor) {
+        if (r.kind == "list" || r.kind == "placeholder") open_toolbar_list(r, anchor);
+        else execute_command(core::wide(r.id));
+    };
+    title_toolbar_->on_overflow = [this](const std::vector<BarRow>& rows, Rect anchor) { open_overflow(rows, anchor); };
 
     hwnd_ = window_.hwnd();
     window_.on_message = [this](UINT msg, WPARAM wp, LPARAM lp) { return on_window_message(msg, wp, lp); };
@@ -403,6 +809,18 @@ void MainView::sink(void* ctx, BbEvent* evt) {
 }
 
 bool MainView::on_window_message(UINT msg, WPARAM, LPARAM lp) {
+    if (msg == WM_BB_BARS) {
+        bars_pending_ = false;
+        try {
+            refresh_bars();
+        } catch (const std::exception&) {
+        }
+        return true;
+    }
+    if (msg == WM_BB_THUMBS) {
+        for (auto& kv : by_tab_) kv.second->drain_thumbnails();
+        return true;
+    }
     if (msg != WM_BB_EVENT) return false;
     auto* evt = reinterpret_cast<BbEvent*>(lp);
     try {
@@ -452,14 +870,49 @@ void MainView::handle(const BbEvent& e) {
         case BB_EVT_BUSY_CHANGED:
             refresh_status();
             break;
+        case BB_EVT_PROPERTIES_NEEDED:
+            supply_properties(e.id);
+            break;
+        case BB_EVT_MODEL_CHANGED:
+            if (e.a == 2) apply_theme();
+            if (e.a == 10) {
+                for (auto& kv : by_tab_) kv.second->reload_columns();
+            }
+            if (e.a == 4) refresh_tooltips();
+            if (e.a == 1 || e.a == 2 || e.a == 4 || e.a == 5 || e.a == 6 || e.a == 7 || e.a == 8 || e.a == 9 || e.a == 10) sync_overlays();
+            break;
+        default:
+            break;
+    }
+    // Whatever moved may have changed what a command can do now: the bars catch up once, at idle.
+    if (!bars_pending_ && hwnd_.load()) {
+        bars_pending_ = true;
+        PostMessageW(hwnd_.load(), WM_BB_BARS, 0, 0);
     }
 }
 
+void MainView::push_system_appearance() {
+    DWORD light = 1, size = sizeof(light);
+    RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme",
+                 RRF_RT_REG_DWORD, nullptr, &light, &size);
+    HIGHCONTRASTW hc{};
+    hc.cbSize = sizeof(hc);
+    const bool high_contrast = SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0) && (hc.dwFlags & HCF_HIGHCONTRASTON);
+    bb_theme_set_system_appearance(core_.app(), light == 0, high_contrast);
+}
+
 void MainView::start(const std::wstring& path) {
+    bb_ui_set_flag(core_.app(), core::s(L"propertyProvider"), true);
+    if (follow_windows_) {
+        push_system_appearance();
+        window_.on_system_settings_changed = [this] { push_system_appearance(); };
+    }
     apply_theme();
     uint64_t tab = 0;
     core::check(bb_app_initialize(core_.app(), core::s(path), &tab), "initialize");
     sync_layout();
+    refresh_bars();
+    sync_overlays();
 }
 
 void MainView::apply_theme() {
@@ -547,27 +1000,353 @@ void MainView::activate_tab(uint64_t tab) { bb_tab_activate(core_.app(), tab); }
 void MainView::close_tab(uint64_t tab) { bb_tab_close(core_.app(), tab); }
 void MainView::activate_pane(uint64_t pane) { bb_pane_activate(core_.app(), pane); }
 
+BbFocusKind MainView::focus_kind() const {
+    Widget* f = window_.root().focused();
+    if (const auto* edit = dynamic_cast<Edit*>(f)) return edit->read_only ? BB_FOCUS_TEXT_READ_ONLY : BB_FOCUS_TEXT_EDITABLE;
+    if (!f || dynamic_cast<ListView*>(f) || dynamic_cast<TileView*>(f)) return BB_FOCUS_FILE_LIST;
+    return BB_FOCUS_OTHER;
+}
+
+uint32_t MainView::focus_flags() {
+    uint32_t flags = 0;
+    if (try_model([&](BbOwnedStr* o) { return bb_settings_page_state(core_.app(), o); })["open"].boolean()) {
+        flags |= BB_FOCUS_SETTINGS_OPEN;
+        if (try_model([&](BbOwnedStr* o) { return bb_keys_page(core_.app(), o); })["recording"].boolean()) flags |= BB_FOCUS_RECORDING;
+    }
+    if (try_model([&](BbOwnedStr* o) { return bb_palette_state(core_.app(), o); })["open"].boolean()) flags |= BB_FOCUS_PALETTE_OPEN;
+    if (dialog_open_) flags |= BB_FOCUS_CONTENT_BLOCKED;
+    if (popup_ && popup_->menu_open()) flags |= BB_FOCUS_IN_POPUP;
+    return flags;
+}
+
 bool MainView::on_preview_key(const KeyEvent& e) {
+    if (menu_bar_ && menu_bar_->preview_key(e)) return true;
+    if (palette_ && palette_->preview_key(e)) return true;
     const std::wstring key = key_name(e.vk);
     if (key.empty()) return false;
     const uint32_t mods = (e.mods.ctrl ? 1u : 0u) | (e.mods.alt ? 2u : 0u) | (e.mods.shift ? 4u : 0u);
-    BbFocusKind kind = BB_FOCUS_OTHER;
-    Widget* f = window_.root().focused();
-    if (const auto* edit = dynamic_cast<Edit*>(f)) {
-        kind = edit->read_only ? BB_FOCUS_TEXT_READ_ONLY : BB_FOCUS_TEXT_EDITABLE;
-    } else if (!f || dynamic_cast<ListView*>(f)) {
-        kind = BB_FOCUS_FILE_LIST;
-    }
-    const std::wstring command = core_.dispatch(mods, key, kind, 0);
-    if (command.empty()) return false;
+    const json::Value r = try_model([&](BbOwnedStr* o) {
+        return bb_key_press(core_.app(), BbKeyChord{mods, core::s(key)}, BbFocusState{focus_kind(), focus_flags()}, false, o);
+    });
+    if (!r["claimed"].boolean()) return false;
     // A claimed chord is the command's even when it cannot run now.
-    run_command(command);
+    if (r["result"].str() == "ui") host_command(core::wide(r["command"].str()));
     return true;
+}
+
+bool MainView::execute_command(const std::wstring& id, std::wstring* reason, bool* ui) {
+    bool needs_ui = false;
+    const BbStatus st = bb_command_execute(core_.app(), core::s(id), &needs_ui);
+    if (st != BB_OK) {
+        if (reason) *reason = core::last_error();
+        return false;
+    }
+    if (needs_ui) {
+        const bool done = host_command(id);
+        if (ui) *ui = !done;  // true: it wanted a person (a dialog) and nothing was done
+    }
+    return true;
+}
+
+bool MainView::host_command(const std::wstring& id) {
+    if (id == L"nav.address-bar") {
+        if (TabView* tv = active_view()) tv->begin_path_edit();
+        return true;
+    }
+    if (id == L"app.settings") {
+        bb_settings_page_open(core_.app(), core::s(L""));
+        sync_overlays();
+        return true;
+    }
+    // Commands that put a dialog up. A run with no one to answer reports them instead.
+    static const std::pair<const wchar_t*, const wchar_t*> dialogs[] = {
+        {L"file.new-folder", L"new-folder"}, {L"file.new-file", L"new-file"},       {L"file.rename", L"rename"},
+        {L"file.properties", L"properties"}, {L"file.compress", L"compress"},       {L"file.extract-here", L"extract"},
+        {L"file.extract-to", L"extract"},    {L"file.unlock-archive", L"archive-password"},
+        {L"app.about", L"about"},            {L"search.syntax", L"search-syntax"},  {L"search.save", L"saved-search"},
+        {L"select.pattern", L"select-pattern"}, {L"select.unpattern", L"select-pattern"},
+        {L"view.add-column", L"columns"},    {L"tools.transfer-details", L"transfer"},
+        {L"app.customise-theme", L"theme-editor"},
+    };
+    for (const auto& [command, kind] : dialogs) {
+        if (id != command) continue;
+        if (headless_dialogs_) return false;
+        open_dialog(kind);
+        return true;
+    }
+    if (id == L"tools.duplicates" && !headless_dialogs_) {
+        const std::wstring folder = core_.tab_text(active_tab_, BB_TEXT_PATH);
+        BbOwnedStr o{};
+        if (bb_duplicates_scan(core_.app(), core::s(folder), 1024 * 1024, &o) == BB_OK) {
+            duplicates_.result = json::parse(core::utf8(core::take(o)));
+            duplicates_.has = true;
+            duplicates_.ticked.clear();
+        }
+        open_dialog(L"duplicates");
+        return true;
+    }
+    return false;
+}
+
+// ---- the menu bar and the toolbars ----------------------------------------------------------------------
+
+MenuBuildEnv MainView::menu_env() {
+    MenuBuildEnv env;
+    env.core = &core_;
+    env.run = [this](const std::wstring& id) { execute_command(id); };
+    env.pick = [this](const std::string& list, const std::wstring& id, const std::wstring& name) { pick_list_item(list, id, name); };
+    return env;
+}
+
+void MainView::pick_list_item(const std::string& list_id, const std::wstring& id, const std::wstring& name) {
+    BbApp* app = core_.app();
+    try {
+        if (list_id == "drives" || list_id == "bookmarks") {
+            if (active_tab_) core_.navigate(active_tab_, id);
+        } else if (list_id == "workspaces") {
+            core::check(bb_saved_do(app, 0, core::s(L"switch-workspace"), core::s(name)), "switch-workspace");
+        } else if (list_id == "saved-searches") {
+            core::check(bb_saved_do(app, active_tab_, core::s(L"run-search"), core::s(name)), "run-search");
+        } else if (list_id == "command-bars") {
+            core::check(bb_bars_do(app, core::s(L"apply"), core::s(name)), "apply");
+        }
+    } catch (const core::CoreError&) {
+    }
+}
+
+std::vector<std::wstring> MainView::menu_bar_captions() const {
+    std::vector<std::wstring> out;
+    for (const MenuBarEntry& m : menu_bar_->menus()) out.push_back(plain_caption(m.text));
+    return out;
+}
+
+MenuItems MainView::build_main_menu(const std::wstring& name, bool* found) {
+    if (found) *found = false;
+    const json::Value menu = try_model([&](BbOwnedStr* o) {
+        return bb_bars_query(core_.app(), core::s(L"menu"), core::s(name), o);
+    });
+    if (menu.is_null()) return {};
+    if (found) *found = true;
+    return build_menu_items(menu_env(), read_bar_rows(menu["rows"]));
+}
+
+void MainView::refresh_bars() {
+    BbApp* app = core_.app();
+    // The headings: rebuilt only when the arrangement changed, since a dropdown holds its items by pointer.
+    const json::Value bar = try_model([&](BbOwnedStr* o) { return bb_bars_query(app, core::s(L"menubar"), core::s(L""), o); });
+    std::string sig;
+    for (size_t i = 0; i < bar.size(); ++i) sig += bar[i]["caption"].str() + "|" + bar[i]["name"].str() + ";";
+    if (sig != menu_sig_ && !bar.is_null()) {
+        menu_sig_ = sig;
+        std::vector<MenuBarEntry> entries;
+        for (size_t i = 0; i < bar.size(); ++i) {
+            MenuBarEntry e;
+            e.text = core::wide(bar[i]["caption"].str());
+            const std::wstring name = core::wide(bar[i]["name"].str());
+            e.on_opening = [this, name](MenuItems& items) { items = build_main_menu(name); };
+            entries.push_back(std::move(e));
+        }
+        menu_bar_->set_menus(std::move(entries));
+        title_->request_layout();
+    }
+    const json::Value title = try_model([&](BbOwnedStr* o) { return bb_bars_query(app, core::s(L"toolbar"), core::s(L"title"), o); });
+    if (!title.is_null()) title_toolbar_->update(title);
+    sync_row_toolbars(try_model([&](BbOwnedStr* o) { return bb_bars_query(app, core::s(L"state"), core::s(L""), o); }));
+}
+
+void MainView::sync_row_toolbars(const json::Value& state) {
+    const size_t want = state["rows"].size();
+    if (want != row_toolbars_.size()) {
+        while (row_toolbars_.size() > want) {
+            rows_panel_->remove_child(row_toolbars_.back());
+            row_toolbars_.pop_back();
+        }
+        while (row_toolbars_.size() < want) {
+            auto* tb = rows_panel_->emplace<CommandToolbar>("row" + std::to_string(row_toolbars_.size() + 1));
+            tb->name = "ToolbarRow" + std::to_string(row_toolbars_.size() + 1);
+            tb->on_activate = [this](const BarRow& r, Rect anchor) {
+                if (r.kind == "list" || r.kind == "placeholder") open_toolbar_list(r, anchor);
+                else execute_command(core::wide(r.id));
+            };
+            tb->on_overflow = [this](const std::vector<BarRow>& rows, Rect anchor) { open_overflow(rows, anchor); };
+            row_toolbars_.push_back(tb);
+        }
+        rows_panel_->height = static_cast<float>(want) * CommandToolbar::kHeight;
+        rows_panel_->set_visible(want > 0);
+        browser_->request_layout();
+    }
+    for (size_t i = 0; i < row_toolbars_.size(); ++i) {
+        const json::Value m = try_model([&](BbOwnedStr* o) {
+            return bb_bars_query(core_.app(), core::s(L"toolbar"), core::s(L"row" + std::to_wstring(i + 1)), o);
+        });
+        if (!m.is_null()) row_toolbars_[i]->update(m);
+    }
+}
+
+void MainView::open_toolbar_list(const BarRow& row, Rect anchor) {
+    BarRow list = row;
+    list.kind = "list";
+    floating_menu_ = std::make_unique<MenuItems>(build_menu_items(menu_env(), {list}));
+    if (floating_menu_->empty()) return;
+    MenuOpen o;
+    o.anchor = anchor;
+    popup_->open_menu(*floating_menu_, o);
+}
+
+void MainView::open_overflow(const std::vector<BarRow>& rows, Rect anchor) {
+    floating_menu_ = std::make_unique<MenuItems>(build_menu_items(menu_env(), rows));
+    if (floating_menu_->empty()) return;
+    MenuOpen o;
+    o.anchor = anchor;
+    popup_->open_menu(*floating_menu_, o);
+}
+
+void MainView::supply_properties(uint64_t tab) {
+    // The core hands out each cell once; keep asking until it has nothing left (bounded: a long list is
+    // read as it scrolls into view, not all at once).
+    for (int round = 0; round < 8; ++round) {
+        const json::Value req = try_model([&](BbOwnedStr* o) { return bb_props_requests(core_.app(), tab, 0, 0, o); });
+        if (req.size() == 0) break;
+        const std::string answer = read_property_cells(req);
+        bb_props_supply(core_.app(), tab, core::s(core::wide(answer)));
+    }
+}
+
+void MainView::sync_index() {
+    index_state_ = try_model([&](BbOwnedStr* o) { return bb_index_state(core_.app(), o); });
+    if (index_state_.is_null()) return;
+    const json::Value& b = index_state_["banner"];
+    indexer_banner_->set_visible(b["show"].boolean());
+    indexer_text_->set_text(core::wide(b["message"].str()));
+    if (Widget* start = indexer_banner_->find("IndexerStart")) start->set_visible(b["canStart"].boolean());
+    browser_->request_layout();
+    refresh_status();
+}
+
+bool MainView::pose_tab_drag(int gap) {
+    for (PaneView* pv : pane_views_) {
+        if (pv->pane() != active_pane_) continue;
+        if (gap < 0 || static_cast<size_t>(gap) > pv->strip->tabs().size()) return false;
+        pv->strip->set_drag_gap(gap);
+        return true;
+    }
+    return false;
+}
+
+IndexerBannerInfo MainView::indexer_banner() const {
+    const json::Value& b = index_state_["banner"];
+    return {b["show"].boolean(), core::wide(b["message"].str()), b["canStart"].boolean()};
+}
+
+std::wstring MainView::indexing_status() const { return core::wide(index_state_["status"].str()); }
+bool MainView::indexing_can_retry() const { return index_state_["canRetry"].boolean(); }
+
+void MainView::sync_overlays() {
+    sync_index();
+    if (settings_) settings_->sync();
+    if (palette_) palette_->sync();
+    if (sidebar_) sidebar_->sync();
+}
+
+void MainView::open_dialog(const std::wstring& kind) {
+    if (headless_dialogs_ || !dialog_exists(kind)) return;
+    close_dialog();
+    auto card = build_dialog(kind, DialogContext{*this, [this] { close_dialog(); }});
+    if (!card) return;
+    dialog_open_ = true;
+    bb_ui_set_dialog_open(core_.app(), true);
+    dialogs_->show(std::move(card));
+}
+
+void MainView::close_dialog() {
+    if (dialogs_ && dialogs_->is_open()) dialogs_->close();
+}
+
+std::unique_ptr<gfx::BitmapSurface> MainView::render_dialog(const std::wstring& kind) {
+    auto card = build_dialog(kind, DialogContext{*this, [] {}});
+    if (!card) return nullptr;
+    return render_dialog_detached(window_.root().resources(), std::move(card));
+}
+
+std::vector<SelectedRow> MainView::selected_rows() {
+    std::vector<SelectedRow> out;
+    if (!active_tab_) return out;
+    const auto listing = core_.listing(active_tab_);
+    if (!listing) return out;
+    for (const uint32_t i : core_.selection(active_tab_)) {
+        BbRow r{};
+        if (!listing->row(i, r)) continue;
+        SelectedRow s;
+        s.name = core::w(r.name);
+        s.path = core::w(r.full_path);
+        s.dir = (r.flags & BB_ROW_DIRECTORY) != 0;
+        s.size = r.size;
+        s.modified = r.modified;
+        s.created = r.created;
+        out.push_back(std::move(s));
+    }
+    return out;
+}
+
+void MainView::set_transfer_pose(TransferPose p) {
+    transfer_ = std::move(p);
+    transfer_strip_->set_visible(transfer_.active);
+    transfer_head_->set_text(transfer_.headline);
+    transfer_detail_->set_text(transfer_.detail);
+    transfer_bar_->set_indeterminate(transfer_.active && transfer_.indeterminate);
+    if (!transfer_.indeterminate) transfer_bar_->set_value(transfer_.fraction);
+    browser_->request_layout();
+}
+
+std::wstring MainView::transfer_text() const {
+    return transfer_.active ? transfer_.headline + L"  " + transfer_.detail : std::wstring();
+}
+
+void MainView::ensure_machine_properties() {
+    if (machine_props_set_) return;
+    machine_props_set_ = true;
+    const std::string list = machine_property_list();
+    bb_columns_set_machine_properties(core_.app(), core::s(core::wide(list)));
+}
+
+bool MainView::build_named_menu(const std::wstring& kind, MenuItems* out) {
+    TabView* tv = active_view();
+    if (!tv) return false;
+    if (kind == L"columns") *out = tv->build_column_menu();
+    else if (kind == L"files") *out = tv->build_files_menu(false);
+    else if (kind == L"background") *out = tv->build_files_menu(true);
+    else return false;
+    return true;
+}
+
+void MainView::show_context_menu(MenuItems items, Point at) {
+    floating_menu_ = std::make_unique<MenuItems>(std::move(items));
+    if (floating_menu_->empty()) return;
+    MenuOpen o;
+    o.anchor = Rect{at.x, at.y, at.x, at.y};
+    popup_->open_menu(*floating_menu_, o);
+}
+
+size_t MainView::thumbnails_pending() const {
+    size_t n = 0;
+    for (const auto& kv : by_tab_) n += kv.second->thumbnails_pending();
+    return n;
+}
+
+void MainView::set_thumbnail_source(ThumbSource s) {
+    thumb_source_ = s;
+    for (auto& kv : by_tab_) kv.second->set_thumbnail_source(s);
+}
+
+void MainView::refresh_tooltips() {
+    for (auto& kv : by_tab_) kv.second->refresh_tooltips();
 }
 
 void MainView::refresh_status() {
     if (!active_tab_) return;
-    status_->set_text(core_.tab_text(active_tab_, BB_TEXT_STATUS), L"");
+    std::wstring right = core::wide(index_state_["status"].str());
+    if (!right.empty() && index_state_["canRetry"].boolean()) right += L"  —  retry";
+    status_->set_text(core_.tab_text(active_tab_, BB_TEXT_STATUS), right);
 }
 
 void MainView::sync_layout() {
@@ -644,6 +1423,7 @@ std::unique_ptr<Widget> MainView::build_node(const json::Value& node, const json
                 parked_.erase(it);
             } else {
                 view = std::make_unique<TabView>(*this, core_, tab);
+                view->set_thumbnail_source(thumb_source_);
                 by_tab_[tab] = view.get();
                 view->reload_listing();
                 view->reload_state();

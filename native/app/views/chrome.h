@@ -27,6 +27,9 @@ class TitleBar : public ui::Widget {
 public:
     TitleBar();
     std::wstring title = L"BertBrowser";
+    bool show_title = true;       // the main window hides it: the menu bar and toolbar take the room
+    ui::Widget* left = nullptr;   // placed after the left padding (a menu bar); sized to its content
+    ui::Widget* middle = nullptr; // takes what is left between it and the caption buttons (a toolbar)
     void set_title(std::wstring t);
     void arrange(ui::Rect r) override;
     void paint(ui::PaintContext& pc) override;
@@ -38,10 +41,15 @@ public:
     StatusBar() { height = kHeight; }
     void set_text(std::wstring left, std::wstring right);
     const std::wstring& left() const { return left_; }
+    const std::wstring& right() const { return right_; }
+    // A click on the right-hand text (the index line offers "retry").
+    std::function<void()> on_right_click;
     void paint(ui::PaintContext& pc) override;
+    bool on_mouse_down(const ui::MouseEvent& e) override;
     static constexpr float kHeight = 24.0f;
 
 private:
+    float right_split() const;
     std::wstring left_, right_;
 };
 
@@ -61,6 +69,12 @@ public:
     void set_tabs(std::vector<TabEntry> tabs, bool pane_active);
     const std::vector<TabEntry>& tabs() const { return tabs_; }
     ui::Rect tab_rect(size_t i) const;
+    // Poses the insertion line a tab drag shows at a gap (0 is before the first tab); -1 takes it away.
+    void set_drag_gap(int gap) {
+        drag_gap_ = gap;
+        invalidate();
+    }
+    int drag_gap() const { return drag_gap_; }
 
     void paint(ui::PaintContext& pc) override;
     bool on_mouse_down(const ui::MouseEvent& e) override;
@@ -68,9 +82,11 @@ public:
     void on_mouse_leave() override;
 
 private:
+    void paint_tabs(ui::PaintContext& pc);
     size_t index_at(ui::Point p) const;
     float tab_width(size_t i) const;
     std::vector<TabEntry> tabs_;
+    int drag_gap_ = -1;
     bool pane_active_ = false;
     size_t hot_ = static_cast<size_t>(-1);
 };

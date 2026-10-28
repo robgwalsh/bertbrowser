@@ -4,8 +4,10 @@
 #pragma once
 #include "sandbox.h"
 #include "session.h"
+#include "ui/popup_layer.h"
 
 #include <functional>
+#include <memory>
 #include <map>
 #include <unordered_map>
 
@@ -24,6 +26,7 @@ private:
     void install();
     void install_asserts();
     void install_bench();
+    void install_ui();
 
     // ---- helpers ----
     static std::pair<std::wstring, std::wstring> split_first(const std::wstring& line);
@@ -49,6 +52,10 @@ private:
     std::string state_json();
     void search(const std::wstring& rest, bool global);
     void split_pane(const std::wstring& rest);
+    // Photographs loose menu items (nothing is opened) to <name>.png in the output directory.
+    void shot_menu(const bb::ui::MenuItems& items, const std::wstring& name);
+    // Writes a bitmap that something rendered detached.
+    void write_shot(bb::gfx::BitmapSurface& bitmap, const std::wstring& name);
 
     // ---- bench ----
     void record_time(const std::wstring& name, double ms);
@@ -62,6 +69,10 @@ private:
         int64_t items = 0, realized = 0, retained_thumbnails = 0;
     };
     MemorySample read_memory();
+
+    // The state the window-feature verbs (runner_ui.cpp) keep between commands.
+    struct UiState;
+    std::shared_ptr<UiState> ui_;
 
     Session& s_;
     const Options& o_;
