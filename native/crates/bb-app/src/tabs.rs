@@ -1,0 +1,1093 @@
+//! A tab: history, breadcrumb, the listing and the jobs that fill it, search, flat view, the watcher
+//! merge and selection. Spec: DirectoryTabViewModel, FileListViewModel.
+//!
+//! Every job is a closure on the worker pool that re-checks the tab's `generation` before it publishes, so
+//! a navigation that was superseded while it ran changes nothing.
+
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Weak};
+use std::time::Duration;
+
+use bb_core::attributes::HIDDEN;
+use bb_core::cancel::CancelToken;
+use bb_core::data::SearchHit;
+use bb_core::fs::{FileListDiff, FileSystemService, SearchProgress, SearchService};
+use bb_core::models::SearchOutcome;
+use bb_core::rules::FlatViewRules;
+use bb_core::search::SearchQuery;
+use bb_paths::PathKey;
+
+use crate::app::{Inner, TabCell, TabData, lock};
+use crate::dirwatch::DirWatcher;
+use crate::events::AppEvent;
+use crate::ids::{AppError, AppResult, TabId};
+use crate::rows::{Listing, Row};
+use crate::sort::SortSpec;
+
+/// How a gesture changes the selection. Indices are positions in the listing the caller holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectOp {
+    Replace,
+    Add,
+    Toggle,
+    Remove,
+    All,
+    Clear,
+    Invert,
+}
+
+/// A segment of the breadcrumb.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Crumb {
+    pub name: String,
+    pub full_path: String,
+}
+
+/// The cap on rows a flat view lists.
+pub const FLAT_ENTRY_CAP: usize = SearchService::MAX_FLAT_ENTRIES;
+
+/// The parent of a path, or None at a root.
+pub fn parent_path(path: &str) -> Option<String> {
+    let trimmed = path.trim_end_matches(['\\', '/']);
+    if trimmed.is_empty() || trimmed.len() == 2 && trimmed.ends_with(':') {
+        return None;
+    }
+    let cut = trimmed.rfind(['\\', '/'])?;
+    let parent = &trimmed[..cut];
+    if parent.len() == 2 && parent.ends_with(':') {
+        return Some(format!("{parent}\\"));
+    }
+    if parent.is_empty() || parent == "\\" {
+        return None;
+    }
+    Some(parent.to_string())
+}
+
+/// `C:\a\b` as C:, a, b with each segment's full path. A root keeps its trailing separator.
+pub fn breadcrumb(path: &str) -> Vec<Crumb> {
+    let mut out = Vec::new();
+    if path.is_empty() {
+        return out;
+    }
+    let root_len = bb_paths::root_len(path);
+    let root = &path[..root_len];
+    if root.is_empty() {
+        return out;
+    }
+    out.push(Crumb {
+        name: root.trim_end_matches(['\\', '/']).to_string(),
+        full_path: root.to_string(),
+    });
+    let mut acc = root.trim_end_matches(['\\', '/']).to_string();
+    for part in path[root_len..]
+        .split(['\\', '/'])
+        .filter(|p| !p.is_empty())
+    {
+        acc = format!("{acc}\\{part}");
+        out.push(Crumb {
+            name: part.to_string(),
+            full_path: acc.clone(),
+        });
+    }
+    out
+}
+
+/// A tab's title: the folder's name, or the drive.
+pub fn tab_title(path: &str) -> String {
+    if path.is_empty() {
+        return "New tab".to_string();
+    }
+    let trimmed = path.trim_end_matches(['\\', '/']);
+    let name = bb_paths::file_name(trimmed);
+    if name.is_empty() {
+        trimmed.to_string()
+    } else {
+        name.to_string()
+    }
+}
+
+fn access_denied_message(path: &str) -> String {
+    format!(
+        "Access is denied. \"{path}\" needs administrator rights, which BertBrowser does not use \u{2014} the same folders are closed to File Explorer."
+    )
+}
+
+fn intern(t: &mut TabData, key: &Arc<str>) -> u64 {
+    if let Some(&id) = t.interner.get(key) {
+        return id;
+    }
+    t.next_row += 1;
+    let id = t.next_row;
+    t.interner.insert(key.clone(), id);
+    id
+}
+
+impl TabData {
+    pub(crate) fn sort_spec(&self) -> SortSpec {
+        SortSpec::new(
+            &self.sort_by,
+            self.sort_desc,
+            self.is_flattened,
+            self.thumbnail_scale > 0.0,
+        )
+    }
+
+    /// Replaces the listing with `rows`, giving each a stable id. Selection survives only where
+    /// asked, and only for rows that are still there.
+    pub(crate) fn install(&mut self, mut rows: Vec<Row>, keep_selection: bool) {
+        for row in rows.iter_mut() {
+            row.id = intern(self, &row.key);
+        }
+        if keep_selection {
+            let present: std::collections::HashSet<u64> = rows.iter().map(|r| r.id).collect();
+            self.selection.retain(|id| present.contains(id));
+        } else {
+            self.selection.clear();
+        }
+        self.version += 1;
+        self.listing = Arc::new(Listing::new(
+            self.id.0,
+            self.version,
+            rows.into_iter().map(Arc::new).collect(),
+            self.is_flattened,
+            self.is_flat_browse,
+        ));
+    }
+
+    fn reset_view_flags(&mut self) {
+        self.is_flattened = false;
+        self.is_flat_browse = false;
+        self.shows_content_matches = false;
+        self.error = None;
+        self.empty_message = None;
+        self.notice = None;
+    }
+
+    fn clear_search_state(&mut self) {
+        self.search_gen += 1;
+        self.search_text.clear();
+        self.global_search_text.clear();
+    }
+}
+
+fn parse_has_search(text: &str) -> bool {
+    let parse = SearchQuery::parse(text);
+    parse.query.is_some() || parse.problem.is_some()
+}
+
+impl Inner {
+    fn include_hidden(&self) -> bool {
+        lock(&self.settings).show_hidden_items
+    }
+
+    // ---- navigation ----
+
+    pub(crate) fn navigate(self: &Arc<Self>, tab: TabId, path: &str) -> AppResult<()> {
+        let cell = self.tab(tab)?;
+        {
+            let t = lock(&cell);
+            if path.eq_ignore_ascii_case(&t.path) {
+                return Ok(());
+            }
+        }
+        if !std::path::Path::new(path).is_dir() {
+            self.set_status(tab, format!("Folder not found: {path}"));
+            return Err(AppError::Invalid(format!("Folder not found: {path}")));
+        }
+        {
+            let mut t = lock(&cell);
+            if !t.path.is_empty() {
+                let current = t.path.clone();
+                t.back.push(current);
+            }
+            t.forward.clear();
+        }
+        self.set_path_and_load(&cell, path.to_string());
+        Ok(())
+    }
+
+    pub(crate) fn back(self: &Arc<Self>, tab: TabId) -> AppResult<()> {
+        let cell = self.tab(tab)?;
+        let target = {
+            let mut t = lock(&cell);
+            let Some(target) = t.back.pop() else {
+                return Err(AppError::Invalid("nothing to go back to".into()));
+            };
+            let current = std::mem::take(&mut t.path);
+            t.forward.push(current);
+            target
+        };
+        self.set_path_and_load(&cell, target);
+        Ok(())
+    }
+
+    pub(crate) fn forward(self: &Arc<Self>, tab: TabId) -> AppResult<()> {
+        let cell = self.tab(tab)?;
+        let target = {
+            let mut t = lock(&cell);
+            let Some(target) = t.forward.pop() else {
+                return Err(AppError::Invalid("nothing to go forward to".into()));
+            };
+            let current = std::mem::take(&mut t.path);
+            t.back.push(current);
+            target
+        };
+        self.set_path_and_load(&cell, target);
+        Ok(())
+    }
+
+    pub(crate) fn up(self: &Arc<Self>, tab: TabId) -> AppResult<()> {
+        let cell = self.tab(tab)?;
+        let path = lock(&cell).path.clone();
+        match parent_path(&path) {
+            Some(parent) => self.navigate(tab, &parent),
+            None => Err(AppError::Invalid("already at the top".into())),
+        }
+    }
+
+    pub(crate) fn refresh(self: &Arc<Self>, tab: TabId) -> AppResult<()> {
+        self.tab(tab)?;
+        self.refresh_view(tab);
+        Ok(())
+    }
+
+    fn set_path_and_load(self: &Arc<Self>, cell: &TabCell, path: String) {
+        let id;
+        {
+            let mut t = lock(cell);
+            id = t.id;
+            t.clear_search_state();
+            t.path = path.clone();
+            t.interner.clear();
+            t.selection.clear();
+            // Restore this folder's tile/list preference.
+            let key = PathKey::canonicalize(&path).unwrap_or_default();
+            t.thumbnail_scale = lock(&self.settings)
+                .directory_thumbnail_scales
+                .get(&key)
+                .copied()
+                .unwrap_or(0.0);
+            t.watcher = None;
+        }
+        let watcher = self.start_watching(id, &path);
+        lock(cell).watcher = watcher;
+        self.hub.emit(AppEvent::TabChanged { tab: id });
+        self.refresh_view(id);
+    }
+
+    fn start_watching(self: &Arc<Self>, tab: TabId, path: &str) -> Option<DirWatcher> {
+        let weak: Weak<Inner> = Arc::downgrade(self);
+        let on_quiet: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            if let Some(inner) = weak.upgrade() {
+                inner.schedule(move |inner| inner.merge_directory(tab));
+            }
+        });
+        DirWatcher::start(
+            path,
+            Duration::from_millis(self.config.watch_debounce_ms),
+            on_quiet,
+        )
+    }
+
+    // ---- refresh: the one entry point every reload goes through ----
+
+    pub(crate) fn refresh_view(self: &Arc<Self>, tab: TabId) {
+        let Ok(cell) = self.tab(tab) else { return };
+        let (generation, token, kind) = {
+            let mut t = lock(&cell);
+            if t.path.is_empty() {
+                return;
+            }
+            t.generation += 1;
+            t.cancel.cancel();
+            t.cancel = CancelToken::new();
+            let kind = if parse_has_search(t.active_search_text()) {
+                Kind::Search
+            } else if t.is_flat_view {
+                Kind::Flat
+            } else {
+                Kind::Directory
+            };
+            (t.generation, t.cancel.clone(), kind)
+        };
+        match kind {
+            Kind::Directory => {
+                self.schedule(move |inner| inner.load_directory(tab, generation, token))
+            }
+            Kind::Search => self.schedule(move |inner| inner.run_search(tab, generation, token)),
+            Kind::Flat => self.schedule(move |inner| inner.run_flat(tab, generation, token)),
+        }
+        self.update_busy();
+    }
+
+    fn load_directory(self: &Arc<Self>, tab: TabId, generation: u64, token: CancelToken) {
+        let Ok(cell) = self.tab(tab) else { return };
+        let include_hidden = self.include_hidden();
+        let (path, spec) = {
+            let mut t = lock(&cell);
+            if t.generation != generation {
+                return;
+            }
+            t.reset_view_flags();
+            (t.path.clone(), t.sort_spec())
+        };
+
+        let listed = self.fs.list_directory(&path);
+        if token.is_cancelled() {
+            return;
+        }
+        match listed {
+            Ok(entries) => {
+                let mut rows: Vec<Row> = entries
+                    .iter()
+                    .filter(|e| include_hidden || e.attributes & HIDDEN == 0)
+                    .map(Row::from_entry)
+                    .collect();
+                spec.sort(&mut rows);
+                self.hydrate_dir_sizes(&mut rows);
+                if token.is_cancelled() {
+                    return;
+                }
+                let mut t = lock(&cell);
+                if t.generation != generation {
+                    return;
+                }
+                let count = rows.len();
+                t.install(rows, false);
+                t.status = format!("{count} item(s)");
+                let version = t.version;
+                drop(t);
+                self.hub.emit(AppEvent::ListingChanged { tab, version });
+                self.hub.emit(AppEvent::TabChanged { tab });
+            }
+            Err(e) => {
+                let message = if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    access_denied_message(&path)
+                } else {
+                    e.to_string()
+                };
+                let mut t = lock(&cell);
+                if t.generation != generation {
+                    return;
+                }
+                t.install(Vec::new(), false);
+                t.error = Some(message);
+                let version = t.version;
+                drop(t);
+                self.hub.emit(AppEvent::ListingChanged { tab, version });
+                self.hub.emit(AppEvent::TabChanged { tab });
+            }
+        }
+    }
+
+    /// Folder sizes come from `dir_size_cache` and nowhere else; a missing row stays blank.
+    fn hydrate_dir_sizes(&self, rows: &mut [Row]) {
+        let dirs: Vec<usize> = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.is_directory && r.size.is_none())
+            .map(|(i, _)| i)
+            .collect();
+        if dirs.is_empty() {
+            return;
+        }
+        let paths: Vec<&str> = dirs.iter().map(|&i| rows[i].full_path.as_str()).collect();
+        let Ok(cache) = self.dir_sizes.get_many(&paths) else {
+            return;
+        };
+        for i in dirs {
+            if let Some(hit) = cache.get(&*rows[i].key) {
+                rows[i].size = Some(hit.size_bytes);
+                rows[i].size_incomplete = hit.incomplete;
+                rows[i].size_computed = hit.computed_utc;
+            }
+        }
+    }
+
+    // ---- the watcher merge ----
+
+    fn merge_directory(self: &Arc<Self>, tab: TabId) {
+        let Ok(cell) = self.tab(tab) else { return };
+        let include_hidden = self.include_hidden();
+        let (path, generation, listing) = {
+            let t = lock(&cell);
+            // A search result is not a folder listing, and an errored list has nothing to merge into.
+            // The listing's own flag as well as the tab's: a load clears the tab's before it has
+            // replaced the rows, and diffing a search result against a folder would "add" the folder.
+            if t.is_flattened || t.listing.is_flattened || t.error.is_some() || t.path.is_empty() {
+                return;
+            }
+            (t.path.clone(), t.generation, t.listing.clone())
+        };
+        let Ok(listed) = self.fs.list_directory(&path) else {
+            return;
+        };
+        let entries: Vec<_> = listed
+            .into_iter()
+            .filter(|e| include_hidden || e.attributes & HIDDEN == 0)
+            .collect();
+        let current: Vec<_> = listing.rows().iter().map(|r| r.to_entry()).collect();
+        let Ok(changes) = FileListDiff::compute(&current, &entries) else {
+            return;
+        };
+        if !changes.any() {
+            return;
+        }
+
+        let mut added: Vec<Row> = changes.added.iter().map(Row::from_entry).collect();
+        let mut updated: Vec<Row> = changes.updated.iter().map(Row::from_entry).collect();
+        // Only folders that arrived need a size; an updated folder keeps the one it had.
+        self.hydrate_dir_sizes(&mut added);
+        let removed: std::collections::HashSet<&str> =
+            changes.removed.iter().map(String::as_str).collect();
+
+        let mut t = lock(&cell);
+        // Dropped if anything replaced the rows while the diff was computed: it was a diff of
+        // rows that are gone, and applying it to the new ones would duplicate entries.
+        if t.generation != generation || t.is_flattened || t.listing.version != listing.version {
+            return;
+        }
+        let spec = t.sort_spec();
+        let mut rows: Vec<Arc<Row>> = Vec::with_capacity(t.listing.len() + added.len());
+        let mut replacements: std::collections::HashMap<Arc<str>, Row> =
+            updated.drain(..).map(|r| (r.key.clone(), r)).collect();
+        for existing in t.listing.rows() {
+            if removed.contains(&*existing.key) {
+                continue;
+            }
+            if let Some(mut replacement) = replacements.remove(&existing.key) {
+                if replacement.is_directory {
+                    replacement.size = existing.size;
+                    replacement.size_incomplete = existing.size_incomplete;
+                    replacement.size_computed = existing.size_computed;
+                }
+                replacement.id = existing.id;
+                rows.push(Arc::new(replacement));
+            } else {
+                rows.push(existing.clone());
+            }
+        }
+        for mut row in added {
+            row.id = intern(&mut t, &row.key);
+            let at = rows.partition_point(|r| spec.compare(&row, r) != std::cmp::Ordering::Less);
+            rows.insert(at, Arc::new(row));
+        }
+        let present: std::collections::HashSet<u64> = rows.iter().map(|r| r.id).collect();
+        t.selection.retain(|id| present.contains(id));
+        t.version += 1;
+        let count = rows.len();
+        t.listing = Arc::new(Listing::new(t.id.0, t.version, rows, false, false));
+        t.empty_message = None;
+        t.status = format!("{count} item(s)");
+        let version = t.version;
+        drop(t);
+        self.hub.emit(AppEvent::ListingChanged { tab, version });
+        self.hub.emit(AppEvent::TabChanged { tab });
+    }
+
+    // ---- search ----
+
+    pub(crate) fn set_search(
+        self: &Arc<Self>,
+        tab: TabId,
+        text: &str,
+        global: bool,
+    ) -> AppResult<()> {
+        let cell = self.tab(tab)?;
+        let search_gen = {
+            let mut t = lock(&cell);
+            if global {
+                t.global_search_text = text.to_string();
+                if !text.is_empty() {
+                    t.search_text.clear();
+                }
+            } else {
+                t.search_text = text.to_string();
+                if !text.is_empty() {
+                    t.global_search_text.clear();
+                }
+            }
+            t.search_gen += 1;
+            t.search_gen
+        };
+        let delay = self.config.search_debounce_ms;
+        if delay == 0 {
+            self.refresh_view(tab);
+            return Ok(());
+        }
+        // The pending wait counts as loading, so a settle cannot slip between typing and searching.
+        self.loading.fetch_add(1, Ordering::SeqCst);
+        let inner = self.clone();
+        let spawned = std::thread::Builder::new()
+            .name("bb-search-debounce".into())
+            .spawn(move || {
+                std::thread::sleep(Duration::from_millis(delay));
+                let current = inner
+                    .tab(tab)
+                    .map(|c| lock(&c).search_gen == search_gen)
+                    .unwrap_or(false);
+                if current {
+                    inner.refresh_view(tab);
+                }
+                inner.loading.fetch_sub(1, Ordering::SeqCst);
+                inner.update_busy();
+            });
+        if spawned.is_err() {
+            self.loading.fetch_sub(1, Ordering::SeqCst);
+            self.refresh_view(tab);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn clear_search(self: &Arc<Self>, tab: TabId) -> AppResult<()> {
+        let cell = self.tab(tab)?;
+        lock(&cell).clear_search_state();
+        self.refresh_view(tab);
+        Ok(())
+    }
+
+    pub(crate) fn set_flat_view(self: &Arc<Self>, tab: TabId, on: bool) -> AppResult<()> {
+        let cell = self.tab(tab)?;
+        {
+            let mut t = lock(&cell);
+            if t.is_flat_view == on {
+                return Ok(());
+            }
+            t.is_flat_view = on;
+        }
+        self.hub.emit(AppEvent::TabChanged { tab });
+        self.refresh_view(tab);
+        Ok(())
+    }
+
+    /// Starts a flattened listing: the rows are about to arrive from many folders.
+    fn begin_flattened(t: &mut TabData, flat_browse: bool) {
+        t.reset_view_flags();
+        t.is_flattened = true;
+        t.is_flat_browse = flat_browse;
+        t.install(Vec::new(), false);
+    }
+
+    /// Appends a streamed batch, unsorted: the final sort replaces it when the run ends.
+    fn append_hits(&self, tab: TabId, generation: u64, hits: &[SearchHit], status: Option<String>) {
+        let Ok(cell) = self.tab(tab) else { return };
+        let mut t = lock(&cell);
+        if t.generation != generation {
+            return;
+        }
+        let mut rows: Vec<Row> = t.listing.rows().iter().map(|r| clone_row(r)).collect();
+        rows.extend(hits.iter().map(Row::from_hit));
+        t.install(rows, true);
+        if let Some(status) = status {
+            t.status = status.replace("{n}", &t.listing.len().to_string());
+        }
+        let version = t.version;
+        drop(t);
+        self.hub.emit(AppEvent::ListingChanged { tab, version });
+        self.hub.emit(AppEvent::TabChanged { tab });
+    }
+
+    fn run_search(self: &Arc<Self>, tab: TabId, generation: u64, token: CancelToken) {
+        let Ok(cell) = self.tab(tab) else { return };
+        let (text, global, path) = {
+            let t = lock(&cell);
+            if t.generation != generation {
+                return;
+            }
+            (
+                t.active_search_text().to_string(),
+                t.is_global_search(),
+                t.path.clone(),
+            )
+        };
+        let parse = SearchQuery::parse(&text);
+        if let Some(problem) = parse.problem {
+            let mut t = lock(&cell);
+            if t.generation == generation {
+                t.error = Some(problem.clone());
+                t.status = problem;
+            }
+            drop(t);
+            self.hub.emit(AppEvent::TabChanged { tab });
+            return;
+        }
+        let Some(query) = parse.query else { return };
+        let needs_content = query.needs_content();
+        {
+            let mut t = lock(&cell);
+            if t.generation != generation {
+                return;
+            }
+            Self::begin_flattened(&mut t, false);
+            t.shows_content_matches = needs_content;
+            t.is_search_running = needs_content;
+            t.status = if global {
+                format!("Searching this PC for '{text}'\u{2026}")
+            } else {
+                format!("Searching for '{text}'\u{2026}")
+            };
+            let version = t.version;
+            drop(t);
+            self.hub.emit(AppEvent::ListingChanged { tab, version });
+        }
+
+        let stream_status = (!needs_content && !global)
+            .then(|| format!("{{n}} result(s) so far for '{text}'\u{2026}"));
+        let on_batch = |hits: &[SearchHit]| {
+            if !token.is_cancelled() {
+                self.append_hits(tab, generation, hits, stream_status.clone());
+            }
+        };
+        let progress = SearchProgress {
+            live_batches: if needs_content && !global {
+                None
+            } else {
+                Some(&on_batch)
+            },
+            content_progress: None,
+        };
+        let result = if global {
+            self.search.search_all(&text, false, progress, &token)
+        } else {
+            self.search.search(&path, &text, false, progress, &token)
+        };
+        let outcome = match result {
+            Ok(Some(outcome)) => outcome,
+            _ => {
+                if let Ok(cell) = self.tab(tab) {
+                    let mut t = lock(&cell);
+                    if t.generation == generation {
+                        t.is_search_running = false;
+                    }
+                }
+                return;
+            }
+        };
+        if token.is_cancelled() {
+            return;
+        }
+
+        let mut rows: Vec<Row> = outcome.hits.iter().map(Row::from_hit).collect();
+        if global {
+            for row in rows.iter_mut() {
+                hydrate_search_metadata(row);
+            }
+        }
+        let spec = lock(&cell).sort_spec();
+        spec.sort(&mut rows);
+        self.hydrate_dir_sizes(&mut rows);
+
+        let mut t = lock(&cell);
+        if t.generation != generation {
+            return;
+        }
+        t.is_search_running = false;
+        let count = rows.len();
+        t.install(rows, false);
+        t.empty_message = (count == 0).then(|| format!("No results for '{text}'"));
+        let scope = if global { "this PC".to_string() } else { path };
+        let truncated = if outcome.truncated {
+            " (showing first 1,000)"
+        } else {
+            ""
+        };
+        t.status = format!(
+            "{count} result(s) for '{text}' in {scope}{truncated}{}",
+            search_suffix(
+                &outcome,
+                global,
+                self.seams.index.any_indexed() || self.seams.index.is_building()
+            )
+        );
+        let version = t.version;
+        drop(t);
+        self.hub.emit(AppEvent::ListingChanged { tab, version });
+        self.hub.emit(AppEvent::TabChanged { tab });
+    }
+
+    fn run_flat(self: &Arc<Self>, tab: TabId, generation: u64, token: CancelToken) {
+        let Ok(cell) = self.tab(tab) else { return };
+        let (path, include_hidden) = {
+            let t = lock(&cell);
+            if t.generation != generation {
+                return;
+            }
+            (t.path.clone(), self.include_hidden())
+        };
+
+        let estimate = self.dir_sizes.get(&path).ok().flatten();
+        let preflight = FlatViewRules::decide(&path, estimate.as_ref(), FLAT_ENTRY_CAP as i64);
+        if preflight.confirm
+            && !self
+                .seams
+                .confirm
+                .ask(&preflight.message, "Flat view", &preflight.confirm_label)
+        {
+            let mut t = lock(&cell);
+            if t.generation == generation {
+                t.is_flat_view = false;
+            }
+            drop(t);
+            self.hub.emit(AppEvent::TabChanged { tab });
+            self.refresh_view(tab);
+            return;
+        }
+
+        let folder = match bb_paths::file_name(path.trim_end_matches(['\\', '/'])) {
+            "" => path.clone(),
+            name => name.to_string(),
+        };
+        {
+            let mut t = lock(&cell);
+            if t.generation != generation {
+                return;
+            }
+            Self::begin_flattened(&mut t, true);
+            t.status = format!("Listing everything under {folder}\u{2026}");
+            let version = t.version;
+            drop(t);
+            self.hub.emit(AppEvent::ListingChanged { tab, version });
+        }
+
+        let stream_status = format!("{{n}} file(s) so far under {folder}\u{2026}");
+        let on_batch = |hits: &[SearchHit]| {
+            if !token.is_cancelled() {
+                self.append_hits(tab, generation, hits, Some(stream_status.clone()));
+            }
+        };
+        let progress = SearchProgress {
+            live_batches: Some(&on_batch),
+            content_progress: None,
+        };
+        let outcome: SearchOutcome =
+            match self
+                .search
+                .list_subtree(&path, FLAT_ENTRY_CAP, include_hidden, progress, &token)
+            {
+                Ok(outcome) => outcome,
+                Err(_) => return,
+            };
+        if token.is_cancelled() {
+            return;
+        }
+
+        let mut t = lock(&cell);
+        if t.generation != generation {
+            return;
+        }
+        if let Some(problem) = outcome.problem {
+            t.error = Some(problem.clone());
+            t.status = problem;
+            drop(t);
+            self.hub.emit(AppEvent::TabChanged { tab });
+            return;
+        }
+        let mut rows: Vec<Row> = outcome.hits.iter().map(Row::from_hit).collect();
+        t.sort_spec().sort(&mut rows);
+        self.hydrate_dir_sizes(&mut rows);
+        let count = rows.len();
+        t.install(rows, false);
+        t.empty_message = (count == 0).then(|| format!("Nothing under \"{folder}\"."));
+        t.notice = outcome.truncated.then(|| {
+            format!(
+                "Showing the first {} of a larger tree. Open a folder further in, or search to narrow it.",
+                bb_core::format::thousands(FLAT_ENTRY_CAP as i64)
+            )
+        });
+        let truncated = if outcome.truncated {
+            format!(
+                " (first {})",
+                bb_core::format::thousands(FLAT_ENTRY_CAP as i64)
+            )
+        } else {
+            String::new()
+        };
+        t.status = format!(
+            "{} file(s) under {}{truncated}",
+            bb_core::format::thousands(count as i64),
+            path
+        );
+        let version = t.version;
+        drop(t);
+        self.hub.emit(AppEvent::ListingChanged { tab, version });
+        self.hub.emit(AppEvent::TabChanged { tab });
+    }
+
+    // ---- sort, view options ----
+
+    pub(crate) fn set_sort(&self, tab: TabId, column: &str) -> AppResult<()> {
+        let cell = self.tab(tab)?;
+        let mut t = lock(&cell);
+        let id = bb_core::columns::ColumnCatalog::sort_spec(Some(column)).id;
+        if t.sort_by.eq_ignore_ascii_case(&id) {
+            t.sort_desc = !t.sort_desc;
+        } else {
+            t.sort_by = id;
+            t.sort_desc = false;
+        }
+        resort(&mut t);
+        let version = t.version;
+        drop(t);
+        self.hub.emit(AppEvent::ListingChanged { tab, version });
+        self.hub.emit(AppEvent::TabChanged { tab });
+        Ok(())
+    }
+
+    pub(crate) fn set_thumbnail_scale(&self, tab: TabId, scale: f64) -> AppResult<()> {
+        let cell = self.tab(tab)?;
+        let mut t = lock(&cell);
+        let scale = scale.clamp(0.0, 1.0);
+        let crossed = (scale > 0.0) != (t.thumbnail_scale > 0.0);
+        t.thumbnail_scale = scale;
+        if !t.path.is_empty()
+            && let Ok(key) = PathKey::canonicalize(&t.path)
+        {
+            let mut settings = lock(&self.settings);
+            if scale > 0.0 {
+                settings.directory_thumbnail_scales.insert(key, scale);
+            } else {
+                settings.directory_thumbnail_scales.remove(&key);
+            }
+        }
+        // Crossing the details/thumbnail boundary changes the bands (media moves to the bottom).
+        let version = if crossed {
+            resort(&mut t);
+            Some(t.version)
+        } else {
+            None
+        };
+        drop(t);
+        if let Some(version) = version {
+            self.hub.emit(AppEvent::ListingChanged { tab, version });
+        }
+        self.hub.emit(AppEvent::TabChanged { tab });
+        Ok(())
+    }
+
+    pub(crate) fn set_side_pane(&self, tab: TabId, pane: u8) -> AppResult<()> {
+        let cell = self.tab(tab)?;
+        lock(&cell).side_pane = pane.min(2);
+        {
+            let mut settings = lock(&self.settings);
+            settings.show_preview_pane = pane == 1;
+            settings.show_metadata_pane = pane == 2;
+        }
+        self.hub.emit(AppEvent::TabChanged { tab });
+        Ok(())
+    }
+
+    // ---- selection ----
+
+    pub(crate) fn select(&self, tab: TabId, op: SelectOp, indices: &[u32]) -> AppResult<()> {
+        let cell = self.tab(tab)?;
+        let mut t = lock(&cell);
+        let listing = t.listing.clone();
+        let ids = indices
+            .iter()
+            .filter_map(|&i| listing.row(i as usize).map(|r| r.id));
+        match op {
+            SelectOp::Replace => {
+                t.selection.clear();
+                t.selection.extend(ids);
+            }
+            SelectOp::Add => t.selection.extend(ids),
+            SelectOp::Remove => {
+                for id in ids {
+                    t.selection.remove(&id);
+                }
+            }
+            SelectOp::Toggle => {
+                for id in ids {
+                    if !t.selection.remove(&id) {
+                        t.selection.insert(id);
+                    }
+                }
+            }
+            SelectOp::All => t.selection = listing.rows().iter().map(|r| r.id).collect(),
+            SelectOp::Clear => t.selection.clear(),
+            SelectOp::Invert => {
+                t.selection = listing
+                    .rows()
+                    .iter()
+                    .map(|r| r.id)
+                    .filter(|id| !t.selection.contains(id))
+                    .collect();
+            }
+        }
+        drop(t);
+        self.hub.emit(AppEvent::TabChanged { tab });
+        Ok(())
+    }
+
+    /// Selected rows' positions in the current listing, ascending.
+    pub(crate) fn selected_indices(&self, tab: TabId) -> AppResult<Vec<u32>> {
+        let cell = self.tab(tab)?;
+        let t = lock(&cell);
+        Ok(t.listing
+            .rows()
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| t.selection.contains(&r.id))
+            .map(|(i, _)| i as u32)
+            .collect())
+    }
+
+    pub(crate) fn selected_paths(&self, tab: TabId) -> AppResult<Vec<String>> {
+        let cell = self.tab(tab)?;
+        let t = lock(&cell);
+        Ok(t.listing
+            .rows()
+            .iter()
+            .filter(|r| t.selection.contains(&r.id))
+            .map(|r| r.full_path.clone())
+            .collect())
+    }
+
+    /// Enter on a row: a folder opens in place, anything else goes to the launcher, whose refusal is
+    /// the status line.
+    pub(crate) fn open_item(self: &Arc<Self>, tab: TabId, index: u32) -> AppResult<()> {
+        let cell = self.tab(tab)?;
+        let row = lock(&cell)
+            .listing
+            .row(index as usize)
+            .cloned()
+            .ok_or(AppError::Stale)?;
+        if row.is_directory {
+            return self.navigate(tab, &row.full_path);
+        }
+        match self.seams.launcher.launch(&row.full_path, false) {
+            Ok(()) => Ok(()),
+            Err(why) => {
+                self.set_status(tab, format!("{} was not launched \u{2014} {why}", row.name));
+                Ok(())
+            }
+        }
+    }
+
+    // ---- refreshing other tabs after an operation ----
+
+    pub(crate) fn refresh_tabs_showing(self: &Arc<Self>, directories: &[String]) {
+        let keys: std::collections::HashSet<String> = directories
+            .iter()
+            .filter(|d| !d.trim().is_empty())
+            .filter_map(|d| PathKey::canonicalize(d).ok())
+            .collect();
+        if keys.is_empty() {
+            return;
+        }
+        for (id, cell) in self.all_tabs() {
+            let showing = {
+                let t = lock(&cell);
+                !t.path.is_empty()
+                    && PathKey::canonicalize(&t.path)
+                        .map(|k| keys.contains(&k))
+                        .unwrap_or(false)
+            };
+            if showing {
+                self.refresh_view(id);
+            }
+        }
+    }
+
+    /// Steps any tab that is inside a folder that just went away out to the nearest parent that
+    /// still exists, before it is reloaded onto a missing path.
+    pub(crate) fn leave_gone_folders(self: &Arc<Self>, gone: &[String]) {
+        for folder in gone {
+            let Ok(gone_key) = PathKey::canonicalize(folder) else {
+                continue;
+            };
+            let Some(parent) = parent_path(&PathKey::normalize_display(folder).unwrap_or_default())
+            else {
+                continue;
+            };
+            for (id, cell) in self.all_tabs() {
+                let inside = {
+                    let t = lock(&cell);
+                    !t.path.is_empty()
+                        && PathKey::canonicalize(&t.path)
+                            .map(|k| k == gone_key || PathKey::is_under_key(&k, &gone_key))
+                            .unwrap_or(false)
+                };
+                if inside {
+                    let _ = self.navigate(id, &parent);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn refresh_all(self: &Arc<Self>) {
+        for (id, _) in self.all_tabs() {
+            self.refresh_view(id);
+        }
+    }
+}
+
+enum Kind {
+    Directory,
+    Search,
+    Flat,
+}
+
+/// Re-sorts the tab's rows in place (a new snapshot, same ids and selection).
+fn resort(t: &mut TabData) {
+    let spec = t.sort_spec();
+    let mut rows: Vec<Arc<crate::rows::Row>> = t.listing.rows().to_vec();
+    rows.sort_by(|a, b| spec.compare(a, b));
+    t.version += 1;
+    t.listing = Arc::new(Listing::new(
+        t.id.0,
+        t.version,
+        rows,
+        t.is_flattened,
+        t.is_flat_browse,
+    ));
+}
+
+/// A copy of a row, id and all, for building the next snapshot of a streaming listing.
+fn clone_row(r: &Row) -> Row {
+    let mut c = Row::from_entry(&r.to_entry());
+    c.id = r.id;
+    c.relative_dir = r.relative_dir.clone();
+    c.content_match = r.content_match.clone();
+    c.size = r.size;
+    c.size_incomplete = r.size_incomplete;
+    c.size_computed = r.size_computed;
+    c
+}
+
+/// Index rows from the names-only fallback carry no times; stat just those.
+fn hydrate_search_metadata(row: &mut Row) {
+    use std::os::windows::fs::MetadataExt;
+    if !row.modified.is_unknown() {
+        return;
+    }
+    if let Ok(meta) = std::fs::metadata(&row.full_path) {
+        row.modified = bb_core::FileTime(meta.last_write_time() as i64);
+        row.created = bb_core::FileTime(meta.creation_time() as i64);
+        row.accessed = bb_core::FileTime(meta.last_access_time() as i64);
+        row.attributes = meta.file_attributes();
+        if !row.is_directory {
+            row.size = Some(meta.file_size() as i64);
+        }
+    }
+}
+
+fn search_suffix(outcome: &SearchOutcome, global: bool, any_index: bool) -> String {
+    use bb_core::models::SearchResultSource as Source;
+    if outcome.cancelled {
+        return " \u{2014} stopped".to_string();
+    }
+    if outcome.scope_lacks_metadata {
+        return " \u{2014} this drive has no size or date data, so those filters can't match"
+            .into();
+    }
+    if global && !any_index {
+        return " \u{2014} the search index is off".to_string();
+    }
+    match outcome.source {
+        Source::LiveScan => " \u{2014} indexing in background\u{2026}".to_string(),
+        Source::StaleIndex => " \u{2014} refreshing index\u{2026}".to_string(),
+        _ if global && outcome.refresh_pending => " \u{2014} indexing drives\u{2026}".to_string(),
+        _ => " \u{2014} indexed".to_string(),
+    }
+}

@@ -38,6 +38,14 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bb-app"
 version = "2.0.0"
+dependencies = [
+ "bb-core",
+ "bb-paths",
+ "bb-test-support",
+ "serde",
+ "serde_json",
+ "windows-sys",
+]
 
 [[package]]
 name = "bb-bench"
@@ -89,6 +97,8 @@ name = "bb-ffi"
 version = "2.0.0"
 dependencies = [
  "bb-app",
+ "bb-core",
+ "bb-test-support",
 ]
 
 [[package]]

@@ -11,7 +11,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Static CRT. The Rust side is built with +crt-static (native/.cargo/config.toml); the two must match.
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+# The release static CRT in every configuration: the C and C++ sources inside Rust dependencies (unrar,
+# sevenz) are compiled by cargo's `cc` with /MT even in a debug profile, and a debug-CRT executable
+# (/MTd, _ITERATOR_DEBUG_LEVEL=2) cannot link them (LNK2038).
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
 
 add_compile_options(/W4 /WX /permissive- /utf-8 /EHsc /Zc:__cplusplus /Zc:preprocessor)
 add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX STRICT)

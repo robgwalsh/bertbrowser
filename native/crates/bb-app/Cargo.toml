@@ -6,5 +6,15 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+bb-core = { path = "../bb-core" }
+bb-paths = { path = "../bb-paths" }
+serde.workspace = true
+serde_json.workspace = true
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
+bb-test-support = { path = "../bb-test-support" }

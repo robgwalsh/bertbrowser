@@ -7,7 +7,12 @@ publish.workspace = true
 
 [lib]
 name = "bbcore"
-crate-type = ["staticlib"]
+# The staticlib is what C++ links; the rlib lets the integration tests call the extern "C" functions.
+crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 bb-app = { path = "../bb-app" }
+bb-core = { path = "../bb-core" }
+
+[dev-dependencies]
+bb-test-support = { path = "../bb-test-support" }
