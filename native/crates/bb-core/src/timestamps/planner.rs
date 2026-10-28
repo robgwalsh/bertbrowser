@@ -11,9 +11,9 @@ use super::{
     TimestampRejection, TimestampSource,
 };
 use crate::FileTime;
-use crate::archives::ArchivePath;
 use crate::attributes::{DIRECTORY, REPARSE_POINT};
-use crate::rename::paths::directory_name;
+use crate::fs::ReadOnlyFile;
+use crate::metadata::{MetadataCodecs, MetadataEditPlanner, MetadataField, MetadataFields};
 use crate::time::TICKS_PER_DAY;
 
 /// What the planner needs to know about disk, so it can be tested without one.
@@ -38,11 +38,13 @@ impl TimestampProbe for FileSystemTimestampProbe {
         })
     }
 
-    fn date_taken_of(&self, _path: &str) -> Option<FileTime> {
-        // TODO(port): extended when Metadata is ported — reads the picture's `DateTaken` through
-        // the codec for its type (`MetadataCodecs::for_path(path)?.read(ReadOnlyFile::try_open(…))`)
-        // and parses it with `MetadataFields::try_parse_date`. Until then no picture has one.
-        None
+    fn date_taken_of(&self, path: &str) -> Option<FileTime> {
+        // The picture's own `DateTaken`, read through the codec for its type on `ReadOnlyFile`'s
+        // terms; a file no codec reads, or one with no date, has none.
+        let codec = MetadataCodecs::for_path(path)?;
+        let mut file = ReadOnlyFile::try_open(path, false)?;
+        let document = codec.read(&mut file).ok()?;
+        MetadataFields::try_parse_date(document.get(MetadataField::DateTaken))
     }
 }
 
@@ -185,9 +187,8 @@ impl<'a> TimestampPlanner<'a> {
     }
 }
 
-/// `MetadataEditPlanner.IsInsideArchive`: asks a path's **folder**, never its own name, because
+/// `MetadataEditPlanner::is_inside_archive`: asks a path's **folder**, never its own name, because
 /// an EPUB is an archive and standing on one is not being in it.
-/// TODO(port): extended when Metadata is ported — belongs on its planner.
 pub fn is_inside_archive(path: &str) -> bool {
-    directory_name(path).is_some_and(|dir| ArchivePath::looks_virtual(&dir))
+    MetadataEditPlanner::is_inside_archive(path)
 }

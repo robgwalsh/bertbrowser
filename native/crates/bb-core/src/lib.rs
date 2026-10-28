@@ -24,6 +24,7 @@ pub mod fs;
 pub mod ipc;
 pub mod launch;
 pub mod layout;
+pub mod metadata;
 pub mod mft;
 pub mod models;
 pub mod newitem;

@@ -18,6 +18,7 @@ use bb_core::timestamps::{
 use bb_core::transfer::TransferExecutor;
 use bb_core::undo::{PlainUndoHost, TimestampRecord, UndoKind, UndoableRecord};
 use bb_paths::fold_upper;
+use bb_test_support::metadata_fixtures;
 use bb_test_support::unique_temp_path;
 
 /// 2020-05-06 12:00:00 UTC.
@@ -251,6 +252,30 @@ fn dates_are_set_on_files_and_folders_and_reverting_is_its_own_redo() {
     let redone = executor.revert(&undone.stamped);
     assert!(redone.failed.is_empty(), "{:?}", redone.failed);
     assert_eq!(when_utc, last_write_utc(&file));
+}
+
+#[test]
+fn a_picture_can_be_dated_from_what_its_camera_wrote() {
+    let x = Fixture::new();
+    let photo = x.p("camera.jpg");
+    std::fs::write(
+        &photo,
+        metadata_fixtures::jpeg(metadata_fixtures::CAMERA_JPEG),
+    )
+    .unwrap();
+    let plain = x.file("notes.txt");
+
+    let outcome = TimestampExecutor::local().execute(&TimestampPlanner::local().plan(
+        &[photo.clone(), plain.clone()],
+        &TimestampChange::date_taken(true, true),
+    ));
+
+    let taken = FileTime::from_ymd_hms(2021, 6, 5, 4, 3, 2).local_to_utc();
+    assert_eq!(1, outcome.stamped.len());
+    assert_eq!(photo, outcome.stamped[0].path);
+    assert_eq!(taken, last_write_utc(&photo));
+    assert_eq!(taken, creation_utc(&photo));
+    assert_eq!(noon(), last_write_utc(&plain));
 }
 
 #[test]

@@ -51,6 +51,8 @@ tar.workspace = true
 flate2.workspace = true
 bzip2.workspace = true
 liblzma.workspace = true
+lofty.workspace = true
+quick-xml.workspace = true
 
 [dev-dependencies]
 bb-test-support = { path = "../bb-test-support" }

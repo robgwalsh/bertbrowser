@@ -1,4 +1,4 @@
 # C# tests deliberately not ported, one per line: FileTests.cs::MethodName  reason
 # Everything else in a ported file must exist in Rust under the snake_cased name.
-
-TimestampTests.cs::A_picture_can_be_dated_from_what_its_camera_wrote  needs the Metadata codecs and MetadataFixtures (not ported); FileSystemTimestampProbe::date_taken_of is a TODO(port) returning None until then
+MetadataEditTests.cs::The_record_steps_back_and_forth_and_retiring_it_erases_what_it_held  exercises UndoHistory (MetadataEditRecord, PlainUndoHost); port once undo uses the real metadata types
+MetadataEditTests.cs::An_edit_that_changed_nothing_is_not_a_history_entry  MetadataEditRecord.For is UndoHistory; port once undo uses the real metadata types

@@ -8,3 +8,5 @@ publish.workspace = true
 [dependencies]
 bb-core = { path = "../bb-core" }
 bb-paths = { path = "../bb-paths" }
+base64.workspace = true
+zip.workspace = true

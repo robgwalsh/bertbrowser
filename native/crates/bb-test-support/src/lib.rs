@@ -1,6 +1,9 @@
 //! Shared test helpers: temp databases and trees under %TEMP%, in-memory pipe pairs, fixtures copied
 //! verbatim from MetadataFixtures and ArchiveFixtures, in-memory probes. A dev-dependency only.
 
+pub mod metadata_fixtures;
+mod metadata_fixtures_data;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
