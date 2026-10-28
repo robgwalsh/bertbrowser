@@ -8,6 +8,7 @@ publish.workspace = true
 [dependencies]
 bb-core = { path = "../bb-core" }
 bb-paths = { path = "../bb-paths" }
+bb-shell = { path = "../bb-shell" }
 serde.workspace = true
 serde_json.workspace = true
 windows-sys = { workspace = true, features = [

@@ -420,7 +420,7 @@ impl Inner {
 
         // Refused for permissions: offer to try again with administrator rights, before the entry
         // is recorded (a retry is one action to the user, however many passes it takes).
-        let mut elevated_note = "";
+        let mut elevated_note = String::new();
         if let Some(retry) =
             ElevatedRetry::retry_for_transfer(&plan, &outcome, resolutions.as_ref())
         {
@@ -435,7 +435,25 @@ impl Inner {
             } else {
                 ElevationOperation::TransferCopy
             };
-            elevated_note = self.offer_elevation(operation, &items, false);
+            let (second, note) = self.elevate(operation, &items, false, |runner| {
+                // Its own progress, built from the retry plan: the first pass's item counts and byte
+                // total describe an operation that has already finished.
+                let estimate =
+                    TransferEstimator::estimate(&retry.plan, &CachedSource(&self.dir_sizes));
+                self.tracker_begin(TransferTracker::for_plan(&retry.plan, estimate));
+                self.set_active_status(format!(
+                    "Retrying {} item(s) as administrator\u{2026}",
+                    count_text(retry.plan.transfers.len())
+                ));
+                runner.run_transfer(&retry, Some(&mut on_progress), cancel)
+            });
+            elevated_note = note;
+            if let Some(second) = second {
+                match ElevatedRetry::merge_transfer(&outcome, &retry, &second) {
+                    Ok(merged) => outcome = merged,
+                    Err(e) => elevated_note = format!(" \u{2014} {e}"),
+                }
+            }
         }
 
         self.record(TransferRecord::for_outcome(outcome.clone()).map(|r| Box::new(r) as _));
@@ -488,7 +506,7 @@ impl Inner {
         } else if outcome.can_undo() || outcome.can_undo_copy {
             text.push_str(" \u{2014} this can be undone");
         }
-        text.push_str(elevated_note);
+        text.push_str(&elevated_note);
         self.set_final_status(text.clone());
         (outcome.failed.is_empty() && !outcome.cancelled, text)
     }
@@ -578,11 +596,11 @@ impl Inner {
                 ));
             }
         };
-        let outcome = self
+        let mut outcome = self
             .delete_executor()
             .execute(&plan, cancel, Some(&on_progress));
 
-        let mut elevated_note = "";
+        let mut elevated_note = String::new();
         if let Some(retry) = ElevatedRetry::retry_for_delete(&plan, &outcome) {
             let items: Vec<String> = retry
                 .plan
@@ -590,7 +608,22 @@ impl Inner {
                 .iter()
                 .map(|d| d.source_path.clone())
                 .collect();
-            elevated_note = self.offer_elevation(ElevationOperation::Delete, &items, false);
+            let (second, note) =
+                self.elevate(ElevationOperation::Delete, &items, false, |runner| {
+                    self.set_active_status(format!(
+                        "Retrying {} item(s) as administrator\u{2026}",
+                        count_text(retry.plan.deletions.len())
+                    ));
+                    let mut forward = |p: bb_core::delete::DeleteProgress| on_progress(p);
+                    runner.run_delete(&retry, Some(&mut forward), cancel)
+                });
+            elevated_note = note;
+            if let Some(second) = second {
+                match ElevatedRetry::merge_delete(&outcome, &retry, &second) {
+                    Ok(merged) => outcome = merged,
+                    Err(e) => elevated_note = format!(" \u{2014} {e}"),
+                }
+            }
         }
 
         self.record(DeleteRecord::for_outcome(outcome.clone(), None).map(|r| Box::new(r) as _));
@@ -617,7 +650,7 @@ impl Inner {
         } else if outcome.can_undo() {
             text.push_str(" \u{2014} this can be undone");
         }
-        text.push_str(elevated_note);
+        text.push_str(&elevated_note);
         self.set_final_status(text.clone());
         (outcome.failed.is_empty(), text)
     }
@@ -721,9 +754,9 @@ impl Inner {
             "Renaming {} item(s)\u{2026}",
             count_text(plan.work().len())
         ));
-        let outcome = RenameExecutor.execute(&plan);
+        let mut outcome = RenameExecutor.execute(&plan);
 
-        let mut elevated_note = "";
+        let mut elevated_note = String::new();
         if let Some(retry) = ElevatedRetry::retry_for_rename(&plan, &outcome) {
             let items: Vec<String> = retry
                 .plan
@@ -731,7 +764,18 @@ impl Inner {
                 .iter()
                 .map(|r| r.source_path.clone())
                 .collect();
-            elevated_note = self.offer_elevation(ElevationOperation::Rename, &items, false);
+            let (second, note) =
+                self.elevate(ElevationOperation::Rename, &items, false, |runner| {
+                    self.set_active_status(format!(
+                        "Retrying {} item(s) as administrator\u{2026}",
+                        count_text(retry.plan.renames.len())
+                    ));
+                    runner.run_rename(&retry, &CancelToken::new())
+                });
+            elevated_note = note;
+            if let Some(second) = second {
+                outcome = ElevatedRetry::merge_rename(&outcome, &retry, &second);
+            }
         }
 
         self.record(RenameRecord::for_outcome(outcome.clone()).map(|r| Box::new(r) as _));
@@ -755,7 +799,7 @@ impl Inner {
         } else if outcome.can_undo() {
             text.push_str(" \u{2014} this can be undone");
         }
-        text.push_str(elevated_note);
+        text.push_str(&elevated_note);
         self.set_final_status(text.clone());
         (outcome.failed.is_empty(), text)
     }

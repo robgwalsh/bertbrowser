@@ -107,8 +107,24 @@ impl Inner {
         if self.seams.index.presence() == IndexerPresence::NotApplicable {
             return;
         }
-        self.schedule(|inner| {
-            let _ = inner.seams.index.start_with(IndexStartMode::AttachOnly);
+        // A benchmark launch leaves the machine alone: see `AppConfig::machine_effects`.
+        if !self.config.machine_effects {
+            return;
+        }
+        // Attach to the helper if one is already running (it outlives the app, so most launches
+        // find one and cost nothing). If there is none this raises *no* elevation prompt unless the
+        // user asked for one at launch; otherwise the banner offers it and the user clicks.
+        let mode = if lock(&self.settings).start_indexer_at_launch {
+            IndexStartMode::AttachOrLaunch
+        } else {
+            IndexStartMode::AttachOnly
+        };
+        self.schedule(move |inner| {
+            let _ = inner.seams.index.start_with(mode);
+            // The recording setting is the helper's only by being pushed, and a helper started
+            // under an earlier app keeps whatever it was last told; an off policy also holds the
+            // table to it.
+            inner.change_log_policy_changed();
             inner.index_wait_for_answer();
         });
     }

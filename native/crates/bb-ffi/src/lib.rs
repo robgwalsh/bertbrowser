@@ -38,6 +38,8 @@ mod ops_ffi;
 pub use ops_ffi::*;
 mod panes;
 pub use panes::*;
+mod startup;
+pub use startup::*;
 mod tools;
 pub use tools::*;
 
@@ -525,7 +527,29 @@ unsafe fn build_app(
             config.settings_debounce_ms = u64::from(settings_debounce_ms);
         }
         config.index_declined = index_declined;
+        if config.fakes == Fakes::None {
+            // The product: a first native launch over a data directory the C# app used moves its
+            // files aside before anything opens the database, and a benchmark launch is told to
+            // leave the machine alone.
+            if let Some(notice) = startup::migrate_legacy_data(&config.data_dir) {
+                startup::set_startup_notice(notice);
+            }
+            config.machine_effects = !startup::trace().enabled();
+        }
         let app = App::new(config)?;
+        if startup::trace().enabled() {
+            // The settings, services, migration and theme all happen inside App::new; one mark each
+            // keeps the schema the bench tool reads.
+            let t = startup::trace();
+            for mark in [
+                bb_core::benchmarking::StartupMarks::SETTINGS_LOADED,
+                bb_core::benchmarking::StartupMarks::SERVICES_BUILT,
+                bb_core::benchmarking::StartupMarks::MIGRATED,
+                bb_core::benchmarking::StartupMarks::THEME_READY,
+            ] {
+                t.mark(mark);
+            }
+        }
         let sink: SinkSlot = Arc::new(Mutex::new(None));
         {
             let sink = sink.clone();

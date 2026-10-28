@@ -1,0 +1,15 @@
+[package]
+name = "bb-ffi-harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "bbcore_harness"
+# The staticlib bb-harness links instead of the product's `bbcore.lib`: the same C ABI, plus the test
+# fixtures (`bb_fixture_write`) that BertBrowser.exe must never carry.
+crate-type = ["staticlib"]
+
+[dependencies]
+bb-ffi = { path = "../bb-ffi", features = ["fixtures"] }

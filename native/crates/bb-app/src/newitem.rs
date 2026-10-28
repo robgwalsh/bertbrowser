@@ -123,16 +123,24 @@ impl Inner {
             "New",
             false,
             Box::new(move |inner, _op, _cancel| {
-                let outcome = NewItemExecutor.execute(&plan);
-                let mut elevated = "";
-                if bb_core::elevation::ElevatedRetry::retry_for_new_item(&plan, &outcome).is_some()
+                let mut outcome = NewItemExecutor.execute(&plan);
+                let mut elevated = String::new();
+                if let Some(retry) =
+                    bb_core::elevation::ElevatedRetry::retry_for_new_item(&plan, &outcome)
                 {
                     let item = format!("{}\\{}", plan.directory.trim_end_matches('\\'), plan.name);
-                    elevated = inner.offer_elevation(
+                    let (second, note) = inner.elevate(
                         bb_core::elevation::ElevationOperation::NewItem,
                         &[item],
                         false,
+                        |runner| runner.run_new_item(&retry, &bb_core::cancel::CancelToken::new()),
                     );
+                    elevated = note;
+                    if let Some(second) = second {
+                        outcome = bb_core::elevation::ElevatedRetry::merge_new_item(
+                            &outcome, &retry, &second,
+                        );
+                    }
                 }
                 if let Some(created) = &outcome.created_path {
                     inner.select_after_refresh(&plan.directory, created);

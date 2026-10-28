@@ -46,12 +46,13 @@ void Window::register_class() {
 
 Window::Window(gfx::Resources& res, const WindowOptions& options) : res_(res), options_(options), root_(res) {
     register_class();
-    const DWORD ex = options_.parked ? (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) : 0;
+    const bool out_of_sight = options_.parked || options_.offscreen;
+    const DWORD ex = out_of_sight ? (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) : 0;
     const UINT guess = options_.dpi_override ? options_.dpi_override : GetDpiForSystem();
     const int w = MulDiv(options_.width_dip, static_cast<int>(guess), 96);
     const int h = MulDiv(options_.height_dip, static_cast<int>(guess), 96);
-    const int x = options_.parked ? -32000 : CW_USEDEFAULT;
-    const int y = options_.parked ? -32000 : CW_USEDEFAULT;
+    const int x = out_of_sight ? -32000 : CW_USEDEFAULT;
+    const int y = out_of_sight ? -32000 : CW_USEDEFAULT;
     hwnd_ = CreateWindowExW(ex, kClassName, options_.title.c_str(), WS_OVERLAPPEDWINDOW, x, y, w, h, nullptr, nullptr,
                             GetModuleHandleW(nullptr), this);
     if (!hwnd_) {
@@ -128,7 +129,7 @@ void Window::show() {
         ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
         EnableWindow(hwnd_, FALSE);  // a disabled window cannot be activated by anything
     } else {
-        ShowWindow(hwnd_, options_.activate ? SW_SHOW : SW_SHOWNOACTIVATE);
+        ShowWindow(hwnd_, options_.activate && !options_.offscreen ? SW_SHOW : SW_SHOWNOACTIVATE);
     }
 }
 
@@ -380,7 +381,11 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             PAINTSTRUCT ps;
             BeginPaint(hwnd_, &ps);
             EndPaint(hwnd_, &ps);
-            render();
+            if (SUCCEEDED(render()) && on_first_paint) {
+                auto first = std::move(on_first_paint);
+                on_first_paint = nullptr;
+                first();
+            }
             return 0;
         }
         case WM_SETCURSOR:
