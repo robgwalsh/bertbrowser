@@ -687,24 +687,8 @@ fn is_file(path: &str) -> bool {
 }
 
 /// Whether a path sits in a delete's holding folder or a Recycle Bin: deleted as far as the user is
-/// concerned, however much it is still on disk. Asked once per row by a search and by the flat
-/// view, so the segments are walked in place.
-// TODO(port): this is `DeleteExecutor.IsHeldPath` and `ProtectedLocations.IsRecycleBinName`
-// (Core/Services/Delete); when Delete is ported it moves there and the names come from one table.
+/// concerned, however much it is still on disk. The delete executor's answer, since it names the
+/// holding folders.
 pub fn is_held_path(path: &str) -> bool {
-    const RECYCLE_BIN_FOLDERS: [&str; 3] = ["$Recycle.Bin", "$RECYCLE.BIN", "RECYCLER"];
-    const TRASH_FOLDER_NAME: &str = ".bertbrowser-trash";
-    const LOCAL_STAGING_PREFIX: &str = ".bertbrowser-deleted-";
-
-    path.split(['\\', '/']).any(|segment| {
-        !segment.is_empty()
-            && (RECYCLE_BIN_FOLDERS
-                .iter()
-                .any(|f| segment.eq_ignore_ascii_case(f))
-                || segment.eq_ignore_ascii_case(TRASH_FOLDER_NAME)
-                || (segment.len() >= LOCAL_STAGING_PREFIX.len()
-                    && segment.is_char_boundary(LOCAL_STAGING_PREFIX.len())
-                    && segment[..LOCAL_STAGING_PREFIX.len()]
-                        .eq_ignore_ascii_case(LOCAL_STAGING_PREFIX)))
-    })
+    crate::delete::DeleteExecutor::is_held_path(path)
 }

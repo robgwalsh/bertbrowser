@@ -11,6 +11,10 @@ use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use bb_core::cancel::CancelToken;
+use bb_core::delete::{
+    DeleteExecutor, DeleteMode, DeleteOutcome, DeletePlanner, DeleteSource, FileSystemDeleteProbe,
+};
 use bb_core::fs::AccessDenied;
 use bb_test_support::unique_temp_path;
 
@@ -68,6 +72,20 @@ impl Fixture {
         self.denied.push(folder);
         std::fs::write(&p, content).unwrap();
         p
+    }
+
+    /// A permanent delete of one file through the real planner and executor, holding nothing
+    /// anywhere but under the fixture.
+    fn delete(&self, path: &Path) -> DeleteOutcome {
+        let path = path.to_string_lossy();
+        let plan = DeletePlanner::new(&FileSystemDeleteProbe)
+            .protecting(&[])
+            .plan(&[DeleteSource::new(&path, false)], DeleteMode::Permanent);
+        assert!(plan.has_work(), "the planner refused the fixture: {plan:?}");
+        DeleteExecutor::new(&FileSystemDeleteProbe)
+            .protecting(&[])
+            .staging_root(&self.root.to_string_lossy())
+            .execute(&plan, &CancelToken::none(), None)
     }
 }
 
@@ -174,7 +192,7 @@ fn nothing_is_not() {
 // --- the wiring, from Win32 up ---
 // TODO(port): re-point the two transfer tests at TransferExecutor's `FailedTransfer.access_denied`
 // once Transfer is ported; until then they pin the failures a copier reports, as the executor's
-// catch clause will see them.
+// catch clause will see them. The three delete tests go through the real `DeleteExecutor`.
 
 #[test]
 fn a_transfer_windows_refuses_is_marked_as_such() {
@@ -198,11 +216,14 @@ fn a_delete_windows_refuses_is_marked_as_such() {
     let mut f = Fixture::new();
     let victim = f.denied_file("precious", &["locked", "a.txt"]);
 
-    let failure = std::fs::remove_file(&victim).expect_err("the denied delete went through");
+    let outcome = f.delete(&victim);
 
+    assert_eq!(outcome.failed.len(), 1, "{outcome:?}");
+    let failure = &outcome.failed[0];
     assert!(
-        AccessDenied::caused(Some(&failure)),
-        "expected a permission failure, got '{failure}'."
+        failure.access_denied,
+        "expected a permission failure, got '{}'.",
+        failure.message
     );
 }
 
@@ -216,18 +237,21 @@ fn a_file_something_else_has_open_is_not_a_permission_problem() {
         .open(&victim)
         .unwrap();
 
-    let failure = std::fs::remove_file(&victim).expect_err("a file held open was deleted");
+    let outcome = f.delete(&victim);
 
+    assert_eq!(outcome.failed.len(), 1, "a file held open was deleted");
+    let failure = &outcome.failed[0];
     assert!(
-        !AccessDenied::caused(Some(&failure)),
-        "a sharing violation must not ask for a token: '{failure}'."
+        !failure.access_denied,
+        "a sharing violation must not ask for a token: '{}'.",
+        failure.message
     );
 }
 
 #[test]
 fn a_read_only_file_is_not_a_permission_problem_either() {
-    // The delete executor answers a refusal by clearing the attribute and retrying, so a read-only
-    // file never reaches the flag at all: it deletes. That order is the reason read-only files do not
+    // `DeleteExecutor::erase` answers a refusal by clearing the attribute and retrying, so this
+    // never reaches the flag at all: it deletes. That order is the reason read-only files do not
     // raise a UAC prompt, and this is what holds it in place.
     let f = Fixture::new();
     let victim = f.file("stubborn", &["ro", "a.txt"]);
@@ -235,14 +259,8 @@ fn a_read_only_file_is_not_a_permission_problem_either() {
     perms.set_readonly(true);
     std::fs::set_permissions(&victim, perms).unwrap();
 
-    let outcome = std::fs::remove_file(&victim).or_else(|_| {
-        let mut perms = std::fs::metadata(&victim).unwrap().permissions();
-        #[allow(clippy::permissions_set_readonly_false)]
-        perms.set_readonly(false);
-        std::fs::set_permissions(&victim, perms).unwrap();
-        std::fs::remove_file(&victim)
-    });
+    let outcome = f.delete(&victim);
 
-    assert!(outcome.is_ok());
+    assert!(outcome.failed.is_empty(), "{:?}", outcome.failed);
     assert!(!victim.exists());
 }
