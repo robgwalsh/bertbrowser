@@ -128,6 +128,39 @@ struct Host {
     }
 };
 
+// A menu line's own picture (MENUITEMINFO::hbmpItem) as premultiplied BGRA at its native size. Null for the
+// stock HBMMENU_* handles (small integers), for owner-drawn lines, and for anything GDI will not give up.
+ui::ThumbPtr bitmap_picture(HBITMAP bitmap) {
+    const auto handle = reinterpret_cast<uintptr_t>(bitmap);
+    if (handle <= 11 || handle == static_cast<uintptr_t>(-1)) return nullptr;
+    BITMAP bm{};
+    if (GetObjectW(bitmap, sizeof(bm), &bm) != sizeof(bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0 || bm.bmWidth > 256 || bm.bmHeight > 256) {
+        return nullptr;
+    }
+    BITMAPINFO bi{};
+    bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+    bi.bmiHeader.biWidth = bm.bmWidth;
+    bi.bmiHeader.biHeight = -bm.bmHeight;  // top-down
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    auto img = std::make_shared<ui::ThumbImage>();
+    img->width = static_cast<uint32_t>(bm.bmWidth);
+    img->height = static_cast<uint32_t>(bm.bmHeight);
+    img->bgra.resize(static_cast<size_t>(img->width) * img->height * 4);
+    HDC dc = GetDC(nullptr);
+    const int got = GetDIBits(dc, bitmap, 0, img->height, img->bgra.data(), &bi, DIB_RGB_COLORS);
+    ReleaseDC(nullptr, dc);
+    if (got != bm.bmHeight) return nullptr;
+    // One with no alpha channel at all is opaque; one with is already premultiplied (menus use PARGB32).
+    bool any_alpha = false;
+    for (size_t i = 3; i < img->bgra.size() && !any_alpha; i += 4) any_alpha = img->bgra[i] != 0;
+    if (!any_alpha) {
+        for (size_t i = 3; i < img->bgra.size(); i += 4) img->bgra[i] = 0xFF;
+    }
+    return img;
+}
+
 struct Selection {
     PIDLIST_ABSOLUTE folder = nullptr;
     std::vector<PIDLIST_ABSOLUTE> items;
@@ -194,7 +227,7 @@ public:
         for (int pos = 0; pos < count; ++pos) {
             MENUITEMINFOW info{};
             info.cbSize = sizeof(info);
-            info.fMask = MIIM_STATE | MIIM_ID | MIIM_SUBMENU | MIIM_STRING | MIIM_FTYPE;
+            info.fMask = MIIM_STATE | MIIM_ID | MIIM_SUBMENU | MIIM_STRING | MIIM_FTYPE | MIIM_BITMAP;
             if (!GetMenuItemInfoW(m, static_cast<UINT>(pos), TRUE, &info)) continue;
             ShellEntry e;
             if (info.fType & MFT_SEPARATOR) {
@@ -214,6 +247,7 @@ public:
                 else text.clear();
             }
             e.enabled = (info.fState & (MFS_DISABLED | MFS_GRAYED)) == 0;
+            if (!(info.fType & MFT_OWNERDRAW)) e.picture = bitmap_picture(info.hbmpItem);
             if (info.hSubMenu) {
                 host.message(WM_INITMENUPOPUP, reinterpret_cast<WPARAM>(info.hSubMenu), static_cast<LPARAM>(pos));
                 e.children = walk(host, info.hSubMenu);

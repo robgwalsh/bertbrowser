@@ -530,6 +530,30 @@ pub unsafe extern "C" fn bb_metadata_picture(
     })
 }
 
+/// A picture's bytes for the preview to decode, from disk or from inside an archive, at most the
+/// preview's image budget. `*out_len` is the whole length; the bytes are copied only when
+/// `capacity` holds them all (call again with a bigger buffer otherwise). `BB_ERR` says why it could
+/// not be read (an encrypted entry, most often). Blocking: call it from a worker thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_preview_read(
+    app: *mut BbApp,
+    path: BbStr,
+    dst: *mut u8,
+    capacity: usize,
+    out_len: *mut usize,
+) -> BbStatus {
+    guard(|| {
+        let bytes = unsafe { app_of(app)? }.app.preview_read(&text_of(path))?;
+        if let Some(l) = unsafe { out_len.as_mut() } {
+            *l = bytes.len();
+        }
+        if !dst.is_null() && capacity >= bytes.len() {
+            unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), dst, bytes.len()) };
+        }
+        Ok(())
+    })
+}
+
 // ---- comparing two panes ----
 
 /// `bb_compare_settle` off the UI thread: answers at once; the rows re-paint when it is done.
@@ -594,7 +618,11 @@ pub unsafe extern "C" fn bb_op_rename_rule(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_undo_clear(app: *mut BbApp) -> BbStatus {
     guard(|| {
-        unsafe { app_of(app)? }.app.release_undo_history();
+        let app = unsafe { app_of(app)? };
+        app.app.release_undo_history();
+        // Said here and not in the release itself, which also runs when the window closes.
+        // Spec: ShellViewModel.ClearUndoHistoryAsync.
+        app.app.set_status("Undo history cleared.");
         Ok(())
     })
 }

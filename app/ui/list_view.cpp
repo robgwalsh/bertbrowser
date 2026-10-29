@@ -36,11 +36,33 @@ void ListView::set_sort(int column_id, bool ascending) {
     invalidate();
 }
 
-void ListView::refresh() {
-    layout_bars();
+size_t ListView::find_row(uint64_t id, size_t hint) const {
     const size_t n = count();
-    if (cursor_ != npos && cursor_ >= n) cursor_ = npos;
-    if (anchor_ != npos && anchor_ >= n) anchor_ = npos;
+    if (!provider_ || n == 0) return npos;
+    // Near where it was first: a merge moves a row by a few places, not across the list.
+    const size_t lo = hint > 64 ? hint - 64 : 0, hi = std::min(n, hint + 65);
+    for (size_t i = lo; i < hi; ++i) {
+        if (provider_->row_id(i) == id) return i;
+    }
+    for (size_t i = 0; i < n; ++i) {
+        if (provider_->row_id(i) == id) return i;
+    }
+    return npos;
+}
+
+void ListView::note_ids() {
+    const size_t n = count();
+    cursor_known_ = provider_ && cursor_ != npos && cursor_ < n;
+    if (cursor_known_) cursor_id_ = provider_->row_id(cursor_);
+    anchor_known_ = provider_ && anchor_ != npos && anchor_ < n;
+    if (anchor_known_) anchor_id_ = provider_->row_id(anchor_);
+}
+
+void ListView::refresh() {
+    if (cursor_ != npos) cursor_ = cursor_known_ ? find_row(cursor_id_, cursor_) : npos;
+    if (anchor_ != npos) anchor_ = anchor_known_ ? find_row(anchor_id_, anchor_) : npos;
+    note_ids();
+    layout_bars();
     invalidate();
 }
 
@@ -148,6 +170,7 @@ Cursor ListView::cursor_at(Point p) const {
 // ---- painting --------------------------------------------------------------------------------------
 
 void ListView::paint(PaintContext& pc) {
+    note_ids();
     pc.fill(bounds, style.bg != kNoToken ? style.bg : tok::ListBackground);
     painted_rows_ = 0;
     if (provider_ && !columns_.empty()) {
@@ -161,10 +184,13 @@ void ListView::paint(PaintContext& pc) {
             ++painted_rows_;
             const bool sel = provider_->selected(row);
             const uint64_t id = provider_->row_id(row);
+            // A comparison's tint is the floor; hover and selection both stand above it. Spec: Styles.xaml
+            // (FileListItem: the tint first, then IsMouseOver and IsSelected).
+            if (const Token tint = provider_->row_tint(row); tint != kNoToken) pc.fill(rr, tint);
             if (sel) {
-                pc.fill(rr, focused() ? tok::ListSelectedBackground : tok::ListSelectedInactiveBackground);
-            } else if (const Token tint = provider_->row_tint(row); tint != kNoToken) {
-                pc.fill(rr, tint);
+                pc.fill(rr, !focused() ? tok::ListSelectedInactiveBackground
+                            : row == hot_row_ ? tok::ListSelectedHoverBackground
+                                              : tok::ListSelectedBackground);
             } else if (row == hot_row_) {
                 pc.fill(rr, tok::ListHoverBackground);
             }
@@ -175,7 +201,8 @@ void ListView::paint(PaintContext& pc) {
             if (row == cursor_ && focused()) {
                 pc.stroke(rr, tok::BorderFocus);
             }
-            ID2D1SolidColorBrush* brush = pc.brush(sel ? tok::ListSelectedForeground : style.fg);
+            const Token row_fg = sel ? (focused() ? tok::ListSelectedForeground : tok::ListSelectedInactiveForeground) : style.fg;
+            ID2D1SolidColorBrush* brush = pc.brush(row_fg);
             float x = x0;
             bool first_column = true;
             for (const Column& col : columns_) {
@@ -195,6 +222,15 @@ void ListView::paint(PaintContext& pc) {
                             icon_w = 22.0f;
                         }
                     }
+                    RowProvider::CellMarks marks;
+                    const bool marked = !text.empty() && provider_->cell_marks(row, col.id, &marks);
+                    if (marked && !marks.lead.empty()) {
+                        // The line number, quieter, then the line. Spec: Styles.xaml (Column.Cell.Match).
+                        const float lw = std::ceil(pc.res.text.measure(marks.lead + L" ", style.font).width);
+                        pc.text(marks.lead, Rect{x + kCellPad + icon_w, rr.t, x + col.width - kCellPad, rr.b}, style.font,
+                                sel ? row_fg : tok::TextSecondary);
+                        icon_w += lw;
+                    }
                     if (!text.empty()) {
                         const float w = std::max(1.0f, col.width - 2 * kCellPad - icon_w);
                         gfx::LayoutOptions opt;
@@ -205,10 +241,24 @@ void ListView::paint(PaintContext& pc) {
                         opt.align = col.right_align ? gfx::TextAlign::Trailing : gfx::TextAlign::Leading;
                         IDWriteTextLayout* layout = pc.res.layouts.get(
                             gfx::LayoutKey{id, static_cast<uint32_t>(col.id), w}, text, style.font, opt);
-                        if (layout && brush) {
-                            pc.dc->DrawTextLayout(D2D1::Point2F(x + kCellPad + icon_w, rr.t), layout, brush,
-                                                  D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                        const D2D1_POINT_2F at = D2D1::Point2F(x + kCellPad + icon_w, rr.t);
+                        if (layout && marked && marks.length > 0) {
+                            // The needle on the selection colour, in semibold.
+                            const DWRITE_TEXT_RANGE range{marks.start, marks.length};
+                            layout->SetFontWeight(DWRITE_FONT_WEIGHT_SEMI_BOLD, range);
+                            UINT32 n = 0;
+                            layout->HitTestTextRange(marks.start, marks.length, 0, 0, nullptr, 0, &n);
+                            std::vector<DWRITE_HIT_TEST_METRICS> hits(n);
+                            if (n && SUCCEEDED(layout->HitTestTextRange(marks.start, marks.length, 0, 0, hits.data(), n, &n))) {
+                                for (const auto& m : hits) {
+                                    const Rect hr = Rect::xywh(at.x + m.left, at.y + m.top, m.width, m.height).intersect(
+                                        Rect{x + kCellPad, rr.t, x + col.width - kCellPad, rr.b});
+                                    if (!hr.empty()) pc.fill(hr, tok::InputSelectionBackground);
+                                }
+                            }
                         }
+                        ID2D1SolidColorBrush* cell_brush = !sel && col.fg != kNoToken ? pc.brush(col.fg) : brush;
+                        if (layout && cell_brush) pc.dc->DrawTextLayout(at, layout, cell_brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
                     }
                 }
                 first_column = false;
@@ -235,12 +285,19 @@ void ListView::paint_header(PaintContext& pc) {
         const Column& col = columns_[i];
         const Rect rc = column_header_rect(i);
         if (rc.r < hr.l || rc.l > hr.r) continue;
-        if (reordering_ && static_cast<int>(i) == press_col_) {
+        // Lit under the pointer and while pressed, the pressed one's title in the primary colour. Spec:
+        // Lists.xaml (GridViewColumnHeader: 11 semibold, IsMouseOver, IsPressed).
+        const bool pressed = static_cast<int>(i) == press_col_;
+        if (pressed || (static_cast<int>(i) == hot_header_ && resize_col_ < 0 && press_col_ < 0)) {
             pc.fill(rc, tok::ListHeaderHoverBackground);
         }
         const bool sorted = col.id == sort_column_;
-        pc.text(col.title, Rect{rc.l + kCellPad, rc.t, rc.r - (sorted ? 22.0f : kCellPad), rc.b}, style.font,
-                tok::ListHeaderForeground, col.right_align ? gfx::TextAlign::Trailing : gfx::TextAlign::Leading);
+        gfx::FontSpec head = style.font;
+        head.size = 11.0f;
+        head.weight = 600;
+        pc.text(col.title, Rect{rc.l + kCellPad, rc.t, rc.r - (sorted ? 22.0f : kCellPad), rc.b}, head,
+                pressed && !reordering_ ? tok::TextPrimary : tok::ListHeaderForeground,
+                col.right_align ? gfx::TextAlign::Trailing : gfx::TextAlign::Leading);
         if (sorted) {
             const float cx = rc.r - 12.0f, cy = (rc.t + rc.b) / 2;
             ComPtr<ID2D1PathGeometry> geo;
@@ -321,6 +378,7 @@ void ListView::move_cursor(size_t row, const Mods& m) {
 // ---- mouse -----------------------------------------------------------------------------------------
 
 bool ListView::on_mouse_down(const MouseEvent& e) {
+    const NoteIds noted{this};
     if (e.button == MouseButton::Middle) {
         const size_t row = (show_header && header_rect().contains(e.pt)) ? npos : row_at(e.pt);
         if (row == npos || !on_middle) return false;
@@ -337,6 +395,10 @@ bool ListView::on_mouse_down(const MouseEvent& e) {
         if (e.button == MouseButton::Right && on_header_menu) on_header_menu(e.pt);
         if (e.button != MouseButton::Left) return true;
         const int zone = resize_zone(e.pt);
+        if (zone >= 0 && e.clicks >= 2) {
+            auto_fit(static_cast<size_t>(zone));
+            return true;
+        }
         if (zone >= 0) {
             resize_col_ = zone;
             resize_x_ = e.pt.x;
@@ -345,6 +407,7 @@ bool ListView::on_mouse_down(const MouseEvent& e) {
             press_col_ = header_index_at(e.pt.x);
             press_x_ = e.pt.x;
             reordering_ = false;
+            invalidate(header_rect());
         }
         root()->capture(this);
         return true;
@@ -499,17 +562,60 @@ bool ListView::on_mouse_move(const MouseEvent& e) {
         update_marquee(e.pt);
         return true;
     }
-    // The row under the pointer is lit, as a list row is.
+    // The header under the pointer is lit, and so is the row, as a list row is.
+    const int header = show_header && header_rect().contains(e.pt) && resize_zone(e.pt) < 0 ? header_index_at(e.pt.x) : -1;
+    if (header != hot_header_) {
+        hot_header_ = header;
+        invalidate(header_rect());
+    }
     const size_t hot = provider_ && body_.contains(e.pt) ? row_at(e.pt) : npos;
+    const int hot_col = hot != npos ? header_index_at(e.pt.x) : -1;
     if (hot != hot_row_) {
         if (hot_row_ != npos && hot_row_ < count()) invalidate(row_rect(hot_row_));
         hot_row_ = hot;
         if (hot != npos) invalidate(row_rect(hot));
     }
+    if (hot != tip_row_ || hot_col != tip_col_) {
+        tip_row_ = hot;
+        tip_col_ = hot_col;
+        std::wstring tip;
+        if (hot != npos && hot_col >= 0 && static_cast<size_t>(hot_col) < columns_.size()) tip = provider_->cell_tip(hot, columns_[static_cast<size_t>(hot_col)].id);
+        if (tip.empty() && hot != npos) tip = provider_->row_tip(hot);
+        tooltip = std::move(tip);
+    }
     return false;
 }
 
+// A double click on a column's gripper sizes it to what it shows: its title and the rows on screen, as a
+// WPF grid column does. Spec: DirectoryTabView.Header_DragCompleted (reads the width the auto-fit left).
+void ListView::auto_fit(size_t index) {
+    if (index >= columns_.size()) return;
+    Column& col = columns_[index];
+    float want = res().text.measure(col.title, style.font).width + 2 * kCellPad + 14.0f;  // room for a sort arrow
+    if (provider_) {
+        const auto [first, last] = visible_range();
+        const bool first_column = index == 0;
+        for (size_t row = first; row < last && row < count(); ++row) {
+            const std::wstring text = provider_->cell_text(row, col.id);
+            float w = text.empty() ? 0.0f : res().text.measure(text, style.font).width;
+            if (first_column) {
+                bool faded = false;
+                if (provider_->row_image(row, 16, &faded) || provider_->row_icon(row)) w += 22.0f;
+            }
+            want = std::max(want, w + 2 * kCellPad + 2.0f);
+        }
+    }
+    col.width = std::max(col.min_width, std::ceil(want));
+    layout_bars();
+    invalidate();
+    if (on_columns_changed) on_columns_changed();
+}
+
 void ListView::on_mouse_leave() {
+    if (hot_header_ >= 0) {
+        hot_header_ = -1;
+        invalidate(header_rect());
+    }
     if (hot_row_ == npos) return;
     if (hot_row_ < count()) invalidate(row_rect(hot_row_));
     hot_row_ = npos;
@@ -594,7 +700,7 @@ bool ListView::on_mouse_up(const MouseEvent& e) {
 }
 
 bool ListView::on_wheel(Point, int delta, Mods m) {
-    const float step = -static_cast<float>(delta) / 120.0f * row_height * 3.0f;
+    const float step = m.shift ? -static_cast<float>(delta) / 120.0f * row_height * 3.0f : wheel_rows(delta) * row_height;
     if (m.shift && h_.needed()) {
         h_.set_offset(h_.offset() + step);
         invalidate();
@@ -608,6 +714,7 @@ bool ListView::on_wheel(Point, int delta, Mods m) {
 // ---- keyboard --------------------------------------------------------------------------------------
 
 bool ListView::on_key_down(const KeyEvent& e) {
+    const NoteIds noted{this};
     if (!provider_) return false;
     const size_t n = count();
     const size_t page = std::max<size_t>(1, static_cast<size_t>(v_.viewport / row_height));
@@ -662,6 +769,7 @@ bool ListView::on_key_down(const KeyEvent& e) {
 }
 
 bool ListView::on_char(wchar_t c) {
+    const NoteIds noted{this};
     if (c < 0x20 || c == 0x7f || !on_typeahead) return false;
     const uint64_t now = root()->now_ms();
     if (now - typed_at_ > kTypeAheadMs) typed_.clear();

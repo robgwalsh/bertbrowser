@@ -262,7 +262,15 @@ bool TreeView::on_mouse_down(const MouseEvent& e) {
 }
 
 bool TreeView::on_mouse_move(const MouseEvent& e) {
-    if (!bar_drag_) return false;
+    if (!bar_drag_) {
+        const size_t row = row_at(e.pt);
+        const uint64_t id = row != npos ? id_at_row(row) : 0;
+        if (id != tip_id_) {
+            tip_id_ = id;
+            tooltip = id && provider_ ? provider_->tip(id) : std::wstring();
+        }
+        return false;
+    }
     v_.mouse_move(e.pt);
     invalidate();
     return true;
@@ -278,7 +286,7 @@ bool TreeView::on_mouse_up(const MouseEvent&) {
 
 bool TreeView::on_wheel(Point, int delta, Mods) {
     if (!v_.needed()) return false;
-    set_scroll_y(v_.offset() - static_cast<float>(delta) / 120.0f * row_height * 3.0f);
+    set_scroll_y(v_.offset() + wheel_rows(delta) * row_height);
     return true;
 }
 

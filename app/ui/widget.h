@@ -40,7 +40,7 @@ struct KeyEvent {
     unsigned vk = 0;
     Mods mods;
 };
-enum class Cursor { Arrow, IBeam, SizeWE, SizeNS, Hand };
+enum class Cursor { Arrow, IBeam, SizeWE, SizeNS, Hand, SizeAll };
 enum class Dock { Fill, Left, Top, Right, Bottom };
 
 struct Flags {
@@ -156,6 +156,11 @@ public:
     virtual bool on_wheel(Point, int /*delta*/, Mods) { return false; }
     virtual void on_mouse_enter() {}
     virtual void on_mouse_leave() {}
+    // Esc while this widget holds the mouse capture (a drag in progress): true when it put the drag down.
+    virtual bool cancel_capture() { return false; }
+    // Something inside this widget was pressed, or the keyboard moved into it by Tab: called on every ancestor
+    // before the press is handled, whoever takes it (a pane becoming the active one).
+    virtual void on_inner_activity() {}
     virtual bool on_key_down(const KeyEvent&) { return false; }
     virtual bool on_key_up(const KeyEvent&) { return false; }
     virtual bool on_char(wchar_t) { return false; }

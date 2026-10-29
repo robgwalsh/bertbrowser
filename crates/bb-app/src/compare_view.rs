@@ -22,7 +22,7 @@ use bb_core::compare::{
     CompareAvailability, CompareRefusal, CompareResult, CompareRowState, CompareRules, CompareSide,
     CompareVerdict, ContentComparer, ContentSettlement, ContentVerdict, FileContentComparer,
     FileSystemCompareProbe, FolderCompareOutcome, FolderCompareService, SyncActionKind,
-    SyncPlanner, SyncPreview, SyncRunner,
+    SyncOutcome, SyncPlanner, SyncPlans, SyncPreview, SyncRunner,
 };
 use bb_core::data::FsIndexRepository;
 use bb_core::delete::{DeleteMode, DeletePlanner};
@@ -794,19 +794,59 @@ impl Inner {
         directories.dedup_by_key(|d| d.to_uppercase());
         self.refresh_tabs_showing(&directories);
 
-        let text = format!(
-            "Synced: {} copied, {} replaced, {} removed{}",
-            outcome.copied_count(),
-            outcome.replaced_count(),
-            outcome.removed_count(),
-            if outcome.can_undo() {
-                " \u{2014} this can be undone"
-            } else {
-                ""
-            }
-        );
         let failed = outcome.failed_copies().len() + outcome.removals.failed.len();
-        self.set_active_status(text.clone());
+        let text = self.describe_sync(&outcome, &plans);
+        // The folders it wrote into have been told to reload; the sentence waits for them.
+        self.set_final_status(text.clone());
         (failed == 0 && !outcome.cancelled, text)
+    }
+
+    /// What the status bar says afterwards. Each half is named separately: "synced 20 items" hides
+    /// the only number anyone checks twice, which is how many were taken away.
+    /// Spec: ShellViewModel.DescribeSync.
+    fn describe_sync(&self, outcome: &SyncOutcome, plans: &SyncPlans) -> String {
+        let mut parts = Vec::new();
+        for (word, n) in [
+            ("copied", outcome.copied_count()),
+            ("replaced", outcome.replaced_count()),
+            ("removed", outcome.removed_count()),
+        ] {
+            if n > 0 {
+                parts.push(format!("{word} {}", bb_core::format::thousands(n as i64)));
+            }
+        }
+        if parts.is_empty() {
+            parts.push("nothing to do".to_string());
+        }
+        let mut text = format!(
+            "{} \u{2014} {}",
+            if outcome.cancelled {
+                "Sync cancelled"
+            } else {
+                "Synced"
+            },
+            parts.join(", ")
+        );
+        let failed_copies = outcome.failed_copies();
+        let failed = failed_copies.len() + outcome.removals.failed.len();
+        if failed > 0 {
+            let first = failed_copies
+                .first()
+                .map(|f| f.message.clone())
+                .or_else(|| outcome.removals.failed.first().map(|f| f.message.clone()))
+                .unwrap_or_default();
+            text.push_str(&format!(
+                ", {} failed \u{2014} {first}",
+                bb_core::format::thousands(failed as i64)
+            ));
+        } else if let Some(first) = plans.refused.first() {
+            text.push_str(&format!(
+                ", {} refused \u{2014} {first}",
+                bb_core::format::thousands(plans.refused.len() as i64)
+            ));
+        } else if outcome.can_undo() {
+            text.push_str(&self.undo_hint());
+        }
+        text
     }
 }

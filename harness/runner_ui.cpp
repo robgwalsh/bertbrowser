@@ -547,6 +547,69 @@ void Runner::install_ui() {
         for (const auto& e : list->entries) rows.push_back(e.text);
         throw AssertionError("'" + to_utf8(name) + "' has no row with '" + to_utf8(text) + "'. Rows: " + join(rows, " | "));
     };
+    // A row's words as a person reads them: a checklist's box glyph is not part of its name.
+    auto row_words = [](const std::wstring& t) {
+        size_t i = 0;
+        while (i < t.size() && (t[i] == L'\u2611' || t[i] == L'\u2610' || t[i] == L' ')) ++i;
+        return t.substr(i);
+    };
+    // The row named `text` (exactly, else the first that contains it), or a failure listing what is there.
+    auto find_row = [this, row_words](views::forms::ItemList& list, const std::wstring& name, const std::wstring& text) {
+        for (size_t i = 0; i < list.entries.size(); ++i) {
+            if (!list.entries[i].heading && core::iequals(row_words(list.entries[i].text), text)) return static_cast<int>(i);
+        }
+        for (size_t i = 0; i < list.entries.size(); ++i) {
+            if (!list.entries[i].heading && core::icontains(list.entries[i].text, text)) return static_cast<int>(i);
+        }
+        std::vector<std::wstring> rows;
+        for (const auto& e : list.entries) rows.push_back(e.text);
+        throw AssertionError("'" + to_utf8(name) + "' has no row with '" + to_utf8(text) + "'. Rows: " + join(rows, " | "));
+    };
+    auto item_list = [this](const std::wstring& name) {
+        auto* list = dynamic_cast<views::forms::ItemList*>(s_.view().find_named(to_utf8(name)));
+        if (!list) throw FormatError("There is no list named '" + to_utf8(name) + "' in the window.");
+        return list;
+    };
+    // list-drag <List>[><Target>] <gap> <row> -- presses the row, drags it and lets go over the line before row
+    // <gap> (0 is the top, the row count the end), of the same list or of <Target>, through the lists' own
+    // mouse handlers: a reorder, or a choice dropped exactly where it should go.
+    verbs_[L"list-drag"] = [this, find_row, item_list](const std::wstring& r) {
+        const auto [names, tail] = split_first(require(r, "list-drag"));
+        const auto [gap_text, text] = split_first(tail);
+        const size_t cut = names.find(L'>');
+        const std::wstring source_name = cut == std::wstring::npos ? names : names.substr(0, cut);
+        const std::wstring target_name = cut == std::wstring::npos ? names : names.substr(cut + 1);
+        auto* source = item_list(source_name);
+        auto* target = item_list(target_name);
+        const int gap = number(gap_text, "list-drag");
+        const int row = find_row(*source, source_name, text);
+        const int n = static_cast<int>(target->entries.size());
+        if (gap < 0 || gap > n) throw FormatError("list-drag: '" + to_utf8(target_name) + "' has gaps 0 to " + std::to_string(n) + ".");
+        source->scroll_into_view(row);
+        const ui::Rect from = source->row_rect(row);
+        const float y = gap < n ? target->row_rect(gap).t + 1 : target->row_rect(n - 1).b - 1;
+        ui::MouseEvent e;
+        e.pt = {(from.l + from.r) / 2, (from.t + from.b) / 2};
+        source->on_mouse_down(e);
+        e.pt = {(from.l + from.r) / 2, (from.t + from.b) / 2 + 8};
+        source->on_mouse_move(e);
+        e.pt = {(target->bounds.l + target->bounds.r) / 2, y};
+        source->on_mouse_move(e);
+        source->on_mouse_up(e);
+        s_.settle();
+    };
+    // assert-list-row <List> <index> <text> -- row <index> of the list reads <text>.
+    verbs_[L"assert-list-row"] = [this, row_words, item_list](const std::wstring& r) {
+        const auto [name, tail] = split_first(require(r, "assert-list-row"));
+        const auto [index_text, text] = split_first(tail);
+        s_.settle();
+        auto* list = item_list(name);
+        const int i = number(index_text, "assert-list-row");
+        if (i < 0 || static_cast<size_t>(i) >= list->entries.size())
+            throw AssertionError("'" + to_utf8(name) + "' has " + std::to_string(list->entries.size()) + " rows, not a row " + std::to_string(i) + ".");
+        const std::wstring actual = row_words(list->entries[static_cast<size_t>(i)].text);
+        if (!core::iequals(actual, text)) throw AssertionError("row " + std::to_string(i) + " of '" + to_utf8(name) + "' is '" + to_utf8(actual) + "', expected '" + to_utf8(text) + "'.");
+    };
     // Gives the keyboard to an element by its name, as a click into it would.
     verbs_[L"focus"] = [this](const std::wstring& r) {
         const std::wstring name = require(r, "focus");
@@ -1530,10 +1593,13 @@ void Runner::install_ui() {
         const bool checksum = k == L"checksum" || k == L"checksum-verify";
         const bool disk = k == L"disk-usage" || k == L"disk-usage-at";
         const bool files = k == L"compare-files";
-        if (checksum || disk || files) {
+        // The Add column list reads the property system on a worker; the second section is what it proves.
+        const bool columns = k == L"columns";
+        if (checksum || disk || files || columns) {
             s_.view().render_dialog(k);
             s_.settle(250);
         }
+        if (columns) s_.view().ensure_machine_properties();
         auto bitmap = s_.view().render_dialog(checksum ? std::wstring(L"checksum-show")
                                               : disk   ? std::wstring(L"disk-usage-show")
                                               : files  ? std::wstring(L"compare-files-show")

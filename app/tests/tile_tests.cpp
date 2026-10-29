@@ -146,8 +146,41 @@ struct TileRig {
 
 // ---- arithmetic -------------------------------------------------------------------------------------
 
+// Folders and files that are not pictures are full-width rows above the grid; the grid starts under them.
+TEST(tile_layout_rows_above_the_grid) {
+    TileMetrics m;
+    m.caption_h = 36;
+    TileLayout lay{m, 800, 13};
+    lay.leading = 3;
+    lay.row_h = 26;
+    CHECK_EQ(lay.tiles(), 10);
+    CHECK_EQ(lay.rows(), 2);
+    CHECK(lay.tile_rect(0) == Rect::xywh(8, 8, 784, 26));
+    CHECK(lay.tile_rect(2) == Rect::xywh(8, 60, 784, 26));
+    CHECK_NEAR(lay.grid_top(), 8 + 78 + 6, 0.01);
+    CHECK(lay.tile_rect(3) == Rect::xywh(8, 92, 120, 160));
+    CHECK(lay.tile_rect(9) == Rect::xywh(8, 92 + 166, 120, 160));
+    CHECK_NEAR(lay.content_height(), 92 + 160 + 6 + 160 + 8, 0.01);
+    CHECK_EQ(lay.index_at({400, 40}), 1);   // a row, anywhere across it
+    CHECK_EQ(lay.index_at({50, 100}), 3);   // the first tile
+    CHECK(lay.index_at({400, 89}) == TileView::npos);  // the gap between the rows and the grid
+    auto v = lay.visible(0, 50);
+    CHECK(v.first == 0 && v.second == 2);   // rows only
+    v = lay.visible(70, 100);
+    CHECK(v.first == 2 && v.second == 9);   // the last row and the first line of tiles
+    v = lay.visible(200, 600);
+    CHECK(v.first == 3 && v.second == 13);  // tiles only
+    // Every row, no grid at all.
+    TileLayout rows_only{m, 800, 3};
+    rows_only.leading = 3;
+    CHECK_NEAR(rows_only.content_height(), 8 + 78 + 8, 0.01);
+    CHECK(rows_only.visible(0, 600).second == 3);
+}
+
 TEST(tile_layout_arithmetic) {
-    TileLayout lay{TileMetrics{}, 800, 100};
+    TileMetrics m;
+    m.caption_h = 36;  // round numbers below
+    TileLayout lay{m, 800, 100};
     CHECK_EQ(lay.columns(), 6);
     CHECK_EQ(lay.rows(), 17);
     CHECK_NEAR(lay.content_height(), 2832, 0.01);
@@ -380,7 +413,7 @@ TEST(tile_view_scrolling_by_wheel_and_bar) {
     t.rig.render();
     CHECK(t.view->scroll_y() == 0);
     t.rig.root.wheel({400, 300}, -120);
-    CHECK_NEAR(t.view->scroll_y(), (160 + 6) * 0.6, 0.01);
+    CHECK_NEAR(t.view->scroll_y(), ui::wheel_rows(-120) * (t.view->metrics.tile_h() + t.view->metrics.gap) * 0.2, 0.01);
     t.rig.root.wheel({400, 300}, 240);
     CHECK_NEAR(t.view->scroll_y(), 0, 0.01);  // clamped at the top
     // Drag the bar's thumb.

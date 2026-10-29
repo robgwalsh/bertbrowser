@@ -277,12 +277,16 @@ std::unique_ptr<Widget> rename_dialog(DialogContext& cx, bool expanded) {
         std::vector<BbStr> views;
         for (const auto& p : st->paths) views.push_back(core::s(p));
         uint64_t op = 0;
+        BbStatus started = BB_OK;
         if (st->expanded) {
             const std::wstring rule = core::wide(rule_json(*st));
-            bb_op_rename_rule(core.app(), views.data(), static_cast<uint32_t>(views.size()), core::s(rule), &op);
+            started = bb_op_rename_rule(core.app(), views.data(), static_cast<uint32_t>(views.size()), core::s(rule), &op);
         } else {
-            bb_op_rename(core.app(), views.data(), static_cast<uint32_t>(views.size()), core::s(st->name->text()), &op);
+            started = bb_op_rename(core.app(), views.data(), static_cast<uint32_t>(views.size()), core::s(st->name->text()), &op);
         }
+        // An archive edit the core refuses is said in a message, not only on the status bar.
+        // Spec: DirectoryTabView.RunArchiveEditAsync.
+        const std::wstring refused = started == BB_ERR ? core::last_error() : std::wstring();
         bb_settings_set(core.app(), core::s(L"advancedRenameExpanded"), core::s(st->expanded ? L"true" : L"false"));
         if (st->expanded) {
             // Kept without its text. Spec: RenameDialog.SaveOptions.
@@ -290,6 +294,7 @@ std::unique_ptr<Widget> rename_dialog(DialogContext& cx, bool expanded) {
             const std::string keep_knobs = "{\"template\":\"\",\"find\":\"\",\"replace\":\"\"" + kept.substr(kept.find(",\"useRegex\""));
             bb_settings_set(core.app(), core::s(L"advancedRename"), core::s(core::wide(keep_knobs)));
         }
+        if (!refused.empty()) st->main->show_message(L"Archive", refused);  // deferred, so before close() frees this handler
         close();
     }, true);
     st->rename->name = "RenameOk";

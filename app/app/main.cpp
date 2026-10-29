@@ -43,6 +43,51 @@ void mark(const wchar_t* name) {
     bb_trace_mark(bb::core::s(std::wstring(name)));
 }
 
+// Puts the window back where it was last closed: the size when it is a sane one, the place only when it is still
+// on a screen (a monitor unplugged since must not strand it), and whether to open maximised (the answer).
+// Bounds are kept in DIPs, so a change of scaling keeps the window's size as the user sees it. Spec:
+// MainWindow.ApplyWindowSettings.
+bool restore_placement(HWND hwnd, BbApp* app) {
+    BbWindowPlacement saved{};
+    if (bb_window_placement(app, &saved) != BB_OK || !saved.known) return false;
+    WINDOWPLACEMENT wp{sizeof(wp)};
+    if (!GetWindowPlacement(hwnd, &wp)) return saved.maximized;
+    const double scale = GetDpiForWindow(hwnd) / 96.0;
+    RECT r = wp.rcNormalPosition;
+    if (saved.width > 200 && saved.height > 150) {
+        r.right = r.left + static_cast<LONG>(saved.width * scale);
+        r.bottom = r.top + static_cast<LONG>(saved.height * scale);
+    }
+    const LONG left = static_cast<LONG>(saved.left * scale), top = static_cast<LONG>(saved.top * scale);
+    const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN), vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    const int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN), vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    const LONG margin = static_cast<LONG>(100 * scale);
+    if (left > vx - margin && top > vy - margin && left < vx + vw - margin && top < vy + vh - margin) {
+        OffsetRect(&r, left - r.left, top - r.top);
+    }
+    wp.rcNormalPosition = r;
+    wp.showCmd = SW_HIDE;  // shown by the caller, maximised or not
+    SetWindowPlacement(hwnd, &wp);
+    return saved.maximized;
+}
+
+// What closing remembers: the restored bounds even when maximised, so un-maximising next time lands where it
+// was. Spec: MainWindow.SaveWindowSettings (RestoreBounds).
+void save_placement(HWND hwnd, BbApp* app) {
+    WINDOWPLACEMENT wp{sizeof(wp)};
+    if (!GetWindowPlacement(hwnd, &wp)) return;
+    const double scale = GetDpiForWindow(hwnd) / 96.0;
+    const RECT& r = wp.rcNormalPosition;
+    BbWindowPlacement p{};
+    p.known = true;
+    p.left = r.left / scale;
+    p.top = r.top / scale;
+    p.width = (r.right - r.left) / scale;
+    p.height = (r.bottom - r.top) / scale;
+    p.maximized = IsZoomed(hwnd) != FALSE;
+    bb_window_placement_set(app, &p);
+}
+
 // The command line as UTF-16 pointers, program name first. Freed with LocalFree.
 struct Args {
     int argc = 0;
@@ -110,6 +155,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             // A measurement parks the real window out of sight and never activates it.
             options.offscreen = bb_trace_enabled();
             options.activate = !options.offscreen;
+            // Spec: MainWindow.xaml (Width 1200, Height 750, MinWidth 640).
+            options.width_dip = 1200;
+            options.height_dip = 750;
+            options.min_width_dip = 640;
+            options.min_height_dip = 320;
             platform::Window window(res, options);
             if (!window.ok()) {
                 error = L"Could not create the window.";
@@ -133,7 +183,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                     view.start(start);
                     view.enable_file_drag_drop();
                     mark(L"windowBuilt");
-                    window.show();
+                    const bool maximize = !options.offscreen && restore_placement(window.hwnd(), app);
+                    if (!options.offscreen) {
+                        window.on_close = [&window, app] {
+                            window.set_full_screen(false);  // where it was, not the monitor a video covered
+                            save_placement(window.hwnd(), app);
+                            DestroyWindow(window.hwnd());
+                        };
+                    }
+                    if (maximize) ShowWindow(window.hwnd(), SW_SHOWMAXIMIZED);
+                    else window.show();
                     mark(L"windowShown");
                     // Other launches are answered from here on, the rest of the command line is
                     // opened, and the background work (or, for a measurement, the trace) starts.

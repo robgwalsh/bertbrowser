@@ -139,6 +139,31 @@ fn a_zip_is_listed_without_extracting() {
     assert!(p["footer"].as_str().unwrap().contains("2 entries"));
 }
 
+/// A picture inside a zip is the host's to decode, from bytes the core reads out of the entry.
+/// Spec: PreviewPaneViewModel.OpenBounded. A zip inside a zip cannot be opened in place, and says
+/// how to see it.
+#[test]
+fn a_picture_inside_a_zip_is_previewed_from_its_bytes() {
+    let f = Fixture::new();
+    let inner = fx::zip_of(&[("deep.txt", "deep")]);
+    let picture: &[u8] = b"\x89PNG not really, but bytes all the same";
+    let outer = fx::zip_of_bytes(&[("pic.png", picture), ("inner.zip", &inner)]);
+    put(&f, "pack.zip", &outer);
+    f.app.navigate(f.tab, &f.path("pack.zip")).unwrap();
+    f.settle();
+
+    f.select_names(&["pic.png"]);
+    let p = preview(&f, MODE_AUTO);
+    assert_eq!(p["state"], "image");
+    assert_eq!(p["inArchive"], true);
+    let bytes = f.app.preview_read(p["path"].as_str().unwrap()).unwrap();
+    assert_eq!(bytes, picture);
+
+    f.select_names(&["inner.zip"]);
+    let p = preview(&f, MODE_AUTO);
+    assert_eq!(p["message"], "Extract this archive to preview it.", "{p}");
+}
+
 #[test]
 fn images_fonts_and_media_are_the_hosts_to_show() {
     let f = Fixture::new();

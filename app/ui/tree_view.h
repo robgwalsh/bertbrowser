@@ -24,6 +24,8 @@ public:
     virtual bool dimmed(uint64_t /*node*/) const { return false; }
     // Muted text at the right edge of the row (a folder's size), or empty for none.
     virtual std::wstring detail(uint64_t /*node*/) const { return {}; }
+    // What the pointer resting on the row shows (a folder's full path), or empty for nothing.
+    virtual std::wstring tip(uint64_t /*node*/) const { return {}; }
 };
 
 class TreeView : public Widget {
@@ -75,6 +77,7 @@ public:
     void on_focus(bool) override { invalidate(); }
 
 private:
+    uint64_t tip_id_ = 0;  // the row the tooltip is about
     std::optional<std::pair<uint64_t, float>> pending_place_;
     struct Entry {
         uint64_t id;

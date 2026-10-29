@@ -142,6 +142,16 @@ bool PopupLayer::on_mouse_move(const MouseEvent& e) {
         const auto cb = opt_.on_outside_move;
         if (cb) cb(e.pt);
     }
+    // Resting on an item with something to say (why a greyed row cannot run) shows it, as a control's tooltip
+    // would. Spec: MainWindow.CommandBars (ToolTip = row.Reason, ShowOnDisabled).
+    const MenuItem* item = menus_.item_at(e.pt);
+    if (item != tip_item_) {
+        tip_item_ = item;
+        hide_tip();
+        root()->stop_timer(this, kTipTimer);
+        menu_tip_ = item ? item->tooltip : std::wstring();
+        if (!menu_tip_.empty()) root()->start_timer(this, kTipTimer, kTipDelayMs);
+    }
     return true;
 }
 
@@ -160,6 +170,10 @@ void PopupLayer::on_timer(int id) {
         menus_.timer();
     } else if (id == kTipTimer) {
         root()->stop_timer(this, kTipTimer);
+        if (menus_.is_open()) {
+            if (!menu_tip_.empty() && tip_item_ && menus_.item_at(root()->pointer()) == tip_item_) show_tip(menu_tip_, root()->pointer());
+            return;
+        }
         if (tip_target_ && root()->hovered() && tip_target_->is_ancestor_of(root()->hovered())) {
             show_tip(tip_target_->tooltip, root()->pointer());
         }

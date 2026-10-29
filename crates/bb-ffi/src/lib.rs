@@ -1166,6 +1166,83 @@ pub unsafe extern "C" fn bb_listing_cell(
     })
 }
 
+/// The Size cell's tooltip for a row (see `Row::size_tip`), Rust-owned (`bb_str_free`).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_listing_size_tip(
+    l: *const BbListing,
+    index: u32,
+    out_text: *mut BbOwnedStr,
+) -> BbStatus {
+    guard(|| {
+        let listing = listing_of(l)?;
+        let row = listing
+            .row(index as usize)
+            .ok_or_else(|| Fail::Err(format!("row {index} is out of range")))?;
+        *unsafe { out(out_text, "out_text")? } = BbOwnedStr::from_str(&row.size_tip());
+        Ok(())
+    })
+}
+
+/// The cell index (`bb_listing_cell`) of a built-in column by its id ("Size", "Modified"), or -1:
+/// for a view that shows a column the layout does not (a thumbnail view's rows).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_cell_index(id: BbStr, out_index: *mut i32) -> BbStatus {
+    guard(|| {
+        let out_index = unsafe { out(out_index, "out_index")? };
+        *out_index = bb_app::cell_index(&unsafe { id.to_string_lossy() }).map_or(-1, |i| i as i32);
+        Ok(())
+    })
+}
+
+/// The line a `content:` search matched on, for the Match cell: its 1-based number (0 when the row
+/// has no match) and where the needle sits in the cell's text, in UTF-16 units.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_listing_match(
+    l: *const BbListing,
+    index: u32,
+    out_line: *mut i32,
+    out_start: *mut u32,
+    out_length: *mut u32,
+) -> BbStatus {
+    guard(|| {
+        let listing = listing_of(l)?;
+        let row = listing
+            .row(index as usize)
+            .ok_or_else(|| Fail::Err(format!("row {index} is out of range")))?;
+        let (line, start, length) = match &row.content_match {
+            Some(m) => {
+                // The core counts characters; the cell is drawn in UTF-16.
+                let units = |chars: usize| -> u32 {
+                    m.line
+                        .chars()
+                        .take(chars)
+                        .map(|c| c.len_utf16() as u32)
+                        .sum()
+                };
+                let start = units(m.match_start);
+                (
+                    m.line_number,
+                    start,
+                    units(m.match_start + m.match_length) - start,
+                )
+            }
+            None => (0, 0, 0),
+        };
+        unsafe {
+            if let Some(o) = out_line.as_mut() {
+                *o = line;
+            }
+            if let Some(o) = out_start.as_mut() {
+                *o = start;
+            }
+            if let Some(o) = out_length.as_mut() {
+                *o = length;
+            }
+        }
+        Ok(())
+    })
+}
+
 // ---- selection ----
 
 #[repr(C)]

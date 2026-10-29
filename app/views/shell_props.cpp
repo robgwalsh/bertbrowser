@@ -7,6 +7,10 @@
 #include <shobjidl.h>
 
 #include <map>
+#include <mutex>
+#include <optional>
+#include <thread>
+#include <utility>
 
 #include "views/core.h"
 
@@ -127,9 +131,11 @@ std::vector<std::pair<std::wstring, std::wstring>> read_all_properties(const std
     return out;
 }
 
+// Every description the system has, minus the plumbing: a property with no display name is not one a person
+// could pick. Spec: ShellProperties.EnumerateDescriptions (PDEF_ALL).
 std::string machine_property_list() {
     IPropertyDescriptionList* list = nullptr;
-    if (FAILED(PSEnumeratePropertyDescriptions(PDEF_VIEWABLE, IID_PPV_ARGS(&list))) || !list) return "[]";
+    if (FAILED(PSEnumeratePropertyDescriptions(PDEF_ALL, IID_PPV_ARGS(&list))) || !list) return "[]";
     UINT count = 0;
     list->GetCount(&count);
     std::string out = "[";
@@ -138,11 +144,10 @@ std::string machine_property_list() {
         IPropertyDescription* d = nullptr;
         if (FAILED(list->GetAt(i, IID_PPV_ARGS(&d))) || !d) continue;
         PWSTR name = nullptr, display = nullptr;
-        if (SUCCEEDED(d->GetCanonicalName(&name)) && name) {
-            d->GetDisplayName(&display);
+        if (SUCCEEDED(d->GetCanonicalName(&name)) && name && *name && SUCCEEDED(d->GetDisplayName(&display)) && display && *display) {
             if (!first) out += ",";
             first = false;
-            out += "[" + jq(name) + "," + jq(display ? display : name) + "]";
+            out += "[" + jq(name) + "," + jq(display) + "]";
         }
         if (name) CoTaskMemFree(name);
         if (display) CoTaskMemFree(display);
@@ -150,6 +155,54 @@ std::string machine_property_list() {
     }
     list->Release();
     return out + "]";
+}
+
+namespace {
+
+// The one background read of the property system. Leaked on purpose: a worker still enumerating when the
+// process exits must not find its mutex destroyed under it.
+struct MachineRead {
+    std::mutex lock;
+    bool started = false, done = false;
+    std::optional<std::string> list;
+};
+
+MachineRead& machine_read() {
+    static MachineRead* state = new MachineRead();
+    return *state;
+}
+
+}  // namespace
+
+void start_machine_property_read() {
+    MachineRead& s = machine_read();
+    {
+        std::lock_guard<std::mutex> g(s.lock);
+        if (s.started) return;
+        s.started = true;
+    }
+    // The property system is free-threaded: the worker joins the multithreaded apartment, enumerates, and
+    // leaves the answer here for the UI thread to take. Spec: ColumnAddPanel.Preload (Task.Run).
+    std::thread([&s] {
+        const HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        std::string list = machine_property_list();
+        if (SUCCEEDED(hr)) CoUninitialize();
+        std::lock_guard<std::mutex> g(s.lock);
+        s.list = std::move(list);
+        s.done = true;
+    }).detach();
+}
+
+bool machine_property_read_done() {
+    MachineRead& s = machine_read();
+    std::lock_guard<std::mutex> g(s.lock);
+    return s.done;
+}
+
+std::optional<std::string> take_machine_property_list() {
+    MachineRead& s = machine_read();
+    std::lock_guard<std::mutex> g(s.lock);
+    return s.list;  // kept: a second main view (a harness restart) asks again
 }
 
 }  // namespace bb::views

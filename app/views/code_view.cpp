@@ -1,5 +1,7 @@
 #include "views/code_view.h"
 
+#include <cwctype>
+
 #include <windows.h>
 
 #include <algorithm>
@@ -282,6 +284,11 @@ void CodeView::keep_in_view(Pos p) {
 }
 
 bool CodeView::on_mouse_down(const MouseEvent& e) {
+    if (e.button == MouseButton::Right) {
+        root()->set_focus(this);
+        if (on_context) on_context(e.pt);
+        return true;
+    }
     if (e.button != MouseButton::Left) return false;
     if (v_.mouse_down(e.pt) || h_.mouse_down(e.pt)) {
         bar_drag_ = true;
@@ -292,10 +299,22 @@ bool CodeView::on_mouse_down(const MouseEvent& e) {
     root()->set_focus(this);
     if (!text_.contains(e.pt)) return true;
     caret_ = hit(e.pt);
-    if (e.clicks >= 2 && caret_.line < lines_.size()) {
-        // A double click takes the line, the way a code view usually does for a triple.
+    if (e.clicks >= 3 && caret_.line < lines_.size()) {
         anchor_ = {caret_.line, 0};
         caret_ = {caret_.line, lines_[caret_.line].size()};
+    } else if (e.clicks == 2 && caret_.line < lines_.size()) {
+        // A double click takes the word, as a text box does (spaces and punctuation are each a run of their own).
+        const std::wstring& line = lines_[caret_.line];
+        auto kind = [](wchar_t ch) { return iswalnum(ch) || ch == L'_' ? 0 : iswspace(ch) ? 1 : 2; };
+        size_t a = std::min(caret_.col, line.size()), b = a;
+        if (a == line.size() && a > 0) --a, --b;
+        if (a < line.size()) {
+            const int k = kind(line[a]);
+            while (a > 0 && kind(line[a - 1]) == k) --a;
+            while (b < line.size() && kind(line[b]) == k) ++b;
+        }
+        anchor_ = {caret_.line, a};
+        caret_ = {caret_.line, b};
     } else if (!e.mods.shift) {
         anchor_ = caret_;
     }

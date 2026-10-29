@@ -42,7 +42,8 @@ ComPtr<IDWriteTextLayout> TextCache::make_layout(std::wstring_view text, const F
     if (opt.vcenter) {
         layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
-    if (opt.ellipsis && !opt.wrap) {
+    // Wrapped text trims too: the last line that fits the height ends in the ellipsis (a two-line caption).
+    if (opt.ellipsis) {
         ComPtr<IDWriteInlineObject> sign;
         if (SUCCEEDED(dwrite_->CreateEllipsisTrimmingSign(layout.Get(), &sign))) {
             const DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};

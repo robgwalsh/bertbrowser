@@ -4,6 +4,7 @@
 #pragma once
 #include "views/json.h"
 
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,5 +23,12 @@ std::vector<std::pair<std::wstring, std::wstring>> read_all_properties(const std
 // The properties this machine reports, as the JSON bb_columns_set_machine_properties takes ([[canonical,
 // display name], ...]); an empty array when the property system cannot be enumerated.
 std::string machine_property_list();
+
+// The same list, read once on a worker thread so the Add column panel can show the curated columns at once and
+// the rest when it lands. Start is idempotent; `take` answers the finished list (null while it is still being
+// read). Spec: ColumnAddPanel.Preload.
+void start_machine_property_read();
+bool machine_property_read_done();
+std::optional<std::string> take_machine_property_list();
 
 }  // namespace bb::views

@@ -1,5 +1,6 @@
 #include "views/metadata_pane.h"
 #include "views/file_pickers.h"
+#include "views/forms.h"
 
 #include "gfx/icons.gen.h"
 #include "views/pane_images.h"
@@ -27,11 +28,25 @@ TextBlock* small_text(Widget& parent, const std::wstring& text, Token fg = tok::
     return t;
 }
 
+// A section title above a run of rows.
+TextBlock* heading(Widget& parent, const std::wstring& text) {
+    auto* t = small_text(parent, text);
+    t->style.font.weight = 600;
+    return t;
+}
+
+// The file list stops here and says how many it left out: it is built eagerly and a selection can be tens of
+// thousands. (The C# pane's items control is virtualised.)
+constexpr size_t kMaxListedFiles = 200;
+
+// The one label column the details and the fields share. Spec: SharedSizeGroup="Label".
+constexpr float kLabelColumn = 96.0f;
+
 bool multiline_field(const std::string& id) { return id == "lyrics" || id == "comment"; }
 
 }  // namespace
 
-MetadataPane::MetadataPane(core::Core& core, uint64_t tab) : core_(core), tab_(tab) {
+MetadataPane::MetadataPane(core::Core& core, uint64_t tab, ShellIcons* icons) : core_(core), icons_(icons), tab_(tab) {
     name = "MetadataPane";
     style.bg = tok::SurfaceBackground;
 
@@ -44,6 +59,7 @@ MetadataPane::MetadataPane(core::Core& core, uint64_t tab) : core_(core), tab_(t
 
     // The foot: what Apply would do, and the buttons.
     auto* foot = emplace<StackPanel>(Orientation::Vertical, 4.0f);
+    foot_ = foot;
     foot->dock = Dock::Bottom;
     foot->pad = 8;
     summary_ = foot->emplace<TextBlock>();
@@ -70,7 +86,7 @@ MetadataPane::MetadataPane(core::Core& core, uint64_t tab) : core_(core), tab_(t
     column_ = scroll_->emplace<StackPanel>(Orientation::Vertical, 10.0f);
     column_->pad = 8;
 
-    empty_ = column_->emplace<TextBlock>(L"Select a file to see and change what it says about itself.");
+    empty_ = column_->emplace<TextBlock>(L"Select something to see and edit its metadata.");
     empty_->wrap = true;
     empty_->style.fg = tok::TextMuted;
     // Top to bottom as the C# pane has it: what nobody can type, the fields, the cover, the two removals,
@@ -156,21 +172,47 @@ void MetadataPane::rebuild() {
     const bool empty = m["isEmpty"].boolean();
     empty_->set_visible(empty);
 
-    for (size_t i = 0; i < m["files"].size() && i < 8; ++i) {
+    // The selection: each item with its own icon, and a pill when this pane changed it or could not.
+    const size_t listed = std::min(m["files"].size(), kMaxListedFiles);
+    for (size_t i = 0; i < listed; ++i) {
         const json::Value& f = m["files"][i];
-        std::wstring line = core::wide(f["name"].str());
         const std::wstring detail = core::wide(f["detail"].str());
         const std::string state = f["state"].str();
-        if (state == "Changed") line += L"  ·  changed";
-        else if (state == "Failed") line += L"  ·  failed";
-        auto* t = small_text(*files_, line, state == "Failed" ? tok::ErrorForeground : tok::TextPrimary);
-        t->name = "MetadataFile";
+        auto* line = files_->emplace<StackPanel>(Orientation::Horizontal, 6.0f);
+        if (icons_) {
+            ShellIcons* icons = icons_;
+            const std::wstring path = core::wide(f["path"].str());
+            const bool directory = f["isDirectory"].boolean();
+            auto* picture = line->emplace<forms::Picture>([icons, path, directory](uint32_t px) {
+                return icons->file(path, directory, directory ? FILE_ATTRIBUTE_DIRECTORY : 0, px);
+            });
+            picture->width = 16;
+        }
+        auto* file_name = small_text(*line, core::wide(f["name"].str()), state == "Failed" ? tok::ErrorForeground : tok::TextPrimary);
+        file_name->name = "MetadataFile";
+        file_name->flex = 1;
+        file_name->tooltip = file_name->text();
+        if (state == "Changed" || state == "Failed") {
+            // Existing tokens only, the ones the checksum verdicts use. Spec: MetadataPane.xaml (the State badge).
+            auto* pill = line->emplace<StackPanel>(Orientation::Horizontal, 0.0f);
+            pill->name = "MetadataFileState";
+            pill->pad = 1;
+            pill->style.bg = state == "Failed" ? tok::ErrorBackground : tok::CompareOnlyHere;
+            pill->emplace<Widget>()->width = 4;
+            auto* word = small_text(*pill, state == "Failed" ? L"Failed" : L"Changed", state == "Failed" ? tok::ErrorForeground : tok::TextPrimary);
+            word->style.font.weight = 600;
+            pill->emplace<Widget>()->width = 4;
+        }
         if (!detail.empty()) {
-            auto* d = small_text(*files_, detail, state == "Failed" ? tok::ErrorForeground : tok::TextMuted);
+            auto* indent = files_->emplace<DockPanel>();
+            auto* gap = indent->emplace<Widget>();
+            gap->dock = Dock::Left;
+            gap->width = 22;
+            auto* d = small_text(*indent, detail, state == "Failed" ? tok::ErrorForeground : tok::TextSecondary);
             d->wrap = true;
         }
     }
-    if (m["files"].size() > 8) small_text(*files_, L"and " + std::to_wstring(m["files"].size() - 8) + L" more", tok::TextMuted);
+    if (m["files"].size() > listed) small_text(*files_, L"and " + std::to_wstring(m["files"].size() - listed) + L" more", tok::TextMuted);
 
     // The cover picture.
     if (m["canHoldPicture"].boolean()) {
@@ -197,11 +239,13 @@ void MetadataPane::rebuild() {
         choose_cover_ = row->emplace<Button>(L"Choose…");
         choose_cover_->name = "MetadataChooseCover";
         choose_cover_->height = 26;
+        choose_cover_->tooltip = L"Embed a picture file as the cover";
         choose_cover_->on_click = [this] { choose_cover(); };
         auto* save = row->emplace<Button>(L"Save as\u2026");
         save->name = "MetadataSaveCover";
         save->height = 26;
-        save->set_enabled(m["hasPicture"].boolean());
+        save->tooltip = L"Save the embedded picture as a file";
+        save->set_visible(m["hasPicture"].boolean());
         save->on_click = [this] { save_cover(); };
         remove_cover_ = row->emplace<Button>(L"Remove");
         remove_cover_->name = "MetadataRemoveCover";
@@ -219,14 +263,21 @@ void MetadataPane::rebuild() {
     }
     cover_box_->set_visible(m["canHoldPicture"].boolean());
 
-    // The boxes.
+    // The boxes, under a heading of their own once there are details above them to tell them from.
+    if (m["details"].size() > 0 && m["fields"].size() > 0) heading(*fields_, L"Fields");
     for (size_t i = 0; i < m["fields"].size(); ++i) {
         const json::Value& f = m["fields"][i];
         Row row;
         row.id = f["id"].str();
-        row.box = fields_->emplace<StackPanel>(Orientation::Vertical, 2.0f);
-        row.box->name = "MetadataField_" + row.id;
-        row.label = small_text(*row.box, core::wide(f["label"].str()));
+        // The label to the left and the box to its right, in the same label column the details use.
+        auto* outer = fields_->emplace<StackPanel>(Orientation::Horizontal, 8.0f);
+        outer->name = "MetadataField_" + row.id;
+        row.label = small_text(*outer, core::wide(f["label"].str()));
+        row.label->width = kLabelColumn;
+        row.label->height = 28;
+        row.label->tooltip = row.label->text();
+        row.box = outer->emplace<StackPanel>(Orientation::Vertical, 2.0f);
+        row.box->flex = 1;
         auto* line = row.box->emplace<StackPanel>(Orientation::Horizontal, 4.0f);
         const bool multi = multiline_field(row.id);
         line->height = multi ? 72.0f : 28.0f;
@@ -238,7 +289,8 @@ void MetadataPane::rebuild() {
         const std::string id = row.id;
         row.edit->on_changed = [this, id](const std::wstring& text) { type_changed(id, text); };
         if (f["isDate"].boolean()) {
-            row.pick = line->emplace<Button>(L"▾");
+            row.pick = line->emplace<Button>();
+            row.pick->icon = icons::find("FileDates");
             row.pick->name = "MetadataPick_" + row.id;
             row.pick->width = 28;
             row.pick->height = 28;
@@ -249,7 +301,7 @@ void MetadataPane::rebuild() {
         row.revert->icon = icons::find("Undo");
         row.revert->width = 28;
         row.revert->height = 28;
-        row.revert->tooltip = L"Revert";
+        row.revert->tooltip = L"Put this field back as it was";
         row.revert->on_click = [this, id] {
             bb_metadata_revert(core_.app(), tab_, core::s(core::wide(id)));
             refresh();
@@ -271,13 +323,15 @@ void MetadataPane::rebuild() {
 
     // What nobody can type.
     if (m["details"].size() > 0) {
-        small_text(*details_, L"Details");
+        heading(*details_, L"Details");
         for (size_t i = 0; i < m["details"].size(); ++i) {
             auto* line = details_->emplace<StackPanel>(Orientation::Horizontal, 8.0f);
             line->height = 16;
             auto* label = small_text(*line, core::wide(m["details"][i]["label"].str()), tok::TextMuted);
-            label->width = 96;
-            small_text(*line, core::wide(m["details"][i]["value"].str()), tok::TextPrimary)->flex = 1;
+            label->width = kLabelColumn;
+            auto* value = small_text(*line, core::wide(m["details"][i]["value"].str()), tok::TextPrimary);
+            value->flex = 1;
+            value->tooltip = value->text();  // the pane is narrow, so the whole value is a rest of the pointer away
         }
     }
     request_layout();
@@ -287,6 +341,8 @@ void MetadataPane::rebuild() {
 void MetadataPane::update() {
     const json::Value& m = model_;
     title_->set_text(core::wide(m["title"].str()));
+    title_->tooltip = title_->text();
+    foot_->set_visible(!m["isEmpty"].boolean());
     summary_->set_text(core::wide(m["summary"].str()));
     apply_->set_enabled(m["canApply"].boolean());
     remove_box_->set_visible(m["canRemove"].boolean());
@@ -296,6 +352,8 @@ void MetadataPane::update() {
     location_note_->set_text(note);
     location_note_->set_visible(!note.empty());
     if (remove_cover_) remove_cover_->set_enabled(m["canRemovePicture"].boolean());
+    // A cover chosen while an apply runs would race the write it queues behind.
+    if (choose_cover_) choose_cover_->set_enabled(!m["isBusy"].boolean());
 
     suppress_ = true;
     for (Row& row : rows_) {
@@ -306,7 +364,7 @@ void MetadataPane::update() {
         if (!f) continue;
         const std::wstring text = core::wide((*f)["text"].str());
         if (row.edit->text() != text) row.edit->set_text(text);
-        row.edit->placeholder = (*f)["mixedPlaceholder"].boolean() ? L"(multiple)" : L"";
+        row.edit->placeholder = (*f)["mixedPlaceholder"].boolean() ? L"(multiple values)" : L"";
         row.revert->set_visible((*f)["isDirty"].boolean());
         const bool invalid = (*f)["isInvalid"].boolean();
         row.note->set_text(core::wide((*f)["note"].str()));

@@ -20,6 +20,8 @@ struct WindowOptions {
     std::wstring title = L"BertBrowser";
     int width_dip = 1100;
     int height_dip = 700;
+    int min_width_dip = 0;  // the smallest the user may drag it (0: Windows' own)
+    int min_height_dip = 0;
     bool parked = false;
     // The real window (hardware surface) put out of sight and never activated: a benchmark launch
     // (BERTBROWSER_STARTUP_TRACE). Unlike `parked` it is a normal window in every other way.
@@ -41,6 +43,10 @@ public:
     Window& operator=(const Window&) = delete;
 
     bool ok() const { return hwnd_ != nullptr && surface_ != nullptr; }
+    // Covers the whole monitor with no frame (a video played full screen), and back to where it was. Never for
+    // a window kept out of sight: a run must not put one over the desktop.
+    void set_full_screen(bool on);
+    bool full_screen() const { return full_screen_; }
     HWND hwnd() const { return hwnd_; }
     ui::UiRoot& root() { return root_; }
     gfx::Surface& surface() { return *surface_; }
@@ -100,6 +106,9 @@ private:
     std::unique_ptr<gfx::Surface> surface_;
     gfx::BitmapSurface* bitmap_ = nullptr;
     bool tracking_leave_ = false;
+    bool full_screen_ = false;
+    LONG_PTR windowed_style_ = 0;
+    WINDOWPLACEMENT windowed_place_{sizeof(WINDOWPLACEMENT)};
     bool tick_running_ = false;
     bool reenabling_ = false;
     bool in_render_ = false;

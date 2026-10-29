@@ -62,6 +62,10 @@ assert-no-row notes.txt
 rename-saved Reports to Markdown
 assert-no-saved-search Reports
 assert-saved-search Markdown
+# The Settings page lists them under the original's headings: name, what it searches, created, last run.
+settings saved-searches
+shot saved-settings-page
+settings close
 remove-saved Markdown
 assert-no-saved-search Markdown
 remove-saved Docs reports

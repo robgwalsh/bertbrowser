@@ -317,7 +317,9 @@ impl TransferTracker {
         json!({
             "headline": headline,
             "fraction": self.fraction,
-            "indeterminate": self.indeterminate && !paused,
+            // Paused with nothing measured is still unmeasured, so the bar stays indeterminate.
+            // Spec: TransferProgressViewModel.SetPaused (IsIndeterminate left alone).
+            "indeterminate": self.indeterminate,
             "bytesText": self.bytes_text,
             "rateText": rate,
             "etaText": eta,

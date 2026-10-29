@@ -179,7 +179,7 @@ impl Inner {
                     .collect();
                 inner.tracker_begin(TransferTracker::new("Extracting", items, estimate));
                 inner.set_active_status(format!(
-                    "Extracting {} file(s)\u{2026}",
+                    "Extracting {} item(s)\u{2026}",
                     format::thousands(files as i64)
                 ));
                 let me = inner.clone();
@@ -192,24 +192,21 @@ impl Inner {
                     Some(&inner.extra.ops.archive_gate),
                 );
                 inner.refresh_tabs_showing(std::slice::from_ref(&plan.destination_directory));
-                let mut text = if outcome.cancelled {
+                // Spec: ShellViewModel.DescribeExtract.
+                let written = format!(
+                    "{} file(s) extracted",
+                    format::thousands(i64::from(outcome.files_written))
+                );
+                let text = if outcome.cancelled {
+                    format!("Extract cancelled \u{2014} {written}.")
+                } else if !outcome.failed.is_empty() {
                     format!(
-                        "Extract cancelled \u{2014} {} file(s) extracted",
-                        outcome.files_written
+                        "{written}, {} failed.",
+                        format::thousands(outcome.failed.len() as i64)
                     )
                 } else {
-                    format!(
-                        "Extracted {} file(s)",
-                        format::thousands(i64::from(outcome.files_written))
-                    )
+                    format!("{written}.")
                 };
-                if let Some(first) = outcome.failed.first() {
-                    text.push_str(&format!(
-                        ", {} failed \u{2014} {}",
-                        outcome.failed.len(),
-                        first.message
-                    ));
-                }
                 inner.set_final_status(text.clone());
                 (outcome.failed.is_empty() && !outcome.cancelled, text)
             }),
@@ -252,6 +249,15 @@ impl Inner {
                     Ok(c) => c,
                     Err(_) => return (false, "cancelled".to_string()),
                 };
+                if collected.is_empty() {
+                    let text = "There is nothing to compress.".to_string();
+                    inner.set_active_status(text.clone());
+                    return (false, text);
+                }
+                inner.set_active_status(format!(
+                    "Compressing {} item(s)\u{2026}",
+                    format::thousands(collected.len() as i64)
+                ));
                 let me = inner.clone();
                 let mut sink = move |p: &ArchiveProgress| me.tracker_apply(&as_transfer(p));
                 let outcome = ArchiveCreator::new().create(
@@ -266,18 +272,21 @@ impl Inner {
                 if let Some(dir) = bb_core::rename::paths::directory_name(&target) {
                     inner.refresh_tabs_showing(&[dir]);
                 }
+                // Spec: ShellViewModel.RunCreateArchiveAsync, which has no word for a failed file;
+                // naming the first one is the addition, so it is not lost.
                 let mut text = if outcome.cancelled {
-                    "Compress cancelled".to_string()
+                    "Compress cancelled \u{2014} nothing was written.".to_string()
                 } else {
                     format!(
-                        "Compressed {} file(s) into {}",
-                        format::thousands(i64::from(outcome.files_written)),
-                        file_name(&target)
+                        "{} created from {} file(s).",
+                        file_name(&target),
+                        format::thousands(i64::from(outcome.files_written))
                     )
                 };
-                if let Some(first) = outcome.failed.first() {
+                if let (false, Some(first)) = (outcome.cancelled, outcome.failed.first()) {
+                    text.pop();
                     text.push_str(&format!(
-                        ", {} failed \u{2014} {first}",
+                        ", {} failed \u{2014} {first}.",
                         outcome.failed.len()
                     ));
                 }
@@ -293,7 +302,7 @@ impl Inner {
         self: &Arc<Self>,
         archive_file: String,
         edits: Vec<ArchiveEdit>,
-        verb: &'static str,
+        _verb: &'static str,
     ) -> AppResult<OpId> {
         let bytes = std::fs::metadata(&archive_file).map_or(0, |m| m.len() as i64);
         let index = self.fs.read_archive(&archive_file);
@@ -330,13 +339,12 @@ impl Inner {
                     ArchiveEditRecord::for_outcome(outcome.clone()).map(|r| Box::new(r) as _),
                 );
                 inner.refresh_tabs_in_archive(&archive_file);
+                // Spec: ShellViewModel.RunArchiveEditAsync - no undo hint, unlike every other edit.
+                let name = file_name(&archive_file);
                 let text = match (&outcome.failure, outcome.cancelled) {
-                    (Some(f), _) => format!("{verb} failed \u{2014} {f}"),
-                    (None, true) => format!("{verb} cancelled"),
-                    (None, false) => format!(
-                        "{verb} in {} \u{2014} this can be undone",
-                        file_name(&archive_file)
-                    ),
+                    (_, true) => format!("{name} was left unchanged."),
+                    (Some(f), false) => f.to_string(),
+                    (None, false) => format!("{name} updated."),
                 };
                 inner.set_final_status(text.clone());
                 (outcome.failure.is_none() && !outcome.cancelled, text)
@@ -390,8 +398,8 @@ impl Inner {
                 let plan = ShortcutPlanner::local().plan(&sources, &directory);
                 if !plan.has_work() {
                     let text = match plan.problems.first() {
-                        Some(p) => format!("No shortcut created \u{2014} {}", p.message),
-                        None => "Nothing to make a shortcut to".to_string(),
+                        Some(p) => p.message.clone(),
+                        None => "No shortcuts were created.".to_string(),
                     };
                     inner.set_active_status(text.clone());
                     return (false, text);
@@ -407,15 +415,24 @@ impl Inner {
                     "shortcuts"
                 };
                 let refused = outcome.failed.len() + plan.problems.len();
-                let mut text = format!("Created {} {noun}", outcome.created.len());
-                if refused > 0 {
-                    let first = outcome
-                        .failed
-                        .first()
-                        .map(|f| f.message.clone())
-                        .or_else(|| plan.problems.first().map(|p| p.message.clone()))
-                        .unwrap_or_default();
-                    text.push_str(&format!("; {refused} could not be \u{2014} {first}"));
+                let first = outcome
+                    .failed
+                    .first()
+                    .map(|f| f.message.clone())
+                    .or_else(|| plan.problems.first().map(|p| p.message.clone()));
+                // Spec: ShellViewModel.Describe(ShortcutPlan, ShortcutOutcome).
+                let mut text = if outcome.created.is_empty() {
+                    first
+                        .clone()
+                        .unwrap_or_else(|| "No shortcuts were created.".to_string())
+                } else {
+                    format!("Created {} {noun}", outcome.created.len())
+                };
+                if refused > 0 && !outcome.created.is_empty() {
+                    text.push_str(&format!(
+                        "; {refused} could not be \u{2014} {}",
+                        first.unwrap_or_default()
+                    ));
                 }
                 inner.set_final_status(text.clone());
                 (outcome.failed.is_empty(), text)

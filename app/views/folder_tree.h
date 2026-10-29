@@ -49,6 +49,8 @@ public:
     // (the portable devices), PortableDeviceNodeViewModel.
     bool set_devices(const std::vector<std::pair<std::wstring, std::wstring>>& devices);
     bool is_device(uint64_t node) const;
+    // A folder's full path; a device's name. Spec: MainWindow.xaml (the tree row's ToolTip, FullPath).
+    std::wstring tip(uint64_t node) const override { return is_device(node) ? label(node) : path_of(node); }
 
     std::wstring path_of(uint64_t node) const;
     // The nodes from the drive down to `path`, loading each level. Empty when the path is not under a drive.

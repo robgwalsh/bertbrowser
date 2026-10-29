@@ -1167,6 +1167,27 @@ fn the_toolbar_editor_walks_menus_and_edits_in_place() {
         ],
         names(&json(&f.app.barpage_json()))
     );
+    // A choice dropped between two rows lands exactly there, whatever is selected; past the end is the end.
+    f.app.barpage_do("add-at", "0 app.settings").unwrap();
+    f.app.barpage_do("add-at", "99 -").unwrap();
+    let after = names(&json(&f.app.barpage_json()));
+    assert_eq!("Settings", after[0]);
+    assert_eq!("Separator", after[after.len() - 1]);
+    assert!(f.app.barpage_do("add-at", "app.settings").is_err());
+    f.app.barpage_do("remove", "0").unwrap();
+    f.app
+        .barpage_do("remove", &(after.len() - 2).to_string())
+        .unwrap();
+    assert_eq!(
+        vec![
+            "Command palette",
+            "Reload",
+            "Search syntax help",
+            "Separator",
+            "About BertBrowser"
+        ],
+        names(&json(&f.app.barpage_json()))
+    );
     assert_eq!(false, json(&f.app.bars_state_json())["isDefault"]);
     assert_eq!(
         "Your own arrangement, not saved under a name",
@@ -1257,6 +1278,27 @@ fn the_columns_page_edits_the_default_set_that_new_tabs_start_from() {
     assert_eq!(vec!["Name", "Created", "Size", "Modified"], defaults(&f));
     // The tab never arranged its own, so it follows.
     assert_eq!(vec!["Name", "Created", "Size", "Modified"], column_ids(&f));
+    // The wheel over a width: snapped to the grid first, so a notch is always one visible move; Ctrl is one DIP.
+    let width = |f: &Fixture| {
+        json(&f.app.columns_defaults_json())["columns"][1]["width"]
+            .as_f64()
+            .unwrap()
+    };
+    f.app.columns_defaults_do("width", "Created 137").unwrap();
+    f.app
+        .columns_defaults_do("step-width", "Created 1")
+        .unwrap();
+    assert_eq!(140.0, width(&f));
+    f.app.columns_defaults_do("width", "Created 137").unwrap();
+    f.app
+        .columns_defaults_do("step-width", "Created -1")
+        .unwrap();
+    assert_eq!(130.0, width(&f));
+    f.app
+        .columns_defaults_do("step-width", "Created 1 fine")
+        .unwrap();
+    assert_eq!(131.0, width(&f));
+    assert!(f.app.columns_defaults_do("step-width", "Nope 1").is_err());
     f.app.columns_defaults_do("reset", "").unwrap();
     assert_eq!(vec!["Name", "Size", "Type", "Modified"], defaults(&f));
 }
@@ -2137,4 +2179,76 @@ fn a_delete_is_asked_about_first_and_only_what_was_shown_goes() {
     f.app.ops_do("delete-confirm", "").unwrap();
     f.settle();
     assert!(!std::path::Path::new(&f.path("notes.txt")).exists());
+}
+
+/// A splitter drag writes each pane's size back as its weight, so the saved session (and the next
+/// split or close) keeps it; a path or a count that no longer fits the tree is stale, not a panic.
+/// Spec: PaneLayoutHost.WriteBackWeights.
+#[test]
+fn a_dragged_split_is_kept_in_the_saved_layout() {
+    let f = Fixture::new();
+    f.app
+        .split_pane(
+            f.app.active_pane(),
+            bb_core::layout::SplitOrientation::Vertical,
+            &f.path("Documents"),
+        )
+        .unwrap();
+    f.settle();
+    f.app.layout_set_weights(&[], &[300.0, 700.0]).unwrap();
+    let saved = json(&f.app.session_capture_json());
+    let weights: Vec<f64> = saved["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["weight"].as_f64().unwrap())
+        .collect();
+    assert_eq!(vec![300.0, 700.0], weights);
+    assert!(matches!(
+        f.app.layout_set_weights(&[], &[1.0]),
+        Err(AppError::Stale)
+    ));
+    assert!(matches!(
+        f.app.layout_set_weights(&[5], &[1.0, 1.0]),
+        Err(AppError::Stale)
+    ));
+}
+
+/// Where the window was left comes back next launch, maximised or not.
+#[test]
+fn the_window_placement_is_remembered_with_the_settings() {
+    let f = Fixture::new();
+    assert_eq!((None, false), f.app.window_placement());
+    f.app
+        .set_window_placement([10.0, 20.0, 1300.0, 800.0], true);
+    f.app.shutdown();
+    let second = bb_app::App::new(bb_app::AppConfig::harness(&f.data)).unwrap();
+    assert_eq!(
+        (Some([10.0, 20.0, 1300.0, 800.0]), true),
+        second.window_placement()
+    );
+    second.shutdown();
+}
+
+/// Inside an archive an entry has no file on disk, so a content term cannot be answered there: it is
+/// refused in so many words rather than matching every entry. Spec: DirectoryTabViewModel
+/// (the archive branch of RunSearchAsync).
+#[test]
+fn a_content_search_inside_an_archive_is_refused_rather_than_answered_wrongly() {
+    let f = Fixture::new();
+    let zip = bb_test_support::metadata_fixtures::zip_of(&[("a.txt", "needle"), ("b.txt", "hay")]);
+    std::fs::write(f.root.join("pack.zip"), zip).unwrap();
+    f.app.navigate(f.tab, &f.path("pack.zip")).unwrap();
+    f.settle();
+    f.app.set_search(f.tab, "content:needle", false).unwrap();
+    f.settle();
+    assert_eq!(
+        "content: can't look inside archives \u{2014} extract it first.",
+        f.status()
+    );
+    assert!(f.names().is_empty(), "{:?}", f.names());
+    // A name search there still works, from the listing's own index.
+    f.app.set_search(f.tab, "a.txt", false).unwrap();
+    f.settle();
+    assert_eq!(vec!["a.txt"], f.names());
 }

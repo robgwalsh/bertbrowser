@@ -6,6 +6,12 @@
 
 namespace bb::ui {
 
+// Rows a turn of the wheel by `delta` moves the file list and the folder tree, downwards positive: Windows' own
+// lines-per-notch times the user's multiplier (Settings, "Vertical scroll speed"). Shift+wheel's sideways scroll
+// is left alone. Spec: ScrollSpeed.HandlePreviewMouseWheel.
+float wheel_rows(int delta);
+void set_wheel_multiplier(double multiplier);
+
 // One axis of a scroll bar, drawn and dragged by whichever widget owns it. Not a Widget: the list and the
 // tree need the thumb maths without a child to hit-test.
 class ScrollBar {
@@ -80,6 +86,7 @@ public:
     float thickness = 5.0f;
     float min_first = 40.0f, min_second = 40.0f;
     std::function<void(float)> on_moved;  // the first pane's new size
+    std::function<void()> on_released;    // a drag of the bar ended
 
     float position() const { return position_; }
     void set_position(float p);

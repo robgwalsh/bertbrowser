@@ -53,6 +53,9 @@ public:
     bool row(size_t i, BbRow& out) const;
     std::wstring name(size_t i) const;
     std::wstring cell(size_t i, uint32_t column) const;
+    // A content: search's match on row i: its line number (0 for none) and the needle's place in the cell.
+    int match(size_t i, uint32_t* start, uint32_t* length) const;
+    std::wstring size_tip(size_t i) const;
 
 private:
     const BbListing* l_;

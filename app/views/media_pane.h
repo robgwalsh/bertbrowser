@@ -28,7 +28,10 @@ public:
     void open(const std::wstring& path, ui::ThumbPtr poster, bool is_video);
     void play();                 // opens the file and starts it
     void toggle_play();
-    void stop();                 // closes the engine and goes back to the poster
+    // Closes the engine and goes back to the poster. `keep_full` leaves full screen up: the next video is on
+    // its way (auto-advance), and full screen only ends once what arrives is no media. Spec: PreviewPane
+    // (OnModelChanged, IsLoading false and HasMedia false).
+    void stop(bool keep_full = false);
     void suspend();              // the pane was hidden: pause, keep the place
     bool started() const { return started_; }
     bool playing() const { return player_ && player_->playing(); }
@@ -36,6 +39,7 @@ public:
     void set_full_screen(bool on);
     bool full_screen() const { return full_; }
     std::function<void()> on_next;  // ask the tab to select the next video
+    std::function<void(bool)> on_full_screen;  // it left the pane for the window, or came back
 
     ui::Slider* seek() const { return seek_; }
     ui::Slider* volume() const { return volume_; }

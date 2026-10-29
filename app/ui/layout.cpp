@@ -25,17 +25,34 @@ void Panel::arrange(Rect r) {
 
 Size StackPanel::measure(Size avail) {
     const bool vert = orientation == Orientation::Vertical;
-    const Size inner{std::max(0.0f, avail.w - 2 * pad), std::max(0.0f, avail.h - 2 * pad)};
+    // A fixed size is the room the children get, or text that wraps would be measured as one long line.
+    const float aw = width > 0 ? width : avail.w, ah = height > 0 ? height : avail.h;
+    const Size inner{std::max(0.0f, aw - 2 * pad), std::max(0.0f, ah - 2 * pad)};
     float main = 0, cross = 0;
     int n = 0;
+    float flex_sum = 0;
     for (auto& c : children()) {
         if (!c->flags.visible) continue;
+        ++n;
+        // Side by side, what flexes is measured once the rest is known, at the width arrange will give it.
+        if (!vert && c->flex > 0 && inner.w < kInf) {
+            flex_sum += c->flex;
+            continue;
+        }
         const Size s = c->measure_tree(vert ? Size{inner.w, kInf} : Size{kInf, inner.h});
         main += vert ? s.h : s.w;
         cross = std::max(cross, vert ? s.w : s.h);
-        ++n;
     }
     if (n > 1) main += spacing * static_cast<float>(n - 1);
+    if (flex_sum > 0) {
+        const float left = std::max(0.0f, inner.w - main);
+        for (auto& c : children()) {
+            if (!c->flags.visible || c->flex <= 0) continue;
+            const Size s = c->measure_tree(Size{left * c->flex / flex_sum, inner.h});
+            main += s.w;
+            cross = std::max(cross, s.h);
+        }
+    }
     return fixed_or(vert ? Size{cross + 2 * pad, main + 2 * pad} : Size{main + 2 * pad, cross + 2 * pad});
 }
 

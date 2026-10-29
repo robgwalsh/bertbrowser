@@ -153,13 +153,37 @@ fn open_bounded(inner: &Inner, path: &str, limit: i64) -> Result<Box<dyn Read>, 
                 &CancelToken::new(),
             )
             .ok_or_else(|| {
-                "This file could not be read from the archive (it may be encrypted).".to_string()
+                // An encrypted zip lists in full and only refuses its contents, so this is the
+                // ordinary way a preview fails in one, and "could not be read" would send the user
+                // looking for a corrupt file rather than at the Unlock button above the list.
+                let encrypted = inner
+                    .fs
+                    .read_archive(&entry.archive_file)
+                    .find(&entry.entry_path)
+                    .is_some_and(|n| n.is_encrypted);
+                if encrypted {
+                    "This file is encrypted. Unlock the archive to preview it.".to_string()
+                } else {
+                    "That entry could not be read from the archive.".to_string()
+                }
             })?;
         return Ok(Box::new(Cursor::new(bytes)));
     }
     ReadOnlyFile::try_open(path, false)
         .map(|f| Box::new(f) as Box<dyn Read>)
         .ok_or_else(|| "This file could not be read.".to_string())
+}
+
+/// At most `limit` bytes of a path, real or inside a container, read whole: a picture inside a zip
+/// is decoded from memory, as is a zip inside a zip listed. Spec: PreviewPaneViewModel.ReadFully.
+pub(crate) fn read_bounded(inner: &Inner, path: &str, limit: i64) -> Result<Vec<u8>, String> {
+    let reader = open_bounded(inner, path, limit)?;
+    let mut bytes = Vec::new();
+    reader
+        .take(limit.max(0) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "This file could not be read.".to_string())?;
+    Ok(bytes)
 }
 
 fn attributes_of(path: &str) -> u32 {
@@ -310,13 +334,11 @@ fn build_hex(inner: &Inner, v: Value, path: &str, plan: &PreviewRequest) -> Valu
     )
 }
 
-fn build_archive(inner: &Inner, v: Value, path: &str) -> Value {
-    let Some(file) = ReadOnlyFile::try_open(path, false) else {
+fn build_archive(v: Value, path: &str) -> Value {
+    let Some(mut file) = ReadOnlyFile::try_open(path, false) else {
         return message(v, "This file could not be read.");
     };
-    let mut file = file;
     let contents = ArchiveListing::read(&mut file, ArchiveListing::DEFAULT_MAX_ENTRIES);
-    let _ = inner;
     if let Some(error) = &contents.error {
         return message(v, error);
     }
@@ -451,11 +473,20 @@ impl Inner {
         let v = with(v, json!({"canChooseMode": true}));
         match plan.kind {
             PreviewKind::Hex => build_hex(self, v, &item.path, &plan),
-            PreviewKind::Image if in_archive => message(v, "Extract this file to preview it."),
-            PreviewKind::Image => with(v, json!({"state": "image"})),
+            // The host decodes the picture from the entry's bytes (`App::preview_read`).
+            PreviewKind::Image => with(v, json!({"state": "image", "inArchive": in_archive})),
             PreviewKind::Text => build_text(self, v, &item.path, &plan, false),
-            PreviewKind::Archive if in_archive => message(v, "Extract this archive to preview it."),
-            PreviewKind::Archive => build_archive(self, v, &item.path),
+            // A zip inside a zip is no virtual path at all (`ArchivePath::parse` refuses it), so
+            // it is recognised by its folder.
+            PreviewKind::Archive
+                if item
+                    .path
+                    .rsplit_once('\\')
+                    .is_some_and(|(folder, _)| self.fs.resolve(folder).is_some()) =>
+            {
+                message(v, "Extract this archive to preview it.")
+            }
+            PreviewKind::Archive => build_archive(v, &item.path),
             PreviewKind::Font if in_archive => message(v, "Extract this font to preview it."),
             PreviewKind::Font => with(v, json!({"state": "font"})),
             PreviewKind::Media if in_archive => message(v, "Extract this file to play it."),
@@ -485,6 +516,13 @@ impl crate::app::App {
     /// As `preview_build` for one path that need not be selected anywhere.
     pub fn preview_build_path(&self, path: &str, mode: u8) -> String {
         self.inner.preview_path(path, mode).to_string()
+    }
+
+    /// A picture's bytes for the host to decode, from disk or from inside a container (bounded
+    /// like every preview read). Blocking; call it from a worker.
+    pub fn preview_read(&self, path: &str) -> AppResult<Vec<u8>> {
+        read_bounded(&self.inner, path, PreviewClassifier::MAX_IMAGE_BYTES)
+            .map_err(crate::ids::AppError::Invalid)
     }
 }
 

@@ -12,33 +12,61 @@ SavedSidebar::SavedSidebar(MainView& main, core::Core& core) : StackPanel(Orient
     name = "SavedSidebar";
     pad = 4;
     style.bg = tok::SurfaceBackground;
-    auto make = [&](TextBlock*& title, f::ItemList*& list, const char* list_name) {
-        title = f::text(*this, L"", tok::TextMuted, 11.5f, 600);
-        title->name = std::string(list_name) + "Title";
-        list = emplace<f::ItemList>();
+    // A hairline above each section's heading, as the original's sections had. Spec: MainWindow.xaml (the
+    // Border.Subtle rule over SAVED SEARCHES, WORKSPACES and BOOKMARKS).
+    auto rule = [&] {
+        auto* r = emplace<Widget>();
+        r->height = 1;
+        r->style.bg = tok::BorderSubtle;
+        return r;
+    };
+    // The rows are links, not a choice: a click runs one and nothing stays selected or takes the keyboard, so
+    // an arrow key afterwards still belongs to the folders. Spec: MainWindow.xaml (the rows are Borders).
+    auto links = [](f::ItemList* list, const char* list_name) {
         list->name = list_name;
         list->row_height = 24;
         list->style.bg = gfx::kNoToken;
         list->style.border = gfx::kNoToken;
         list->flags.tab_stop = false;
+        list->flags.focusable = false;
+        list->keep_selection = false;
+        list->hover = true;
     };
+    auto note = [&](const char* note_name) {
+        auto* t = f::text(*this, L"", tok::TextMuted, 11.0f);
+        t->name = note_name;
+        t->wrap = true;
+        t->set_visible(false);
+        return t;
+    };
+    auto make = [&](TextBlock*& title, f::ItemList*& list, const char* list_name) {
+        title = f::text(*this, L"", tok::TextMuted, 11.0f, 600);
+        title->name = std::string(list_name) + "Title";
+        list = emplace<f::ItemList>();
+        links(list, list_name);
+    };
+    search_rule_ = rule();
     make(search_title_, search_list_, "SavedSearchesList");
+    search_empty_ = note("SavedSearchEmptyText");
     // WORKSPACES, with "+" beside it: saving the panes as they are is what the section is for.
+    space_rule_ = rule();
     space_head_ = emplace<StackPanel>(Orientation::Horizontal, 4.0f);
-    space_title_ = f::text(*space_head_, L"", tok::TextMuted, 11.5f, 600);
+    space_title_ = f::text(*space_head_, L"", tok::TextMuted, 11.0f, 600);
     space_title_->name = "WorkspacesListTitle";
     space_title_->flex = 1;
-    space_add_ = f::button(*space_head_, L"+", [this] { main_.execute_command(L"app.save-workspace"); }, 24);
+    space_add_ = f::button(*space_head_, L"", [this] { main_.execute_command(L"app.save-workspace"); }, 21);
     space_add_->name = "SaveWorkspaceButton";
-    space_add_->tooltip = L"Save the current panes and tabs as a workspace";
-    space_add_->height = 20;
+    space_add_->icon = &icons::Add;
+    space_add_->style.bg = tok::SurfaceBackground;  // flat, as a toolbar button, until the pointer is on it
+    space_add_->style.border = tok::SurfaceBackground;
+    space_add_->tooltip = L"Save the current layout as a workspace";
+    space_add_->height = 21;
     space_list_ = emplace<f::ItemList>();
-    space_list_->name = "WorkspacesList";
-    space_list_->row_height = 24;
-    space_list_->style.bg = gfx::kNoToken;
-    space_list_->style.border = gfx::kNoToken;
-    space_list_->flags.tab_stop = false;
+    links(space_list_, "WorkspacesList");
+    space_empty_ = note("WorkspaceEmptyText");
+    rule();
     make(bookmark_title_, bookmark_list_, "BookmarksList");
+    bookmark_empty_ = note("BookmarkEmptyText");
     bookmark_title_->set_text(L"BOOKMARKS");
     bookmark_list_->on_select = [this](int i) {
         if (i >= 0 && static_cast<size_t>(i) < bookmark_paths_.size()) open_bookmark(L"here", bookmark_paths_[static_cast<size_t>(i)]);
@@ -103,29 +131,40 @@ void SavedSidebar::workspace_menu(int row, Point at) {
     main_.show_context_menu(std::move(items), at);
 }
 
+void SavedSidebar::show_empty(f::ItemList& list, TextBlock& note, const wchar_t* text, bool empty) {
+    note.set_text(text);
+    note.set_visible(empty);
+    if (empty) list.height = 0;
+}
+
 void SavedSidebar::fill(f::ItemList& list, TextBlock& title, const std::vector<std::wstring>& names, const wchar_t* heading,
-                        const wchar_t* empty, bool shown, const std::vector<std::wstring>& details) {
+                        const wchar_t* empty, bool shown, const std::vector<std::wstring>& details, const std::vector<std::wstring>& tips,
+                        const IconData* icon) {
+    TextBlock* note = &title == space_title_ ? space_empty_ : search_empty_;
+    Widget* section_rule = &title == space_title_ ? space_rule_ : search_rule_;
     title.set_visible(shown);
     list.set_visible(shown);
+    if (section_rule) section_rule->set_visible(shown);
     if (&title == space_title_ && space_head_) space_head_->set_visible(shown);
-    if (!shown) return;
+    if (!shown) {
+        if (note) note->set_visible(false);
+        return;
+    }
     title.set_text(heading);
     std::vector<f::ListEntry> entries;
     for (size_t i = 0; i < names.size(); ++i) {
         f::ListEntry e;
         e.text = names[i];
+        e.icon = icon;
         if (i < details.size()) e.detail = details[i];
-        entries.push_back(std::move(e));
-    }
-    if (entries.empty()) {
-        f::ListEntry e;
-        e.text = empty;
-        e.muted = true;
+        if (i < tips.size()) e.tip = tips[i];
         entries.push_back(std::move(e));
     }
     // Up to about eight rows, then it scrolls: a long list must not squeeze the drives out.
     list.height = std::min(200.0f, 24.0f * static_cast<float>(entries.size()) + 2);
+    const bool none = entries.empty();
     list.set_entries(std::move(entries));
+    if (note) show_empty(list, *note, empty, none);
 }
 
 void SavedSidebar::fill_bookmarks(const json::Value& rows) {
@@ -139,6 +178,7 @@ void SavedSidebar::fill_bookmarks(const json::Value& rows) {
         bookmark_paths_.push_back(path);
         f::ListEntry e;
         e.text = core::wide(r["name"].str());
+        e.tip = path;
         e.faded = hidden;
         ShellIcons* icons = &main_.shell_icons();
         const uint32_t attributes = (dir ? FILE_ATTRIBUTE_DIRECTORY : 0) | (hidden ? FILE_ATTRIBUTE_HIDDEN : 0);
@@ -148,16 +188,12 @@ void SavedSidebar::fill_bookmarks(const json::Value& rows) {
         };
         entries.push_back(std::move(e));
     }
-    if (entries.empty()) {
-        f::ListEntry e;
-        e.text = L"Right-click a file or folder to bookmark it.";
-        e.muted = true;
-        entries.push_back(std::move(e));
-    }
     // Sized to its rows up to ten, then it scrolls, so a long list never pushes the tree off the sidebar.
     const size_t rows_shown = std::min<size_t>(entries.size(), 10);
     bookmark_list_->height = 24.0f * static_cast<float>(rows_shown) + 2;
+    const bool none = entries.empty();
     bookmark_list_->set_entries(std::move(entries));
+    show_empty(*bookmark_list_, *bookmark_empty_, L"Right-click a file or folder to bookmark it.", none);
 }
 
 void SavedSidebar::open_bookmark(const std::wstring& how, const std::wstring& path) {
@@ -194,17 +230,20 @@ void SavedSidebar::sync() {
     if (st.is_null()) return;
     searches_.clear();
     workspaces_.clear();
-    std::vector<std::wstring> scopes;
+    std::vector<std::wstring> scopes, search_tips, shapes;
     std::string sig = st["savedSearchesPlacement"].str() + "|" + st["workspacesPlacement"].str();
     for (size_t i = 0; i < st["searches"].size(); ++i) {
         searches_.push_back(core::wide(st["searches"][i]["name"].str()));
         scopes.push_back(core::wide(st["searches"][i]["scopeText"].str()));
-        sig += "/" + st["searches"][i]["name"].str() + "=" + st["searches"][i]["scopeText"].str();
+        // The query as it runs, and where. Spec: SavedSearchesViewModel.ToolTip.
+        search_tips.push_back(core::wide(st["searches"][i]["query"].str()) + L" \u2014 " + scopes.back());
+        sig += "/" + st["searches"][i]["name"].str() + "=" + st["searches"][i]["scopeText"].str() + ":" + st["searches"][i]["query"].str();
     }
     sig += "|";
     for (size_t i = 0; i < st["workspaces"].size(); ++i) {
         workspaces_.push_back(core::wide(st["workspaces"][i]["name"].str()));
-        sig += "/" + st["workspaces"][i]["name"].str();
+        shapes.push_back(core::wide(st["workspaces"][i]["shape"].str()));  // Spec: SavedWorkspacesViewModel.ToolTip
+        sig += "/" + st["workspaces"][i]["name"].str() + "=" + st["workspaces"][i]["shape"].str();
     }
     sig += "|";
     for (size_t i = 0; i < st["bookmarks"].size(); ++i) {
@@ -214,9 +253,9 @@ void SavedSidebar::sync() {
     if (sig == signature_) return;
     signature_ = sig;
     fill(*search_list_, *search_title_, searches_, L"SAVED SEARCHES", L"Save a search from the search box to keep it here.",
-         st["savedSearchesPlacement"].str() == "sidebar", scopes);
+         st["savedSearchesPlacement"].str() == "sidebar", scopes, search_tips, &icons::Search);
     fill(*space_list_, *space_title_, workspaces_, L"WORKSPACES", L"Save the current panes and tabs here, to switch back to them by name.",
-         st["workspacesPlacement"].str() == "sidebar");
+         st["workspacesPlacement"].str() == "sidebar", {}, shapes, &icons::SplitRight);
     fill_bookmarks(st["bookmarks"]);
     request_layout();
 }

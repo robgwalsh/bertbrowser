@@ -153,7 +153,7 @@ TEST(grid_layout_cache_is_used_on_repaint) {
 TEST(grid_wheel_and_scroll_bar) {
     GridRig g;
     g.rig.root.wheel({200, 200}, -120);
-    CHECK_NEAR(g.list->scroll_y(), 66.0, 0.01);  // one notch = 3 rows
+    CHECK_NEAR(g.list->scroll_y(), 22.0 * ui::wheel_rows(-120), 0.01);  // one notch = Windows' lines per notch
     g.rig.root.wheel({200, 200}, 120);
     g.rig.root.wheel({200, 200}, 120);
     CHECK_NEAR(g.list->scroll_y(), 0.0, 0.01);

@@ -20,7 +20,10 @@ public:
 
 private:
     void fill(forms::ItemList& list, ui::TextBlock& title, const std::vector<std::wstring>& names, const wchar_t* heading,
-              const wchar_t* empty, bool shown, const std::vector<std::wstring>& details = {});
+              const wchar_t* empty, bool shown, const std::vector<std::wstring>& details, const std::vector<std::wstring>& tips,
+              const ui::IconData* icon);
+    // A section's empty state, said in a line that wraps, under its heading. Spec: MainWindow.xaml (SavedSearchEmptyText).
+    void show_empty(forms::ItemList& list, ui::TextBlock& note, const wchar_t* text, bool empty);
     void run_search(const std::wstring& name, bool new_tab);
     void search_menu(int row, ui::Point at);
     void workspace_menu(int row, ui::Point at);
@@ -30,6 +33,8 @@ private:
     MainView& main_;
     core::Core& core_;
     ui::TextBlock *search_title_ = nullptr, *space_title_ = nullptr, *bookmark_title_ = nullptr;
+    ui::TextBlock *search_empty_ = nullptr, *space_empty_ = nullptr, *bookmark_empty_ = nullptr;
+    ui::Widget *search_rule_ = nullptr, *space_rule_ = nullptr;
     forms::ItemList *search_list_ = nullptr, *space_list_ = nullptr, *bookmark_list_ = nullptr;
     ui::StackPanel* space_head_ = nullptr;
     ui::Button* space_add_ = nullptr;

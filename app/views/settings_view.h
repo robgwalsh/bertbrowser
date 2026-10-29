@@ -9,6 +9,7 @@
 #include "views/forms.h"
 #include "views/model.h"
 
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -23,6 +24,9 @@ public:
     // Reads the core's state: shows or hides the layer, switches page, rebuilds the page.
     void sync();
     bool is_open() const { return open_; }
+    // Esc goes back; on the Keyboard page the next key is the recorder's answer. Asked by the main view
+    // before the focused control sees a key; true = taken.
+    bool preview_key(const ui::KeyEvent& e);
     const std::string& page_id() const { return page_; }
 
     // ---- what the harness asks ----
@@ -47,6 +51,7 @@ public:
 
 private:
     void build_chrome();
+    void go_back();
     void build_nav(const json::Value& pages);
     void build_page();
     void rebuild_if_changed(bool force);
@@ -91,7 +96,7 @@ private:
     void bool_row(ui::Widget& p, const wchar_t* label, const char* key);
     // A setting with a fixed list of values, as the original's combos and sliders had: a value off the list
     // (a hand-edited file) is shown as itself rather than rewritten. `choices` are label and JSON value.
-    void choice_row(ui::Widget& p, const wchar_t* label, const char* key, std::vector<std::pair<std::wstring, std::string>> choices,
+    ui::ComboBox* choice_row(ui::Widget& p, const wchar_t* label, const char* key, std::vector<std::pair<std::wstring, std::string>> choices,
                     const char* when_unset = nullptr);
     // What a hint calls a command: its shortcut, or its name when it has none.
     std::wstring gesture_or(const wchar_t* command, const wchar_t* fallback);
@@ -116,6 +121,10 @@ private:
     std::wstring refused_;
     void show_problem(const std::wstring& core_problem);
     json::Value pages_;
+    // Alt+Up/Down on a list a page builds (the menu layout, the bar rows): the page sets what moves the
+    // selected row, and `preview_key` calls it while that list has the keyboard. Cleared with the page.
+    std::function<void(int)> nudge_;
+    ui::Widget* nudge_for_ = nullptr;
     // the editors' last models (for the harness and the keys page)
     json::Value bars_model_, keys_model_;
 };

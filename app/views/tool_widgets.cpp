@@ -251,6 +251,7 @@ bool TableList::on_key_down(const KeyEvent& e) {
         invalidate();
         return true;
     }
+    if (on_key && !e.mods.ctrl && !e.mods.alt && e.vk != VK_UP && e.vk != VK_DOWN && on_key(e.vk)) return true;
     switch (e.vk) {
         case VK_DOWN: move(1); return true;
         case VK_UP: move(-1); return true;

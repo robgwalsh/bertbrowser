@@ -73,11 +73,11 @@ void Edit::ensure_layout() {
 Point Edit::origin() {
     ensure_layout();
     if (multiline) {
-        return {bounds.l + kPadX - scroll_x_, bounds.t + kPadY - scroll_y_};
+        return {bounds.l + kPadX + inset_left - scroll_x_, bounds.t + kPadY - scroll_y_};
     }
     DWRITE_TEXT_METRICS tm{};
     layout_->GetMetrics(&tm);
-    return {bounds.l + kPadX - scroll_x_, bounds.t + std::max(0.0f, (bounds.height() - tm.height) / 2)};
+    return {bounds.l + kPadX + inset_left - scroll_x_, bounds.t + std::max(0.0f, (bounds.height() - tm.height) / 2)};
 }
 
 Rect Edit::caret_rect() {
@@ -112,7 +112,7 @@ void Edit::paint(PaintContext& pc) {
         pc.fill(bounds, style.bg);
         pc.stroke(bounds, focused() ? tok::BorderFocus : (style.border != kNoToken ? style.border : tok::InputBorder));
     }
-    const Rect inner = bounds.deflate(kPadX, 1, kPadX + inset_right, 1);
+    const Rect inner = bounds.deflate(kPadX + inset_left, 1, kPadX + inset_right, 1);
     pc.clip(inner.intersect(pc.dirty));
     const Point o = origin();
     if (display_text().empty() && !placeholder.empty()) {

@@ -5,6 +5,7 @@
 #include "ui/edit.h"
 #include "ui/inputs.h"
 #include "ui/layout.h"
+#include "ui/scroll.h"
 #include "views/core.h"
 
 #include <functional>
@@ -29,6 +30,7 @@ public:
     TitleBar();
     std::wstring title = L"BertBrowser";
     bool show_title = true;       // the main window hides it: the menu bar and toolbar take the room
+    ui::Widget* app_icon = nullptr;  // 16 DIPs square at the very left, before `left` (the main window's)
     ui::Widget* left = nullptr;   // placed after the left padding (a menu bar); sized to its content
     ui::Widget* middle = nullptr; // takes what is left between it and the caption buttons (a toolbar)
     ui::Widget* after = nullptr;  // sized to its content, just after `middle`'s (the title bar's switchers)
@@ -46,7 +48,8 @@ public:
 class StatusBar : public ui::Widget {
 public:
     StatusBar();
-    void set_text(std::wstring left, std::wstring right);
+    // `right` is the index line; `action` ("Try again") follows it as the link the line becomes.
+    void set_text(std::wstring left, std::wstring right, std::wstring action = {});
     // What Undo would undo ("Ctrl+Z: undo move 3 items"), and "3 items selected (1.2 MB)"; empty for none.
     void set_extras(std::wstring undo, std::wstring selection);
     void set_scale(double scale);  // the slider, unless it is being dragged
@@ -59,9 +62,12 @@ public:
     std::function<void()> on_right_click;
     std::function<void()> on_undo_click;
     std::function<void(double scale)> on_scale;  // 0 is the details list
+    std::wstring undo_tip = L"Show the undo history";  // with its key, set by the window
     void arrange(ui::Rect r) override;
     void paint(ui::PaintContext& pc) override;
     bool on_mouse_down(const ui::MouseEvent& e) override;
+    bool on_mouse_move(const ui::MouseEvent& e) override;
+    void on_mouse_leave() override;
     ui::Cursor cursor_at(ui::Point p) const override;
     static constexpr float kHeight = 24.0f;
 
@@ -70,7 +76,12 @@ private:
     float right_split() const;
     float right_edge() const;  // where the index line ends: the slider is beyond it
     ui::Rect undo_rect() const;
-    std::wstring left_, right_, undo_, selection_;
+    float right_width() const;  // the index line: its icon, its text and the action after it
+    ui::Rect right_rect() const;
+    std::wstring left_, right_, action_, undo_, selection_;
+    bool hot_undo_ = false;
+    gfx::ComPtr<ID2D1PathGeometry> index_geo_;
+    uint32_t index_gen_ = 0;
     ui::Slider* slider_ = nullptr;
     gfx::ComPtr<ID2D1PathGeometry> icon_geo_;
     uint32_t icon_gen_ = 0;
@@ -118,9 +129,17 @@ public:
     bool on_wheel(ui::Point p, int delta, ui::Mods mods) override;
     void on_mouse_leave() override;
     void on_modal_cancel() override;
+    bool cancel_capture() override;
+    ui::Cursor cursor_at(ui::Point p) const override;
+    std::wstring close_tip = L"Close tab";  // the close button's tooltip, with its key
 
 private:
     static constexpr float kButtons = 3 * 26.0f + 9.0f;  // three buttons and the rule between + and the splits
+    ui::Rect close_rect(size_t i) const;  // a tab's close button
+    void sync_bar();
+    ui::ScrollBar h_{false};  // under the tabs when they do not all fit. Spec: FilePaneView.xaml (HorizontalScrollBarVisibility)
+    bool bar_drag_ = false;
+    bool hot_close_ = false;  // the pointer is on the hot tab's close button
     void paint_tabs(ui::PaintContext& pc);
     size_t index_at(ui::Point p) const;
     float tab_width(size_t i) const;

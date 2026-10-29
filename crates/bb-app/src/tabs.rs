@@ -12,8 +12,9 @@ use bb_core::archives::ArchiveBrowser;
 use bb_core::attributes::HIDDEN;
 use bb_core::cancel::CancelToken;
 use bb_core::data::SearchHit;
+use bb_core::format::{byte_size, thousands};
 use bb_core::fs::{FileListDiff, FileSystemService, SearchProgress, SearchService};
-use bb_core::models::SearchOutcome;
+use bb_core::models::{ContentScanProgress, SearchOutcome};
 use bb_core::rules::FlatViewRules;
 use bb_core::search::SearchQuery;
 use bb_paths::PathKey;
@@ -660,6 +661,29 @@ impl Inner {
         }
         let Some(query) = parse.query else { return };
         let needs_content = query.needs_content();
+        // Inside a container the answer comes from the index its listing was read from: instant, and
+        // nowhere near fs_entry, which must never learn a virtual path.
+        let archive_here = if global { None } else { self.fs.resolve(&path) };
+        if needs_content && archive_here.is_some() {
+            // Refused rather than answered wrongly: an entry has no file on disk, so its candidate
+            // carries no content, and an unread candidate counts as a possible match by design. Run the
+            // walk anyway and every entry in the container comes back as a hit.
+            // Spec: DirectoryTabViewModel.RunSearchAsync (the archive branch).
+            let message =
+                "content: can't look inside archives \u{2014} extract it first.".to_string();
+            let mut t = lock(&cell);
+            if t.generation == generation {
+                Self::begin_flattened(&mut t, false);
+                t.error = Some(message.clone());
+                t.status = message;
+                t.is_search_running = false;
+                let version = t.version;
+                drop(t);
+                self.hub.emit(AppEvent::ListingChanged { tab, version });
+                self.hub.emit(AppEvent::TabChanged { tab });
+            }
+            return;
+        }
         {
             let mut t = lock(&cell);
             if t.generation != generation {
@@ -681,41 +705,67 @@ impl Inner {
 
         let stream_status = (!needs_content && !global)
             .then(|| format!("{{n}} result(s) so far for '{text}'\u{2026}"));
+        // What matched streams onto the list either way (the service keeps a content query's walk, which
+        // is only candidates, to itself); the reading pass owns the status line once it reports, or the
+        // two channels would fight over one row of text.
         let on_batch = |hits: &[SearchHit]| {
             if !token.is_cancelled() {
                 self.append_hits(tab, generation, hits, stream_status.clone());
             }
         };
-        let progress = SearchProgress {
-            live_batches: if needs_content && !global {
-                None
+        // How much of the reading pass is left: during the tens of seconds a whole-tree grep can take,
+        // the only thing worth saying. Spec: DirectoryTabViewModel.RunSearchAsync (contentProgress).
+        let on_content = |p: ContentScanProgress| {
+            if token.is_cancelled() {
+                return;
+            }
+            let Ok(cell) = self.tab(tab) else { return };
+            let mut t = lock(&cell);
+            if t.generation != generation {
+                return;
+            }
+            t.status = if p.files_to_read > 0 {
+                format!(
+                    "Reading {} of {} file(s) for '{text}' \u{2014} {} result(s) so far \u{2014} Esc to stop",
+                    thousands(p.files_read as i64),
+                    thousands(p.files_to_read as i64),
+                    t.listing.len()
+                )
             } else {
-                Some(&on_batch)
-            },
-            content_progress: None,
+                format!("Searching for '{text}'\u{2026}")
+            };
+            drop(t);
+            self.hub.emit(AppEvent::TabChanged { tab });
         };
-        // Inside a container the answer comes from the index its listing was read from: instant, and
-        // nowhere near fs_entry, which must never learn a virtual path.
-        let archive_here = if global { None } else { self.fs.resolve(&path) };
+        let progress = SearchProgress {
+            live_batches: Some(&on_batch),
+            content_progress: needs_content
+                .then_some(&on_content as &(dyn Fn(ContentScanProgress) + Sync)),
+        };
         let result = if global {
             self.search.search_all(&text, false, progress, &stop)
         } else if let Some(a) = archive_here {
             let index = self.fs.read_archive(&a.archive_file);
+            // Spec: DirectoryTabViewModel.ArchiveSearchLimit (1,000, and "showing first" past it).
+            const ARCHIVE_SEARCH_LIMIT: usize = 1_000;
             match bb_core::archives::ArchiveSearchScanner::search(
                 &index,
                 &a.archive_file,
                 &a.entry_path,
                 Some(&query),
-                5_000,
+                ARCHIVE_SEARCH_LIMIT,
                 &stop,
                 true,
             ) {
-                Ok(hits) => Ok(Some(SearchOutcome::new(
-                    hits,
-                    false,
-                    bb_core::models::SearchResultSource::Index,
-                    false,
-                ))),
+                Ok(hits) => {
+                    let truncated = hits.len() >= ARCHIVE_SEARCH_LIMIT;
+                    Ok(Some(SearchOutcome::new(
+                        hits,
+                        truncated,
+                        bb_core::models::SearchResultSource::Index,
+                        false,
+                    )))
+                }
                 Err(_) => Ok(None),
             }
         } else {
@@ -894,17 +944,17 @@ impl Inner {
         t.notice = outcome.truncated.then(|| {
             format!(
                 "Showing the first {} of a larger tree. Open a folder further in, or search to narrow it.",
-                bb_core::format::thousands(cap as i64)
+                thousands(cap as i64)
             )
         });
         let truncated = if outcome.truncated {
-            format!(" (first {})", bb_core::format::thousands(cap as i64))
+            format!(" (first {})", thousands(cap as i64))
         } else {
             String::new()
         };
         t.status = format!(
             "{} file(s) under {}{truncated}",
-            bb_core::format::thousands(count as i64),
+            thousands(count as i64),
             path
         );
         let version = t.version;
@@ -1141,7 +1191,7 @@ impl Inner {
             return Ok(None);
         }
         let noun = if count == 1 { "item" } else { "items" };
-        let counted = bb_core::format::thousands(count);
+        let counted = thousands(count);
         Ok(Some(if bytes > 0 {
             format!(
                 "{counted} {noun} selected ({})",
@@ -1378,9 +1428,45 @@ fn hydrate_search_metadata(row: &mut Row) {
 }
 
 fn search_suffix(outcome: &SearchOutcome, global: bool, any_index: bool) -> String {
-    use bb_core::models::SearchResultSource as Source;
+    use bb_core::models::{ContentScanLimit, SearchResultSource as Source};
     if outcome.cancelled {
         return " \u{2014} stopped".to_string();
+    }
+    // What the reading pass did comes first: a content search that stopped at a ceiling found what it
+    // found in the part of the disk it reached, and "0 results" alone would report an absence the search
+    // never established. Spec: DirectoryTabViewModel (the suffix), ContentLimitSuffix.
+    if let Some(scan) = &outcome.content_scan {
+        if scan.limit != ContentScanLimit::None {
+            let place = scan
+                .last_path_examined
+                .as_deref()
+                .filter(|p| !p.is_empty())
+                .map(|p| format!(", up to {p}"))
+                .unwrap_or_default();
+            return match scan.limit {
+                ContentScanLimit::Bytes => format!(
+                    " \u{2014} stopped after reading {}{place}",
+                    byte_size(scan.bytes_read as i64)
+                ),
+                _ => format!(
+                    " \u{2014} searched the first {} file(s){place}",
+                    thousands(scan.files_read as i64)
+                ),
+            };
+        }
+        if scan.unreadable > 0 {
+            return format!(
+                " \u{2014} {} file(s) could not be read",
+                thousands(scan.unreadable as i64)
+            );
+        }
+        if scan.truncated > 0 {
+            return format!(
+                " \u{2014} {} file(s) were only searched to their first {}",
+                thousands(scan.truncated as i64),
+                byte_size(bb_core::search::ContentSearchRules::MAX_BYTES_PER_FILE as i64)
+            );
+        }
     }
     if outcome.scope_lacks_metadata {
         return " \u{2014} this drive has no size or date data, so those filters can't match"
@@ -1394,5 +1480,52 @@ fn search_suffix(outcome: &SearchOutcome, global: bool, any_index: bool) -> Stri
         Source::StaleIndex => " \u{2014} refreshing index\u{2026}".to_string(),
         _ if global && outcome.refresh_pending => " \u{2014} indexing drives\u{2026}".to_string(),
         _ => " \u{2014} indexed".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bb_core::models::{ContentScanLimit, ContentScanReport, SearchResultSource};
+
+    fn with_scan(scan: ContentScanReport) -> SearchOutcome {
+        let mut o = SearchOutcome::new(Vec::new(), false, SearchResultSource::Index, false);
+        o.content_scan = Some(scan);
+        o
+    }
+
+    /// What the reading pass did is said before anything about the index: a content search that hit a
+    /// ceiling found what it found in the part of the disk it reached. Spec: DirectoryTabViewModel
+    /// (ContentLimitSuffix and the suffix switch).
+    #[test]
+    fn a_content_pass_that_was_cut_short_says_where_and_why() {
+        let files = with_scan(ContentScanReport {
+            files_read: 50_000,
+            limit: ContentScanLimit::Files,
+            last_path_examined: Some(r"C:\Data\m.txt".into()),
+            ..Default::default()
+        });
+        assert_eq!(
+            " \u{2014} searched the first 50,000 file(s), up to C:\\Data\\m.txt",
+            search_suffix(&files, false, true)
+        );
+        let unreadable = with_scan(ContentScanReport {
+            unreadable: 3,
+            ..Default::default()
+        });
+        assert_eq!(
+            " \u{2014} 3 file(s) could not be read",
+            search_suffix(&unreadable, false, true)
+        );
+        let big = with_scan(ContentScanReport {
+            truncated: 2,
+            ..Default::default()
+        });
+        assert!(
+            search_suffix(&big, false, true)
+                .starts_with(" \u{2014} 2 file(s) were only searched to their first ")
+        );
+        let whole = with_scan(ContentScanReport::default());
+        assert_eq!(" \u{2014} indexed", search_suffix(&whole, false, true));
     }
 }

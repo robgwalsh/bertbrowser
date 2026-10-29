@@ -57,12 +57,18 @@ void TitleBar::arrange(Rect r) {
     bounds = r;
     float right = r.r;
     for (auto it = children().rbegin(); it != children().rend(); ++it) {
-        if (it->get() == left || it->get() == middle || it->get() == after || it->get() == center) continue;
+        if (it->get() == left || it->get() == middle || it->get() == after || it->get() == center || it->get() == app_icon) continue;
         const float w = (*it)->width > 0 ? (*it)->width : 46.0f;
         (*it)->arrange(Rect{right - w, r.t, right, r.b});
         right -= w;
     }
     float x = r.l + 8;
+    if (app_icon && app_icon->flags.visible) {
+        constexpr float kIcon = 16.0f;
+        const float t = r.t + (r.height() - kIcon) / 2;
+        app_icon->arrange(Rect{x, t, x + kIcon, t + kIcon});
+        x += kIcon + 6;
+    }
     if (left) {
         const float w = left->measure_tree({kInf, r.height()}).w;
         left->arrange(Rect{x, r.t, x + w, r.b});
@@ -126,10 +132,11 @@ StatusBar::StatusBar() {
     };
 }
 
-void StatusBar::set_text(std::wstring left, std::wstring right) {
-    if (left == left_ && right == right_) return;
+void StatusBar::set_text(std::wstring left, std::wstring right, std::wstring action) {
+    if (left == left_ && right == right_ && action == action_) return;
     left_ = std::move(left);
     right_ = std::move(right);
+    action_ = std::move(action);
     invalidate();
 }
 
@@ -160,6 +167,27 @@ Rect StatusBar::undo_rect() const {
     return Rect{x, bounds.t, std::min(x + w, right_split() - 8), bounds.b};
 }
 
+static gfx::FontSpec action_font() {
+    gfx::FontSpec f = status_font();
+    f.weight = 600;
+    return f;
+}
+
+// The index line: a 12px Indexing glyph, the status, and "Try again" in semibold when it can be. Spec:
+// MainWindow.xaml (the indexing status, IndexingRetry).
+float StatusBar::right_width() const {
+    if (right_.empty()) return 0;
+    float w = 18.0f + std::ceil(res().text.measure(right_, status_font()).width);
+    if (!action_.empty()) w += 8.0f + std::ceil(res().text.measure(action_, action_font()).width);
+    return w;
+}
+
+Rect StatusBar::right_rect() const {
+    if (right_.empty()) return {};
+    const float r = right_edge();
+    return Rect{std::max(right_split(), r - right_width()), bounds.t, r, bounds.b};
+}
+
 void StatusBar::paint(PaintContext& pc) {
     pc.fill(bounds, tok::StatusBarBackground);
     const gfx::FontSpec font = status_font();
@@ -168,17 +196,28 @@ void StatusBar::paint(PaintContext& pc) {
     pc.text(left_, Rect{bounds.l + 12, bounds.t, limit, bounds.b}, font, tok::StatusBarForeground);
     float x = bounds.l + 12 + std::ceil(pc.res.text.measure(left_, font).width) + 10;
     if (!undo_.empty() && x < limit) {
+        // A link: underlined under the pointer. Spec: Styles.xaml (LinkButton).
         const Rect u = undo_rect();
         pc.text(undo_, u, font, tok::StatusBarForeground);
-        pc.line({u.l, u.b - 5.5f}, {u.r, u.b - 5.5f}, tok::StatusBarMutedForeground);
+        if (hot_undo_) pc.line({u.l, u.b - 5.5f}, {u.r, u.b - 5.5f}, tok::StatusBarForeground);
         x = u.r + 10;
     }
     if (!selection_.empty() && x < limit) {
         pc.text(selection_, Rect{x, bounds.t, limit, bounds.b}, font, tok::StatusBarMutedForeground);
     }
     if (!right_.empty()) {
-        pc.text(right_, Rect{split, bounds.t, right_edge(), bounds.b}, font, tok::StatusBarMutedForeground,
-                gfx::TextAlign::Trailing);
+        const Rect rr = right_rect();
+        pc.clip(rr);
+        float rx = rr.l;
+        ui::Icon::draw(pc, icons::Indexing, Rect::xywh(rx, bounds.t + (bounds.height() - 12) / 2, 12, 12), tok::StatusBarMutedForeground,
+                       index_geo_, index_gen_);
+        rx += 18;
+        pc.text(right_, Rect{rx, bounds.t, rr.r, bounds.b}, font, tok::StatusBarMutedForeground);
+        if (!action_.empty()) {
+            rx += std::ceil(pc.res.text.measure(right_, font).width) + 8;
+            pc.text(action_, Rect{rx, bounds.t, rr.r, bounds.b}, action_font(), tok::StatusBarForeground);
+        }
+        pc.unclip();
     }
     const Rect icon = Rect::xywh(slider_->bounds.l - kSliderIcon, bounds.t + (bounds.height() - 13) / 2, 13, 13);
     ui::Icon::draw(pc, icons::DetailsList, icon, tok::StatusBarMutedForeground, icon_geo_, icon_gen_);
@@ -186,8 +225,7 @@ void StatusBar::paint(PaintContext& pc) {
 
 float StatusBar::right_split() const {
     if (right_.empty()) return right_edge();
-    const float w = std::ceil(res().text.measure(right_, status_font()).width) + 12.0f;
-    return std::max(bounds.l + 12 + 200.0f, right_edge() - w);
+    return std::max(bounds.l + 12 + 200.0f, right_edge() - right_width() - 12.0f);
 }
 
 bool StatusBar::on_mouse_down(const MouseEvent& e) {
@@ -196,12 +234,32 @@ bool StatusBar::on_mouse_down(const MouseEvent& e) {
         on_undo_click();
         return true;
     }
-    if (right_.empty() || !on_right_click || e.pt.x < right_split() || e.pt.x > right_edge()) return false;
+    if (right_.empty() || !on_right_click || !right_rect().contains(e.pt)) return false;
     on_right_click();
     return true;
 }
 
-Cursor StatusBar::cursor_at(Point p) const { return undo_rect().contains(p) ? Cursor::Hand : Cursor::Arrow; }
+bool StatusBar::on_mouse_move(const MouseEvent& e) {
+    const bool on_undo = undo_rect().contains(e.pt);
+    if (on_undo != hot_undo_) {
+        hot_undo_ = on_undo;
+        invalidate();
+    }
+    tooltip = on_undo ? undo_tip
+              : !action_.empty() && right_rect().contains(e.pt) ? L"Ask for administrator rights again so drives can be indexed"
+                                                               : std::wstring();
+    return false;
+}
+
+void StatusBar::on_mouse_leave() {
+    if (!hot_undo_) return;
+    hot_undo_ = false;
+    invalidate();
+}
+
+Cursor StatusBar::cursor_at(Point p) const {
+    return undo_rect().contains(p) || (!action_.empty() && right_rect().contains(p)) ? Cursor::Hand : Cursor::Arrow;
+}
 
 // ---- tab strip ---------------------------------------------------------------------------------------
 
@@ -222,9 +280,18 @@ TabStrip::TabStrip() {
     split_below_ = make("SplitBelowButton", icons::SplitBelow, [this] { if (on_split) on_split(false); });
 }
 
+void TabStrip::sync_bar() {
+    const float room = std::max(0.0f, bounds.r - kButtons - 4 - (bounds.l + 4));
+    h_.extent = tabs_width();
+    h_.viewport = room;
+    h_.area = Rect{bounds.l + 4, bounds.b - 5, bounds.l + 4 + room, bounds.b - 1};
+    h_.set_offset(scroll_);
+}
+
 void TabStrip::arrange(Rect r) {
     bounds = r;
     clamp_scroll();
+    sync_bar();
     const float x = tabs_right() + 3;
     const float t = r.t + (r.height() - 24.0f) / 2 + 1;
     new_tab_->arrange(Rect::xywh(x, t, 24, 24));
@@ -242,6 +309,7 @@ void TabStrip::paint(PaintContext& pc) {
         pc.fill(Rect{x - 1, bounds.t + 4, x + 1, bounds.b - 2}, tok::AccentBackground);
     }
     pc.unclip();
+    h_.paint(pc);
     const float rule = new_tab_->bounds.r + 5.5f;
     pc.line({rule, bounds.t + 8}, {rule, bounds.b - 8}, tok::BorderSubtle);
     pc.line({bounds.l, bounds.b - 0.5f}, {bounds.r, bounds.b - 0.5f}, tok::TabBorder);
@@ -265,7 +333,7 @@ void TabStrip::set_tabs(std::vector<TabEntry> tabs, bool pane_active) {
 
 float TabStrip::tab_width(size_t i) const {
     const float text = res().text.measure(tabs_[i].title, gfx::FontSpec{}).width;
-    return std::clamp(std::ceil(text) + 44.0f, 96.0f, 220.0f);
+    return std::clamp(std::ceil(text) + 44.0f, 110.0f, 220.0f);  // Spec: FilePaneView.xaml (MinWidth 110)
 }
 
 float TabStrip::tabs_width() const {
@@ -325,8 +393,10 @@ void TabStrip::paint_tabs(PaintContext& pc) {
         pc.fill(r, t.active ? tok::TabActiveBackground : hot ? tok::TabHoverBackground : tok::TabInactiveBackground);
         const Token fg = t.active ? tok::TabActiveForeground : tok::TabInactiveForeground;
         pc.text(t.title, Rect{r.l + 10, r.t, r.r - 28, r.b}, gfx::FontSpec{}, fg);
-        // The close glyph is faint until its tab is hovered or active, so a row of tabs is not a row of X's.
+        // The close glyph is faint until its tab is hovered or active, so a row of tabs is not a row of X's; the
+        // button itself lights under the pointer. Spec: FilePaneView.xaml (the close button, StripButton hover).
         const float cx = r.r - 15.5f, cy = std::floor((r.t + r.b) / 2) + 0.5f;
+        if (hot && hot_close_) pc.fill(close_rect(i), tok::ButtonSecondaryHoverBackground);
         const Token x = t.active || hot ? fg : tok::TextMuted;
         pc.line({cx - 4, cy - 4}, {cx + 4, cy + 4}, x);
         pc.line({cx + 4, cy - 4}, {cx - 4, cy + 4}, x);
@@ -336,11 +406,24 @@ void TabStrip::paint_tabs(PaintContext& pc) {
     }
 }
 
+Rect TabStrip::close_rect(size_t i) const {
+    const Rect r = tab_rect(i);
+    const float cx = r.r - 15.5f, cy = std::floor((r.t + r.b) / 2) + 0.5f;
+    return Rect{cx - 8, cy - 8, cx + 8, cy + 8};
+}
+
 bool TabStrip::on_mouse_down(const MouseEvent& e) {
+    if (e.button == MouseButton::Left && h_.mouse_down(e.pt)) {
+        bar_drag_ = true;
+        scroll_ = h_.offset();
+        root()->capture(this);
+        arrange(bounds);
+        invalidate();
+        return true;
+    }
     const size_t i = index_at(e.pt);
     if (i == kNone) return false;
-    const Rect r = tab_rect(i);
-    if (e.button == MouseButton::Middle || (e.button == MouseButton::Left && e.pt.x >= r.r - 26)) {
+    if (e.button == MouseButton::Middle || (e.button == MouseButton::Left && close_rect(i).contains(e.pt))) {
         if (on_close) on_close(tabs_[i].id);
     } else if (e.button == MouseButton::Right) {
         if (on_context) on_context(tabs_[i].id, e.pt);
@@ -354,9 +437,23 @@ bool TabStrip::on_mouse_down(const MouseEvent& e) {
 }
 
 bool TabStrip::on_mouse_move(const MouseEvent& e) {
+    if (bar_drag_) {
+        h_.mouse_move(e.pt);
+        scroll_ = h_.offset();
+        arrange(bounds);
+        invalidate();
+        return true;
+    }
     if (pressed_ != kNone) {
         if (!dragging_ && std::fabs(e.pt.x - press_at_.x) >= 5) dragging_ = true;
         if (dragging_) {
+            // Near either end of an overflowing strip, it scrolls to show where the tab could go.
+            const float right = bounds.r - kButtons - 4;
+            const float before = scroll_;
+            if (e.pt.x < bounds.l + 24) scroll_ -= 12;
+            else if (e.pt.x > right - 24) scroll_ += 12;
+            clamp_scroll();
+            if (scroll_ != before) arrange(bounds);
             const int gap = gap_at(e.pt.x);
             if (gap != drag_gap_) {
                 drag_gap_ = gap;
@@ -366,15 +463,24 @@ bool TabStrip::on_mouse_move(const MouseEvent& e) {
         return true;
     }
     const size_t i = index_at(e.pt);
-    if (i != hot_) {
+    const bool over_close = i != kNone && close_rect(i).contains(e.pt);
+    if (i != hot_ || over_close != hot_close_) {
         hot_ = i;
-        if (i != kNone) tooltip = tabs_[i].path;
+        hot_close_ = over_close;
+        if (i != kNone) tooltip = over_close ? close_tip : tabs_[i].path;
         invalidate();
     }
     return false;
 }
 
 bool TabStrip::on_mouse_up(const MouseEvent& e) {
+    if (bar_drag_) {
+        bar_drag_ = false;
+        h_.mouse_up();
+        if (root() && root()->captured() == this) root()->release_capture();
+        invalidate();
+        return true;
+    }
     if (pressed_ == kNone || e.button != MouseButton::Left) return false;
     const size_t from = pressed_;
     const int gap = drag_gap_;
@@ -403,10 +509,21 @@ void TabStrip::end_drag() {
 
 void TabStrip::on_modal_cancel() { end_drag(); }
 
+// Esc puts a dragged tab back where it was. Spec: ListReorderDrag.OnKey.
+bool TabStrip::cancel_capture() {
+    if (pressed_ == kNone && !bar_drag_) return false;
+    bar_drag_ = false;
+    h_.mouse_up();
+    end_drag();
+    return true;
+}
+
+Cursor TabStrip::cursor_at(Point) const { return dragging_ ? Cursor::SizeWE : Cursor::Arrow; }
+
 bool TabStrip::on_wheel(Point p, int delta, Mods) {
     if (p.x >= tabs_right()) return false;
     const float before = scroll_;
-    scroll_ -= static_cast<float>(delta) / 120.0f * 60.0f;
+    scroll_ -= static_cast<float>(delta) / 120.0f * 120.0f;  // Spec: FilePaneView (120 a notch)
     clamp_scroll();
     if (scroll_ == before) return false;
     arrange(bounds);

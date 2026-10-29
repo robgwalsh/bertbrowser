@@ -10,6 +10,7 @@ use bb_core::archives::ArchivePath;
 use bb_core::data::{
     SavedSearch, SavedSearchRepository, SavedSearchScope, SavedWorkspace, SavedWorkspaceRepository,
 };
+use bb_core::format;
 use bb_core::rules::{SavedSearchRules, SavedWorkspaceRules};
 use serde_json::{Value, json};
 
@@ -318,6 +319,10 @@ impl Inner {
             placement(settings.saved_searches_placement),
         );
         drop(settings);
+        // The lists read as days ("Today 14:05"), in local time. Spec: SavedSearchViewModel.CreatedText.
+        let now = FileTime::now().to_local();
+        let created = |t: Option<FileTime>| format::day(t.map(FileTime::to_local), now, "Unknown");
+        let used = |t: Option<FileTime>| format::day(t.map(FileTime::to_local), now, "Never");
         json!({
             "searches": self.saved_searches().iter().map(|s| json!({
                 "name": s.name,
@@ -325,12 +330,21 @@ impl Inner {
                 "scope": scope_name(s.scope),
                 "scopePath": s.scope_path,
                 "scopeText": scope_text(s),
+                "scopeColumn": scope_column_text(s.scope),
                 "pinnedInArchive": s.scope_path.as_deref().is_some_and(ArchivePath::looks_virtual),
+                "createdUtc": s.created_utc.map(|t| t.0),
+                "lastUsedUtc": s.last_used_utc.map(|t| t.0),
+                "createdText": created(s.created_utc),
+                "lastUsedText": used(s.last_used_utc),
             })).collect::<Vec<_>>(),
             "workspaces": self.saved_workspaces().iter().map(|w| json!({
                 "name": w.name,
                 "shape": SavedWorkspaceRules::shape_text(&w.layout),
                 "folders": SavedWorkspaceRules::folders(&w.layout),
+                "createdUtc": w.created_utc.map(|t| t.0),
+                "lastUsedUtc": w.last_used_utc.map(|t| t.0),
+                "createdText": created(w.created_utc),
+                "lastUsedText": used(w.last_used_utc),
             })).collect::<Vec<_>>(),
             "bookmarks": self.bookmark_rows(),
             "workspacesPlacement": wp,

@@ -176,6 +176,83 @@ pub unsafe extern "C" fn bb_session_capture(
     })
 }
 
+/// Writes the sizes a splitter drag left one split's children at (see `App::layout_set_weights`):
+/// `path` is `depth` child indexes from the root, `weights` one per child.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_layout_set_weights(
+    app: *mut BbApp,
+    path: *const u32,
+    depth: u32,
+    weights: *const f64,
+    n: u32,
+) -> BbStatus {
+    guard(|| {
+        let app = unsafe { app_of(app)? };
+        let path: &[u32] = if depth == 0 || path.is_null() {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(path, depth as usize) }
+        };
+        let weights: &[f64] = if n == 0 || weights.is_null() {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(weights, n as usize) }
+        };
+        Ok(app.app.layout_set_weights(path, weights)?)
+    })
+}
+
+/// The main window's restored bounds in DIPs, and whether it was maximised.
+#[repr(C)]
+pub struct BbWindowPlacement {
+    /// False until a window has closed once: the window opens where Windows puts it.
+    pub known: bool,
+    pub left: f64,
+    pub top: f64,
+    pub width: f64,
+    pub height: f64,
+    pub maximized: bool,
+}
+
+/// Where the main window was last left.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_window_placement(
+    app: *mut BbApp,
+    out_placement: *mut BbWindowPlacement,
+) -> BbStatus {
+    guard(|| {
+        let app = unsafe { app_of(app)? };
+        let out_placement = unsafe { out(out_placement, "out_placement")? };
+        let (bounds, maximized) = app.app.window_placement();
+        let [left, top, width, height] = bounds.unwrap_or_default();
+        *out_placement = BbWindowPlacement {
+            known: bounds.is_some(),
+            left,
+            top,
+            width,
+            height,
+            maximized,
+        };
+        Ok(())
+    })
+}
+
+/// Remembers where the main window is (written with the settings at shutdown).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_window_placement_set(
+    app: *mut BbApp,
+    placement: *const BbWindowPlacement,
+) -> BbStatus {
+    guard(|| {
+        let app = unsafe { app_of(app)? };
+        let p = unsafe { placement.as_ref() }
+            .ok_or_else(|| bb_app::AppError::Invalid("placement".into()))?;
+        app.app
+            .set_window_placement([p.left, p.top, p.width, p.height], p.maximized);
+        Ok(())
+    })
+}
+
 /// Writes the pane and tab arrangement into the settings now.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_session_save(app: *mut BbApp) -> BbStatus {

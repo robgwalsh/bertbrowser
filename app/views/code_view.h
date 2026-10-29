@@ -9,6 +9,7 @@
 #include "ui/scroll.h"
 #include "ui/widget.h"
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -37,6 +38,9 @@ public:
     std::wstring selected_text() const;
     void select_all();
     bool has_selection() const { return anchor_ != caret_; }
+    void copy_selection();
+    // A right click, at the pointer: whoever owns the view offers Copy and Select all.
+    std::function<void(ui::Point)> on_context;
 
     // How wide the pane would need to be to show the widest line with no horizontal bar.
     float desired_width();
@@ -75,7 +79,6 @@ private:
     Pos hit(ui::Point p);
     ui::ComPtr<IDWriteTextLayout> layout_for(size_t line);
     void keep_in_view(Pos p);
-    void copy_selection();
 
     std::vector<std::wstring> lines_;
     std::vector<Span> spans_;

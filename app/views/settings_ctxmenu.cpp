@@ -25,8 +25,10 @@ std::string upper(std::string s) {
 
 struct Row {
     std::string token;  // `-`, `@more`, `app:id`, `cmd:id`, or an extension id
-    std::wstring name, detail;
+    std::wstring name, detail, gesture;
     const IconData* icon = nullptr;
+    // An entry another program adds: faded while the master switch for those is off.
+    bool shell = false;
     bool separator() const { return token == "-"; }
     bool more() const { return upper(token) == "@MORE"; }
 };
@@ -42,11 +44,19 @@ std::wstring shell_detail(const ShellExtensionInfo* e) {
     return e->handler ? L"extension" : L"command";
 }
 
-Row row_for_built_in(const json::Value& b) {
+// What the menu itself will print beside an entry: the shortcut in force, not the one it shipped with.
+std::wstring gesture_text(BbApp* app, const json::Value& b) {
+    if (b["commandId"].str().empty()) return L"";
+    BbOwnedStr o{};
+    return bb_keymap_gesture(app, core::s(core::wide(b["commandId"].str())), &o) == BB_OK ? core::take(o) : L"";
+}
+
+Row row_for_built_in(BbApp* app, const json::Value& b) {
     Row r;
     r.token = b["token"].str();
     r.name = core::wide(b["name"].str());
     r.detail = core::wide(b["detail"].str());
+    r.gesture = gesture_text(app, b);
     r.icon = icon_for(b["icon"].str());
     return r;
 }
@@ -99,7 +109,7 @@ Model read_model(MainView& main) {
         } else if (token.rfind("app:", 0) == 0) {
             const auto it = built_ins.find(upper(token.substr(4)));
             if (it == built_ins.end() || hidden_built.count(upper(token.substr(4)))) continue;
-            r = row_for_built_in(*it->second);
+            r = row_for_built_in(main.core().app(), *it->second);
         } else if (token.rfind("cmd:", 0) == 0) {
             const auto it = commands.find(token.substr(4));
             if (it == commands.end() || !(*it->second)["showInMenu"].boolean()) continue;
@@ -113,6 +123,7 @@ Model read_model(MainView& main) {
             r.token = token;
             r.name = e ? core::wide(e->name) : core::wide(token);
             r.detail = shell_detail(e);
+            r.shell = true;
         }
         m.rows.push_back(std::move(r));
     }
@@ -134,6 +145,7 @@ Model read_model(MainView& main) {
         r.token = e.id;
         r.name = core::wide(e.name);
         r.detail = shell_detail(&e);
+        r.shell = true;
         fresh.push_back(std::move(r));
     }
     if (!fresh.empty()) {
@@ -255,6 +267,7 @@ void SettingsView::page_context_menu(Widget& p) {
     list->name = "MenuLayoutList";
     list->flex = 1;
     list->row_height = 28;
+    const bool show_shell = get("showShellExtensions").boolean(true);
     std::vector<f::ListEntry> entries;
     for (const Row& r : model->rows) {
         f::ListEntry e;
@@ -266,8 +279,10 @@ void SettingsView::page_context_menu(Widget& p) {
             e.muted = true;
         } else {
             e.text = r.name;
-            e.detail = r.detail;
+            // The note, then the shortcut, as the menu prints them. Other programs' rows fade while they are switched off.
+            e.detail = r.detail + (r.detail.empty() || r.gesture.empty() ? L"" : L"   ") + r.gesture;
             e.icon = r.icon;
+            e.muted = r.shell && !show_shell;
         }
         entries.push_back(std::move(e));
     }
@@ -290,28 +305,44 @@ void SettingsView::page_context_menu(Widget& p) {
         apply_rows(*this, main, *model, rows);
         rebuild_if_changed(true);
     };
-    auto* tools = f::row(*left, 6);
-    f::button(*tools, L"Move up", [this, model, commit] {
-        const int at = menu_selected_;
-        if (at <= 0 || at >= static_cast<int>(model->rows.size())) return;
+    auto move_by = [this, model, commit](int d) {
+        const int at = menu_selected_, to = at + d, n = static_cast<int>(model->rows.size());
+        if (at < 0 || at >= n || to < 0 || to >= n) return;
         std::vector<Row> rows = model->rows;
-        std::swap(rows[static_cast<size_t>(at)], rows[static_cast<size_t>(at) - 1]);
-        commit(std::move(rows), at - 1);
-    })->name = "MenuMoveUp";
-    f::button(*tools, L"Move down", [this, model, commit] {
-        const int at = menu_selected_;
-        if (at < 0 || at + 1 >= static_cast<int>(model->rows.size())) return;
-        std::vector<Row> rows = model->rows;
-        std::swap(rows[static_cast<size_t>(at)], rows[static_cast<size_t>(at) + 1]);
-        commit(std::move(rows), at + 1);
-    })->name = "MenuMoveDown";
-    f::button(*tools, L"Remove", [this, model, commit] {
+        std::swap(rows[static_cast<size_t>(at)], rows[static_cast<size_t>(to)]);
+        commit(std::move(rows), to);
+    };
+    auto remove_selected = [this, model, commit] {
         const int at = menu_selected_;
         if (at < 0 || at >= static_cast<int>(model->rows.size()) || model->rows[static_cast<size_t>(at)].more()) return;
         std::vector<Row> rows = model->rows;
         rows.erase(rows.begin() + at);
         commit(std::move(rows), -1);
-    })->name = "MenuRemove";
+    };
+    // Alt+Up/Down moves the selected row and Del takes it off the menu. Spec: SettingsView.xaml.cs (MenuLayoutList_KeyDown).
+    // The list is rebuilt by either, so focus comes back through its automation id and a Del waits for the key to finish.
+    list->automation_id = "MenuLayoutList";
+    nudge_ = move_by;
+    nudge_for_ = list;
+    // A row dragged to a new place. Spec: SettingsView.xaml.cs (MenuLayoutList drag).
+    list->on_reorder = [model, commit](int from, int to) {
+        const int n = static_cast<int>(model->rows.size());
+        if (from < 0 || from >= n || to < 0 || to >= n) return;
+        std::vector<Row> rows = model->rows;
+        Row moved = std::move(rows[static_cast<size_t>(from)]);
+        rows.erase(rows.begin() + from);
+        rows.insert(rows.begin() + to, std::move(moved));
+        commit(std::move(rows), to);
+    };
+    list->on_key = [this, remove_selected](unsigned vk) {
+        if (vk != VK_DELETE) return false;
+        main_.defer(remove_selected);
+        return true;
+    };
+    auto* tools = f::row(*left, 6);
+    f::button(*tools, L"Move up", [move_by] { move_by(-1); })->name = "MenuMoveUp";
+    f::button(*tools, L"Move down", [move_by] { move_by(1); })->name = "MenuMoveDown";
+    f::button(*tools, L"Remove", [remove_selected] { remove_selected(); })->name = "MenuRemove";
     auto* tools2 = f::row(*left, 6);
     f::button(*tools2, L"Add separator", [this, model, commit] {
         std::vector<Row> rows = model->rows;
@@ -340,7 +371,7 @@ void SettingsView::page_context_menu(Widget& p) {
                 more.name = L"New entries from other programs appear here";
                 rows.push_back(more);
             } else if (const auto it = built_ins.find(upper(token)); it != built_ins.end()) {
-                rows.push_back(row_for_built_in(*it->second));
+                rows.push_back(row_for_built_in(core_.app(), *it->second));
             }
         }
         std::vector<Row> kept;
@@ -358,14 +389,9 @@ void SettingsView::page_context_menu(Widget& p) {
     });
     reset->name = "MenuReset";
     reset->tooltip = L"BertBrowser's entries back in their original order, all on the menu";
+    f::text(*left, L"Alt+↑/↓ moves · Del removes", tok::TextMuted, 11.0f);
 
-    if (dragging_pose_) {
-        // The line a drag leaves between two rows, placed rather than dragged.
-        auto* line = left->emplace<Widget>();
-        line->height = 2;
-        line->style.bg = tok::AccentBackground;
-        line->name = "MenuInsertionLine";
-    }
+    if (dragging_pose_) list->set_drop_line(3);  // the line a drag draws between two rows, placed rather than dragged
 
     // -- what can be in it
     auto* right = cols->emplace<StackPanel>(Orientation::Vertical, 6.0f);
@@ -384,10 +410,16 @@ void SettingsView::page_context_menu(Widget& p) {
         ce.push_back(std::move(h));
         tokens.emplace_back();
     };
-    auto choice = [&](const std::string& token, const std::wstring& label, const std::wstring& detail) {
+    // Other programs' entries cannot be added or taken out while the switch for them is off.
+    std::set<std::string> switched_off;
+    auto choice = [&](const std::string& token, const std::wstring& label, const std::wstring& detail, bool shell = false) {
         f::ListEntry e;
         e.text = std::wstring(has_row(model->rows, token) ? L"\u2611  " : L"\u2610  ") + label;
         e.detail = detail;
+        if (shell && !show_shell) {
+            e.enabled = false;
+            switched_off.insert(token);
+        }
         ce.push_back(std::move(e));
         tokens.push_back(token);
     };
@@ -398,7 +430,7 @@ void SettingsView::page_context_menu(Widget& p) {
     }
     if (!model->catalog.empty()) {
         heading(L"Other programs");
-        for (const auto& e : model->catalog) choice(e.id, core::wide(e.name), shell_detail(&e));
+        for (const auto& e : model->catalog) choice(e.id, core::wide(e.name), shell_detail(&e), true);
     }
     if (model->page["commands"].size() > 0) {
         heading(L"Your commands");
@@ -408,6 +440,32 @@ void SettingsView::page_context_menu(Widget& p) {
         }
     }
     choices->set_entries(std::move(ce));
+    // A choice dragged onto the menu lands exactly where it is dropped; one already on it moves there.
+    // Spec: SettingsView.xaml.cs (MenuChoice drag, MenuLayoutList_Drop).
+    choices->tooltip = L"Double-click to add or take out; drag onto the menu to put it exactly where you want";
+    choices->can_drag = [tokens, switched_off](int i) {
+        return i >= 0 && static_cast<size_t>(i) < tokens.size() && !tokens[static_cast<size_t>(i)].empty() && !switched_off.count(tokens[static_cast<size_t>(i)]);
+    };
+    choices->drag_into = list;
+    list->on_drop_in = [model, commit, tokens, switched_off](int from, int at) {
+        if (from < 0 || static_cast<size_t>(from) >= tokens.size() || tokens[static_cast<size_t>(from)].empty()) return;
+        const std::string& token = tokens[static_cast<size_t>(from)];
+        if (switched_off.count(token)) return;
+        std::vector<Row> rows = model->rows;
+        Row r;
+        r.token = token;
+        for (size_t k = 0; k < rows.size(); ++k) {
+            if (!rows[k].separator() && upper(rows[k].token) == upper(token)) {
+                r = std::move(rows[k]);
+                rows.erase(rows.begin() + static_cast<std::ptrdiff_t>(k));
+                if (static_cast<int>(k) < at) --at;
+                break;
+            }
+        }
+        at = std::clamp(at, 0, static_cast<int>(rows.size()));
+        rows.insert(rows.begin() + at, std::move(r));
+        commit(std::move(rows), at);
+    };
     choices->on_select = [this, tokens](int i) {
         if (i < 0 || static_cast<size_t>(i) >= tokens.size()) return;
         const std::string& token = tokens[static_cast<size_t>(i)];
@@ -417,9 +475,10 @@ void SettingsView::page_context_menu(Widget& p) {
         command_editor_ = false;
         main_.defer([this] { rebuild_if_changed(true); });
     };
-    choices->on_activate = [this, model, commit, tokens](int i) {
+    choices->on_activate = [this, model, commit, tokens, switched_off](int i) {
         if (i < 0 || static_cast<size_t>(i) >= tokens.size() || tokens[static_cast<size_t>(i)].empty()) return;
         const std::string& token = tokens[static_cast<size_t>(i)];
+        if (switched_off.count(token)) return;
         std::vector<Row> rows = model->rows;
         for (size_t k = 0; k < rows.size(); ++k) {
             if (!rows[k].separator() && upper(rows[k].token) == upper(token)) {
@@ -435,6 +494,7 @@ void SettingsView::page_context_menu(Widget& p) {
         commit(std::move(rows), static_cast<int>(at));
     };
     f::note(*right, L"Double-click to add or take out. The list on the left is the order of both right-click menus.");
+    f::note(*right, L"Programs of your own. In Arguments, {path}, {name} and {dir} expand per item \u2014 quote tokens that may contain spaces, e.g. \"{path}\". Blank arguments default to the quoted full path.");
 
     // -- one of your commands, edited where it is: every change is written at once (a command missing a
     // field keeps the whole list unwritten, and the strip says why). Spec: SettingsView.xaml (CommandEditor).

@@ -346,6 +346,9 @@ bool UiRoot::mouse_down(Point p, MouseButton b, Mods m, int clicks) {
             break;
         }
     }
+    if (!modal_) {
+        for (Widget* w = target; w; w = w->parent_) w->on_inner_activity();
+    }
     const MouseEvent ev{p, b, merge(m, mods_), clicks};
     return bubble(target, [&](Widget* w) { return w->flags.enabled && w->on_mouse_down(ev); });
 }
@@ -411,6 +414,10 @@ bool UiRoot::key_down(unsigned vk) {
         return true;
     }
     const KeyEvent ev{vk, mods_};
+    if (vk == VK_ESCAPE && capture_ && !modal_ && capture_->cancel_capture()) {
+        capture_ = nullptr;
+        return true;
+    }
     if (!modal_ && on_preview_key && on_preview_key(ev)) {
         return true;
     }
@@ -423,7 +430,11 @@ bool UiRoot::key_down(unsigned vk) {
         return true;
     }
     if (vk == VK_TAB && !mods_.ctrl && !mods_.alt) {
-        return focus_next(mods_.shift);
+        const bool moved = focus_next(mods_.shift);
+        if (moved) {
+            for (Widget* w = focus_; w; w = w->parent_) w->on_inner_activity();
+        }
+        return moved;
     }
     return false;
 }

@@ -90,6 +90,18 @@ std::wstring Listing::cell(size_t i, uint32_t column) const {
     return w(t);
 }
 
+std::wstring Listing::size_tip(size_t i) const {
+    BbOwnedStr o{};
+    if (bb_listing_size_tip(l_, static_cast<uint32_t>(i), &o) != BB_OK) return {};
+    return take(o);
+}
+
+int Listing::match(size_t i, uint32_t* start, uint32_t* length) const {
+    int32_t line = 0;
+    if (bb_listing_match(l_, static_cast<uint32_t>(i), &line, start, length) != BB_OK) return 0;
+    return line;
+}
+
 BbTabState Core::tab_state(uint64_t tab) {
     BbTabState st{};
     check(bb_tab_state(app_, tab, &st), "bb_tab_state");

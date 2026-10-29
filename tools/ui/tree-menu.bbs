@@ -42,10 +42,11 @@ dialog-press DeleteConfirm
 live-dialogs off
 assert-missing Empty
 assert-path sandbox
+# A new tab from the tree opens behind the one in view, as a middle-click does. Spec: ShellViewModel.OpenInNewTab.
 tree-menu-run Open in new tab on Documents
-assert-path Documents
+assert-path sandbox
 assert-tabs 2
-tree-menu-run Open in pane right on Pictures
+tree-menu-run To the right on Pictures
 assert-panes 2
 assert-path Pictures
 shot 03-after-tree-menu

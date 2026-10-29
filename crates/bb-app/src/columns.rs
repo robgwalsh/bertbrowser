@@ -273,7 +273,8 @@ impl Inner {
     }
 
     /// One edit of the default set: `add <id>`, `remove <id>`, `move <id> <index>`, `width <id> <dips>`,
-    /// `reset`. Through the same rules the header menu and a header drag use, so Name stays first
+    /// `step-width <id> <notches> [fine]` (the wheel over a width: a snapped step, or one DIP with
+    /// Ctrl), `reset`. Through the same rules the header menu and a header drag use, so Name stays first
     /// whichever way it is asked for. Saved at once; tabs that never arranged their own follow.
     pub(crate) fn columns_defaults_do(&self, verb: &str, arg: &str) -> AppResult<()> {
         let saved = lock(&self.settings).file_list_columns.clone();
@@ -293,6 +294,21 @@ impl Inner {
                     .next()
                     .and_then(|n| n.parse().ok())
                     .ok_or_else(|| AppError::Invalid("width takes '<id> <dips>'".into()))?;
+                ColumnLayoutRules::set_width(current, id, width)
+            }
+            "step-width" => {
+                let id = parts.next().unwrap_or("");
+                let notches: i32 = parts
+                    .next()
+                    .and_then(|n| n.parse().ok())
+                    .ok_or_else(|| AppError::Invalid("step-width takes '<id> <notches>'".into()))?;
+                let fine = parts.next() == Some("fine");
+                let from = ColumnLayoutRules::normalize(current)
+                    .iter()
+                    .find(|c| c.id.eq_ignore_ascii_case(id))
+                    .map(|c| c.width)
+                    .ok_or(AppError::Stale)?;
+                let width = ColumnLayoutRules::step_width(from, notches, fine);
                 ColumnLayoutRules::set_width(current, id, width)
             }
             "reset" => bb_core::columns::ColumnCatalog::defaults(),

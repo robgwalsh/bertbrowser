@@ -24,6 +24,7 @@ LPCWSTR cursor_id(ui::Cursor c) {
         case ui::Cursor::SizeWE: return IDC_SIZEWE;
         case ui::Cursor::SizeNS: return IDC_SIZENS;
         case ui::Cursor::Hand: return IDC_HAND;
+        case ui::Cursor::SizeAll: return IDC_SIZEALL;
         default: return IDC_ARROW;
     }
 }
@@ -153,6 +154,27 @@ void Window::recover() {
     root_.invalidate_all();
 }
 
+// Spec: PreviewPane.EnterFullScreen (a borderless window over the pane's monitor).
+void Window::set_full_screen(bool on) {
+    if (on == full_screen_ || !hwnd_ || options_.parked || options_.offscreen) return;
+    if (on) {
+        windowed_style_ = GetWindowLongPtrW(hwnd_, GWL_STYLE);
+        windowed_place_.length = sizeof(windowed_place_);
+        GetWindowPlacement(hwnd_, &windowed_place_);
+        MONITORINFO info{sizeof(info)};
+        if (!GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &info)) return;
+        full_screen_ = true;
+        SetWindowLongPtrW(hwnd_, GWL_STYLE, (windowed_style_ & ~WS_OVERLAPPEDWINDOW) | WS_POPUP);
+        const RECT& m = info.rcMonitor;
+        SetWindowPos(hwnd_, HWND_TOP, m.left, m.top, m.right - m.left, m.bottom - m.top, SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
+    } else {
+        full_screen_ = false;
+        SetWindowLongPtrW(hwnd_, GWL_STYLE, windowed_style_);
+        SetWindowPlacement(hwnd_, &windowed_place_);
+        SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    }
+}
+
 void Window::show() {
     if (options_.parked) {
         ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
@@ -276,6 +298,7 @@ bool Window::mouse_button(UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 LRESULT Window::nc_hit_test(LPARAM lp) {
+    if (full_screen_) return HTCLIENT;  // no frame to grab, no caption to drag
     const LRESULT def = DefWindowProcW(hwnd_, WM_NCHITTEST, 0, lp);
     if (def != HTCLIENT) {
         return def;  // the left, right and bottom resize frames are DefWindowProc's
@@ -324,7 +347,7 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
     }
     switch (msg) {
         case WM_NCCALCSIZE:
-            if (chrome && wp) {
+            if (chrome && wp && !full_screen_) {
                 // Keep the side and bottom frames (DWM draws the resize borders and the shadow for them)
                 // and give the top back to the client, so there is no caption. Maximised, the frame would
                 // hang off the monitor, so inset the top by the frame height.
@@ -339,7 +362,13 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             if (chrome) return nc_hit_test(lp);
             break;
         case WM_GETMINMAXINFO:
-            if (chrome) {
+            if (options_.min_width_dip || options_.min_height_dip) {
+                auto* mm = reinterpret_cast<MINMAXINFO*>(lp);
+                const int dpi = static_cast<int>(GetDpiForWindow(hwnd_));
+                if (options_.min_width_dip) mm->ptMinTrackSize.x = MulDiv(options_.min_width_dip, dpi, 96);
+                if (options_.min_height_dip) mm->ptMinTrackSize.y = MulDiv(options_.min_height_dip, dpi, 96);
+            }
+            if (chrome && !full_screen_) {
                 const HMONITOR monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
                 MONITORINFO info{sizeof(info)};
                 if (monitor && GetMonitorInfoW(monitor, &info)) {

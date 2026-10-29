@@ -156,6 +156,8 @@ void MenuPanel::paint(PaintContext& pc) {
             const Rect ir = Rect::xywh(cx - 8, cy - 8, 16, 16);
             if (it.checked) pc.stroke(ir.inflate(3), icon_fg);
             Icon::draw(pc, *it.icon, ir, icon_fg, icon_geo_[k], icon_gen_[k]);
+        } else if (it.picture) {
+            images_.draw(pc, it.picture, Rect::xywh(cx - 8, cy - 8, 16, 16), it.enabled ? 1.0f : 0.4f);
         } else if (it.checked) {
             if (it.radio) {
                 const D2D1_ELLIPSE e = D2D1::Ellipse(D2D1::Point2F(cx, cy), 3.0f, 3.0f);
@@ -274,6 +276,16 @@ int MenuController::level_at(Point p) const {
         if (levels_[static_cast<size_t>(i)].rect.contains(p)) return i;
     }
     return -1;
+}
+
+const MenuItem* MenuController::item_at(Point p) const {
+    const int L = level_at(p);
+    if (L < 0) return nullptr;
+    const Level& lv = levels_[static_cast<size_t>(L)];
+    const int idx = lv.panel->item_at({p.x - lv.rect.l, p.y - lv.rect.t});
+    if (idx < 0 || static_cast<size_t>(idx) >= lv.items->size()) return nullptr;
+    const MenuItem& it = (*lv.items)[static_cast<size_t>(idx)];
+    return it.is_separator ? nullptr : &it;
 }
 
 bool MenuController::pointer_moved(Point p) {

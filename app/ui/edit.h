@@ -20,6 +20,7 @@ public:
     std::function<void()> on_commit;                      // Enter, single-line
     std::function<void()> on_cancel;                      // Escape
     float inset_right = 0;  // room kept clear of text at the right edge, for buttons inside the box
+    float inset_left = 0;   // and at the left, for a glyph (a search box's magnifier)
 
     const std::wstring& text() const { return text_; }
     void set_text(std::wstring t);  // replaces the text, drops the undo history, caret to the end
@@ -68,7 +69,7 @@ private:
     std::pair<size_t, size_t> selection() const { return {std::min(anchor_, caret_), std::max(anchor_, caret_)}; }
     std::wstring display_text() const;
     size_t display_caret() const { return composing_ ? caret_ + composition_cursor_ : caret_; }
-    float inner_width() const { return std::max(1.0f, bounds.width() - 2 * kPadX - inset_right); }
+    float inner_width() const { return std::max(1.0f, bounds.width() - 2 * kPadX - inset_right - inset_left); }
     void ensure_layout();
     Point origin();
     std::vector<DWRITE_HIT_TEST_METRICS> range_metrics(size_t start, size_t length);

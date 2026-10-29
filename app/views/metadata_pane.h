@@ -16,6 +16,7 @@
 #include "views/core.h"
 #include "views/image_view.h"
 #include "views/json.h"
+#include "views/shell_icons.h"
 
 #include <optional>
 
@@ -23,7 +24,8 @@ namespace bb::views {
 
 class MetadataPane : public ui::DockPanel {
 public:
-    MetadataPane(core::Core& core, uint64_t tab);
+    // `icons` draws the selected files' own icons in the list; without it the list shows names only.
+    MetadataPane(core::Core& core, uint64_t tab, ShellIcons* icons = nullptr);
 
     // Points the pane at the tab's selection and reads it, unless neither the paths nor their modified times
     // moved (a refresh that changes neither must not wipe what is half typed). `force` always reads.
@@ -69,6 +71,7 @@ private:
     void choose_cover();
 
     core::Core& core_;
+    ShellIcons* icons_ = nullptr;
     uint64_t tab_;
     json::Value model_;
     std::string built_;
@@ -76,6 +79,7 @@ private:
     std::wstring shown_selection_;
 
     ui::TextBlock *title_ = nullptr, *summary_ = nullptr, *empty_ = nullptr;
+    ui::StackPanel* foot_ = nullptr;        // the summary and Apply: only while something is selected
     ui::StackPanel* remove_box_ = nullptr;  // the removals: the location note and its two buttons
     ui::Button *apply_ = nullptr, *remove_location_ = nullptr, *remove_all_ = nullptr, *choose_cover_ = nullptr,
                *remove_cover_ = nullptr;

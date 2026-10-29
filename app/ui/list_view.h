@@ -37,6 +37,23 @@ public:
     virtual const IconData* row_icon(size_t /*row*/) const { return nullptr; }
     // A faint fill behind the row (what a folder comparison says about it), or kNoToken for none.
     virtual Token row_tint(size_t /*row*/) const { return kNoToken; }
+    // What the pointer resting on the row shows (an archive entry's full path), or empty for nothing.
+    virtual std::wstring row_tip(size_t /*row*/) const { return {}; }
+    // And over one cell (a folder's size: when it was computed); empty falls back to `row_tip`.
+    virtual std::wstring cell_tip(size_t /*row*/, int /*column_id*/) const { return {}; }
+    // A cell drawn richer than its text: `lead` before it in the secondary colour (a match's line number), and
+    // `length` characters from `start` marked (the needle a content: search found). False for a plain cell.
+    struct CellMarks {
+        std::wstring lead;
+        uint32_t start = 0, length = 0;
+    };
+    virtual bool cell_marks(size_t /*row*/, int /*column_id*/, CellMarks* /*out*/) const { return false; }
+    // The thumbnail view: whether the row is a picture tile (media) or a full-width row above them (folders and
+    // everything else), the words that row carries at its right (0 the size, 1 the modified date), and whether
+    // the row is drawn dimmed (a hidden file).
+    virtual bool row_is_tile(size_t /*row*/) const { return true; }
+    virtual std::wstring tile_row_text(size_t /*row*/, int /*part*/) const { return {}; }
+    virtual bool row_faded(size_t /*row*/) const { return false; }
 };
 
 struct Column {
@@ -46,6 +63,7 @@ struct Column {
     float min_width = 32.0f;
     bool right_align = false;
     bool sortable = true;
+    Token fg = kNoToken;  // a quieter column (the Folder of a search result); the row's own colour otherwise
 };
 
 class ListView : public Widget {
@@ -77,6 +95,7 @@ public:
     void set_columns(std::vector<Column> cols);
     const std::vector<Column>& columns() const { return columns_; }
     void set_sort(int column_id, bool ascending);
+    bool marquee_active() const { return marquee_; }
     int sort_column() const { return sort_column_; }
     bool sort_ascending() const { return sort_ascending_; }
     void refresh();  // the provider's rows changed: re-measure, clamp, repaint
@@ -114,6 +133,7 @@ public:
     Cursor cursor_at(Point p) const override;
 
 private:
+    void auto_fit(size_t index);  // the double click on a gripper
     void layout_bars();
     int resize_zone(Point p) const;  // column index whose right edge is under p, or -1
     int header_index_at(float x) const;
@@ -130,11 +150,24 @@ private:
     int sort_column_ = -1;
     bool sort_ascending_ = true;
     size_t cursor_ = npos, anchor_ = npos;
+    // The rows the cursor and the anchor were on, by identity: a watcher merge that adds a row above moves
+    // them with their row rather than leaving them on the index. Noted after every gesture and paint.
+    uint64_t cursor_id_ = 0, anchor_id_ = 0;
+    bool cursor_known_ = false, anchor_known_ = false;
+    void note_ids();
+    size_t find_row(uint64_t id, size_t hint) const;
+    struct NoteIds {
+        ListView* v;
+        ~NoteIds() { v->note_ids(); }
+    };
     size_t painted_rows_ = 0;
 
     // Gesture state.
     bool bar_drag_ = false;
     int resize_col_ = -1;
+    int hot_header_ = -1;  // the header under the pointer
+    size_t tip_row_ = static_cast<size_t>(-1);  // the cell the tooltip is about
+    int tip_col_ = -1;
     float resize_x_ = 0, resize_w_ = 0;
     int press_col_ = -1;
     float press_x_ = 0;

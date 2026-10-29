@@ -18,7 +18,14 @@ impl App {
     /// Starts playing a GIF: returns its handle once frame 0 is ready, the rest decode behind it.
     /// Blocking (it reads the file), so call it from a worker.
     pub fn gif_open(&self, path: &str) -> Result<(u64, Arc<GifPlayer>), GifOpenError> {
-        let player = GifPlayer::open(path)?;
+        // Through the preview's own bounded read, so a GIF inside a zip plays as one on disk does.
+        let bytes = crate::preview::read_bounded(
+            &self.inner,
+            path,
+            bb_core::preview::PreviewClassifier::MAX_IMAGE_BYTES,
+        )
+        .map_err(|_| GifOpenError::Unreadable)?;
+        let player = GifPlayer::from_bytes(bytes)?;
         let handle = self.inner.new_id();
         lock(&self.inner.extra.gifs).insert(handle, player.clone());
         Ok((handle, player))

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace bb::views::forms {
 
@@ -171,6 +172,7 @@ void ItemList::paint(PaintContext& pc) {
         }
         const bool sel = i == selected && !e.heading;
         if (sel) pc.fill(rc, focused() ? tok::ListSelectedBackground : tok::ListSelectedInactiveBackground);
+        else if (hover && i == hot_ && !e.heading && !e.separator && !e.muted) pc.fill(rc, tok::ListHoverBackground);
         Token fg = e.heading ? tok::TextMuted : !e.enabled || e.muted ? tok::TextDisabled : sel ? tok::ListSelectedForeground : tok::TextPrimary;
         float x = rc.l + 8;
         if (e.picture) {
@@ -201,9 +203,32 @@ void ItemList::paint(PaintContext& pc) {
         }
         pc.text(e.text, Rect{x, rc.t, std::max(x, right), rc.b}, f, fg);
     }
+    if (drop_line_ >= 0) {
+        const float y = std::clamp(bounds.t + static_cast<float>(drop_line_) * row_height - v_.offset(), bounds.t + 1, bounds.b - 1);
+        pc.fill(Rect{bounds.l + 4, y - 1, bounds.r - 4 - (v_.needed() ? ScrollBar::kThickness : 0.0f), y + 1}, tok::AccentBackground);
+    }
     pc.unclip();
     v_.paint(pc);
     if (style.border != kNoToken) pc.stroke(bounds, focused() ? tok::BorderFocus : style.border);
+}
+
+void ItemList::set_drop_line(int gap) {
+    if (gap == drop_line_) return;
+    drop_line_ = gap;
+    invalidate();
+}
+
+int ItemList::gap_at(Point p) const {
+    const float y = p.y - bounds.t + v_.offset();
+    return std::clamp(static_cast<int>(std::lround(y / row_height)), 0, static_cast<int>(entries.size()));
+}
+
+void ItemList::end_drag() {
+    if (drop_target_) drop_target_->set_drop_line(-1);
+    set_drop_line(-1);
+    drop_target_ = nullptr;
+    dragging_ = false;
+    drag_from_ = -1;
 }
 
 bool ItemList::on_mouse_down(const MouseEvent& e) {
@@ -224,11 +249,31 @@ bool ItemList::on_mouse_down(const MouseEvent& e) {
         return true;
     }
     const int i = row_at(e.pt);
+    // A separator can be dragged; a heading cannot.
+    const bool draggable = i >= 0 && !entries[static_cast<size_t>(i)].heading && (on_reorder || (drag_into && drag_into->on_drop_in)) &&
+                           (!can_drag || can_drag(i)) && e.clicks == 1;
+    if (draggable) {
+        drag_from_ = i;
+        drag_origin_ = e.pt;
+        root()->capture(this);
+    }
     if (i >= 0 && !entries[static_cast<size_t>(i)].heading && !entries[static_cast<size_t>(i)].separator) {
+        if (!keep_selection) {
+            // A link: it runs, and nothing stays chosen. The handler may rebuild the list, so nothing after it.
+            if (!entries[static_cast<size_t>(i)].muted && on_select) on_select(i);
+            return true;
+        }
         select(i, true);
-        if (e.clicks >= 2 && on_activate) on_activate(i);
+        if (activate_on_click) pressed_ = e.clicks == 1 ? i : -1;
+        else if (e.clicks >= 2 && on_activate) on_activate(i);
     }
     return true;
+}
+
+void ItemList::on_mouse_leave() {
+    if (hot_ < 0) return;
+    hot_ = -1;
+    invalidate();
 }
 
 bool ItemList::on_mouse_move(const MouseEvent& e) {
@@ -236,12 +281,60 @@ bool ItemList::on_mouse_move(const MouseEvent& e) {
         invalidate();
         return true;
     }
-    return false;
+    if (drag_from_ < 0) {
+        const int hot = bounds.contains(e.pt) ? row_at(e.pt) : -1;
+        if (hot != hot_) {
+            hot_ = hot;
+            tooltip = hot >= 0 && static_cast<size_t>(hot) < entries.size() ? entries[static_cast<size_t>(hot)].tip : std::wstring();
+            if (hover) invalidate();
+        }
+    }
+    if (drag_from_ < 0) return false;
+    if (!dragging_ && std::abs(e.pt.y - drag_origin_.y) + std::abs(e.pt.x - drag_origin_.x) < 5.0f) return true;
+    dragging_ = true;
+    pressed_ = -1;  // a drag is not a click
+    ItemList* target = on_reorder && bounds.contains(e.pt) ? this
+                       : drag_into && drag_into->on_drop_in && drag_into->bounds.contains(e.pt) ? drag_into
+                                                                                               : nullptr;
+    if (drop_target_ && drop_target_ != target) drop_target_->set_drop_line(-1);
+    drop_target_ = target;
+    if (target) {
+        // Near an edge, the list under the pointer scrolls to show where the row could go.
+        if (e.pt.y < target->bounds.t + target->row_height / 2) target->v_.set_offset(target->v_.offset() - target->row_height / 2);
+        else if (e.pt.y > target->bounds.b - target->row_height / 2) target->v_.set_offset(target->v_.offset() + target->row_height / 2);
+        target->set_drop_line(target->gap_at(e.pt));
+        target->invalidate();
+    }
+    return true;
 }
 
-bool ItemList::on_mouse_up(const MouseEvent&) {
+bool ItemList::on_mouse_up(const MouseEvent& e) {
+    if (drag_from_ >= 0) {
+        root()->release_capture();
+        const int from = drag_from_;
+        const bool dragged = dragging_;
+        ItemList* target = drop_target_;
+        const int gap = target ? target->drop_line_ : -1;
+        end_drag();
+        if (dragged) {
+            pressed_ = -1;
+            // Either handler may rebuild the page this list is on, so nothing of `this` is touched after.
+            if (target == this && gap >= 0) {
+                const int to = gap > from ? gap - 1 : gap;
+                if (to != from && on_reorder) on_reorder(from, to);
+            } else if (target && gap >= 0 && target->on_drop_in) {
+                target->on_drop_in(from, gap);
+            }
+            return true;
+        }
+    }
     const bool was = v_.dragging();
     v_.mouse_up();
+    const int pressed = std::exchange(pressed_, -1);
+    if (!was && activate_on_click && pressed >= 0 && pressed == row_at(e.pt) && on_activate) {
+        on_activate(pressed);
+        return true;
+    }
     return was;
 }
 

@@ -354,8 +354,31 @@ impl Inner {
         }
     }
 
-    /// The rows a list expands to.
+    /// The rows a list expands to: `{id, name, detail?, checked?, enabled?, tip?}`. A row says why
+    /// it cannot run (`tip`) when `enabled` is false, and what it points at otherwise.
     pub(crate) fn list_rows(&self, list_id: &str) -> Vec<Value> {
+        let mut rows = self.list_rows_ungated(list_id);
+        // Everything a list offers acts on the folders, except recalling an arrangement, which is
+        // exactly what somebody on the Menus and toolbars page wants to do. Spec:
+        // MainWindow.CommandBars (ListRows, IsSettingsOpen).
+        let settings_open = lock(&self.extra.ui).settings_page.is_some();
+        if settings_open
+            && !matches!(
+                list_id,
+                CommandBarLists::COMMAND_BARS | CommandBarLists::CUSTOM_COMMANDS
+            )
+        {
+            for row in rows.iter_mut() {
+                if row["enabled"].as_bool() != Some(false) {
+                    row["enabled"] = json!(false);
+                    row["tip"] = json!(crate::commands::SETTINGS_OPEN_REASON);
+                }
+            }
+        }
+        rows
+    }
+
+    fn list_rows_ungated(&self, list_id: &str) -> Vec<Value> {
         match list_id {
             CommandBarLists::WORKSPACES => {
                 // Ticked: the workspace the window last came from. Spec: MainWindow.WorkspaceRows.
@@ -366,6 +389,7 @@ impl Inner {
                         json!({
                             "id": w.name,
                             "name": w.name,
+                            "tip": bb_core::rules::SavedWorkspaceRules::folders(&w.layout).join("\n"),
                             "detail": bb_core::rules::SavedWorkspaceRules::shape_text(&w.layout),
                             "checked": current.as_deref().is_some_and(|c| c.eq_ignore_ascii_case(&w.name)),
                         })
@@ -375,24 +399,39 @@ impl Inner {
             CommandBarLists::SAVED_SEARCHES => self
                 .saved_searches()
                 .iter()
-                .map(|s| json!({ "id": s.name, "name": s.name, "detail": crate::saved::scope_column_text(s.scope) }))
+                .map(|s| json!({ "id": s.name, "name": s.name, "detail": crate::saved::scope_column_text(s.scope), "tip": s.query }))
                 .collect(),
             CommandBarLists::BOOKMARKS => self
                 .bookmark_list()
                 .iter()
-                .map(|b| json!({ "id": b.display_path, "name": b.display_path }))
+                .map(|b| json!({ "id": b.display_path, "name": b.display_path, "tip": b.display_path }))
                 .collect(),
-            CommandBarLists::NEW_FILE_TYPES => self
-                .new_file_types()
-                .iter()
-                .map(|t| json!({ "id": t.extension, "name": t.label, "detail": t.extension }))
-                .collect(),
+            CommandBarLists::NEW_FILE_TYPES => {
+                // Greyed with the reason wherever New is not on offer (a search result, an archive).
+                // Spec: MainWindow.CommandBars (NewFileTypeRows: WhyNot(FileVerb.New)).
+                let why_not = self.why_not_now("file.new-file").ok().flatten();
+                self.new_file_types()
+                    .iter()
+                    .map(|t| {
+                        json!({
+                            "id": t.extension, "name": t.label, "detail": t.extension,
+                            "enabled": why_not.is_none(), "tip": why_not.clone().unwrap_or_default(),
+                        })
+                    })
+                    .collect()
+            }
+            // Commands like any other, so through the same gate as one placed by hand.
             CommandBarLists::CUSTOM_COMMANDS => self
                 .custom_command_ids()
                 .iter()
                 .filter_map(|id| {
-                    self.custom_command(id)
-                        .map(|c| json!({ "id": id, "name": c.name }))
+                    let why_not = self.why_not_now(id).ok().flatten();
+                    self.custom_command(id).map(|c| {
+                        json!({
+                            "id": id, "name": c.name,
+                            "enabled": why_not.is_none(), "tip": why_not.unwrap_or_default(),
+                        })
+                    })
                 })
                 .collect(),
             CommandBarLists::COMMAND_BARS => {
@@ -924,7 +963,20 @@ impl Inner {
                 changed();
                 Ok(())
             }
-            "add" | "add-separator" | "add-menu" => {
+            "add" | "add-at" | "add-separator" | "add-menu" => {
+                // `add-at <index> <what>` puts it exactly there: a choice dropped between two rows.
+                // Spec: SettingsView.xaml.cs (BarItemsList_Drop).
+                let (place, arg) = if verb == "add-at" {
+                    let (index, rest) = arg
+                        .split_once(' ')
+                        .ok_or_else(|| AppError::Invalid("add-at takes '<index> <what>'".into()))?;
+                    let index = index
+                        .parse::<usize>()
+                        .map_err(|_| AppError::Invalid("add-at takes '<index> <what>'".into()))?;
+                    (Some(index), rest.trim())
+                } else {
+                    (None, arg)
+                };
                 let item = match verb {
                     "add-separator" => BarItem::separator(),
                     "add-menu" => BarItem::menu("New menu", vec![]),
@@ -960,10 +1012,10 @@ impl Inner {
                     }
                 };
                 let count = CommandBarEdit::items_at(&set, target, &path).len();
-                let at = if count == 0 {
-                    0
-                } else {
-                    (selected + 1).min(count)
+                let at = match place {
+                    Some(index) => index.min(count),
+                    None if count == 0 => 0,
+                    None => (selected + 1).min(count),
                 };
                 let edited = CommandBarEdit::insert(&set, target, &path, at, item);
                 self.barpage_commit(edited, Some(at))

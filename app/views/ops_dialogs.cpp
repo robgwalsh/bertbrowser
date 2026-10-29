@@ -566,12 +566,16 @@ std::unique_ptr<Widget> delete_dialog(DialogContext& cx, bool permanent) {
     Button* cancel = add_button(c, L"Cancel", cx.close);
     cancel->name = "DeleteCancel";
     cancel->is_default = true;
-    add_button(c, p["archive"].boolean() ? L"Remove" : L"Delete", [core, confirmed, after, &main, close = cx.close] {
+    const bool in_archive = p["archive"].boolean();
+    add_button(c, in_archive ? L"Remove" : L"Delete", [core, confirmed, after, &main, in_archive, close = cx.close] {
         *confirmed = true;
         try {
             run(*core, "delete-confirm");
         } catch (const std::exception& e) {
-            bb_status_set(core->app(), core::s(core::wide(e.what())));
+            // An archive that refuses the edit says so in a card, as the original's warning did. Spec:
+            // DirectoryTabView.xaml.cs (the "Archive" warning).
+            if (in_archive) main.show_message(L"Archive", core::message_of(e));
+            else bb_status_set(core->app(), core::s(core::wide(e.what())));
         }
         close();
         if (!*after) main.focus_file_list();

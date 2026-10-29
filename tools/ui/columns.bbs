@@ -190,9 +190,30 @@ columns default
 # hundred COM activations away and renders "Reading…" until it does.
 dialog columns 09-add-column
 
+# Live, it is a popup at the pointer: a click on a row adds that column, and a click outside puts it away.
+live-dialogs on
+menu columns 09a-column-menu-live
+menu-run More columns…
+assert-dialog columns
+widget-drag ColumnCandidates 60 39 60 39
+assert-columns Name, Size, Type, Modified, Created
+assert-dialog columns
+widget-drag DialogLayer 1000 600 1000 600
+assert-dialog none
+live-dialogs off
+columns reset
+
 # The page edits the set a new tab starts from (what a tab that was never arranged follows is pinned in
 # the_columns_page_edits_the_default_set_that_new_tabs_start_from); Reset puts the shipped set back.
 settings columns
+# Dragged to a new place; Name is first and stays there.
+list-drag ColumnRows 1 Modified
+assert-list-row ColumnRows 1 Modified
+assert-list-row ColumnRows 3 Type
+list-drag ColumnRows 0 Type
+assert-list-row ColumnRows 0 Name
+assert-list-row ColumnRows 1 Type
+press ColumnReset
 list-pick ColumnRows Size
 press ColumnRemove
 shot 09b-columns-page-edited

@@ -150,6 +150,17 @@ assert-menu-item New tab
 assert-bar-rows File | Edit | View | Go | Tools | Help
 settings bars open Help
 assert-bar-rows Command palette | Search syntax help | - | About BertBrowser
+# Dragged: a row to a new place and back, and a choice dropped exactly between two rows.
+list-drag BarRows 2 Command palette
+assert-bar-rows Search syntax help | Command palette | - | About BertBrowser
+list-drag BarRows 0 Command palette
+assert-bar-rows Command palette | Search syntax help | - | About BertBrowser
+settings bars filter refresh
+list-drag BarChoices>BarRows 1 Refresh
+assert-bar-rows Command palette | Refresh | Search syntax help | - | About BertBrowser
+settings bars remove Refresh
+settings bars filter
+assert-bar-rows Command palette | Search syntax help | - | About BertBrowser
 settings bars pick Search syntax help
 settings bars add nav.refresh
 assert-bar-rows Command palette | Search syntax help | Refresh | - | About BertBrowser

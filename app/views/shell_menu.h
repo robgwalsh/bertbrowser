@@ -7,6 +7,8 @@
 #pragma once
 #include <windows.h>
 
+#include "ui/controls.h"
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -26,6 +28,8 @@ struct ShellEntry {
     std::wstring header, gesture;
     bool separator = false;
     bool enabled = true;
+    // The extension's own picture for the line (MENUITEMINFO::hbmpItem), 32-bit premultiplied; null when it gave none.
+    ui::ThumbPtr picture;
     std::vector<ShellEntry> children;
     int command = -1;
 };

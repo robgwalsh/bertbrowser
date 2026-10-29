@@ -17,6 +17,7 @@
 #include "ui/inputs.h"
 #include "ui/layout.h"
 #include "ui/list_view.h"
+#include "ui/menu.h"
 #include "views/code_view.h"
 #include "views/core.h"
 #include "views/font_view.h"
@@ -41,6 +42,7 @@ struct PreviewResult {
     uint64_t generation = 0;
     uint64_t tab = 0;
     int mode = 0;
+    bool started = false;  // only says the debounce is over and the read has begun: the pane shows "Loading…"
     json::Value model;
     ui::ThumbPtr image;  // a picture, a document's page, a video's poster
     uint32_t image_w = 0, image_h = 0;
@@ -97,6 +99,8 @@ public:
     std::function<void()> on_fit_width;  // the tab widens the pane
     // Selects what plays next in the list (media); the tab does it, the pane only knows its file.
     std::function<void()> on_next_media;
+    std::function<void(ui::MenuItems, ui::Point)> on_context_menu;  // the text view's Copy / Select all
+    std::function<void(bool)> on_full_screen;  // the video went full screen (or came back): the window follows
 
     // ---- the animation, for the harness and the transport ----
     bool animated() const { return gif_ != 0; }
@@ -128,6 +132,7 @@ private:
     void worker_main();
     std::unique_ptr<PreviewResult> build(const Request& r);
     void show_body(const char* which);
+    void show_loading();
     void sync_chrome();
     void set_text_content(const json::Value& model, bool hex);
 

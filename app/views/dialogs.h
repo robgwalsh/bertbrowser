@@ -45,15 +45,20 @@ class DialogLayer : public ui::Widget {
 public:
     DialogLayer();
     void show(std::unique_ptr<ui::Widget> card);
+    // As a popup: no scrim, the card's top-left at `at` (pulled back inside the window), and a press anywhere
+    // outside it puts it away (`on_click`). Spec: ColumnAddPopup (StaysOpen false).
+    void show_popup(std::unique_ptr<ui::Widget> card, ui::Point at);
     void close();
     bool is_open() const { return card_ != nullptr; }
+    bool is_popup() const { return popup_; }
     std::function<void()> on_closed;
     // A click that nothing in the card took (on the scrim, or on the card's own background).
     std::function<void()> on_click;
 
     ui::Size measure(ui::Size avail) override { return avail; }
     void arrange(ui::Rect r) override;
-    bool on_mouse_down(const ui::MouseEvent&) override {
+    bool on_mouse_down(const ui::MouseEvent& e) override {
+        if (popup_ && card_ && card_->bounds.contains(e.pt)) return true;  // the popup's own background
         if (on_click) on_click();
         return true;
     }
@@ -61,6 +66,8 @@ public:
 
 private:
     ui::Widget* card_ = nullptr;
+    bool popup_ = false;
+    ui::Point at_;
 };
 
 }  // namespace bb::views

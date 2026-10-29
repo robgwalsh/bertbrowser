@@ -273,6 +273,18 @@ impl Inner {
         };
     }
 
+    /// What a status line adds after something undoable: the key for Undo, asked of the keymap each
+    /// time because it can be rebound, or the plain sentence when it has none.
+    /// Spec: ShellViewModel.UndoHint.
+    pub(crate) fn undo_hint(&self) -> String {
+        let gesture = self.keymap_gesture("edit.undo");
+        if gesture.is_empty() {
+            " \u{2014} this can be undone".to_string()
+        } else {
+            format!(" \u{2014} {gesture} to undo")
+        }
+    }
+
     /// Commits whatever the history still holds. Called when the window closes.
     pub(crate) fn release_undo_history(&self) {
         let released = {
@@ -282,6 +294,32 @@ impl Inner {
             released
         };
         released.retire_all();
+    }
+
+    /// Says `text` in the tab showing `directory` (the active one when several do), else in the
+    /// active tab. A drop reports where it landed. Spec: FileDragDropController, `tab.StatusText`.
+    fn set_status_where(&self, directory: &str, text: String) {
+        let active = lock(&self.shell).active_tab_id();
+        let mut found = None;
+        if let Ok(key) = bb_paths::PathKey::canonicalize(directory) {
+            for (id, cell) in self.all_tabs() {
+                let showing = {
+                    let t = lock(&cell);
+                    !t.path.is_empty()
+                        && bb_paths::PathKey::canonicalize(&t.path).is_ok_and(|k| k == key)
+                };
+                if showing {
+                    if Some(id) == active {
+                        found = Some(id);
+                        break;
+                    }
+                    found.get_or_insert(id);
+                }
+            }
+        }
+        if let Some(tab) = found.or(active) {
+            self.set_status(tab, text);
+        }
     }
 
     // ---- move and copy ----
@@ -326,23 +364,18 @@ impl Inner {
         verb: TransferVerb,
         cancel: &CancelToken,
     ) -> (bool, String) {
-        let word = if verb == TransferVerb::Move {
-            "move"
-        } else {
-            "copy"
-        };
         let planner = TransferPlanner::default();
         let mut plan = planner.plan(sources, destination, verb);
 
         if !plan.has_work() {
-            let why = plan
-                .rejected
-                .iter()
-                .find(|r| !r.is_benign())
-                .map(|r| format!(" {}", r.message))
-                .unwrap_or_default();
-            let text = format!("Nothing to {word}.{why}");
-            self.set_active_status(text.clone());
+            // The first thing the planner refused, verbatim, else the no-op it is. Said in the tab
+            // that shows the destination: the pane dropped into, not whichever has the focus.
+            // Spec: DropPipeline.PerformAsync.
+            let text = plan.problems().first().map_or_else(
+                || "Nothing to move \u{2014} those items are already there.".to_string(),
+                |r| r.message.clone(),
+            );
+            self.set_status_where(destination, text.clone());
             return (false, text);
         }
 
@@ -358,8 +391,8 @@ impl Inner {
                 Err(_) => return (false, "cancelled".to_string()),
             }
             if !plan.has_work() {
-                let text = format!("Nothing to {word}.");
-                self.set_active_status(text.clone());
+                let text = "Nothing to move \u{2014} those items are already there.".to_string();
+                self.set_status_where(destination, text.clone());
                 return (false, text);
             }
             if !plan.conflicts().is_empty() {
@@ -504,7 +537,7 @@ impl Inner {
                 first.message
             ));
         } else if outcome.can_undo() || outcome.can_undo_copy {
-            text.push_str(" \u{2014} this can be undone");
+            text.push_str(&self.undo_hint());
         }
         text.push_str(&elevated_note);
         self.set_final_status(text.clone());
@@ -652,7 +685,7 @@ impl Inner {
             let all: Vec<&str> = outcome.failed.iter().map(|f| f.message.as_str()).collect();
             self.seams.notice.say(&all.join("\n\n"), "Delete");
         } else if outcome.can_undo() {
-            text.push_str(" \u{2014} this can be undone");
+            text.push_str(&self.undo_hint());
         }
         text.push_str(&elevated_note);
         self.set_final_status(text.clone());
@@ -817,7 +850,7 @@ impl Inner {
             let all: Vec<&str> = outcome.failed.iter().map(|f| f.message.as_str()).collect();
             self.seams.notice.say(&all.join("\n\n"), "Rename");
         } else if outcome.can_undo() {
-            text.push_str(" \u{2014} this can be undone");
+            text.push_str(&self.undo_hint());
         }
         text.push_str(&elevated_note);
         self.set_final_status(text.clone());

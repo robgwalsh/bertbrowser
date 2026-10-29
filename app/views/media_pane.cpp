@@ -122,9 +122,10 @@ void MediaPane::toggle_setting(const char* key, const char* other) {
 }
 
 void MediaPane::open(const std::wstring& path, ui::ThumbPtr poster, bool is_video) {
-    stop();
+    stop(true);
     path_ = path;
     is_video_ = is_video;
+    screen_->upscale = false;  // a poster is never blown up; the video, once playing, fits the pane
     screen_->set_image(poster);
     big_play_->set_visible(true);
     transport_->set_visible(false);
@@ -141,7 +142,14 @@ void MediaPane::play() {
     if (!player_) {
         player_ = std::make_unique<MediaPlayer>(res().dev);
         if (!player_->open(path_)) {
+            // A missing codec is a message, not a dead button: N editions of Windows have no media stack, and
+            // the poster is still worth showing. Spec: PreviewPane.Media_Failed.
             player_.reset();
+            big_play_->set_visible(false);
+            transport_->set_visible(true);
+            time_->set_text(L"Cannot play this format");
+            sync_transport();
+            request_layout();
             return;
         }
         player_->set_volume(volume_->value());
@@ -149,6 +157,7 @@ void MediaPane::play() {
     }
     started_ = true;
     ended_handled_ = false;
+    screen_->upscale = true;
     player_->play();
     big_play_->set_visible(false);
     transport_->set_visible(true);
@@ -171,8 +180,8 @@ void MediaPane::toggle_play() {
     sync_transport();
 }
 
-void MediaPane::stop() {
-    if (full_) set_full_screen(false);
+void MediaPane::stop(bool keep_full) {
+    if (full_ && !keep_full) set_full_screen(false);
     if (root()) root()->stop_timer(this, 1);
     player_.reset();
     started_ = false;
@@ -206,7 +215,7 @@ std::wstring MediaPane::clock_text(double seconds) {
 void MediaPane::tick() {
     if (!player_) return;
     if (player_->failed()) {
-        time_->set_text(L"This file could not be played.");
+        time_->set_text(L"Cannot play this format");
         root()->stop_timer(this, 1);
         return;
     }
@@ -289,14 +298,29 @@ void MediaPane::set_full_screen(bool on) {
         style.bg = tok::SurfaceBackground;
         if (host) host->add_child(std::move(me));
     }
+    if (on_full_screen) on_full_screen(full_);
     sync_transport();
     request_layout();
     invalidate();
 }
 
+// Spec: PreviewPane.FullScreen_KeyDown.
 bool MediaPane::on_key_down(const KeyEvent& e) {
-    if (e.vk == VK_ESCAPE && full_) {
+    if ((e.vk == VK_ESCAPE || e.vk == VK_F11) && full_) {
         set_full_screen(false);
+        return true;
+    }
+    if ((e.vk == VK_LEFT || e.vk == VK_RIGHT) && full_) {
+        if (player_ && player_->ready()) {
+            const double d = player_->duration();
+            const double to = std::clamp(player_->position() + (e.vk == VK_LEFT ? -5.0 : 5.0), 0.0, d > 0 ? d : 0.0);
+            player_->seek(to);
+            if (d > 0) seek_->set_value(to / d * 1000.0);
+        }
+        return true;
+    }
+    if (e.vk == 'N' && full_) {
+        if (on_next) on_next();
         return true;
     }
     if (e.vk == VK_SPACE && (full_ || started_)) {

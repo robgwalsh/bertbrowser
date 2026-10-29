@@ -33,13 +33,15 @@ public:
 };
 
 struct TileMetrics {
-    float image = 104.0f;      // the square image slot
+    float image = 104.0f;      // the image slot's width (what the zoom slider drives)
+    float image_h = 0.0f;      // and its height, from the tile aspect ratio; 0 is square
     float pad = 8.0f;          // around the image, and between image and caption
-    float caption_h = 36.0f;   // fixed: two lines. Uniform tiles are what make the arithmetic work
+    float caption_h = 32.0f;   // fixed: two lines. Uniform tiles are what make the arithmetic work
     float gap = 6.0f;          // between tiles
     float margin = 8.0f;       // around the whole grid
+    float slot_h() const { return image_h > 0 ? image_h : image; }
     float tile_w() const { return image + 2 * pad; }
-    float tile_h() const { return pad + image + 4 + caption_h + pad; }
+    float tile_h() const { return pad + slot_h() + 4 + caption_h + pad; }
 };
 
 // The pure arithmetic. Content coordinates: (0,0) is the grid's top-left before scrolling.
@@ -47,6 +49,13 @@ struct TileLayout {
     TileMetrics m;
     float width = 0;  // viewport width available to the grid
     size_t count = 0;
+    // The first `leading` rows are full-width rows above the grid (folders, files that are not pictures), each
+    // `row_h` tall: the sort puts them first, so the list reads as rows, then a grid. Spec: ThumbnailTemplateSelector.
+    size_t leading = 0;
+    float row_h = 26.0f;
+    size_t tiles() const { return count > leading ? count - leading : 0; }
+    float grid_top() const { return m.margin + static_cast<float>(leading) * row_h + (leading > 0 ? m.gap : 0.0f); }
+    bool is_row(size_t index) const { return index < leading; }
 
     int columns() const;
     size_t rows() const;
@@ -62,6 +71,7 @@ struct TileLayout {
 
 class TileView : public Widget, public ThumbnailSink {
 public:
+    bool marquee_active() const { return marquee_; }
     static constexpr size_t npos = static_cast<size_t>(-1);
 
     TileView();
@@ -134,6 +144,7 @@ private:
     void update_requests();   // trim to the realized rows, then ask for what is missing, up to the gate
     void move_cursor(size_t row, const Mods& m);
     void update_marquee(Point p);
+    void paint_row(PaintContext& pc, size_t row, const Rect& r, Token fg, bool sel);
     size_t count() const { return provider_ ? provider_->row_count() : 0; }
 
     RowProvider* provider_ = nullptr;
@@ -141,6 +152,17 @@ private:
     ScrollBar v_;
     Rect body_;
     size_t cursor_ = npos, anchor_ = npos;
+    size_t leading_ = 0;  // full-width rows above the grid
+    // The rows the cursor and the anchor were on, by identity: a watcher merge that adds a row above moves
+    // them with their row rather than leaving them on the index. Noted after every gesture and paint.
+    uint64_t cursor_id_ = 0, anchor_id_ = 0;
+    bool cursor_known_ = false, anchor_known_ = false;
+    void note_ids();
+    size_t find_row(uint64_t id, size_t hint) const;
+    struct NoteIds {
+        TileView* v;
+        ~NoteIds() { v->note_ids(); }
+    };
     size_t painted_ = 0;
     bool bar_drag_ = false;
     bool updating_ = false;

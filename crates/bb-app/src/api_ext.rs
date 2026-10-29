@@ -152,6 +152,55 @@ impl App {
         serde_json::to_string(&self.inner.capture_layout()).unwrap_or_default()
     }
 
+    /// The sizes a splitter drag left the children of one split at, as star weights: the split is
+    /// found by child indexes from the root (`path`), and `weights` has one entry per child.
+    /// Without it the next split or close, and the saved session, would rebuild from the weights
+    /// the drag had replaced. No event: the panes are already that size. Spec:
+    /// PaneLayoutHost.WriteBackWeights.
+    pub fn layout_set_weights(&self, path: &[u32], weights: &[f64]) -> AppResult<()> {
+        let mut shell = lock(&self.inner.shell);
+        let mut node = shell.layout.root();
+        for &i in path {
+            node = *shell
+                .layout
+                .children(node)
+                .get(i as usize)
+                .ok_or(crate::ids::AppError::Stale)?;
+        }
+        let kids = shell.layout.children(node).to_vec();
+        if kids.len() != weights.len() {
+            return Err(crate::ids::AppError::Stale);
+        }
+        for (kid, w) in kids.into_iter().zip(weights) {
+            if w.is_finite() && *w > 0.0 {
+                shell.layout.set_weight(kid, *w);
+            }
+        }
+        Ok(())
+    }
+
+    /// Where the main window was last left, in DIPs (left, top, width, height), and whether it was
+    /// maximised. None until a window has closed once. Spec: MainWindow.ApplyWindowSettings.
+    pub fn window_placement(&self) -> (Option<[f64; 4]>, bool) {
+        let s = lock(&self.inner.settings);
+        let bounds = match (s.window_left, s.window_top, s.window_width, s.window_height) {
+            (Some(l), Some(t), Some(w), Some(h)) => Some([l, t, w, h]),
+            _ => None,
+        };
+        (bounds, s.window_maximized)
+    }
+
+    /// Remembers the main window's restored bounds (DIPs) and state; written with the rest of the
+    /// settings when the app shuts down. Spec: MainWindow.SaveWindowSettings.
+    pub fn set_window_placement(&self, bounds: [f64; 4], maximized: bool) {
+        let mut s = lock(&self.inner.settings);
+        s.window_left = Some(bounds[0]);
+        s.window_top = Some(bounds[1]);
+        s.window_width = Some(bounds[2]);
+        s.window_height = Some(bounds[3]);
+        s.window_maximized = maximized;
+    }
+
     /// Writes the arrangement into the settings now.
     pub fn session_save(&self) -> AppResult<()> {
         self.inner.session_save();

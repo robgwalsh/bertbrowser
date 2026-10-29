@@ -292,6 +292,17 @@ typedef struct BbFocusState {
   uint32_t flags;
 } BbFocusState;
 
+// The main window's restored bounds in DIPs, and whether it was maximised.
+typedef struct BbWindowPlacement {
+  // False until a window has closed once: the window opens where Windows puts it.
+  bool known;
+  double left;
+  double top;
+  double width;
+  double height;
+  bool maximized;
+} BbWindowPlacement;
+
 // The host's side of the property system. Every callback returns `BB_OK` with `*out` set to a JSON
 // view that stays valid until the host's next call on that thread, or a failure status.
 //
@@ -456,6 +467,23 @@ enum BbStatus bb_listing_cell(const struct BbListing *l,
                               uint32_t column,
                               struct BbStr *out_text);
 
+// The Size cell's tooltip for a row (see `Row::size_tip`), Rust-owned (`bb_str_free`).
+enum BbStatus bb_listing_size_tip(const struct BbListing *l,
+                                  uint32_t index,
+                                  struct BbOwnedStr *out_text);
+
+// The cell index (`bb_listing_cell`) of a built-in column by its id ("Size", "Modified"), or -1:
+// for a view that shows a column the layout does not (a thumbnail view's rows).
+enum BbStatus bb_cell_index(struct BbStr id, int32_t *out_index);
+
+// The line a `content:` search matched on, for the Match cell: its 1-based number (0 when the row
+// has no match) and where the needle sits in the cell's text, in UTF-16 units.
+enum BbStatus bb_listing_match(const struct BbListing *l,
+                               uint32_t index,
+                               int32_t *out_line,
+                               uint32_t *out_start,
+                               uint32_t *out_length);
+
 // One gesture, one call: `idx` are positions in the snapshot the caller holds.
 enum BbStatus bb_tab_select(struct BbApp *app,
                             uint64_t tab,
@@ -606,6 +634,20 @@ enum BbStatus bb_new_file_types(struct BbApp *app, struct BbOwnedStr *out_json);
 
 // What closing the window would save, as the settings file spells it.
 enum BbStatus bb_session_capture(struct BbApp *app, struct BbOwnedStr *out_json);
+
+// Writes the sizes a splitter drag left one split's children at (see `App::layout_set_weights`):
+// `path` is `depth` child indexes from the root, `weights` one per child.
+enum BbStatus bb_layout_set_weights(struct BbApp *app,
+                                    const uint32_t *path,
+                                    uint32_t depth,
+                                    const double *weights,
+                                    uint32_t n);
+
+// Where the main window was last left.
+enum BbStatus bb_window_placement(struct BbApp *app, struct BbWindowPlacement *out_placement);
+
+// Remembers where the main window is (written with the settings at shutdown).
+enum BbStatus bb_window_placement_set(struct BbApp *app, const struct BbWindowPlacement *placement);
 
 // Writes the pane and tab arrangement into the settings now.
 enum BbStatus bb_session_save(struct BbApp *app);
@@ -993,6 +1035,16 @@ enum BbStatus bb_metadata_picture(struct BbApp *app,
                                   uint8_t *dst,
                                   size_t capacity,
                                   size_t *out_len);
+
+// A picture's bytes for the preview to decode, from disk or from inside an archive, at most the
+// preview's image budget. `*out_len` is the whole length; the bytes are copied only when
+// `capacity` holds them all (call again with a bigger buffer otherwise). `BB_ERR` says why it could
+// not be read (an encrypted entry, most often). Blocking: call it from a worker thread.
+enum BbStatus bb_preview_read(struct BbApp *app,
+                              struct BbStr path,
+                              uint8_t *dst,
+                              size_t capacity,
+                              size_t *out_len);
 
 // `bb_compare_settle` off the UI thread: answers at once; the rows re-paint when it is done.
 enum BbStatus bb_compare_settle_start(struct BbApp *app, const struct BbStr *paths, uint32_t n);

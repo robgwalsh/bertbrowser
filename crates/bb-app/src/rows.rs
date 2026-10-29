@@ -254,6 +254,23 @@ impl Row {
         }
     }
 
+    /// What the pointer resting on the Size cell says: when a folder's size was computed, and that
+    /// it may be short when part of the tree could not be read; a file's size otherwise.
+    /// Spec: FileItemViewModel.SizeTooltip.
+    pub fn size_tip(&self) -> String {
+        if self.is_directory && self.size.is_some() && !self.size_computed.is_unknown() {
+            let mut tip = format!(
+                "Computed {}",
+                bb_core::time::format_short_local(self.size_computed)
+            );
+            if self.size_incomplete {
+                tip.push_str("\nMay be incomplete \u{2014} some folders were inaccessible.");
+            }
+            return tip;
+        }
+        self.size_text()
+    }
+
     pub fn cell_text(&self, column: u32) -> String {
         match CELL_COLUMNS.get(column as usize).copied() {
             Some(ColumnCatalog::NAME) => self.name.clone(),

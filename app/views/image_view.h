@@ -21,11 +21,12 @@ public:
     // The picture's own size, for the pane's subtitle and a GIF whose frames are the canvas.
     const ui::ThumbPtr& image() const { return image_; }
 
-    // Fitted to the pane (the default) or shown at 100%.
+    // Fitted to the pane (the default), or not: shown at 100%, or zoomed by the wheel, which leaves "fit" too.
     bool fitted() const { return !actual_; }
     void set_fitted(bool fitted);
     void toggle_fit() { set_fitted(actual_); }
-    // The scale relative to "fit": 1 is fitted, and it never goes below that.
+    // The scale relative to "fit": 1 is fitted, and it only goes below that down to 100% of a picture that
+    // fitting blew up.
     double scale() const { return scale_; }
     // The width the image would want at 100%, plus the pane's own margins: for "fit width".
     float natural_width() const;
@@ -33,9 +34,11 @@ public:
     // False for a thumbnail-sized cover that only sits there: no wheel zoom, no pan, no double-click.
     bool interactive = true;
     bool checkerboard = true;  // the chequerboard under a picture with transparency (off for an icon)
+    bool upscale = true;       // false: fitted only ever shrinks it (a video's poster). Spec: StretchDirection=DownOnly
 
     std::function<void()> on_toggle_playing;  // Space, when the picture is animated
     std::function<void()> on_fit_changed;
+    std::function<void()> on_left_fit;     // the wheel zoomed a fitted picture: whoever owns the switch hears it is off
     std::function<void()> on_fit_request;  // a double click: ask whoever owns the switch (else toggled here)
 
     ui::Size measure(ui::Size) override { return fixed_or({0, 0}); }
@@ -51,13 +54,18 @@ public:
 private:
     ui::Rect fitted_rect() const;  // the picture laid out to fit, before zoom and pan
     void clamp_offset();
-    void apply_scale(double scale, ui::Point anchor);
+    void apply_scale(double scale, ui::Point anchor, double min_scale);
+    // How far "fit" must be scaled to show one picture pixel per DIP: below 1 for a picture fitting blew up.
+    double one_to_one() const;
+    void apply_actual();
+    bool can_pan() const;
 
     ui::ThumbPtr image_;
     Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap_;
     uint32_t generation_ = 0;
     bool dirty_ = true;
     bool actual_ = false;
+    bool actual_pending_ = false;  // 100% asked for before there was a viewport to centre it in
     double scale_ = 1.0;
     double ox_ = 0, oy_ = 0;  // translation in DIPs, applied after the scale about the fitted rect's origin
     bool panning_ = false;

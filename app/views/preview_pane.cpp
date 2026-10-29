@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cwctype>
+#include <list>
+#include <unordered_map>
 
 namespace bb::views {
 
@@ -54,6 +56,42 @@ std::wstring join(std::initializer_list<std::wstring> parts) {
     return out;
 }
 
+// The shell's answers for the last 50 files (path, size and modified time), so arrowing back over documents is
+// instant. A refusal is remembered too: it stays one until the file changes. Spec: Interop/PreviewImageCache.
+ui::ThumbPtr cached_shell_preview(const std::wstring& path, uint32_t px) {
+    constexpr size_t kCapacity = 50;
+    static std::mutex gate;
+    static std::list<std::pair<std::wstring, ui::ThumbPtr>> order;  // most recent first
+    static std::unordered_map<std::wstring, std::list<std::pair<std::wstring, ui::ThumbPtr>>::iterator> map;
+
+    WIN32_FILE_ATTRIBUTE_DATA info{};
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &info)) return shell_preview(path, px);
+    std::wstring key = path;
+    CharUpperBuffW(key.data(), static_cast<DWORD>(key.size()));
+    key += L"|" + std::to_wstring(px) + L"|" + std::to_wstring((static_cast<uint64_t>(info.nFileSizeHigh) << 32) | info.nFileSizeLow) + L"|" +
+           std::to_wstring((static_cast<uint64_t>(info.ftLastWriteTime.dwHighDateTime) << 32) | info.ftLastWriteTime.dwLowDateTime);
+    {
+        std::lock_guard<std::mutex> lock(gate);
+        if (auto hit = map.find(key); hit != map.end()) {
+            order.splice(order.begin(), order, hit->second);
+            return hit->second->second;
+        }
+    }
+    ui::ThumbPtr image = shell_preview(path, px);
+    std::lock_guard<std::mutex> lock(gate);
+    if (auto hit = map.find(key); hit != map.end()) {
+        order.splice(order.begin(), order, hit->second);
+        return hit->second->second;
+    }
+    order.emplace_front(key, image);
+    map[key] = order.begin();
+    if (map.size() > kCapacity) {
+        map.erase(order.back().first);
+        order.pop_back();
+    }
+    return image;
+}
+
 Button* make_button(Widget& parent, const wchar_t* label, const char* name, std::function<void()> click) {
     auto* b = parent.emplace<Button>(label);
     b->name = name;
@@ -78,6 +116,7 @@ struct PreviewPane::ArchiveRows : ui::RowProvider {
     }
     bool selected(size_t) const override { return false; }
     void select(ui::SelectOp, size_t, size_t) override {}
+    std::wstring row_tip(size_t row) const override { return row < rows.size() ? rows[row].path : std::wstring(); }
 };
 
 PreviewPane::PreviewPane(core::Core& core, uint64_t tab, HWND window) : core_(core), tab_(tab), window_(window) {
@@ -177,11 +216,23 @@ PreviewPane::PreviewPane(core::Core& core, uint64_t tab, HWND window) : core_(co
     body_->dock = Dock::Fill;
     code_ = body_->emplace<CodeView>();
     code_->name = "PreviewText";
+    // What a text box offers on a right click. Spec: PreviewPane.xaml (the RichTextBox's own menu).
+    code_->on_context = [this](Point at) {
+        if (!on_context_menu) return;
+        MenuItems items;
+        MenuItem copy = MenuItem::make(L"&Copy", [this] { code_->copy_selection(); });
+        copy.enabled = code_->has_selection();
+        copy.icon = &icons::Copy;
+        items.push_back(std::move(copy));
+        items.push_back(MenuItem::make(L"Select &all", [this] { code_->select_all(); }));
+        on_context_menu(std::move(items), at);
+    };
     image_ = body_->emplace<ImageView>();
     image_->name = "PreviewImage";
     image_->on_toggle_playing = [this] { animation_toggle(); };
     image_->on_fit_changed = [this] { sync_chrome(); };
     image_->on_fit_request = [this] { request_fit(); };
+    image_->on_left_fit = [this] { request_fit(); };  // the tab's switch follows: it reads "Fit" now
     archive_rows_ = std::make_unique<ArchiveRows>();
     archive_ = body_->emplace<ListView>();
     archive_->name = "PreviewArchive";
@@ -207,6 +258,13 @@ PreviewPane::PreviewPane(core::Core& core, uint64_t tab, HWND window) : core_(co
     font_->name = "PreviewFont";
     media_ = body_->emplace<MediaPane>(core_, tab_);
     media_->name = "PreviewMedia";
+    // The slot the video left says where it went. Spec: PreviewPane.EnterFullScreen ("Playing full screen").
+    media_->on_full_screen = [this](bool on) {
+        if (on_full_screen) on_full_screen(on);
+        show_body(state_.c_str());
+        request_layout();
+        invalidate();
+    };
     media_->on_next = [this] {
         if (on_next_media) on_next_media();
     };
@@ -322,6 +380,15 @@ void PreviewPane::worker_main() {
             cv_.wait_for(lock, std::chrono::milliseconds(150), [this] { return stop_ || request_.valid; });
         }
         if (latest_ != r.generation || stop_) continue;
+        {
+            // The debounce is over: what was on show is for another selection, so the pane says it is loading.
+            auto started = std::make_unique<PreviewResult>();
+            started->generation = r.generation;
+            started->tab = tab_;
+            started->mode = r.mode;
+            started->started = true;
+            if (PostMessageW(window_, WM_BB_PREVIEW, static_cast<WPARAM>(tab_), reinterpret_cast<LPARAM>(started.get()))) started.release();
+        }
         std::unique_ptr<PreviewResult> result;
         try {
             result = build(r);
@@ -402,10 +469,30 @@ std::unique_ptr<PreviewResult> PreviewPane::build(const Request& r) {
                 }
             }
         }
+        if (!out->image && m["inArchive"].boolean()) {
+            // A picture inside an archive is decoded from the entry's bytes; the shell has nothing to say about a
+            // path that is not on disk, so there is no second try.
+            std::vector<uint8_t> bytes(static_cast<size_t>(std::max<int64_t>(m["sizeBytes"].i64(), 0)) + 1);
+            size_t len = 0;
+            BbStatus st = bb_preview_read(core_.app(), core::s(path), bytes.data(), bytes.size(), &len);
+            if (st == BB_OK && len > bytes.size()) {
+                bytes.resize(len);
+                st = bb_preview_read(core_.app(), core::s(path), bytes.data(), bytes.size(), &len);
+            }
+            if (st != BB_OK) {
+                const std::string why = core::utf8(core::last_error());
+                set_message(why.empty() ? "This file could not be read." : why.c_str());
+                return out;
+            }
+            bytes.resize(len);
+            out->image = decode_picture(bytes, 2048, &out->image_w, &out->image_h);
+            if (!out->image) set_message("No preview available");
+            return out;
+        }
         if (!out->image) out->image = decode_picture_file(path, 2048, &out->image_w, &out->image_h);
         if (!out->image) {
             // No codec for this format (HEIC and camera raw, most often): the shell may still have a handler.
-            out->image = shell_preview(path, 1024);
+            out->image = cached_shell_preview(path, 1024);
             if (out->image) {
                 out->image_w = out->image->width;
                 out->image_h = out->image->height;
@@ -413,7 +500,7 @@ std::unique_ptr<PreviewResult> PreviewPane::build(const Request& r) {
         }
         if (!out->image) set_message("No preview available");
     } else if (state == "document") {
-        out->image = shell_preview(path, 1024);
+        out->image = cached_shell_preview(path, 1024);
         if (out->image) {
             out->image_w = 0;
         } else {
@@ -422,7 +509,7 @@ std::unique_ptr<PreviewResult> PreviewPane::build(const Request& r) {
             out->model = ask(3);
         }
     } else if (state == "media") {
-        out->image = shell_preview(path, 1024);  // the poster, if the shell has one
+        out->image = cached_shell_preview(path, 1024);  // the poster, if the shell has one
     } else if (state == "font") {
         out->font = read_font_info(path);
         if (!out->font.ok) set_message("This font could not be read.");
@@ -438,10 +525,14 @@ void PreviewPane::apply(std::unique_ptr<PreviewResult> r) {
         if (r->gif) bb_gif_close(core_.app(), static_cast<uint64_t>(r->gif));
         return;
     }
+    if (r->started) {
+        show_loading();
+        return;
+    }
     applied_ = r->generation;
     loading_ = false;
     animation_stop();
-    media_->stop();
+    media_->stop(r->model["state"].str() == "media");
     // A font held in a private collection holds its file; nothing here holds a file open past the preview.
     font_->set_font(L"");
 
@@ -488,6 +579,31 @@ void PreviewPane::apply(std::unique_ptr<PreviewResult> r) {
     invalidate();
 }
 
+// Spec: PreviewPaneViewModel.LoadAsync (Describe, then IsLoading with every body hidden). A selection that needs
+// no disk (nothing, several, a folder) answers at once and never says it is loading.
+void PreviewPane::show_loading() {
+    const std::vector<uint32_t> sel = core_.selection(tab_);
+    if (sel.size() != 1) return;
+    auto listing = core_.listing(tab_);
+    BbRow row{};
+    if (!listing || !listing->row(sel[0], row) || (row.attributes & FILE_ATTRIBUTE_DIRECTORY)) return;
+    animation_stop();
+    media_->stop(true);  // full screen waits for what arrives: the next video keeps it, anything else ends it
+    font_->set_font(L"");
+    state_ = "none";
+    title_text_ = core::w(row.name);
+    base_subtitle_.clear();
+    subtitle_text_.clear();
+    message_text_.clear();
+    footer_text_.clear();
+    image_->set_image(nullptr);
+    show_body("none");
+    if (media_->full_screen()) media_->set_visible(true);
+    sync_chrome();
+    request_layout();
+    invalidate();
+}
+
 void PreviewPane::set_text_content(const json::Value& m, bool hex) {
     std::vector<std::wstring> lines;
     const json::Value& jl = m["lines"];
@@ -518,10 +634,15 @@ void PreviewPane::show_body(const char* which) {
     message_->set_visible(!text && !image && w != "archive" && w != "font" && w != "media");
     message_->set_text(message_text_.empty() && loading_ ? L"Loading…" : message_text_);
     if (w == "media" && !message_text_.empty()) message_->set_visible(false);
+    if (media_->full_screen()) {
+        message_->set_text(L"Playing full screen");
+        message_->set_visible(true);
+    }
 }
 
 void PreviewPane::sync_chrome() {
     title_->set_text(title_text_);
+    title_->tooltip = title_text_;  // a long name is trimmed in the header
     subtitle_->set_text(subtitle_text_);
     const bool text = state_ == "text", hex = state_ == "hex";
     const bool image = state_ == "image" || state_ == "document";

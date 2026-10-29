@@ -111,7 +111,8 @@ impl Inner {
         let pane = lock(&self.shell).active_pane;
         let tab = match how {
             "here" => lock(&self.shell).active_tab_id().ok_or(AppError::Stale)?,
-            "new-tab" => self.open_tab(pane, &folder, true)?,
+            // Behind the one in view. Spec: MainWindow.OpenBookmarkInNewTab (AddTab, activate: false).
+            "new-tab" => self.open_tab(pane, &folder, false)?,
             "pane-right" | "pane-below" => {
                 let orientation = if how == "pane-right" {
                     SplitOrientation::Vertical

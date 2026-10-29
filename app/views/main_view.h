@@ -84,6 +84,13 @@ public:
     void reset(std::shared_ptr<core::Listing> l);
     void reload_selection();
     void set_cells(std::vector<int> cells) { cells_ = std::move(cells); }
+    void set_match_column(int column_id) { match_column_ = column_id; }
+    void set_size_column(int column_id) { size_column_ = column_id; }
+    std::wstring cell_tip(size_t row, int column_id) const override;
+    bool cell_marks(size_t row, int column_id, CellMarks* out) const override;
+    bool row_is_tile(size_t row) const override;
+    std::wstring tile_row_text(size_t row, int part) const override;
+    bool row_faded(size_t row) const override;
     const std::shared_ptr<core::Listing>& listing() const { return listing_; }
 
     size_t row_count() const override { return listing_ ? listing_->size() : 0; }
@@ -103,6 +110,8 @@ private:
     uint64_t tab_;
     std::shared_ptr<core::Listing> listing_;
     std::vector<char> sel_;
+    int match_column_ = -1;
+    int size_column_ = -1;
     std::vector<int> cells_;
     // Whether the rows are real files a program's or shortcut's own icon can be read from - not the inside of
     // an archive, whose paths only look real. Asked of the disk once per place.
@@ -119,8 +128,10 @@ public:
     void sync_buttons();  // shown while the box has text
     ui::Button* clear_button() const { return clear_; }
     ui::Button* save_button() const { return save_; }
+    ui::Button* glyph() const { return glyph_; }
 
 private:
+    ui::Button* glyph_ = nullptr;
     ui::Button* clear_ = nullptr;
     ui::Button* save_ = nullptr;
 };
@@ -128,6 +139,8 @@ private:
 // One tab: navigation row, path, search, the details list, the message over an empty folder.
 class TabView : public ui::DockPanel {
 public:
+    static std::wstring filters_tip();
+    void mirror_selection_to_tree();
     TabView(MainView& main, core::Core& core, uint64_t tab);
     ~TabView() override;
     void arrange(ui::Rect r) override;
@@ -183,6 +196,7 @@ public:
     bool side_pending() const { return preview_ && preview_->pending(); }
 
 private:
+    std::wstring last_tree_mirror_;  // the folder the selection last showed in the tree
     void end_path_edit();
     void sync_columns();
     void sync_view_mode(const BbTabState& st);
@@ -244,6 +258,7 @@ public:
     TabStrip* strip = nullptr;
     TabView* content = nullptr;
     bool on_mouse_down(const ui::MouseEvent&) override;
+    void on_inner_activity() override;
 
 private:
     MainView& main_;
@@ -387,8 +402,15 @@ public:
     void sync_overlays();
     // Opens a dialog by kind in the window's dialog layer (modal until closed).
     void open_dialog(const std::wstring& kind);
+    // A dialog that is a popup (the column picker), opened with its corner at `at`.
+    void open_dialog_at(const std::wstring& kind, ui::Point at) {
+        dialog_anchor_ = at;
+        open_dialog(kind);
+        dialog_anchor_.reset();
+    }
     void refresh_tool(const std::wstring& kind);
     void sync_devices(bool refresh);
+    void sync_wheel_speed();
     void open_device(const std::wstring& path);
     // A card that says something and has an OK: what a refused plan reports (C#'s MessageDialog), raised on
     // the UI thread, unlike the notice seam a worker parks on.
@@ -460,6 +482,8 @@ public:
     ShellIcons& shell_icons() { return *icons_; }
     size_t icons_pending() const { return icons_->pending(); }
     size_t tree_pending() const;  // folder-tree reads still on a worker
+    // The property system still being read for the Add column panel (the harness waits for it).
+    bool column_props_pending();
     // A preview scheduled or being read in any tab (the harness waits for it to land).
     bool preview_pending() const;
     // Where tile thumbnails come from: the shell (the product) or a generator (the harness).
@@ -482,7 +506,7 @@ private:
     void sync_row_toolbars(const json::Value& state);
     void handle(const BbEvent& e);
     void rebuild_layout(const json::Value& state);
-    std::unique_ptr<ui::Widget> build_node(const json::Value& node, const json::Value& panes);
+    std::unique_ptr<ui::Widget> build_node(const json::Value& node, const json::Value& panes, const std::vector<uint32_t>& path);
     void refresh_status();
     static void sink(void* ctx, BbEvent* evt);
 
@@ -532,8 +556,11 @@ private:
     ui::TextBlock *transfer_head_ = nullptr, *transfer_detail_ = nullptr;
     ui::ProgressBar* transfer_bar_ = nullptr;
     ui::Button *transfer_pause_ = nullptr, *transfer_cancel_ = nullptr;
+    ui::TextBlock* transfer_waiting_ = nullptr;
     DuplicatesState duplicates_;
     bool machine_props_set_ = false;
+    std::optional<ui::Point> dialog_anchor_;
+    bool machine_props_asked_ = false;  // the worker has been started
     DialogLayer* dialogs_ = nullptr;
     ui::StackPanel* indexer_banner_ = nullptr;
     ui::TextBlock* indexer_text_ = nullptr;

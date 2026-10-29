@@ -1,6 +1,21 @@
 #include "ui/scroll.h"
 
+#include <windows.h>
+
 namespace bb::ui {
+
+namespace {
+double g_wheel_multiplier = 1.0;
+}
+
+void set_wheel_multiplier(double multiplier) { g_wheel_multiplier = multiplier > 0 ? multiplier : 1.0; }
+
+float wheel_rows(int delta) {
+    UINT lines = 3;
+    SystemParametersInfoW(SPI_GETWHEELSCROLLLINES, 0, &lines, 0);
+    if (lines == 0 || lines == WHEEL_PAGESCROLL) lines = 3;  // "one page" falls back to the common default
+    return static_cast<float>(-static_cast<double>(delta) / 120.0 * lines * g_wheel_multiplier);
+}
 
 // ---- ScrollBar -------------------------------------------------------------------------------------
 
@@ -197,12 +212,14 @@ void Splitter::arrange(Rect r) {
     position_ = clamp(position_);
     const Rect b = bar();
     const bool horiz = orientation == Orientation::Horizontal;
-    if (children().size() > 0) {
-        children()[0]->arrange(horiz ? Rect{r.l, r.t, b.l, r.b} : Rect{r.l, r.t, r.r, b.t});
-    }
-    if (children().size() > 1) {
-        children()[1]->arrange(horiz ? Rect{b.r, r.t, r.r, r.b} : Rect{r.l, b.b, r.r, r.b});
-    }
+    // Each side is measured at the size it is about to get: measured at the whole split's size, text that wraps
+    // in the narrower side would be given one line's height.
+    auto place = [](Widget& child, Rect to) {
+        child.measure_tree({to.width(), to.height()});
+        child.arrange(to);
+    };
+    if (children().size() > 0) place(*children()[0], horiz ? Rect{r.l, r.t, b.l, r.b} : Rect{r.l, r.t, r.r, b.t});
+    if (children().size() > 1) place(*children()[1], horiz ? Rect{b.r, r.t, r.r, r.b} : Rect{r.l, b.b, r.r, r.b});
 }
 
 void Splitter::paint_children(PaintContext& pc) {
@@ -239,6 +256,7 @@ bool Splitter::on_mouse_up(const MouseEvent&) {
     const bool was = dragging_;
     dragging_ = false;
     invalidate();
+    if (was && on_released) on_released();
     return was;
 }
 

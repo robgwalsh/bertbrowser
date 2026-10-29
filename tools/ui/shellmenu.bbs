@@ -21,6 +21,12 @@ assert-menu-item Open with Code
 assert-menu-item TortoiseSVN
 # still there: the app's own items are untouched by the section
 assert-menu-item Properties
+# the menu's own words: a dialog ends in an ellipsis, the groups say where, and the New submenu reads Folder / Empty file
+assert-menu-item Analyse disk usage…
+assert-menu-item Delete permanently…
+assert-menu-item To the right
+assert-menu-item Empty file…
+assert-no-menu-item Open in pane
 
 # --- Empty space: the folder's background. Git Bash Here belongs here; 7-Zip, which registers for
 # items, does not. ---
@@ -33,6 +39,9 @@ assert-no-menu-item 7-Zip
 # --- The folder tree's node menu gets the same section ---
 
 menu tree 03-menu-tree
+# the tree's words are fixed: they never count the file list's selection
+assert-no-menu-item Delete 1
+assert-menu-item Delete…
 assert-menu-item TortoiseSVN
 assert-menu-item Open Git Bash here
 
@@ -93,6 +102,18 @@ assert-menu-order What changed here | 7-Zip | - | Copy as path | - | Delete | Bo
 # selection with its editor open.
 settings context-menu
 shot 11-settings-context-menu-arranged
+# A row dragged to a new place and back, and a choice dropped where it should go (one already on the menu
+# moves there).
+list-drag MenuLayoutList 0 Open
+assert-list-row MenuLayoutList 0 Open
+assert-list-row MenuLayoutList 1 New
+list-drag MenuLayoutList 3 Open
+assert-list-row MenuLayoutList 2 Open
+list-drag MenuChoiceList>MenuLayoutList 0 Properties
+assert-list-row MenuLayoutList 0 Properties
+menu-layout app:new - app:open app:run-as-admin app:open-new-tab app:open-new-pane app:open-terminal app:open-vscode app:disk-usage app:duplicates app:changes app:compare-panes app:compress clsid:{23170F69-40C1-278A-1000-000100020000} app:extract - app:copy-path app:copy-name app:compare-files app:settle-by-content app:verify-checksums app:checksum - app:rename app:delete app:delete-permanently app:bookmark - app:cut app:copy app:paste @more - app:properties
+settings context-menu
+assert-list-row MenuLayoutList 0 New
 settings context-menu dragging
 shot 12-settings-context-menu-dragging
 settings context-menu new-command

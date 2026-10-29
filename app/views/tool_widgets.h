@@ -62,6 +62,7 @@ public:
     int picture_column = -1;  // which column's cells start with the row's picture
     std::vector<int> picked() const;
     std::function<void()> on_copy;  // Ctrl+C
+    std::function<bool(unsigned vk)> on_key;  // a plain key the list's own handling has not taken yet; true = handled
 
     void set_rows(std::vector<TableRow> r);
     float scroll_offset() const { return v_.offset(); }

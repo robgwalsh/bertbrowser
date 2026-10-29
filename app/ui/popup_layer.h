@@ -71,6 +71,9 @@ public:
 
 private:
     void hover_changed(Widget* w);
+    // A menu item's tooltip: the item the pointer rests on, and what it will say once the delay is up.
+    const MenuItem* tip_item_ = nullptr;
+    std::wstring menu_tip_;
 
     gfx::Resources& res_;
     PopupPresenter* external_ = nullptr;

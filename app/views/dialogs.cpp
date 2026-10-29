@@ -206,29 +206,81 @@ std::unique_ptr<Panel> new_item(DialogContext& cx, bool file) {
     return std::move(c.root);
 }
 
+namespace {
+
+// The Add column panel's search row. Down leaves the box for the list (the box answers false to it, so it
+// bubbles here), and while the property system is still being read it asks, now and then, whether the rest has
+// arrived. Spec: ColumnAddPanel.Search_KeyDown, LoadAsync.
+class ColumnSearchRow : public Panel {
+public:
+    std::function<void()> on_down;
+    std::function<bool()> poll;  // true = it has arrived, stop asking
+    bool on_key_down(const KeyEvent& e) override {
+        if (e.vk != VK_DOWN || e.mods.ctrl || e.mods.alt || e.mods.shift || !on_down) return false;
+        on_down();
+        return true;
+    }
+    void paint(PaintContext& pc) override {
+        Panel::paint(pc);
+        if (poll && !watching_ && root()) {
+            watching_ = true;
+            root()->start_timer(this, 1, 120);
+        }
+    }
+    void on_timer(int id) override {
+        if (!poll || !poll()) return;
+        poll = nullptr;
+        if (root()) root()->stop_timer(this, id);
+    }
+
+private:
+    bool watching_ = false;
+};
+
+}  // namespace
+
 // Add a column: the catalogue's columns and every property this machine reports, searched as it is typed. A
-// column taken leaves the list at once, and Enter in the box adds the first match, so search-Enter-type-again
-// is one session. Spec: Views/ColumnAddPanel.
+// click on a row takes it, a column taken leaves the list at once, and Enter in the box adds the first match, so
+// search-Enter-type-again is one session. Down from the box enters the list, Up from its first row returns,
+// Space or Enter takes the row. The property system is read on a worker: the curated columns are there at once.
+// Spec: Views/ColumnAddPanel.
 // `defaults` is the Columns page's: the set new tabs start from rather than this tab's.
+// A popup, as C#'s is: the search box over the list, opened at the pointer (the header menu) or under the Add
+// button, put away by Esc or a click outside. A click on a row adds it, so three columns are three clicks.
+// Spec: ColumnAddPanel.xaml, ColumnAddPopup.
 std::unique_ptr<Panel> columns_dialog(DialogContext& cx, bool defaults) {
-    Card c = make_card(defaults ? L"Add a column to new tabs" : L"Add a column", 520);
+    auto root = std::make_unique<Panel>();
+    root->name = "ColumnAddPanel";
+    root->pad = 1;
+    root->width = 360;
+    root->style.bg = tok::MenuBorder;
+    auto* body = root->emplace<StackPanel>(Orientation::Vertical, 6.0f);
+    body->pad = 10;
+    body->style.bg = tok::MenuBackground;
     cx.main.ensure_machine_properties();
     BbApp* app = cx.main.core().app();
     const uint64_t tab = defaults ? 0 : cx.main.active_tab();
-    auto* search = f::field(*c.body, L"", -1, nullptr, L"Search columns and properties");
+    auto* search_row = body->emplace<ColumnSearchRow>();
+    auto* search = f::field(*search_row, L"", -1, nullptr, L"Search all properties");
     search->width = -1;
     search->name = "ColumnSearch";
-    auto* list = c.body->emplace<f::ItemList>();
+    auto* list = body->emplace<f::ItemList>();
     list->name = "ColumnCandidates";
-    list->height = 360;
-    auto* status = f::text(*c.body, L"", tok::TextMuted, 12.5f);
+    list->height = 340;
+    list->activate_on_click = true;
+    list->style.bg = gfx::kNoToken;
+    list->style.border = gfx::kNoToken;
+    auto* status = f::text(*body, L"", tok::TextMuted, 12.5f);
     status->name = "ColumnStatus";
     status->wrap = true;
     auto ids = std::make_shared<std::vector<std::wstring>>();
-    auto refill = [app, tab, search, list, status, ids] {
+    // `keep` leaves the highlighted row where it is (the rest of the properties arriving under the pointer).
+    auto refill = [app, tab, search, list, status, ids](bool keep) {
+        const std::wstring was = keep && list->selected >= 0 && static_cast<size_t>(list->selected) < ids->size() ? (*ids)[static_cast<size_t>(list->selected)] : L"";
         const json::Value st = try_model([&](BbOwnedStr* o) { return bb_columns_candidates(app, tab, core::s(search->text()), o); });
         std::vector<f::ListEntry> entries;
         ids->clear();
+        int again = -1;
         for (size_t g = 0; g < st["groups"].size(); ++g) {
             f::ListEntry h;
             h.heading = true;
@@ -242,35 +294,61 @@ std::unique_ptr<Panel> columns_dialog(DialogContext& cx, bool defaults) {
                 e.detail = core::wide(items[i]["detail"].str());
                 entries.push_back(std::move(e));
                 ids->push_back(core::wide(items[i]["id"].str()));
+                if (!was.empty() && ids->back() == was) again = static_cast<int>(ids->size()) - 1;
             }
         }
-        list->set_entries(std::move(entries));
+        list->set_entries(std::move(entries), again);
         status->set_text(st["full"].boolean()     ? L"That is all " + std::to_wstring(st["max"].i64()) + L" columns. Remove one to add another."
-                         : st["loading"].boolean() ? L"Reading the rest of the property system\u2026"
+                         : st["loading"].boolean() ? L"Reading the rest of the property system…"
                          : st["empty"].boolean()   ? L"No property matches that."
                                                    : L"");
         status->invalidate();
     };
-    auto add = [app, tab, ids, refill](int i) {
+    auto first_row = [ids] {
+        for (size_t i = 0; i < ids->size(); ++i) {
+            if (!(*ids)[i].empty()) return static_cast<int>(i);
+        }
+        return -1;
+    };
+    auto add = [app, tab, ids, refill, first_row, list, search](int i) {
         if (i < 0 || static_cast<size_t>(i) >= ids->size() || (*ids)[static_cast<size_t>(i)].empty()) return;
         if (tab == 0) bb_columns_defaults_do(app, core::s(L"add"), core::s((*ids)[static_cast<size_t>(i)]));
         else bb_columns_do(app, tab, core::s(L"add"), core::s((*ids)[static_cast<size_t>(i)]));
-        refill();  // the column just taken leaves the list
+        refill(false);  // the column just taken leaves the list
+        // The keyboard stays where the person left it: in the box, a search then Enter then more typing is one
+        // session; in the list, the next candidate is the one to take.
+        if (!search->focused()) list->select(first_row(), true);
     };
-    search->on_changed = [refill](const std::wstring&) { refill(); };
-    search->on_commit = [ids, add] {
-        for (size_t i = 0; i < ids->size(); ++i) {
-            if (!(*ids)[i].empty()) {
-                add(static_cast<int>(i));
-                return;
-            }
+    search->on_changed = [refill](const std::wstring&) { refill(false); };
+    search->on_commit = [first_row, add] { add(first_row()); };
+    search_row->on_down = [first_row, list] {
+        const int first = first_row();
+        if (first < 0) return;
+        list->select(first, true);
+        if (list->root()) list->root()->set_focus(list);
+    };
+    list->on_key = [list, search, first_row, add](unsigned vk) {
+        if (vk == VK_SPACE && list->selected >= 0) {
+            add(list->selected);
+            return true;
         }
+        if (vk == VK_UP && list->selected == first_row()) {
+            // Back out of the top of the list into the box, rather than sitting on the first row with nowhere to go.
+            if (list->root()) list->root()->set_focus(search);
+            search->select(search->text().size(), search->text().size());
+            return true;
+        }
+        return false;
     };
     list->on_activate = add;
-    refill();
-    add_button(c, L"Add", [list, add] { add(list->selected); }, true)->name = "ColumnAdd";
-    add_button(c, L"Close", cx.close);
-    return std::move(c.root);
+    search_row->poll = [&main = cx.main, refill] {
+        if (!machine_property_read_done()) return false;
+        main.ensure_machine_properties();  // hands the core what the worker found
+        refill(true);
+        return true;
+    };
+    refill(false);
+    return root;
 }
 
 // The folder a tree menu's Properties is about, read from disk: the tree holds names, not sizes or dates.
@@ -1096,6 +1174,19 @@ DialogLayer::DialogLayer() {
 
 void DialogLayer::show(std::unique_ptr<Widget> card) {
     close();
+    popup_ = false;
+    style.bg = tok::Scrim;
+    card_ = add(std::move(card));
+    set_visible(true);
+    request_layout();
+    invalidate();
+}
+
+void DialogLayer::show_popup(std::unique_ptr<Widget> card, Point at) {
+    close();
+    popup_ = true;
+    at_ = at;
+    style.bg = gfx::kNoToken;
     card_ = add(std::move(card));
     set_visible(true);
     request_layout();
@@ -1116,6 +1207,12 @@ void DialogLayer::arrange(Rect r) {
     if (!card_) return;
     const Size d = card_->measure_tree({card_->width >= 0 ? card_->width : r.width() - 80, r.height() - 40});
     const float w = card_->width >= 0 ? card_->width : d.w;
+    if (popup_) {
+        const float x = std::clamp(at_.x, r.l + 4, std::max(r.l + 4, r.r - w - 4));
+        const float y = std::clamp(at_.y, r.t + 4, std::max(r.t + 4, r.b - d.h - 4));
+        card_->arrange(Rect::xywh(x, y, w, std::min(d.h, r.height() - 8)));
+        return;
+    }
     card_->arrange(Rect::xywh(r.l + (r.width() - w) / 2, r.t + std::max(20.0f, (r.height() - d.h) / 3), w, d.h));
 }
 

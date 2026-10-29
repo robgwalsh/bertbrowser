@@ -210,6 +210,12 @@ pub fn epub() -> Vec<u8> {
 /// A zip of text entries, `mimetype` stored and the rest deflated, every entry dated
 /// 2024-03-14 09:26:52.
 pub fn zip_of(entries: &[(&str, &str)]) -> Vec<u8> {
+    let binary: Vec<(&str, &[u8])> = entries.iter().map(|(n, c)| (*n, c.as_bytes())).collect();
+    zip_of_bytes(&binary)
+}
+
+/// As `zip_of`, for entries that are not text (a picture, another zip).
+pub fn zip_of_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     for (name, content) in entries {
         let method = if *name == "mimetype" {
@@ -223,7 +229,7 @@ pub fn zip_of(entries: &[(&str, &str)]) -> Vec<u8> {
                 zip::DateTime::from_date_and_time(2024, 3, 14, 9, 26, 52).expect("a valid date"),
             );
         writer.start_file(*name, options).expect("start entry");
-        writer.write_all(content.as_bytes()).expect("write entry");
+        writer.write_all(content).expect("write entry");
     }
     writer.finish().expect("finish zip").into_inner()
 }

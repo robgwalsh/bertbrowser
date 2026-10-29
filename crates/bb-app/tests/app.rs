@@ -392,6 +392,14 @@ fn a_move_and_its_undo_and_redo_round_trip() {
     let (ok, message) = f.wait_op(op);
     assert!(ok, "{message}");
     assert!(message.starts_with("Moved 2 item(s)"), "{message}");
+    // The hint names Undo's key, or says the plain sentence when it has none.
+    let gesture = f.app.keymap_gesture("edit.undo");
+    let hint = if gesture.is_empty() {
+        " \u{2014} this can be undone".to_string()
+    } else {
+        format!(" \u{2014} {gesture} to undo")
+    };
+    assert!(message.ends_with(&hint), "{message}");
 
     assert!(!f.names().contains(&"photo.jpg".to_string()));
     assert!(std::path::Path::new(&f.path("Documents\\photo.jpg")).exists());
@@ -525,7 +533,10 @@ fn nothing_to_do_is_reported_not_recorded() {
         .unwrap();
     let (ok, _) = f.wait_op(op);
     assert!(!ok);
-    assert!(f.status().starts_with("Nothing to move"), "{}", f.status());
+    assert_eq!(
+        "Nothing to move \u{2014} those items are already there.",
+        f.status()
+    );
     assert!(!f.app.can_undo());
     assert!(f.app.undo_step(1).is_err());
 }

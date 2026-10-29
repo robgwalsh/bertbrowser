@@ -44,8 +44,23 @@ public:
         auto group = [&](const char* id, std::vector<ShellEntry> entries) {
             session->groups.push_back({id, std::move(entries)});
         };
+        // One line carries a picture of its own, as an extension's HBITMAP would: a flat blue square.
+        auto swatch = [] {
+            auto img = std::make_shared<bb::ui::ThumbImage>();
+            img->width = img->height = 16;
+            img->bgra.resize(16 * 16 * 4);
+            for (size_t i = 0; i < img->bgra.size(); i += 4) {
+                img->bgra[i] = 0xD0;
+                img->bgra[i + 1] = 0x78;
+                img->bgra[i + 2] = 0x00;
+                img->bgra[i + 3] = 0xFF;
+            }
+            return bb::ui::ThumbPtr(img);
+        };
+        ShellEntry code = item(L"Open with Code");
+        code.picture = swatch();
         group("verb:git_shell", {item(L"Open Git Bash here")});
-        group("verb:vscode", {item(L"Open with Code")});
+        group("verb:vscode", {std::move(code)});
         if (context == bb::views::ShellContext::Items) {
             bool any_file = false;
             for (const auto& t : targets) any_file = any_file || !t.is_directory;

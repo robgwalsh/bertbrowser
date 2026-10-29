@@ -222,7 +222,8 @@ impl Inner {
                     }
                     None => (true, format!("Created '{}'", plan.name)),
                 };
-                inner.set_active_status(text.clone());
+                // After the reload, which ends by writing "N items" over anything said earlier.
+                inner.set_final_status(text.clone());
                 (ok, text)
             }),
         )

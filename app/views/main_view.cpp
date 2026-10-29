@@ -183,6 +183,39 @@ std::wstring ListAdapter::cell_text(size_t row, int column_id) const {
     return cell < 0 ? std::wstring() : listing_->cell(row, static_cast<uint32_t>(cell));
 }
 
+// Pictures and videos are tiles; folders and every other file are rows above them. Spec: ThumbnailTemplateSelector.
+bool ListAdapter::row_is_tile(size_t row) const {
+    BbRow r{};
+    return listing_ && listing_->row(row, r) && (r.flags & BB_ROW_MEDIA) && !(r.flags & BB_ROW_DIRECTORY);
+}
+
+std::wstring ListAdapter::tile_row_text(size_t row, int part) const {
+    auto index_of = [](const wchar_t* id) {
+        int32_t i = -1;
+        return bb_cell_index(core::s(id), &i) == BB_OK ? i : -1;
+    };
+    static const int size_cell = index_of(L"Size"), modified_cell = index_of(L"Modified");
+    const int cell = part == 0 ? size_cell : modified_cell;
+    return listing_ && cell >= 0 ? listing_->cell(row, static_cast<uint32_t>(cell)) : std::wstring();
+}
+
+std::wstring ListAdapter::cell_tip(size_t row, int column_id) const {
+    return column_id == size_column_ && listing_ ? listing_->size_tip(row) : std::wstring();
+}
+
+bool ListAdapter::row_faded(size_t row) const {
+    BbRow r{};
+    return listing_ && listing_->row(row, r) && (r.flags & BB_ROW_HIDDEN);
+}
+
+bool ListAdapter::cell_marks(size_t row, int column_id, CellMarks* out) const {
+    if (column_id != match_column_ || !listing_) return false;
+    const int line = listing_->match(row, &out->start, &out->length);
+    if (line <= 0) return false;
+    out->lead = std::to_wstring(line);
+    return true;
+}
+
 Token ListAdapter::row_tint(size_t row) const {
     BbRow r{};
     if (!listing_ || !listing_->row(row, r)) return gfx::kNoToken;
@@ -295,8 +328,12 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     path_->name = "PathBox";
     path_->set_visible(false);
     path_->on_commit = [this] {
-        const std::wstring target = path_->text();
+        // Trimmed, and an empty box goes nowhere rather than "Folder not found". Spec: DirectoryTabView.PathBox_KeyDown.
+        std::wstring target = path_->text();
+        const size_t a = target.find_first_not_of(L" \t"), b = target.find_last_not_of(L" \t");
+        target = a == std::wstring::npos ? std::wstring() : target.substr(a, b - a + 1);
         end_path_edit();
+        if (target.empty()) return;
         try {
             core_.navigate(tab_, target);
         } catch (const core::CoreError&) {
@@ -308,7 +345,7 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     auto save = [this] { main_.execute_command(L"search.save"); };
     search_ = nav_->emplace<SearchField>([this] { clear_search(false); }, save);
     search_->name = "SearchBox";
-    search_->width = 170;
+    search_->width = 280;  // Spec: DirectoryTabView.xaml (Width 280, MinWidth 150)
     search_->placeholder = L"Search this folder";
     search_->on_changed = [this](const std::wstring&) { on_search_changed(false); };
     search_->on_cancel = [this] { search_escape(false); };
@@ -365,8 +402,7 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     }
 
     auto banner = std::make_unique<StackPanel>(Orientation::Horizontal, 8.0f);
-    banner->pad = 4;
-    banner->height = 28;
+    banner->pad = 6;  // grows with what it says: an access-denied message is long, and a pane can be narrow
     banner->dock = Dock::Top;
     banner->name = "ErrorBanner";
     // A locked archive is a listing state, so Unlock rides in this banner rather than a dialog of its
@@ -374,6 +410,7 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     banner->style.bg = tok::WarningBackground;
     banner_ = banner->emplace<TextBlock>();
     banner_->style.fg = tok::WarningForeground;
+    banner_->wrap = true;
     banner_->vcenter = true;
     banner_->flex = 1;
     unlock_ = banner->emplace<Button>(L"Unlock…");
@@ -528,8 +565,15 @@ bool TabView::select_by_prefix(const std::wstring& prefix, size_t start) {
 void TabView::sync_columns() {
     const auto cols = core_.columns(tab_);
     std::vector<int> cells;
-    for (const auto& c : cols) cells.push_back(c.cell);
+    int match = -1, size = -1;
+    for (size_t i = 0; i < cols.size(); ++i) {
+        cells.push_back(cols[i].cell);
+        if (cols[i].id == L"Match") match = static_cast<int>(i);
+        if (cols[i].id == L"Size") size = static_cast<int>(i);
+    }
     adapter_.set_cells(cells);
+    adapter_.set_match_column(match);
+    adapter_.set_size_column(size);
     bool same = cols.size() == columns_.size();
     for (size_t i = 0; same && i < cols.size(); ++i) same = cols[i].id == columns_[i].id;
     columns_ = cols;
@@ -542,6 +586,9 @@ void TabView::sync_columns() {
         c.width = cols[i].width;
         c.right_align = cols[i].right;
         c.sortable = cols[i].sortable;
+        // Where a result lives and what a comparison says in words are second to the name. Spec: Styles.xaml
+        // (Column.Cell.RelativePath at 0.7, Column.Cell.CompareStatus in the secondary colour).
+        if (cols[i].id == L"RelativePath" || cols[i].id == L"CompareStatus") c.fg = tok::TextSecondary;
         out.push_back(std::move(c));
     }
     list_->set_columns(std::move(out));
@@ -612,14 +659,25 @@ Widget* TabView::active_view() const { return tiles_on_ ? static_cast<Widget*>(t
 
 void TabView::sync_view_mode(const BbTabState& st) {
     const bool want = st.thumbnail_scale > 0.0;
-    const float image = 64.0f + static_cast<float>(st.thumbnail_scale) * 160.0f;
+    // 64 to 256 wide, the slider's first 5% all at the smallest so it need not be landed on exactly; the height
+    // is the width through the tile aspect ratio. Spec: FileListViewModel (ThumbnailSize, ThumbnailTileHeight).
+    constexpr double kMin = 64, kMax = 256, kDeadZone = 0.05;
+    const double s = st.thumbnail_scale;
+    const float image = static_cast<float>(s < kDeadZone ? kMin : kMin + (s - kDeadZone) / (1 - kDeadZone) * (kMax - kMin));
+    float image_h = image;
+    if (want) {
+        const json::Value ts = try_model([&](BbOwnedStr* o) { return bb_tab_tile_state(core_.app(), tab_, o); });
+        const double w = ts["aspect"]["width"].num(1), h = ts["aspect"]["height"].num(1);
+        if (w > 0 && h > 0) image_h = static_cast<float>(image * h / w);
+    }
     if (want && !thumbs_) {
         thumbs_ = std::make_unique<ThumbnailService>(main_.window().hwnd(), thumb_source_, [this](size_t row) { return adapter_.row_path(row); });
         tiles_->set_thumbnails(thumbs_.get());
         tiles_->dpi_scale = static_cast<float>(main_.window().dpi()) / 96.0f;
     }
-    if (want && std::fabs(tiles_->metrics.image - image) > 0.5f) {
+    if (want && (std::fabs(tiles_->metrics.image - image) > 0.5f || std::fabs(tiles_->metrics.slot_h() - image_h) > 0.5f)) {
         tiles_->metrics.image = image;
+        tiles_->metrics.image_h = image_h;
         tiles_->refresh();
     }
     if (want == tiles_on_) return;
@@ -636,12 +694,14 @@ PreviewPane* TabView::ensure_preview() {
     preview_ = side_pane_->emplace<PreviewPane>(core_, tab_, main_.window().hwnd());
     preview_->on_fit_width = [this] { fit_side_width(); };
     preview_->on_next_media = [this] { select_next_media(); };
+    preview_->on_context_menu = [this](MenuItems items, Point at) { main_.show_context_menu(std::move(items), at); };
+    preview_->on_full_screen = [this](bool on) { main_.window().set_full_screen(on); };
     return preview_;
 }
 
 MetadataPane* TabView::ensure_metadata() {
     if (metadata_) return metadata_;
-    metadata_ = side_pane_->emplace<MetadataPane>(core_, tab_);
+    metadata_ = side_pane_->emplace<MetadataPane>(core_, tab_, &main_.shell_icons());
     return metadata_;
 }
 
@@ -671,6 +731,23 @@ void TabView::sync_side_pane(const BbTabState& st) {
     bb_ui_set_flag(core_.app(), core::s(L"previewHasMedia"), preview_ && side_mode_ == 1 && preview_->state_name() == "media");
 }
 
+// One folder selected in the active tab is shown in the folder tree, without going there; never while a marquee
+// is still being drawn. Spec: DirectoryTabView.MirrorSelection, ShellViewModel.RequestTreeReveal.
+void TabView::mirror_selection_to_tree() {
+    if (main_.active_tab() != tab_ || list_->marquee_active() || tiles_->marquee_active()) return;
+    const std::vector<uint32_t> sel = core_.selection(tab_);
+    auto listing = core_.listing(tab_);
+    BbRow row{};
+    if (sel.size() != 1 || !listing || !listing->row(sel[0], row) || !(row.flags & BB_ROW_DIRECTORY)) {
+        last_tree_mirror_.clear();  // selected again later, it is shown again
+        return;
+    }
+    const std::wstring path = core::w(row.full_path);
+    if (path == last_tree_mirror_) return;
+    last_tree_mirror_ = path;
+    main_.reveal_in_tree(path);
+}
+
 void TabView::fit_side_width() {
     if (!preview_) return;
     const float wanted = preview_->desired_width() + 16.0f;
@@ -698,6 +775,22 @@ static std::wstring gesture_tip(BbApp* app, const std::wstring& text, const wcha
     return text + (g.empty() ? std::wstring() : L" (" + g + L")") + after;
 }
 
+// Every filter the box takes, with what it means: the magnifier's tooltip. Spec: Styles.xaml (SearchSyntaxToolTip).
+std::wstring TabView::filters_tip() {
+    static const std::wstring text = [] {
+        std::wstring out = L"Filters";
+        const json::Value sections = try_model([&](BbOwnedStr* o) { return bb_search_syntax_help(o); });
+        for (size_t s = 0; s < sections.size(); ++s) {
+            for (size_t i = 0; i < sections[s]["entries"].size(); ++i) {
+                const json::Value& e = sections[s]["entries"][i];
+                out += L"\n" + core::wide(e["example"].str()) + L"   \u2014   " + core::wide(e["meaning"].str());
+            }
+        }
+        return out;
+    }();
+    return text;
+}
+
 void TabView::refresh_tooltips() {
     BbApp* app = core_.app();
     back_->tooltip = gesture_tip(app, L"Back", L"nav.back");
@@ -706,6 +799,7 @@ void TabView::refresh_tooltips() {
     refresh_->tooltip = gesture_tip(app, L"Refresh", L"nav.refresh");
     search_->tooltip = gesture_tip(app, L"Search this folder and everything under it", L"search.folder",
                                    L". Filters: ext: size: dm: path: is: re: in: content:, plus OR and !");
+    search_->glyph()->tooltip = filters_tip();
     static const wchar_t* ids[3] = {L"view.side-none", L"view.preview", L"view.metadata"};
     static const wchar_t* names[3] = {L"No side pane", L"Preview pane", L"Metadata pane"};
     for (int i = 0; i < 3; ++i) {
@@ -759,7 +853,7 @@ MenuItems TabView::build_column_menu() {
         for (size_t i = 0; i < m["extra"].size(); ++i) out.push_back(entry(m["extra"][i]));
     }
     out.push_back(MenuItem::separator());
-    out.push_back(MenuItem::make(L"More columns\u2026", [this] { main_.open_dialog(L"columns"); }));
+    out.push_back(MenuItem::make(L"More columns\u2026", [this] { main_.open_dialog_at(L"columns", main_.window().root().pointer()); }));
     out.push_back(MenuItem::make(L"Set as default for new tabs", [app, tab] { bb_columns_do(app, tab, core::s(L"default"), core::s(L"")); }));
     out.push_back(MenuItem::make(L"Reset to default", [app, tab] { bb_columns_do(app, tab, core::s(L"reset"), core::s(L"")); }));
     return out;
@@ -814,6 +908,7 @@ void TabView::reload_state() {
         list_->set_provider(&adapter_);  // a different place: back to the top, no cursor
         tiles_->set_provider(&adapter_);
         main_.tab_navigated(tab_, path);
+        last_tree_mirror_.clear();
     }
 
     // The box that holds the active search shows it; typing in the other one is left alone. The whole-PC
@@ -842,6 +937,7 @@ void TabView::reload_state() {
     unlock_->set_visible(!error.empty() && st.is_archive_locked);
 
     adapter_.reload_selection();
+    mirror_selection_to_tree();
     const std::wstring sort = core_.tab_text(tab_, BB_TEXT_SORT_BY);
     for (size_t i = 0; i < columns_.size(); ++i) {
         if (columns_[i].id == sort) list_->set_sort(static_cast<int>(i), !st.sort_descending);
@@ -893,6 +989,13 @@ SearchField::SearchField(std::function<void()> clear, std::function<void()> save
     };
     save_ = make(icons::Save, L"Save this search\u2026", std::move(save));
     clear_ = make(icons::Dismiss, L"Clear search (Esc)", std::move(clear));
+    // The magnifier at the left; a click on it is a click into the box. Spec: DirectoryTabView.xaml,
+    // MainWindow.xaml (the search glyph).
+    glyph_ = make(icons::Search, L"", [this] {
+        if (root()) root()->set_focus(this);
+    });
+    glyph_->set_visible(true);
+    inset_left = 18.0f;
 }
 
 void SearchField::sync_buttons() {
@@ -909,6 +1012,7 @@ void SearchField::arrange(Rect r) {
     Edit::arrange(r);
     const float size = std::min(22.0f, r.height() - 4);
     const float t = r.t + (r.height() - size) / 2;
+    glyph_->arrange(Rect::xywh(r.l + 2, t, size, size));
     clear_->arrange(Rect::xywh(r.r - 2 - size, t, size, size));
     save_->arrange(Rect::xywh(r.r - 2 - 2 * size, t, size, size));
 }
@@ -949,6 +1053,13 @@ bool PaneView::on_mouse_down(const MouseEvent&) {
     return false;
 }
 
+// A press anywhere in the pane (its list, its search box, its breadcrumb, whatever takes the press) or Tab into
+// it makes it the active one. The activation arrives as an event, so nothing under the press is rebuilt now.
+// Spec: FilePaneView (PreviewMouseDown with handledEventsToo, IsKeyboardFocusWithinChanged).
+void PaneView::on_inner_activity() {
+    if (pane_ != main_.active_pane()) main_.activate_pane(pane_);
+}
+
 // ---- MainView ----------------------------------------------------------------------------------------
 
 MainView::MainView(core::Core& core, platform::Window& window)
@@ -966,6 +1077,19 @@ MainView::MainView(core::Core& core, platform::Window& window)
     title_->name = "TitleBarRoot";
     title_->dock = Dock::Top;
     title_->show_title = false;
+    // The app's icon at the left of the caption; a click on it is the window menu. Spec: MainWindow.xaml
+    // (ShowsAppIcon). The harness exe has no icon resource, and shows none.
+    if (HICON icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR))) {
+        auto* logo = title_->emplace<ImageView>();
+        logo->name = "TitleAppIcon";
+        logo->interactive = false;
+        logo->checkerboard = false;
+        logo->style.bg = gfx::kNoToken;
+        logo->nc_hit = HTSYSMENU;
+        logo->set_image(icon_picture(icon, 32));
+        DestroyIcon(icon);
+        title_->app_icon = logo;
+    }
     menu_bar_ = title_->emplace<MenuBar>();
     menu_bar_->name = "MainMenu";
     menu_bar_->nc_hit = HTCLIENT;
@@ -1098,27 +1222,36 @@ MainView::MainView(core::Core& core, platform::Window& window)
         transfer_detail_ = strip->emplace<TextBlock>();
         transfer_detail_->flex = 1;
         transfer_detail_->style.fg = tok::TextSecondary;
+        // How many more are queued behind this one; blank when there is only the running job. Spec:
+        // MainWindow.xaml (TransferQueue.WaitingText).
+        transfer_waiting_ = strip->emplace<TextBlock>();
+        transfer_waiting_->name = "TransferWaiting";
+        transfer_waiting_->style.fg = tok::TextSecondary;
+        // Links, as the original's were. Spec: MainWindow.xaml (the transfer strip's LinkButtons).
         transfer_pause_ = strip->emplace<Button>(L"Pause");
         transfer_pause_->name = "TransferPause";
-        transfer_pause_->width = 80;
+        transfer_pause_->link = true;
         transfer_pause_->on_click = [this] {
             const bool paused = queue_["paused"].boolean();
             BbOwnedStr o{};
             bb_ops_do(core_.app(), core::s(paused ? L"queue-resume" : L"queue-pause"), core::s(L""), &o);
             bb_str_free(o);
         };
+        auto* details = strip->emplace<Button>(L"Details");
+        details->name = "TransferDetails";
+        details->link = true;
+        details->tooltip = L"Show every item in this transfer, and everything queued behind it";
+        details->on_click = [this] { open_dialog(L"transfer"); };
         transfer_cancel_ = strip->emplace<Button>(L"Cancel");
         transfer_cancel_->name = "TransferCancel";
-        transfer_cancel_->width = 80;
+        transfer_cancel_->link = true;
+        transfer_cancel_->style.font.weight = 600;
+        transfer_cancel_->tooltip = L"Stop this transfer. Whatever has already been transferred stays, and can be undone.";
         transfer_cancel_->on_click = [this] {
             BbOwnedStr o{};
             bb_ops_do(core_.app(), core::s(L"cancel-running"), core::s(L""), &o);
             bb_str_free(o);
         };
-        auto* details = strip->emplace<Button>(L"Details");
-        details->name = "TransferDetails";
-        details->width = 90;
-        details->on_click = [this] { open_dialog(L"transfer"); };
     }
     {
         // The offer to start the search index helper, above the status bar and the transfer strip:
@@ -1157,7 +1290,8 @@ MainView::MainView(core::Core& core, platform::Window& window)
     main_split_ = browser_dock->emplace<Splitter>(Orientation::Horizontal);
     main_split_->dock = Dock::Fill;
     main_split_->name = "MainSplitter";
-    main_split_->set_position(240);
+    main_split_->set_position(260);  // Spec: MainWindow.xaml (sidebar column Width 260, MinWidth 150)
+    main_split_->min_first = 150;
     auto* sidebar_column = main_split_->emplace<DockPanel>();
     sidebar_column->name = "SidebarColumn";
     sidebar_ = sidebar_column->emplace<SavedSidebar>(*this, core_);
@@ -1250,9 +1384,10 @@ MainView::MainView(core::Core& core, platform::Window& window)
             bb_pane_split(app, 0, BB_VERTICAL, core::s(path), &pane);
         }
     };
+    // No menu on a device: there is no path behind it for any entry to act on. Spec: MainWindow.FolderTree_ContextMenu.
     tree_->on_context = [this](uint64_t id, Point at) {
         const std::wstring path = tree_provider_->path_of(id);
-        if (!path.empty()) open_tree_menu(path, at);
+        if (!path.empty() && !tree_provider_->is_device(id)) open_tree_menu(path, at);
     };
     // A device is no path to browse: a double-click (or a middle-click) opens it in Explorer, and selecting it
     // navigates nowhere. Spec: MainWindow.FolderTree_DoubleClick, ShellViewModel.MiddleClickDriveOrDevice.
@@ -1279,7 +1414,7 @@ MainView::MainView(core::Core& core, platform::Window& window)
     dialogs_->name = "DialogLayer";
     // The search syntax card is a reference sheet: any click puts it away. Spec: SearchSyntaxDialog.
     dialogs_->on_click = [this] {
-        if (dialog_open_ && dialog_kind_ == L"search-syntax") defer([this] { close_dialog(); });
+        if (dialog_open_ && (dialog_kind_ == L"search-syntax" || dialogs_->is_popup())) defer([this] { close_dialog(); });
     };
     window_.on_timer = [this](UINT_PTR id) {
         if (id == kChangesTimer) refresh_changes(false);
@@ -1331,6 +1466,7 @@ MainView::MainView(core::Core& core, platform::Window& window)
     bb_app_set_event_sink(core_.app(), &MainView::sink, this);
     // After the sink, so the event that says the read landed cannot arrive before anyone listens.
     sync_devices(false);  // starts reading the portable devices; their rows join the drives when it lands
+    sync_wheel_speed();
 }
 
 MainView::~MainView() {
@@ -1439,6 +1575,10 @@ void MainView::handle(const BbEvent& e) {
             const std::wstring key = core::w(e.text);
             if (core::icontains(key, L"theme")) apply_theme();
             if (key == L"showHiddenItems") sync_tree_hidden();
+            if (key == L"scrollSpeedMultiplier") sync_wheel_speed();
+            if (key == L"tileAspectRatio") {
+                for (auto& kv : by_tab_) kv.second->reload_state();
+            }
             // The page redraws only what moved (its signature), so this is cheap; it is how an import that
             // finished off the UI thread, or a problem with a list just typed, reaches the page.
             if (settings_ && settings_->is_open()) settings_->sync();
@@ -1658,6 +1798,7 @@ void MainView::activate_pane(uint64_t pane) { bb_pane_activate(core_.app(), pane
 // The strip's buttons and its menu act on the pane they sit in, so that pane is made active first.
 void MainView::wire_tab_strip(TabStrip& strip, uint64_t pane) {
     BbApp* app = core_.app();
+    strip.close_tip = gesture_tip(app, L"Close tab", L"tab.close");
     strip.on_move = [app](uint64_t tab, uint32_t index) { bb_tab_move(app, tab, index); };
     strip.on_new_tab = [this, pane] {
         activate_pane(pane);
@@ -1789,6 +1930,7 @@ bool MainView::on_preview_key(const KeyEvent& e) {
     if (dialog_key(e)) return true;
     if (menu_bar_ && menu_bar_->preview_key(e)) return true;
     if (palette_ && palette_->preview_key(e)) return true;
+    if (settings_ && settings_->is_open() && settings_->preview_key(e)) return true;
     const std::wstring key = key_name(e.vk);
     if (key.empty()) return false;
     const uint32_t mods = (e.mods.ctrl ? 1u : 0u) | (e.mods.alt ? 2u : 0u) | (e.mods.shift ? 4u : 0u);
@@ -2143,8 +2285,9 @@ void MainView::tree_verb(const std::wstring& id, const std::wstring& folder) {
     } else if (id == L"tools.duplicates") {
         if (shows_dialogs()) open_duplicates(folder);
     } else if (id == L"file.open-new-tab") {
+        // Behind the one in view, as a middle-click does. Spec: ShellViewModel.OpenInNewTab (activate: false).
         uint64_t tab = 0;
-        bb_tab_open(app, 0, core::s(folder), true, &tab);
+        bb_tab_open(app, 0, core::s(folder), false, &tab);
     } else if (id == L"file.open-pane-right" || id == L"file.open-pane-below") {
         uint64_t pane = 0;
         bb_pane_split(app, 0, id == L"file.open-pane-right" ? BB_VERTICAL : BB_HORIZONTAL, core::s(folder), &pane);
@@ -2181,6 +2324,18 @@ void MainView::pick_list_item(const std::string& list_id, const std::wstring& id
         } else if (list_id == "command-bars") {
             // Asks first when the arrangement in force is saved under no name. Spec: MainWindow.CommandBars (ConfirmDiscardCommandBars).
             core::check(bb_barpage_do(app, core::s(L"apply-saved"), core::s(name)), "apply");
+        } else if (list_id == "new-file-types") {
+            // The New dialog for that type, in the active folder. Spec: MainWindow.CommandBars (NewFileTypeRows: RunNew).
+            open_new_file(id, name, L"");
+        } else if (list_id == "custom-commands") {
+            // One of your commands is an ordinary command, through the same gate.
+            std::wstring reason;
+            if (!execute_command(id, &reason) && !reason.empty()) bb_status_set(app, core::s(reason));
+        } else if (list_id == "undo-steps" || list_id == "redo-steps") {
+            // Back (or forward) to that step, as the title bar's split buttons do.
+            const int steps = _wtoi(id.c_str());
+            uint64_t op = 0;
+            if (steps > 0) bb_undo_step(app, list_id == "undo-steps" ? steps : -steps, &op);
         }
     } catch (const core::CoreError&) {
     }
@@ -2421,6 +2576,18 @@ void MainView::sync_overlays() {
     if (palette_) palette_->sync();
     if (sidebar_) sidebar_->sync();
     sync_switchers();
+    // Behind the Settings page the whole-PC search and the switchers would change the tab under the scrim; the
+    // palette button stays live. Spec: MainWindow.xaml.cs (OpenSettings, CloseSettings: GlobalSearchGroup).
+    const bool live = !(settings_ && settings_->is_open());
+    if (title_search_ && title_search_->flags.enabled != live) {
+        title_search_->set_enabled(live);
+        title_search_->clear_button()->set_enabled(live);
+        title_search_->save_button()->set_enabled(live);
+        title_search_->glyph()->set_enabled(live);
+        if (switchers_) {
+            for (const auto& child : switchers_->children()) child->set_enabled(live);
+        }
+    }
 }
 
 namespace {
@@ -2553,7 +2720,14 @@ void MainView::open_dialog(const std::wstring& kind) {
     Widget* before = window_.root().focused();
     if (again) focus_before_dialog_ = kept_focus;
     else if (!dialogs_->holds(before)) focus_before_dialog_ = before;
-    dialogs_->show(std::move(card));
+    // The column picker is a popup where it was asked for (the pointer, or under a button); with no place to go
+    // (a key, the palette) it sits under the title bar's left edge, over the list.
+    if (kind == L"columns" || kind == L"default-columns") {
+        const Rect area = dialogs_->bounds;
+        dialogs_->show_popup(std::move(card), dialog_anchor_.value_or(Point{area.l + 40, area.t + 40}));
+    } else {
+        dialogs_->show(std::move(card));
+    }
     if (again) tools::restore_places(*dialogs_, places);
     Widget* named = focused_name.empty() ? nullptr : dialogs_->find(focused_name);
     if (named) window_.root().set_focus(named);
@@ -2654,8 +2828,13 @@ void MainView::sync_transfer() {
     const bool paused = queue_["paused"].boolean();
     transfer_bar_->set_indeterminate(active && v["indeterminate"].boolean());
     if (!v["indeterminate"].boolean()) transfer_bar_->set_value(v["fraction"].num());
+    transfer_waiting_->set_text(core::wide(queue_["waitingText"].str()));
     transfer_pause_->text = paused ? L"Resume" : L"Pause";
-    transfer_pause_->set_enabled(queue_["canPause"].boolean() || queue_["canResume"].boolean());
+    transfer_pause_->style.font.weight = paused ? 600 : 400;
+    transfer_pause_->tooltip = paused ? L"Carry on from where it stopped"
+                                      : L"Hold this transfer where it is. Nothing else can be moved, renamed or deleted while it is paused.";
+    // A run the queue does not host (a sync carries its own progress) offers neither.
+    transfer_pause_->set_visible(queue_["canPause"].boolean() || queue_["canResume"].boolean());
     transfer_cancel_->set_enabled(queue_["canCancel"].boolean());
     browser_->request_layout();
     if (on_transfer_changed) on_transfer_changed();
@@ -2687,9 +2866,20 @@ void MainView::sync_questions(const wchar_t* kind) {
 
 void MainView::ensure_machine_properties() {
     if (machine_props_set_) return;
+    // Read on a worker: the core says "loading" and lists the curated columns until the rest arrives, and the
+    // Add column panel asks again until it has. Spec: ColumnAddPanel.LoadAsync.
+    start_machine_property_read();
+    machine_props_asked_ = true;
+    const std::optional<std::string> list = take_machine_property_list();
+    if (!list) return;
     machine_props_set_ = true;
-    const std::string list = machine_property_list();
-    bb_columns_set_machine_properties(core_.app(), core::s(core::wide(list)));
+    bb_columns_set_machine_properties(core_.app(), core::s(core::wide(*list)));
+}
+
+bool MainView::column_props_pending() {
+    // A finished read is handed over here too, so a panel closed before it landed does not leave it waiting.
+    if (machine_props_asked_ && !machine_props_set_ && machine_property_read_done()) ensure_machine_properties();
+    return machine_props_asked_ && !machine_props_set_;
 }
 
 bool MainView::build_named_menu(const std::wstring& kind, MenuItems* out) {
@@ -2775,6 +2965,11 @@ void MainView::open_device(const std::wstring& path) {
     if (!r["ok"].boolean() && !r["error"].is_null()) bb_status_set(core_.app(), core::s(core::wide(r["error"].str())));
 }
 
+void MainView::sync_wheel_speed() {
+    BbOwnedStr o{};
+    if (bb_settings_get(core_.app(), core::s(L"scrollSpeedMultiplier"), &o) == BB_OK) ui::set_wheel_multiplier(_wtof(core::take(o).c_str()));
+}
+
 size_t MainView::tree_pending() const { return tree_provider_ ? tree_provider_->pending() : 0; }
 
 void MainView::refresh_tooltips() {
@@ -2788,9 +2983,10 @@ void MainView::refresh_tooltips() {
 
 void MainView::refresh_status() {
     if (!active_tab_) return;
-    std::wstring right = core::wide(index_state_["status"].str());
-    if (!right.empty() && index_state_["canRetry"].boolean()) right += L"  —  retry";
-    status_->set_text(core_.tab_text(active_tab_, BB_TEXT_STATUS), right);
+    const std::wstring right = core::wide(index_state_["status"].str());
+    status_->set_text(core_.tab_text(active_tab_, BB_TEXT_STATUS), right,
+                      !right.empty() && index_state_["canRetry"].boolean() ? L"Try again" : L"");
+    status_->undo_tip = gesture_tip(core_.app(), L"Show the undo history", L"edit.undo-history");
     // Undo's caption is what it would undo, and there is one only while there is something to undo.
     const json::Value undo = try_model([&](BbOwnedStr* o) { return bb_command_state(core_.app(), core::s(L"edit.undo"), o); });
     status_->set_extras(undo.is_null() ? std::wstring() : core::wide(undo["caption"].str()),
@@ -2851,12 +3047,12 @@ void MainView::rebuild_layout(const json::Value& st) {
             ++it;
         }
     }
-    std::unique_ptr<Widget> built = build_node(st["layout"], st["panes"]);
+    std::unique_ptr<Widget> built = build_node(st["layout"], st["panes"], {});
     if (built) layout_root_ = pane_host_->add(std::move(built));
     pane_host_->request_layout();
 }
 
-std::unique_ptr<Widget> MainView::build_node(const json::Value& node, const json::Value& panes) {
+std::unique_ptr<Widget> MainView::build_node(const json::Value& node, const json::Value& panes, const std::vector<uint32_t>& path) {
     if (node["kind"].str() == "pane") {
         const uint64_t id = static_cast<uint64_t>(node["pane"].i64());
         auto pv = std::make_unique<PaneView>(*this, id);
@@ -2889,14 +3085,34 @@ std::unique_ptr<Widget> MainView::build_node(const json::Value& node, const json
     const json::Value& kids = node["children"];
     if (kids.size() == 0) return nullptr;
     const Orientation o = node["orientation"].str() == "vertical" ? Orientation::Horizontal : Orientation::Vertical;
-    // Right-nested: [a, b, c] is a | (b | c), each first child weighted against the rest.
+    // Right-nested: [a, b, c] is a | (b | c), each first child weighted against the rest. A drag of any bar in
+    // the chain writes every child's size back as its weight. Spec: PaneLayoutHost (MinPaneSize 160,
+    // WriteBackWeights).
+    constexpr float kMinPane = 160.0f;
+    auto bars = std::make_shared<std::vector<Splitter*>>();
+    auto write_back = [this, bars, path, o] {
+        if (bars->empty()) return;
+        std::vector<double> sizes;
+        for (Splitter* s : *bars) sizes.push_back(s->position());
+        const Splitter* last = bars->back();
+        const float extent = o == Orientation::Horizontal ? last->bounds.width() : last->bounds.height();
+        sizes.push_back(std::max(1.0f, extent - last->position() - last->thickness));
+        bb_layout_set_weights(core_.app(), path.data(), static_cast<uint32_t>(path.size()), sizes.data(), static_cast<uint32_t>(sizes.size()));
+    };
     std::function<std::unique_ptr<Widget>(size_t)> chain = [&](size_t i) -> std::unique_ptr<Widget> {
-        std::unique_ptr<Widget> first = build_node(kids[i], panes);
+        std::vector<uint32_t> child_path = path;
+        child_path.push_back(static_cast<uint32_t>(i));
+        std::unique_ptr<Widget> first = build_node(kids[i], panes, child_path);
         if (i + 1 >= kids.size()) return first;
         float rest = 0;
         for (size_t k = i + 1; k < kids.size(); ++k) rest += static_cast<float>(kids[k]["weight"].num(1));
         const float mine = static_cast<float>(kids[i]["weight"].num(1));
         auto split = std::make_unique<WeightedSplitter>(o, mine / std::max(0.0001f, mine + rest));
+        const float after = static_cast<float>(kids.size() - i - 1);
+        split->min_first = kMinPane;
+        split->min_second = kMinPane * after + split->thickness * (after - 1);
+        split->on_released = write_back;
+        bars->push_back(split.get());
         split->add_child(std::move(first));
         split->add_child(chain(i + 1));
         return split;

@@ -3,6 +3,7 @@
 
 #include "gfx/icons.gen.h"
 #include "views/main_view.h"
+#include "views/tool_widgets.h"
 
 #include <windows.h>
 
@@ -55,6 +56,19 @@ CheckBox* find_checkbox(Widget& w, const std::wstring& label) {
     return nullptr;
 }
 
+// A row that turns the wheel over it into steps: the Columns page's width ("Scroll a width to change it"), Ctrl
+// for one DIP at a time. Spec: SettingsView.xaml.cs (ColumnWidth_Wheel).
+class WheelRow : public StackPanel {
+public:
+    WheelRow() : StackPanel(Orientation::Horizontal, 8.0f) {}
+    std::function<void(int notches, bool fine)> on_step;
+    bool on_wheel(Point, int delta, Mods m) override {
+        if (!on_step || delta == 0) return false;
+        on_step(delta > 0 ? std::max(1, delta / 120) : std::min(-1, delta / 120), m.ctrl);
+        return true;
+    }
+};
+
 }  // namespace
 
 SettingsView::SettingsView(MainView& main, core::Core& core) : main_(main), core_(core) {
@@ -69,6 +83,33 @@ void SettingsView::build_chrome() {
     card->style.bg = tok::SurfaceBackground;
     card->style.border = tok::BorderDefault;
     card_ = add(std::move(card));
+
+    // The title, and the way back to the folders on the right, where the Settings button that opened the page
+    // sits. Spec: SettingsView.xaml (the title strip).
+    auto* strip = card_->emplace<DockPanel>();
+    strip->name = "SettingsTitle";
+    strip->dock = Dock::Top;
+    strip->height = 44;
+    strip->pad = 8;
+    strip->style.bg = tok::SurfaceBackground;
+    auto* close = strip->emplace<Button>();
+    close->name = "SettingsClose";
+    close->dock = Dock::Right;
+    close->icon = &icons::Dismiss;
+    close->width = 32;
+    close->style.bg = tok::SurfaceBackground;  // flat, as a toolbar button, until the pointer is on it
+    close->style.border = tok::SurfaceBackground;
+    close->tooltip = L"Close settings (Esc)";
+    close->on_click = [this] { go_back(); };
+    auto* title = strip->emplace<TextBlock>(L"Settings");
+    title->style.font.size = 16.0f;
+    title->style.font.weight = 600;
+    title->vcenter = true;
+    title->wrap = true;
+    auto* rule = card_->emplace<Widget>();
+    rule->dock = Dock::Top;
+    rule->height = 1;
+    rule->style.bg = tok::BorderSubtle;
 
     auto* nav = card_->emplace<StackPanel>(Orientation::Vertical, 6.0f);
     nav->dock = Dock::Left;
@@ -119,6 +160,62 @@ bool SettingsView::on_mouse_down(const MouseEvent& e) {
         }
     }
     return true;
+}
+
+void SettingsView::go_back() {
+    try {
+        core::check(bb_settings_page_close(core_.app()), "close settings");
+    } catch (const core::CoreError& e) {
+        refused_ = core::wide(e.what());
+        show_problem(L"");
+    }
+}
+
+// Esc and the Keyboard page's recorder, taken before the focused control sees the key (the main view asks
+// first). While the page listens the next key is the answer and nothing else sees it; an offer to reassign
+// is declined by Esc rather than leaving the page with the question open; otherwise a plain Esc goes back.
+// Spec: SettingsView.xaml.cs (View_KeyDown, OnPreviewKeyDown).
+bool SettingsView::preview_key(const KeyEvent& e) {
+    if (!open_) return false;
+    const bool modifier = e.vk == VK_SHIFT || e.vk == VK_CONTROL || e.vk == VK_MENU || e.vk == VK_LWIN || e.vk == VK_RWIN;
+    const bool bare = !e.mods.ctrl && !e.mods.alt && !e.mods.shift;
+    if (nudge_ && e.mods.alt && !e.mods.ctrl && !e.mods.shift && (e.vk == VK_UP || e.vk == VK_DOWN) && root() && root()->focused() == nudge_for_) {
+        // A copy: moving a row rebuilds the page, which drops the function that is running.
+        const auto nudge = nudge_;
+        nudge(e.vk == VK_UP ? -1 : 1);
+        return true;
+    }
+    if (page_ == "keyboard") {
+        const json::Value m = try_model([&](BbOwnedStr* o) { return bb_keys_page(core_.app(), o); });
+        auto keys_do = [&](const std::wstring& verb, const std::wstring& arg = L"") {
+            try {
+                core::check(bb_keys_do(core_.app(), core::s(verb), core::s(arg)), "keys");
+            } catch (const core::CoreError&) {
+            }
+        };
+        if (m["canReassign"].boolean() && e.vk == VK_ESCAPE && bare) {
+            keys_do(L"cancel");
+            return true;
+        }
+        if (m["capturing"].boolean()) {
+            // Alt+F4 still closes the window: it can never be a shortcut.
+            if (e.vk == VK_F4 && e.mods.alt && !e.mods.ctrl && !e.mods.shift) return false;
+            if (e.vk == VK_ESCAPE && bare) {
+                keys_do(L"cancel");
+                return true;
+            }
+            if (modifier) return true;  // a modifier on its way down is not a chord yet
+            const std::wstring key = chord_key_name(e.vk);
+            if (key.empty()) return true;
+            keys_do(L"press", std::wstring(e.mods.ctrl ? L"Ctrl+" : L"") + (e.mods.alt ? L"Alt+" : L"") + (e.mods.shift ? L"Shift+" : L"") + key);
+            return true;
+        }
+    }
+    if (e.vk == VK_ESCAPE && bare) {
+        go_back();
+        return true;
+    }
+    return false;
 }
 
 // ---- reading the core --------------------------------------------------------------------------------------
@@ -176,8 +273,8 @@ void SettingsView::number_row(Widget& p, const wchar_t* label, const char* key, 
     if (*unit) f::text(*row, unit, tok::TextMuted, 13.0f);
 }
 
-void SettingsView::choice_row(Widget& p, const wchar_t* label, const char* key, std::vector<std::pair<std::wstring, std::string>> choices,
-                              const char* when_unset) {
+ComboBox* SettingsView::choice_row(Widget& p, const wchar_t* label, const char* key, std::vector<std::pair<std::wstring, std::string>> choices,
+                                   const char* when_unset) {
     auto* row = f::row(p);
     f::row_label(*row, label, 320);
     const json::Value v = get(key);
@@ -205,6 +302,7 @@ void SettingsView::choice_row(Widget& p, const wchar_t* label, const char* key, 
         if (i >= 0 && static_cast<size_t>(i) < choices.size()) set_raw(key, choices[static_cast<size_t>(i)].second);
     });
     box->automation_id = key;
+    return box;
 }
 
 std::wstring SettingsView::gesture_or(const wchar_t* command, const wchar_t* fallback) {
@@ -257,15 +355,6 @@ void SettingsView::sync() {
 
 void SettingsView::build_nav(const json::Value& pages) {
     while (!nav_->children().empty()) nav_->remove_child(nav_->children().front().get());
-    auto* back = f::button(*nav_, L"←  Back", [this] {
-        try {
-            core::check(bb_settings_page_close(core_.app()), "close settings");
-        } catch (const core::CoreError& e) {
-            refused_ = core::wide(e.what());
-            show_problem(L"");
-        }
-    });
-    back->name = "SettingsBack";
     auto* list = nav_->emplace<f::ItemList>();
     list->name = "SettingsPages";
     list->flex = 1;
@@ -332,6 +421,8 @@ void SettingsView::build_page() {
         }
     }
     const float keep_scroll = scroll_ ? scroll_->offset_y() : 0.0f;
+    nudge_ = nullptr;
+    nudge_for_ = nullptr;
     while (!body_->children().empty()) body_->remove_child(body_->children().front().get());
     if (page_ == "general") page_general(*body_);
     else if (page_ == "appearance") page_appearance(*body_);
@@ -461,6 +552,7 @@ void SettingsView::page_appearance(Widget& p) {
         if (bb_theme_do(core_.app(), core::s(L"follow"), core::s(v ? L"on" : L"off"), &o) == BB_OK) bb_str_free(o);
     });
     follow->name = "FollowSystemTheme";
+    f::note(p, L"Switches theme when Windows does, without a restart. Turning on Windows high contrast switches to High Contrast Dark whatever is picked below, and turning it off comes back here.");
     const json::Value& available = th["available"];
     std::vector<std::wstring> names;
     std::vector<std::string> ids;
@@ -504,7 +596,8 @@ void SettingsView::page_appearance(Widget& p) {
             if (i >= 0 && bb_theme_do(core_.app(), core::s(L"slot"), core::s(L"light " + core::wide(light_ids[static_cast<size_t>(i)])), &o) == BB_OK) bb_str_free(o);
         });
         c1->name = "LightThemeCombo";
-        f::button(*r1, L"Customise colours…", [this] { main_.open_dialog(L"theme-editor"); });
+        f::button(*r1, L"Customise colours…", [this] { main_.open_dialog(L"theme-editor"); })->tooltip =
+            L"Edit any colour in the theme currently in use and save it as your own";
         auto* r2 = f::row(p);
         f::row_label(*r2, L"Dark theme", 160);
         auto* c2 = f::combo(*r2, dark_names, dark_at, 240, [this, dark_ids](int i) {
@@ -512,7 +605,8 @@ void SettingsView::page_appearance(Widget& p) {
             if (i >= 0 && bb_theme_do(core_.app(), core::s(L"slot"), core::s(L"dark " + core::wide(dark_ids[static_cast<size_t>(i)])), &o) == BB_OK) bb_str_free(o);
         });
         c2->name = "DarkThemeCombo";
-        f::button(*r2, L"Customise colours…", [this] { main_.open_dialog(L"theme-editor"); });
+        f::button(*r2, L"Customise colours…", [this] { main_.open_dialog(L"theme-editor"); })->tooltip =
+            L"Edit any colour in the theme currently in use and save it as your own";
     } else {
         auto* r = f::row(p);
         f::row_label(*r, L"Theme", 160);
@@ -521,7 +615,8 @@ void SettingsView::page_appearance(Widget& p) {
             if (i >= 0 && bb_theme_do(core_.app(), core::s(L"select"), core::s(core::wide(ids[static_cast<size_t>(i)])), &o) == BB_OK) bb_str_free(o);
         });
         c->name = "ThemeCombo";
-        f::button(*r, L"Customise colours…", [this] { main_.open_dialog(L"theme-editor"); });
+        f::button(*r, L"Customise colours…", [this] { main_.open_dialog(L"theme-editor"); })->tooltip =
+            L"Edit any colour in this theme and save it as your own";
     }
     (void)theme_do;
     for (size_t i = 0; i < th["issues"].size(); ++i) f::text(p, core::wide(th["issues"][i].str()), tok::WarningForeground, 13.0f)->wrap = true;
@@ -599,7 +694,9 @@ void SettingsView::page_history(Widget& p) {
     f::note(p, L"Keeps a log of every file created, changed, deleted or renamed on every indexed drive, so the \"What changed\" window (" +
                    gesture_or(L"tools.changes", L"What changed here") +
                    L") can show what an installer or a build just did. The log lives in BertBrowser's own database in your profile folder, readable by anything that can read your files \u2014 which is why it is off unless you turn it on. Turning it off deletes what was kept, straight away.");
-    choice_row(p, L"Keep changes for", "fileChangeRetentionHours", {{L"1 hour", "1"}, {L"6 hours", "6"}, {L"24 hours", "24"}, {L"7 days", "168"}});
+    // Nothing is kept while recording is off, so there is nothing to choose how long to keep.
+    choice_row(p, L"Keep changes for", "fileChangeRetentionHours", {{L"1 hour", "1"}, {L"6 hours", "6"}, {L"24 hours", "24"}, {L"7 days", "168"}})
+        ->set_enabled(get("recordFileChanges").boolean());
     f::note(p, L"Older changes are dropped as new ones arrive. Whatever you pick, the log never grows past half a million rows.");
     BbOwnedStr out{};
     int64_t recorded = 0;
@@ -614,7 +711,10 @@ void SettingsView::page_history(Widget& p) {
     });
     clear->name = "ClearChangeLog";
     clear->set_enabled(recorded > 0);
-    if (recorded > 0) f::text(*r, recorded == 1 ? L"1 change recorded" : std::to_wstring(recorded) + L" changes recorded", tok::TextMuted, 13.0f)->name = "ChangeLogCount";
+    // Thousands grouped, as the original's N0 had it.
+    std::wstring digits = std::to_wstring(recorded);
+    for (int at = static_cast<int>(digits.size()) - 3; at > 0; at -= 3) digits.insert(static_cast<size_t>(at), L",");
+    f::text(*r, recorded == 1 ? L"1 change recorded" : digits + L" changes recorded", tok::TextMuted, 13.0f)->name = "ChangeLogCount";
     f::note(p, L"Deletes the log straight away.");
     f::gap(p, 6);
     f::text(p, L"Undo", tok::TextSecondary, 14.0f, 600);
@@ -800,24 +900,41 @@ void SettingsView::page_columns(Widget& p) {
     list->height = 30.0f * static_cast<float>(std::max<size_t>(4, std::min<size_t>(10, cols.size()))) + 4;
     std::vector<f::ListEntry> entries;
     std::vector<std::wstring> ids;
+    std::vector<bool> movable;
     for (size_t i = 0; i < cols.size(); ++i) {
         f::ListEntry e;
         e.text = core::wide(cols[i]["header"].str());
-        e.detail = std::to_wstring(static_cast<int>(std::lround(cols[i]["width"].num()))) + L" px";
+        // A property column says which property it is beside its width, as the C# row does.
+        const std::wstring id = core::wide(cols[i]["id"].str());
+        const std::wstring px = std::to_wstring(static_cast<int>(std::lround(cols[i]["width"].num()))) + L" px";
+        e.detail = id.find(L'.') != std::wstring::npos ? id + L"   " + px : px;
         entries.push_back(std::move(e));
-        ids.push_back(core::wide(cols[i]["id"].str()));
+        ids.push_back(id);
+        movable.push_back(cols[i]["removable"].boolean());
     }
     list->set_entries(std::move(entries), column_selected_);
+    list->automation_id = "ColumnRows";
     list->on_select = [this](int i) {
         column_selected_ = i;
         main_.defer([this] { build_page(); });
     };
-    if (dragging_pose_) {
-        // The line a row drag leaves between two columns, placed rather than dragged.
-        auto* line = p.emplace<Widget>();
-        line->height = 2;
-        line->style.bg = tok::AccentBackground;
-    }
+    // Dragged to a new place, or Alt+Up/Down: Name is first and stays there. Spec: SettingsView.xaml.cs
+    // (ColumnList drag, ColumnList_KeyDown).
+    list->can_drag = [movable](int i) { return i >= 0 && static_cast<size_t>(i) < movable.size() && movable[static_cast<size_t>(i)]; };
+    list->on_reorder = [this, edit, ids](int from, int to) {
+        if (from < 0 || static_cast<size_t>(from) >= ids.size()) return;
+        to = std::max(1, to);
+        column_selected_ = to;
+        edit(L"move", ids[static_cast<size_t>(from)] + L" " + std::to_wstring(to));
+    };
+    nudge_ = [this, edit, ids, movable](int d) {
+        const int at = column_selected_, to = at + d;
+        if (at < 1 || static_cast<size_t>(at) >= ids.size() || !movable[static_cast<size_t>(at)] || to < 1 || static_cast<size_t>(to) >= ids.size()) return;
+        column_selected_ = to;
+        edit(L"move", ids[static_cast<size_t>(at)] + L" " + std::to_wstring(to));
+    };
+    nudge_for_ = list;
+    if (dragging_pose_) list->set_drop_line(2);  // the line a row drag draws, placed rather than dragged
     const int sel = column_selected_;
     const bool has = sel >= 0 && sel < static_cast<int>(ids.size());
     const std::wstring id = has ? ids[static_cast<size_t>(sel)] : std::wstring();
@@ -830,7 +947,8 @@ void SettingsView::page_columns(Widget& p) {
         return false;
     };
     auto* r = f::row(p);
-    auto* add = f::button(*r, L"Add column\u2026", [this] { main_.open_dialog(L"default-columns"); });
+    auto* add = f::button(*r, L"Add column…", nullptr);  // a popup under the button, as C#'s
+    add->on_click = [this, add] { main_.open_dialog_at(L"default-columns", Point{add->bounds.l, add->bounds.b + 2}); };
     add->name = "ColumnAdd";
     add->icon = &icons::Add;
     auto* remove = f::button(*r, L"Remove", [edit, id] { edit(L"remove", id); });
@@ -853,8 +971,12 @@ void SettingsView::page_columns(Widget& p) {
         column_selected_ = 0;
         edit(L"reset", L"");
     })->name = "ColumnReset";
+    f::note(p, L"Drag to reorder (or Alt+\u2191/\u2193). Scroll a width to change it; Ctrl+scroll by one.");
     if (has) {
-        auto* wr = f::row(p);
+        auto* wr = p.emplace<WheelRow>();
+        wr->on_step = [edit, id](int notches, bool fine) {
+            edit(L"step-width", id + L" " + std::to_wstring(notches) + (fine ? L" fine" : L""));
+        };
         f::row_label(*wr, L"Width of \u201c" + core::wide(cols[static_cast<size_t>(sel)]["header"].str()) + L"\u201d", 220);
         auto* box = f::field(*wr, std::to_wstring(static_cast<int>(std::lround(cols[static_cast<size_t>(sel)]["width"].num()))), 80,
                              nullptr);
@@ -870,11 +992,12 @@ void SettingsView::page_columns(Widget& p) {
 
 void SettingsView::page_saved(Widget& p, bool workspaces) {
     f::heading(p, workspaces ? L"Workspaces" : L"Saved searches");
-    f::note(p, workspaces ? L"A workspace is the arrangement of panes and tabs, saved under a name." : L"A saved search keeps a query under a name, to run again in one click.");
+    f::note(p, workspaces ? L"A workspace is your panes and tabs saved under a name, to switch back to in one click. Switching replaces the panes you have open."
+                          : L"A saved search keeps a query under a name, to run again in one click.");
     const json::Value st = try_model([&](BbOwnedStr* o) { return bb_saved_state(core_.app(), o); });
     const char* key = workspaces ? "workspacesPlacement" : "savedSearchesPlacement";
     const std::string cur = st[workspaces ? "workspacesPlacement" : "savedSearchesPlacement"].str();
-    f::text(p, L"Where to offer them", tok::TextSecondary, 14.0f, 600);
+    f::text(p, workspaces ? L"Show the workspace switcher" : L"Show saved searches", tok::TextSecondary, 14.0f, 600);
     auto* rg = f::radios(p, {L"In the sidebar", L"In the title bar, beside the app name", L"Nowhere"},
                          cur == "sidebar" ? 0 : cur == "titlebar" || cur == "title-bar" || cur == "titleBar" ? 1 : 2, [this, key](int i) {
                              const char* v[] = {"\"sidebar\"", "\"titleBar\"", "\"hidden\""};
@@ -886,28 +1009,50 @@ void SettingsView::page_saved(Widget& p, bool workspaces) {
                              }
                          });
     rg->name = workspaces ? "WorkspacesPlacement" : "SavedSearchesPlacement";
+    if (workspaces) f::note(p, L"Nowhere only hides the switcher. Your workspaces are kept, and stay listed below.");
     f::gap(p, 6);
-    f::text(p, workspaces ? L"Your workspaces" : L"Your saved searches", tok::TextSecondary, 14.0f, 600);
+    f::text(p, workspaces ? L"Saved workspaces" : L"Your saved searches", tok::TextSecondary, 14.0f, 600);
     const json::Value& items = st[workspaces ? "workspaces" : "searches"];
-    auto* list = p.emplace<f::ItemList>();
+    if (items.size() == 0) {
+        f::note(p, workspaces ? L"Nothing saved yet. Use the + beside WORKSPACES in the sidebar, or Save current layout in the title bar\u2019s workspace menu."
+                              : L"Nothing saved yet. Type a search, then press the save button inside the search box.")
+            ->name = workspaces ? "SettingsWorkspacesEmpty" : "SettingsSavedSearchesEmpty";
+        return;
+    }
+    // What it is, when it was made and when it was last used, under the original's column headings.
+    // Spec: SettingsView.xaml (SavedSearchesList, WorkspacesList).
+    auto* list = p.emplace<tools::TableList>();
     list->name = workspaces ? "WorkspaceList" : "SavedSearchList";
     list->height = 220;
-    std::vector<f::ListEntry> entries;
+    list->columns = {{L"Name", 100.0f, true},
+                     {workspaces ? L"Layout" : L"Searches", 170.0f},
+                     {L"Created", 130.0f},
+                     {workspaces ? L"Last opened" : L"Last run", 130.0f}};
+    std::vector<tools::TableRow> entries;
+    std::vector<std::wstring> names, more;
     for (size_t i = 0; i < items.size(); ++i) {
-        f::ListEntry e;
-        e.text = core::wide(items[i]["name"].str());
-        e.detail = core::wide(workspaces ? items[i]["shape"].str() : items[i]["query"].str());
-        entries.push_back(std::move(e));
+        names.push_back(core::wide(items[i]["name"].str()));
+        // Under the list for the selected row, and as the row's tooltip: the query as it runs, or the folders the
+        // workspace opens.
+        if (workspaces) {
+            std::wstring folders;
+            for (size_t k = 0; k < items[i]["folders"].size(); ++k) folders += (k ? L"  \u00b7  " : L"") + core::wide(items[i]["folders"][k].str());
+            more.push_back(folders);
+        } else {
+            more.push_back(core::wide(items[i]["query"].str()));
+        }
+        tools::TableRow row;
+        row.cells = {names.back(), core::wide(workspaces ? items[i]["shape"].str() : items[i]["scopeColumn"].str()),
+                     core::wide(items[i]["createdText"].str()), core::wide(items[i]["lastUsedText"].str())};
+        row.tip = more.back();
+        entries.push_back(std::move(row));
     }
-    std::vector<std::wstring> names;
-    for (size_t i = 0; i < items.size(); ++i) names.push_back(core::wide(items[i]["name"].str()));
-    if (entries.empty()) {
-        f::ListEntry e;
-        e.text = workspaces ? L"No saved workspaces yet" : L"No saved searches yet";
-        e.muted = true;
-        entries.push_back(std::move(e));
-    }
-    list->set_entries(std::move(entries));
+    list->set_rows(std::move(entries));
+    auto* about = f::text(p, L"", tok::TextSecondary, 13.0f);
+    about->name = "SavedAbout";
+    list->on_select = [about, more](int i) {
+        about->set_text(i >= 0 && static_cast<size_t>(i) < more.size() ? more[static_cast<size_t>(i)] : L"");
+    };
     // Edit (a search) or Rename (a workspace) and Delete, for the selected row - the sidebar's menu's own.
     // Enter edits, Del deletes. Spec: SettingsView (Saved searches / Workspaces), ListKeyDown.
     auto* buttons = f::row(p, 8);
@@ -928,12 +1073,19 @@ void SettingsView::page_saved(Widget& p, bool workspaces) {
         signature_.clear();
         sync();
     };
-    f::button(*buttons, workspaces ? L"Rename…" : L"Edit…", edit, 110)->name = workspaces ? "WorkspaceRename" : "SavedSearchEdit";
-    f::button(*buttons, L"Delete", remove, 90)->name = workspaces ? "WorkspaceDelete" : "SavedSearchDelete";
+    auto* edit_button = f::button(*buttons, workspaces ? L"Rename…" : L"Edit…", edit, 110);
+    edit_button->name = workspaces ? "WorkspaceRename" : "SavedSearchEdit";
+    edit_button->tooltip = workspaces ? L"Rename (F2)" : L"Edit name, search and scope (F2)";
+    auto* delete_button = f::button(*buttons, L"Delete", remove, 90);
+    delete_button->name = workspaces ? "WorkspaceDelete" : "SavedSearchDelete";
+    delete_button->tooltip = L"Delete (Del)";
+    f::note(p, workspaces ? L"Deleting a workspace removes only its name and layout \u2014 no folder or file is touched."
+                          : L"Deleting a saved search removes only the search \u2014 no file it found is touched.");
     list->on_activate = [edit](int) { edit(); };
-    list->on_key = [remove, edit](unsigned vk) {
-        if (vk == VK_DELETE) remove();
-        else if (vk == VK_F2) edit();
+    // Deferred: either one rebuilds the page, which frees this list while its own handler is still running.
+    list->on_key = [this, remove, edit](unsigned vk) {
+        if (vk == VK_DELETE) main_.defer(remove);
+        else if (vk == VK_F2) main_.defer(edit);
         else return false;
         return true;
     };
@@ -952,18 +1104,23 @@ void SettingsView::page_bars(Widget& p) {
     const json::Value m = try_model([&](BbOwnedStr* o) { return bb_bars_query(app, core::s(L"page"), core::s(L""), o); });
     bars_model_ = m;
     f::heading(p, L"Menus and toolbars");
+    f::note(p, L"What is on the menu bar and the toolbars, and in what order. Changes show in the title bar above as you make them. Every command stays in the command palette (" +
+                   gesture_or(L"app.palette", L"Command palette") + L") whether or not it is placed here.");
     auto* top = f::row(p);
     auto* status = f::text(*top, core::wide(m["status"].str()), tok::TextMuted, 13.0f);
     status->flex = 1;
     auto rebuild = [this] { main_.defer([this] { build_page(); }); };
-    f::button(*top, L"Save as\u2026", [this, rebuild] {
+    auto* save_as = f::button(*top, L"Save as\u2026", [this, rebuild] {
         bar_naming_ = BarNaming::SaveAs;
         bar_name_text_.clear();
         rebuild();
-    })->name = "BarSaveAs";
+    });
+    save_as->name = "BarSaveAs";
+    save_as->tooltip = L"Keep this arrangement under a name, to come back to";
     // Asks first when the arrangement in force is saved under no name (the core does).
     auto* reset = f::button(*top, L"Reset to default", [bars_do] { bars_do(L"reset"); });
     reset->name = "BarReset";
+    reset->tooltip = L"The menus and toolbar BertBrowser ships with. Saved arrangements are kept.";
     reset->set_enabled(!m["isDefault"].boolean());
     if (bar_naming_ != BarNaming::None) {
         // A name box in place of a dialog: Save keeps the arrangement in force under it (replacing one of that
@@ -1026,9 +1183,11 @@ void SettingsView::page_bars(Widget& p) {
     };
     // Toolbar rows come and go here; the menu bar and the title bar always exist.
     auto* trow = f::row(*left, 6);
-    f::button(*trow, L"Add toolbar", [bars_do] { bars_do(L"add-row"); })->name = "BarAddRow";
+    auto* add_row = f::button(*trow, L"Add toolbar", [bars_do] { bars_do(L"add-row"); });
+    add_row->name = "BarAddRow";
+    add_row->tooltip = L"A new toolbar under the title bar";
     auto* remove_row = f::button(*trow, L"Remove", [bars_do] { bars_do(L"remove-row"); });
-    remove_row->tooltip = L"Remove this toolbar";
+    remove_row->tooltip = L"Take the selected toolbar row away, with everything on it";
     remove_row->name = "BarRemoveRow";
     remove_row->set_enabled(m["target"]["kind"].str() == "row");
     f::text(*left, L"Saved arrangements", tok::TextSecondary, 13.0f, 600);
@@ -1046,22 +1205,39 @@ void SettingsView::page_bars(Widget& p) {
         snames.push_back(core::wide(m["saved"][i]["name"].str()));
         if (m["saved"][i]["name"].str() == m["selectedSaved"].str()) ssel = static_cast<int>(i);
     }
-    if (se.empty()) {
-        f::ListEntry e;
-        e.text = L"Nothing saved yet";
-        e.muted = true;
-        se.push_back(std::move(e));
-    }
+    const bool none_saved = se.empty();
     saved->set_entries(std::move(se), ssel);
+    if (none_saved) {
+        f::note(*left, L"Nothing saved yet. Save as\u2026 keeps the arrangement above under a name; View \u25b8 Menus and toolbars and the command palette switch between them.")
+            ->name = "SavedBarsEmpty";
+    }
+    saved->automation_id = "SavedBarsList";
     saved->on_select = [bars_do, snames](int i) {
         if (i >= 0 && static_cast<size_t>(i) < snames.size()) bars_do(L"select-saved", snames[static_cast<size_t>(i)]);
     };
     saved->on_activate = [bars_do, snames](int i) {
         if (i >= 0 && static_cast<size_t>(i) < snames.size()) bars_do(L"apply-saved", snames[static_cast<size_t>(i)]);
     };
+    // Enter and a double click use it (above); F2 renames and Del deletes. Spec: SettingsView.xaml.cs (SavedBarsList_KeyDown).
+    saved->on_key = [this, bars_do, snames, saved, rebuild](unsigned vk) {
+        const int at = saved->selected;
+        if (at < 0 || static_cast<size_t>(at) >= snames.size()) return false;
+        if (vk == VK_F2) {
+            bar_naming_ = BarNaming::Rename;
+            bar_name_text_ = snames[static_cast<size_t>(at)];
+            rebuild();
+            return true;
+        }
+        if (vk == VK_DELETE) {
+            bars_do(L"remove-saved", snames[static_cast<size_t>(at)]);
+            return true;
+        }
+        return false;
+    };
     auto* sr = f::row(*left, 6);
     auto* use = f::button(*sr, L"Use", [bars_do, snames, ssel] { if (ssel >= 0) bars_do(L"apply-saved", snames[static_cast<size_t>(ssel)]); });
     use->name = "BarUseSaved";
+    use->tooltip = L"Switch the menus and toolbars to this arrangement (Enter)";
     use->set_enabled(ssel >= 0);
     auto* rename = f::button(*sr, L"Rename\u2026", [this, snames, ssel, rebuild] {
         if (ssel < 0) return;
@@ -1070,15 +1246,17 @@ void SettingsView::page_bars(Widget& p) {
         rebuild();
     });
     rename->name = "BarRenameSaved";
+    rename->tooltip = L"Rename (F2)";
     rename->set_enabled(ssel >= 0);
     auto* forget = f::button(*sr, L"Remove", [bars_do, snames, ssel] { if (ssel >= 0) bars_do(L"remove-saved", snames[static_cast<size_t>(ssel)]); });
+    forget->tooltip = L"Delete (Del)";
     forget->set_enabled(ssel >= 0);
 
     // -- what is on the bar
     auto* mid = cols->emplace<StackPanel>(Orientation::Vertical, 6.0f);
     mid->flex = 1;
     auto* loc = f::row(*mid);
-    if (m["canUp"].boolean()) f::button(*loc, L"←", [bars_do] { bars_do(L"up"); });
+    if (m["canUp"].boolean()) f::button(*loc, L"←", [bars_do] { bars_do(L"up"); })->tooltip = L"Back out of this submenu (Backspace)";
     f::text(*loc, core::wide(m["location"].str()), tok::TextPrimary, 14.0f, 600);
     auto* rows = mid->emplace<f::ItemList>();
     rows->name = "BarRows";
@@ -1090,7 +1268,9 @@ void SettingsView::page_bars(Widget& p) {
         f::ListEntry e;
         e.separator = r["separator"].boolean();
         e.text = e.separator ? L"" : core::wide(r["name"].str());
-        e.detail = core::wide(r["detail"].str());
+        // The note, then the shortcut, as the menu prints them.
+        const std::wstring detail = core::wide(r["detail"].str()), gesture = core::wide(r["gesture"].str());
+        e.detail = detail + (detail.empty() || gesture.empty() ? L"" : L"   ") + gesture;
         e.icon = icon_for(r["icon"].str());
         re.push_back(std::move(e));
         if (r["selected"].boolean()) rsel = static_cast<int>(i);
@@ -1098,19 +1278,41 @@ void SettingsView::page_bars(Widget& p) {
     rows->set_entries(std::move(re), rsel);
     rows->on_select = [bars_do](int i) { bars_do(L"pick", std::to_wstring(i)); };
     rows->on_activate = [bars_do](int i) { bars_do(L"open", std::to_wstring(i)); };
+    // Alt+Up/Down moves the selected item, Del takes it off, Enter opens a submenu (above) and Backspace backs
+    // out of one. Spec: SettingsView.xaml.cs (BarItemsList_KeyDown).
+    rows->automation_id = "BarRows";
+    nudge_ = [bars_do](int d) { bars_do(L"nudge", d < 0 ? L"up" : L"down"); };
+    nudge_for_ = rows;
+    // Or dragged to its new place. Spec: SettingsView.xaml.cs (BarItemsList drag).
+    rows->on_reorder = [bars_do](int from, int to) { bars_do(L"move", std::to_wstring(from) + L" " + std::to_wstring(to)); };
+    const bool can_up = m["canUp"].boolean();
+    rows->on_key = [bars_do, can_up](unsigned vk) {
+        if (vk == VK_DELETE) {
+            bars_do(L"remove");
+            return true;
+        }
+        if (vk == VK_BACK && can_up) {
+            bars_do(L"up");
+            return true;
+        }
+        return false;
+    };
     auto* rb = f::row(*mid, 6);
     const bool row_is_menu = rsel >= 0 && m["rows"][static_cast<size_t>(rsel)]["menu"].boolean();
     auto* open = f::button(*rb, L"Open", [bars_do, rsel] { if (rsel >= 0) bars_do(L"open", std::to_wstring(rsel)); });
     open->name = "BarOpen";
+    open->tooltip = L"Edit what is inside the selected menu (Enter)";
     open->set_enabled(row_is_menu);
     f::button(*rb, L"↑", [bars_do] { bars_do(L"nudge", L"up"); });
     f::button(*rb, L"↓", [bars_do] { bars_do(L"nudge", L"down"); });
-    f::button(*rb, L"Remove", [bars_do] { bars_do(L"remove"); });
+    f::button(*rb, L"Remove", [bars_do] { bars_do(L"remove"); })->tooltip = L"Take this off (Del)";
+    f::text(*mid, L"Alt+\u2191/\u2193 moves \u00b7 Del removes \u00b7 Enter opens a menu", tok::TextMuted, 11.0f);
     auto* rb2 = f::row(*mid, 6);
     f::button(*rb2, L"Add separator", [bars_do] { bars_do(L"add-separator"); });
     // At the top of the menu bar only menus can be added: a command needs a menu to be in.
     auto* addm = f::button(*rb2, m["addSubmenuLabel"].str() == "Submenu" ? L"Add submenu" : L"Add menu", [bars_do] { bars_do(L"add-menu"); });
     addm->name = "BarAddMenu";
+    addm->tooltip = L"An empty menu to fill: open it, then add commands from the right";
     if (m["canEditCaption"].boolean()) {
         auto* cr = f::row(*mid, 6);
         f::row_label(*cr, L"Name", 60);
@@ -1159,6 +1361,15 @@ void SettingsView::page_bars(Widget& p) {
     choices->set_entries(std::move(ce));
     const bool can_add = m["canAdd"].boolean();
     choices->on_activate = [bars_do, cids, can_add](int i) { if (i >= 0 && can_add) bars_do(L"add", cids[static_cast<size_t>(i)]); };
+    // Dragged onto the list, a choice lands exactly where it is dropped. Spec: SettingsView.xaml.cs (BarChoices drag).
+    if (can_add) {
+        choices->tooltip = L"Double-click to add after the selected item, or drag onto the list to put it exactly where you want";
+        choices->can_drag = [cids](int i) { return i >= 0 && static_cast<size_t>(i) < cids.size() && !cids[static_cast<size_t>(i)].empty(); };
+        choices->drag_into = rows;
+        rows->on_drop_in = [bars_do, cids](int from, int at) {
+            if (from >= 0 && static_cast<size_t>(from) < cids.size()) bars_do(L"add-at", std::to_wstring(at) + L" " + cids[static_cast<size_t>(from)]);
+        };
+    }
     auto* add = f::button(*right, L"Add", [bars_do, choices, cids] {
         if (choices->selected >= 0) bars_do(L"add", cids[static_cast<size_t>(choices->selected)]);
     });
@@ -1198,18 +1409,31 @@ void SettingsView::page_keys(Widget& p) {
     const json::Value m = try_model([&](BbOwnedStr* o) { return bb_keys_page(app, o); });
     keys_model_ = m;
     f::heading(p, L"Keyboard");
-    f::note(p, L"Every command and the shortcuts that run it. Pick one, then Change to press a new shortcut for it.");
+    f::note(p, L"Every command, and the keys that run it. Select one and choose Change, then press the keys you want. The command palette (" +
+                   gesture_or(L"app.palette", L"Command palette") + L") finds any of these by name.");
     auto* top = f::row(p);
     auto* filter = f::field(*top, core::wide(m["filter"].str()), 320, [keys_do](const std::wstring& t) { keys_do(L"filter", t); }, L"Filter by name, category or shortcut");
     filter->automation_id = "KeyFilter";
-    f::button(*top, L"Find by key…", [keys_do] { keys_do(L"find"); })->name = "KeyFind";
+    auto* find = f::button(*top, L"Find by key…", [keys_do] { keys_do(L"find"); });
+    find->name = "KeyFind";
+    find->tooltip = L"Press a shortcut to see which command it runs";
     auto* reset_all = f::button(*top, L"Reset all", [keys_do] { keys_do(L"reset-all"); });
     reset_all->name = "KeyResetAll";
     reset_all->set_enabled(m["hasChanged"].boolean());
-    reset_all->tooltip = L"Every shortcut back to what BertBrowser ships with";
+    reset_all->tooltip = L"Put every command back to the shortcut it ships with";
+
+    // The selected command, which the keys below and the buttons under the list act on.
+    const json::Value* chosen = nullptr;
+    for (size_t i = 0; i < m["rows"].size(); ++i) {
+        if (!m["rows"][i]["heading"].boolean() && m["rows"][i]["id"].str() == m["selected"].str()) chosen = &m["rows"][i];
+    }
+    const bool recording = m["recording"].boolean() || m["capturing"].boolean();
+    const bool have = chosen != nullptr;
+    const bool bound = have && (*chosen)["chords"].size() > 0;
 
     auto* list = p.emplace<f::ItemList>();
     list->name = "KeyRows";
+    list->automation_id = "KeyRows";  // the page is rebuilt by every change; focus comes back to the list through this
     list->height = 340;
     std::vector<f::ListEntry> entries;
     std::vector<std::wstring> ids;
@@ -1234,21 +1458,28 @@ void SettingsView::page_keys(Widget& p) {
     list->on_select = [keys_do, ids](int i) {
         if (i >= 0 && static_cast<size_t>(i) < ids.size() && !ids[static_cast<size_t>(i)].empty()) keys_do(L"select", ids[static_cast<size_t>(i)]);
     };
+    // Enter changes the selected command's shortcut (a double click too) and Del removes it, while the
+    // recorder is not listening. Spec: SettingsView.xaml.cs (KeyList_KeyDown, KeyList_DoubleClick).
+    const bool listening = recording || m["canReassign"].boolean();
+    list->on_activate = [keys_do, listening](int) { if (!listening) keys_do(L"change"); };
+    list->on_key = [keys_do, listening, bound](unsigned vk) {
+        if (vk != VK_DELETE || listening || !bound) return false;
+        keys_do(L"remove");
+        return true;
+    };
     // The recorder: one line saying what is being waited for, or what was refused.
     auto* panel = p.emplace<StackPanel>(Orientation::Vertical, 6.0f);
     panel->name = "KeyRecorderPanel";
-    const bool recording = m["recording"].boolean() || m["capturing"].boolean();
     const std::wstring line = core::wide(m["text"].str());
     if (!line.empty()) {
         auto* t = f::text(*panel, line, recording ? tok::AccentBackground : tok::TextPrimary, 14.0f, 600);
         t->name = "KeyRecorderText";
         t->wrap = true;
     }
-    // The selected command: what it ships with, so a change can be judged against it.
-    const json::Value* chosen = nullptr;
-    for (size_t i = 0; i < m["rows"].size(); ++i) {
-        if (!m["rows"][i]["heading"].boolean() && m["rows"][i]["id"].str() == m["selected"].str()) chosen = &m["rows"][i];
+    if (line.empty() && !chosen && !recording) {
+        f::text(*panel, L"Select a command to change its shortcut.", tok::TextSecondary, 14.0f)->name = "KeyRecorderHint";
     }
+    // The selected command: what it ships with, so a change can be judged against it.
     if (chosen && !recording) {
         const std::wstring where = core::wide((*chosen)["where"].str());
         auto* d = f::text(*panel, core::wide((*chosen)["defaultText"].str()) + (where.empty() ? L"" : L"; works " + where) + L".", tok::TextMuted, 13.0f);
@@ -1259,20 +1490,22 @@ void SettingsView::page_keys(Widget& p) {
     if (recording || m["canReassign"].boolean()) {
         f::button(*br, L"Cancel", [keys_do] { keys_do(L"cancel"); })->name = "KeyCancel";
     } else {
-        const bool have = chosen != nullptr;
-        const bool bound = have && (*chosen)["chords"].size() > 0;
         auto* change = f::button(*br, L"Change…", [keys_do] { keys_do(L"change"); });
         change->name = "KeyChange";
+        change->tooltip = L"Replace this command’s shortcut (Enter)";
         change->set_enabled(have);
         // Another shortcut only for something that has one already; with none, Change is the way in.
         auto* add = f::button(*br, L"Add another…", [keys_do] { keys_do(L"add"); });
         add->name = "KeyAdd";
+        add->tooltip = L"Give this command a second shortcut";
         add->set_enabled(bound);
         auto* remove = f::button(*br, L"Remove", [keys_do] { keys_do(L"remove"); });
         remove->name = "KeyRemove";
+        remove->tooltip = L"Leave this command with no shortcut (Del)";
         remove->set_enabled(bound);
         auto* reset = f::button(*br, L"Reset", [keys_do] { keys_do(L"reset"); });
         reset->name = "KeyReset";
+        reset->tooltip = L"Put back the shortcut it ships with";
         reset->set_enabled(have && (*chosen)["changed"].boolean());
     }
 }

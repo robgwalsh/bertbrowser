@@ -18,11 +18,13 @@ struct MenuItem {
     std::wstring text;     // "&Open": & marks the access key, "&&" is a literal ampersand
     std::wstring gesture;  // shortcut text, right aligned ("Ctrl+O")
     const IconData* icon = nullptr;
+    ThumbPtr picture;  // a picture of its own (a shell extension's), drawn where `icon` would be when there is none
     bool is_separator = false;
     bool checked = false;  // a check mark, or a bullet when `radio`
     bool radio = false;
     bool enabled = true;
     bool marked = false;  // drawn as hovered without being the selection (the undo list's "back to here")
+    std::wstring tooltip;  // shown while the pointer rests on it, disabled or not (why a row cannot run now)
     int id = 0;
     std::function<void()> on_invoke;
     // The selection landed on this item (pointer or keys): may restyle the level it is in, which its
@@ -108,6 +110,7 @@ private:
     std::vector<float> tops_;  // item i spans [tops_[i], tops_[i + 1]) down the panel
     std::vector<ComPtr<ID2D1PathGeometry>> icon_geo_;
     std::vector<uint32_t> icon_gen_;
+    ImageCache images_;
 };
 
 // ---- the controller ---------------------------------------------------------------------------------
@@ -148,6 +151,7 @@ public:
 
     // Input, in owner DIPs.
     bool pointer_moved(Point p);  // true when p is over a level
+    const MenuItem* item_at(Point p) const;  // the item under p, disabled ones included; null over none
     Press press(Point p);
     Press release(Point p);
     bool key(unsigned vk);       // always consumes; false only for keys the menu never takes

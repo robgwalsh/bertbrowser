@@ -73,12 +73,16 @@ static void append_rows(const MenuBuildEnv& env, const std::vector<BarRow>& rows
                 return bb_bars_query(env.core->app(), core::s(L"list"), core::s(core::wide(r.id)), o);
             });
             for (size_t i = 0; i < items.size(); ++i) {
-                const std::wstring id = core::wide(items[i]["id"].str());
+                // An undo step is a number; everything else is named.
+                const json::Value& raw = items[i]["id"];
+                const std::wstring id = raw.type == json::Value::Type::Number ? std::to_wstring(raw.i64()) : core::wide(raw.str());
                 const std::wstring name = core::wide(items[i]["name"].str());
                 // The detail (a workspace's shape, a saved search's query) rides where a gesture would.
                 MenuItem m = MenuItem::make(escape_caption(name), {}, core::wide(items[i]["detail"].str()));
                 m.icon = icon_for(r.icon);
                 m.checked = items[i]["checked"].boolean();
+                m.enabled = items[i]["enabled"].boolean(true);
+                m.tooltip = core::wide(items[i]["tip"].str());
                 m.on_invoke = [env, list = r.id, id, name] {
                     if (env.pick) env.pick(list, id, name);
                 };
@@ -93,6 +97,7 @@ static void append_rows(const MenuBuildEnv& env, const std::vector<BarRow>& rows
             m.icon = icon_for(r.icon);
             m.enabled = r.enabled;
             m.checked = r.checked;
+            if (!r.enabled) m.tooltip = r.reason;
             m.on_invoke = [env, id = core::wide(r.id)] {
                 if (env.run) env.run(id);
             };

@@ -8,6 +8,7 @@
 #include "views/main_view.h"
 
 #include <algorithm>
+#include <map>
 #include <set>
 
 namespace bb::views::ops {
@@ -54,11 +55,11 @@ struct Spec {
 const std::vector<Spec>& specs() {
     // id, commands, group, tree
     static const std::vector<Spec> table = {
-        {"new", {"file.new-folder", "file.new-file"}, L"N&ew", true},
+        {"new", {"file.new-folder", "file.new-file"}, L"New", true},
         {"open", {"file.open"}, nullptr, false},
         {"run-as-admin", {"file.run-as-admin"}, nullptr, false},
         {"open-new-tab", {"file.open-new-tab"}, nullptr, true},
-        {"open-new-pane", {"file.open-pane-right", "file.open-pane-below"}, L"Open in new &pane", true},
+        {"open-new-pane", {"file.open-pane-right", "file.open-pane-below"}, L"Open in new pane", true},
         {"open-terminal", {"file.open-terminal"}, nullptr, true},
         {"open-vscode", {"file.open-vscode"}, nullptr, true},
         {"disk-usage", {"tools.disk-usage"}, nullptr, true},
@@ -92,19 +93,58 @@ const Spec* spec_of(const std::string& id) {
     return nullptr;
 }
 
+// What the right-click menus call their entries. They are fixed words, not the command's caption: a menu is
+// about its own subject (the folder right-clicked, or the item under the pointer), so "Delete 3 items..." from
+// the file list's selection must never leak into the tree's, and the ellipsis marks a dialog the way the verb
+// rule does for the file list's own verbs. Null = the command's own caption stands.
+// Spec: MainWindow.xaml (the tree's menu), DirectoryTabView.xaml, FileVerbRules.
+const wchar_t* fixed_caption(const std::string& id) {
+    static const std::map<std::string, const wchar_t*> table = {
+        {"file.new-folder", L"Folder"},
+        {"file.new-file", L"Empty file…"},
+        {"file.open-pane-right", L"To the right"},
+        {"file.open-pane-below", L"Below"},
+        {"tools.disk-usage", L"Analyse disk usage…"},
+        {"tools.duplicates", L"Find duplicates…"},
+        {"tools.changes", L"What changed here…"},
+        {"file.delete-permanently", L"Delete permanently…"},
+    };
+    const auto it = table.find(id);
+    return it == table.end() ? nullptr : it->second;
+}
+
+// The tree's entries on top of those: they are never counted by the file list's selection.
+const wchar_t* tree_caption(const std::string& id) {
+    if (const wchar_t* fixed = fixed_caption(id)) return fixed;
+    static const std::map<std::string, const wchar_t*> table = {
+        {"file.open-new-tab", L"Open in new tab"},
+        {"file.open-terminal", L"Open in Terminal"},
+        {"file.open-vscode", L"Open in VS Code"},
+        {"file.delete", L"Delete…"},
+        {"edit.copy-path", L"Copy as path"},
+        {"file.properties", L"Properties…"},
+    };
+    const auto it = table.find(id);
+    return it == table.end() ? nullptr : it->second;
+}
+
+// The two directions of "Open in new pane" read as words alone; the group carries the picture.
+bool child_has_icon(const std::string& id) { return id != "file.open-pane-right" && id != "file.open-pane-below"; }
+
 // The tree's entries act on the folder right-clicked, not on the file list's selection, so each one is the
-// command's caption and icon with the tree's own action; the shortcut is the file list's, so none is shown.
+// command's icon with the tree's own words and action; the shortcut is the file list's, so none is shown.
 MenuItems tree_items(MainView& main, const Spec& s, const std::wstring& subject) {
     MenuItems items;
     for (const char* c : s.commands) {
         BarRow r = command_row(main.core(), c);
         if (r.id.empty()) continue;
-        std::wstring caption = r.caption;
+        const wchar_t* fixed = tree_caption(r.id);
+        std::wstring caption = fixed ? fixed : escape_caption(r.name);
         if (r.id == "file.bookmark") {
-            caption = bb_is_bookmarked(main.core().app(), core::s(subject)) ? L"Remove &bookmark" : L"&Bookmark";
+            caption = bb_is_bookmarked(main.core().app(), core::s(subject)) ? L"Remove bookmark" : L"Bookmark";
         }
         MenuItem m = MenuItem::make(caption);
-        m.icon = icon_for(r.icon);
+        if (child_has_icon(r.id)) m.icon = icon_for(r.icon);
         // A drive is not a folder that can be deleted.
         m.enabled = !(r.id == "file.delete" && subject.size() <= 3);
         MainView* mv = &main;
@@ -112,21 +152,14 @@ MenuItems tree_items(MainView& main, const Spec& s, const std::wstring& subject)
         m.on_invoke = [mv, id, subject] { mv->tree_verb(id, subject); };
         items.push_back(std::move(m));
     }
-    if (items.empty() || !s.group) return items;
-    MenuItem group = MenuItem::make(s.group);
-    group.icon = icon_for(command_row(main.core(), s.commands.front()).icon);
-    group.sub = std::move(items);
-    return MenuItems{std::move(group)};
+    return items;
 }
 
-// The file types the New submenu offers after New file, each a New file dialog with the type's extension and
-// name (Settings > New items). Spec: Views/NewItemMenu.
-void add_new_file_types(MainView& main, MenuItems& items, const std::wstring& folder, bool enabled) {
-    if (items.empty() || !items.front().is_submenu()) return;
+// The file types the New submenu offers after the folder, each a New file dialog with the type's extension
+// and name (Settings > New items). Spec: Views/NewItemMenu.
+MenuItems new_file_type_items(MainView& main, const std::wstring& folder, bool enabled) {
+    MenuItems out;
     const json::Value types = try_model([&](BbOwnedStr* o) { return bb_new_file_types(main.core().app(), o); });
-    if (types.size() == 0) return;
-    MenuItems& sub = items.front().sub;
-    sub.push_back(MenuItem::separator());
     for (size_t i = 0; i < types.size(); ++i) {
         const std::wstring label = core::wide(types[i]["label"].str());
         const std::wstring ext = core::wide(types[i]["extension"].str());
@@ -137,18 +170,40 @@ void add_new_file_types(MainView& main, MenuItems& items, const std::wstring& fo
         m.enabled = enabled;
         MainView* mv = &main;
         m.on_invoke = [mv, ext, label, folder] { mv->open_new_file(ext, label, folder); };
-        sub.push_back(std::move(m));
+        out.push_back(std::move(m));
     }
+    return out;
 }
 
-MenuItems built_in_items(MainView& main, const Spec& s, MenuKind kind, const std::wstring& subject) {
+// The entries of one built-in as the menu shows them: a single item per command, or a group's submenu with
+// its picture, disabled as a whole when its verb rule says so (every child shares the rule). New is
+// Folder / the configured types / Empty file..., the types between two separators.
+MenuItems assemble(MainView& main, const Spec& s, MenuItems kids, const std::string& icon, bool enabled, const std::wstring& reason,
+                   const std::wstring& folder, bool types_enabled) {
+    if (kids.empty() || !s.group) return kids;
+    if (std::string_view(s.id) == "new" && kids.size() == 2) {
+        MenuItems sub;
+        sub.push_back(std::move(kids[0]));
+        sub.push_back(MenuItem::separator());
+        MenuItems types = new_file_type_items(main, folder, types_enabled);
+        const bool any = !types.empty();
+        for (MenuItem& t : types) sub.push_back(std::move(t));
+        if (any) sub.push_back(MenuItem::separator());
+        sub.push_back(std::move(kids[1]));
+        kids = std::move(sub);
+    }
+    MenuItem group = MenuItem::make(s.group);
+    group.icon = icon_for(icon);
+    group.enabled = enabled;
+    if (!enabled) group.tooltip = reason;
+    group.sub = std::move(kids);
+    return MenuItems{std::move(group)};
+}
+
+MenuItems built_in_items(MainView& main, const Spec& s, MenuKind kind, const std::wstring& subject, const std::string& icon, bool in_archive) {
     const bool background = kind == MenuKind::Background, tree = kind == MenuKind::Tree;
     if (tree && !s.tree) return {};
-    if (tree) {
-        MenuItems items = tree_items(main, s, subject);
-        if (std::string_view(s.id) == "new") add_new_file_types(main, items, subject, true);
-        return items;
-    }
+    if (tree) return assemble(main, s, tree_items(main, s, subject), icon, true, {}, subject, true);
     std::vector<BarRow> rows;
     for (const char* c : s.commands) {
         // The folder's own path is what Copy as path means over empty space.
@@ -156,36 +211,37 @@ MenuItems built_in_items(MainView& main, const Spec& s, MenuKind kind, const std
         if (background && id == "edit.copy-path") id = "edit.copy-folder-path";
         BarRow r = command_row(main.core(), id);
         if (r.id.empty() || r.hidden) continue;
+        if (const wchar_t* fixed = fixed_caption(r.id)) r.caption = fixed;
+        if (!child_has_icon(r.id)) r.icon.clear();
+        // The Shift+Delete key still means Delete in there (the gate answers as Delete does); the menu row says
+        // what C# does: there is only Delete. Spec: FileVerbRules (DeletePermanently).
+        if (r.id == "file.delete-permanently" && in_archive && r.enabled) {
+            r.enabled = false;
+            r.reason = L"Inside an archive there is only Delete.";
+        }
         rows.push_back(std::move(r));
     }
     if (rows.empty()) return {};
-    if (s.group) {
-        BarRow m;
-        m.kind = "menu";
-        m.caption = s.group;
-        m.children = std::move(rows);
-        rows.clear();
-        rows.push_back(std::move(m));
-    }
-    MenuItems items = build_menu_items(main.menu_env(), rows);
-    if (std::string_view(s.id) == "new") {
-        add_new_file_types(main, items, L"", command_row(main.core(), "file.new-file").enabled);
-    }
-    return items;
+    const bool enabled = rows.front().enabled;
+    const std::wstring reason = rows.front().reason;
+    MenuItems kids = build_menu_items(main.menu_env(), rows);
+    return assemble(main, s, std::move(kids), icon, enabled, reason, L"", command_row(main.core(), "file.new-file").enabled);
 }
 
 MenuItem from_entry(const ShellEntry& e, const std::shared_ptr<ShellMenuSession>& session, MainView& main) {
     if (e.separator) return MenuItem::separator();
     MenuItem m = MenuItem::make(e.header, {}, e.gesture);
     m.enabled = e.enabled;
+    m.picture = e.picture;
     if (!e.children.empty()) {
         for (const ShellEntry& c : e.children) m.sub.push_back(from_entry(c, session, main));
     } else {
         const int command = e.command;
         MainView* mv = &main;
         m.on_invoke = [session, command, mv] {
+            // What the extension answers goes on the status bar, as it does for the C# menu.
             const std::wstring said = session->invoke(command, mv->window().hwnd());
-            (void)said;
+            if (!said.empty()) bb_status_set(mv->core().app(), core::s(said));
         };
     }
     return m;
@@ -215,6 +271,16 @@ ComposedMenu compose_context_menu(MainView& main, MenuKind kind, const std::wstr
     if (targets.empty()) targets.push_back({folder, true});
     const ShellContext context = kind == MenuKind::Background ? ShellContext::Background : ShellContext::Items;
 
+    // Where the tab is: inside an archive nothing has a path another program can open, and a search result
+    // has no folder of its own to be the background of. The tree always names real folders.
+    bool in_archive = false, shell_allowed = true;
+    if (!tree) {
+        in_archive = !folder.empty() && !query(core, "archive-of", core::utf8(folder)).is_null();
+        const BbTabState st = core.tab_state(main.active_tab());
+        const bool over_nothing = kind == MenuKind::Background || (kind == MenuKind::Files && main.selected_rows().empty());
+        shell_allowed = !in_archive && !folder.empty() && !(over_nothing && st.is_flattened && !st.is_flat_browse);
+    }
+
     // The app's own entries this menu declares, minus the ones unticked on the Context menu page.
     const json::Value page = query(core, "context-menu");
     std::set<std::string> hidden;
@@ -233,7 +299,7 @@ ComposedMenu compose_context_menu(MainView& main, MenuKind kind, const std::wstr
         if (hidden.count(id)) continue;
         const Spec* s = spec_of(id);
         if (!s) continue;
-        declared[id] = built_in_items(main, *s, kind, subject);
+        declared[id] = built_in_items(main, *s, kind, subject, b["icon"].str(), in_archive);
         declared_ids.push_back(core::wide(id));
     }
 
@@ -248,14 +314,20 @@ ComposedMenu compose_context_menu(MainView& main, MenuKind kind, const std::wstr
         if (!applies || commands.count(c["id"].str())) continue;
         const std::string id = c["id"].str();
         MainView* mv = &main;
+        MenuItem item;
         if (tree) {
             BbApp* app = core.app();
-            commands.emplace(id, MenuItem::make(escape_caption(w(c["name"])), [app, id, subject] {
+            item = MenuItem::make(escape_caption(w(c["name"])), [app, id, subject] {
                 bb_launch_command_at(app, core::s(L"custom:" + core::wide(id)), core::s(subject));
-            }));
+            });
         } else {
-            commands.emplace(id, MenuItem::make(escape_caption(w(c["name"])), [mv, id] { mv->run_command(L"custom:" + core::wide(id)); }));
+            item = MenuItem::make(escape_caption(w(c["name"])), [mv, id] { mv->run_command(L"custom:" + core::wide(id)); });
         }
+        // A shield when it will ask for administrator rights, and the shortcut it was given on the Keyboard page.
+        const BarRow own = command_row(core, "custom:" + id);
+        item.icon = icon_for(!own.icon.empty() ? own.icon : c["runElevated"].boolean() ? "Icon.Shield" : "Icon.CustomCommand");
+        item.gesture = own.gesture;
+        commands.emplace(id, std::move(item));
         command_ids.push_back(core::wide(id));
     }
 
@@ -263,7 +335,7 @@ ComposedMenu compose_context_menu(MainView& main, MenuKind kind, const std::wstr
     std::shared_ptr<ShellMenuSession> session;
     std::map<std::string, const ShellGroup*> groups;
     std::vector<std::wstring> group_ids;
-    if (ShellMenuSource* source = main.shell_source()) {
+    if (ShellMenuSource* source = shell_allowed ? main.shell_source() : nullptr) {
         try {
             session = std::shared_ptr<ShellMenuSession>(source->open(targets, context, folder));
         } catch (const std::exception&) {
