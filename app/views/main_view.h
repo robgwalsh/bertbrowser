@@ -25,10 +25,12 @@
 #include "views/sidebar.h"
 #include "views/core.h"
 #include "views/json.h"
+#include "views/tool_window.h"
 
 #include "ui/inputs.h"
 
 #include <atomic>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -57,10 +59,13 @@ struct SelectedRow {
 };
 
 // The duplicate finder's last result and which copies are ticked for removal.
+// The duplicate finder's window: the core's model (`duplicates.model`) as last read, and the copies ticked here,
+// by position - so they go whenever the core says the groups were replaced (`version`).
 struct DuplicatesState {
     bool has = false;
     json::Value result;
     std::set<std::pair<size_t, size_t>> ticked;  // group, file
+    int64_t version = -1;
 };
 
 // Rows and selection of one tab, for the details list. Cells come from the snapshot; selection is the
@@ -339,6 +344,13 @@ public:
     // The delete confirmation over `paths` rather than the selection; `after` hears whether Delete was
     // pressed once the dialog has gone.
     void ask_delete(std::vector<std::wstring> paths, std::function<void(bool confirmed)> after);
+    // New <type> from the New submenu: the New file dialog with that type's extension and name, in `folder`
+    // (empty: the tab's).
+    void open_new_file(const std::wstring& extension, const std::wstring& label, const std::wstring& folder);
+    std::pair<std::wstring, std::wstring> new_file_template() const { return new_file_template_; }
+    // Opens (or rebuilds) a dialog about these items rather than the selection.
+    void reopen_on(const std::wstring& kind, std::vector<std::wstring> paths);
+    std::vector<std::wstring>& properties_paths() { return properties_paths_; }
     const std::vector<std::wstring>& dialog_paths() const { return dialog_paths_; }
     // A scripted run normally reports a dialog instead of putting it up; with this on it really opens,
     // so a script can type into it and press its buttons (`dialog_widget`).
@@ -347,6 +359,18 @@ public:
     bool dialog_up() const { return dialog_open_; }
     const std::wstring& dialog_kind() const { return dialog_kind_; }
     ui::Widget* dialog_widget(std::string_view name);
+    // The tool windows (disk usage, duplicates, ...): modeless windows of their own, as the original's
+    // were, so the folders stay live behind them. `open_dialog` sends their kinds here; opening one that is
+    // already up rebuilds it in place and brings it forward.
+    static bool is_tool_window(const std::wstring& kind);
+    ToolWindow* tool_window(const std::wstring& kind);
+    void close_tool(const std::wstring& kind);
+    // Re-reads the duplicate finder's model, and rebuilds its window if it is open.
+    void sync_duplicates();
+    // The Properties dialog's Details: the one path whose shell properties were last read, and what they were.
+    std::pair<std::wstring, std::vector<std::pair<std::wstring, std::wstring>>>& properties_details() { return properties_details_; }
+    void style_tool_window(ToolWindow& w);
+    std::vector<std::wstring> open_tool_windows() const;
     std::function<void(bool)> take_after_delete() { return std::exchange(after_delete_, nullptr); }
     // Opens a menu at a point (a right click), keeping its items alive while it is up.
     void show_context_menu(ui::MenuItems items, ui::Point at);
@@ -411,9 +435,13 @@ private:
     bool bars_pending_ = false;
     bool headless_dialogs_ = false;
     bool live_dialogs_ = false;
+    std::pair<std::wstring, std::vector<std::pair<std::wstring, std::wstring>>> properties_details_;
+    std::map<std::wstring, std::unique_ptr<ToolWindow>> tools_;  // by tool_key
     bool follow_windows_ = true;
     std::wstring dialog_folder_;
     std::vector<std::wstring> dialog_paths_;  // what the delete confirmation being built asks about
+    std::vector<std::wstring> properties_paths_;  // what the Properties dialog up is about
+    std::pair<std::wstring, std::wstring> new_file_template_;  // extension, label: the New file dialog being built
     std::function<void(bool)> after_delete_;
     // A run's clipboard (see set_headless_dialogs), and its change count, standing in for Windows'.
     std::optional<ClipboardFiles> run_clipboard_;

@@ -43,6 +43,8 @@ pub(crate) struct Extra {
     pub ops: crate::ops_ui::OpsUi,
     /// The delete the confirmation is asking about, and its survey.
     pub delete: crate::delete_confirm::DeleteConfirm,
+    /// The History window's last model, answered while an undo walk holds the history.
+    pub history_cache: Mutex<serde_json::Value>,
 }
 
 impl Extra {
@@ -70,6 +72,7 @@ impl Extra {
             tools: Default::default(),
             ops,
             delete: Default::default(),
+            history_cache: Mutex::new(serde_json::json!({ "rows": [], "count": 0 })),
         }
     }
 }

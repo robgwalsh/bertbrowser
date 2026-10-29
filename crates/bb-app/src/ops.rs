@@ -647,6 +647,10 @@ impl Inner {
                 outcome.failed.len(),
                 first.message
             ));
+            // What could not be deleted is said where it will be read, not only in the footer.
+            // Spec: DirectoryTabView.DeleteSelectionAsync.
+            let all: Vec<&str> = outcome.failed.iter().map(|f| f.message.as_str()).collect();
+            self.seams.notice.say(&all.join("\n\n"), "Delete");
         } else if outcome.can_undo() {
             text.push_str(" \u{2014} this can be undone");
         }
@@ -787,7 +791,21 @@ impl Inner {
             .collect();
         directories.sort_by_key(|d| d.to_uppercase());
         directories.dedup_by_key(|d| d.to_uppercase());
+        // What was renamed is still selected, under its new name.
+        for dir in &directories {
+            let finals: Vec<String> = outcome
+                .completed
+                .iter()
+                .filter(|c| {
+                    bb_core::rename::paths::directory_name(&c.source_path)
+                        .is_some_and(|d| d.eq_ignore_ascii_case(dir))
+                })
+                .map(|c| c.final_path.clone())
+                .collect();
+            self.select_many_after_refresh(dir, finals);
+        }
         self.refresh_tabs_showing(&directories);
+        self.follow_renamed_folders(&outcome.completed);
 
         let mut text = format!("Renamed {} item(s)", outcome.completed.len());
         if let Some(first) = outcome.failed.first() {
@@ -796,6 +814,8 @@ impl Inner {
                 outcome.failed.len(),
                 first.message
             ));
+            let all: Vec<&str> = outcome.failed.iter().map(|f| f.message.as_str()).collect();
+            self.seams.notice.say(&all.join("\n\n"), "Rename");
         } else if outcome.can_undo() {
             text.push_str(" \u{2014} this can be undone");
         }
@@ -849,12 +869,17 @@ impl Inner {
         let transfers = TransferExecutor::default();
         let deletes = self.delete_executor();
         let renames = RenameExecutor;
-        let host = PlainUndoHost::without_archives(&transfers, &deletes, &renames);
+        // The plain host's executors, with an elevated second pass offered where Windows refuses part of
+        // a step - as the forward operations do.
+        let host = crate::undo_host::AppUndoHost::new(
+            self,
+            PlainUndoHost::without_archives(&transfers, &deletes, &renames),
+        );
         let sizes = CachedSizes(&self.dir_sizes);
         let estimator = HeldSizeEstimator::new(Some(&sizes));
         let measure = |r: &dyn UndoableRecord| estimator.measure_record(r);
 
-        let (span, result) = {
+        let (span, result, described) = {
             let mut undo = lock(&self.undo);
             let span = {
                 let entries = undo.entries();
@@ -883,9 +908,14 @@ impl Inner {
             if span.is_empty() {
                 return (false, "nothing to do".to_string());
             }
+            let described: Vec<(bb_core::undo::EntryId, String)> = undo
+                .entries()
+                .iter()
+                .map(|e| (e.id(), e.record().description().to_string()))
+                .collect();
             let result = UndoNavigator::walk(&mut undo, &span, &host, &measure, &FileTime::now);
             self.refresh_undo_summary(&undo);
-            (span, result)
+            (span, result, described)
         };
 
         result.released.retire_all();
@@ -909,26 +939,58 @@ impl Inner {
         directories.dedup_by_key(|d| d.to_uppercase());
         self.refresh_tabs_showing(&directories);
         self.refresh_archive_tabs();
+        let renamed: Vec<_> = result
+            .refreshes
+            .iter()
+            .flat_map(|r| r.renamed.iter().cloned())
+            .collect();
+        self.follow_renamed_folders(&renamed);
+        if result.refreshes.iter().any(|r| r.rescan_compare) {
+            let _ = self.compare_rescan();
+        }
 
-        let did = if direction == UndoDirection::Undo {
-            "Undone"
+        // "Undone \u{2014} move 3 items to Documents", "Undone 4 actions", or where and why it stopped.
+        // Spec: ShellViewModel.DescribeWalk.
+        let (did, verb) = if direction == UndoDirection::Undo {
+            ("Undone", "undo")
         } else {
-            "Redone"
+            ("Redone", "redo")
         };
+        let name_of = |id: &bb_core::undo::EntryId| {
+            described
+                .iter()
+                .find(|(e, _)| e == id)
+                .map(|(_, d)| bb_core::undo::UndoText::as_object(d))
+                .unwrap_or_default()
+        };
+        let notes: String = result.notes.concat();
         let text = match (&result.stopped_at, &result.stop_report) {
-            (Some(_), Some(report)) => {
+            (Some(stopped), Some(report)) => {
+                let name = name_of(stopped);
                 let first = report.failures.first().cloned().unwrap_or_default();
-                if report.nothing_happened() {
-                    format!("Could not {} \u{2014} {first}", did.to_lowercase())
+                let mut text = if report.nothing_happened() {
+                    format!("Could not {verb} {name} \u{2014} {first}")
                 } else {
                     format!(
-                        "{did} only in part: {} could not be \u{2014} {first}",
-                        report.failures.len()
+                        "{did} {name} only in part: {} could not be \u{2014} {first}",
+                        count_text(report.failures.len())
                     )
+                };
+                let remaining = span
+                    .len()
+                    .saturating_sub(result.steps_taken)
+                    .saturating_sub(usize::from(report.nothing_happened()));
+                if remaining > 0 {
+                    text.push_str(&format!(
+                        " (stopped there; {} more not {})",
+                        count_text(remaining),
+                        did.to_lowercase()
+                    ));
                 }
+                text + &notes
             }
-            _ if span.len() == 1 => did.to_string(),
-            _ => format!("{did} {} actions", span.len()),
+            _ if span.len() == 1 => format!("{did} \u{2014} {}{notes}", name_of(&span[0])),
+            _ => format!("{did} {} actions{notes}", count_text(span.len())),
         };
         self.set_final_status(text.clone());
         self.hub.emit(AppEvent::UndoChanged);

@@ -62,6 +62,8 @@ public:
     std::function<void(int, Point)> on_context;  // a right click on a row, which does not select it
 
     void set_entries(std::vector<ListEntry> e, int select = -1);
+    // One row's words or swatch changed: repainted where it is, the selection and scroll left alone.
+    void update_entry(int i, ListEntry e);
     void select(int i, bool notify = false);
     void scroll_into_view(int i);
     Rect row_rect(int i) const;

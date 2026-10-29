@@ -736,8 +736,12 @@ fn the_tool_door_runs_a_verb_and_refuses_one_it_does_not_know() {
     let notes = serde_json::json!({"paths": [rig.path("notes.txt")], "algorithms": ["Sha1"]});
     let (st, text) = run("checksum.hash", &notes.to_string());
     assert_eq!(BbStatus::BB_OK, st);
+    let started: Value = serde_json::from_str(&text.unwrap()).unwrap();
+    assert_eq!("notes.txt", started["rows"][0]["name"]);
+    // The reading runs off the thread; its digests are in the model once it has settled.
+    rig.settle();
+    let (_, text) = run("checksum.model", "{}");
     let model: Value = serde_json::from_str(&text.unwrap()).unwrap();
-    assert_eq!("notes.txt", model["rows"][0]["name"]);
     assert_eq!(
         40,
         model["rows"][0]["digests"][0]["digest"]

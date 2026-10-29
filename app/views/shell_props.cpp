@@ -90,6 +90,43 @@ std::string read_property_cells(const json::Value& requests) {
     return out + "]";
 }
 
+std::vector<std::pair<std::wstring, std::wstring>> read_all_properties(const std::wstring& path) {
+    std::vector<std::pair<std::wstring, std::wstring>> out;
+    IPropertyStore* store = nullptr;
+    if (FAILED(SHGetPropertyStoreFromParsingName(path.c_str(), nullptr, GPS_BESTEFFORT, IID_PPV_ARGS(&store))) || !store) return out;
+    std::map<std::wstring, std::wstring, std::less<>> by_name;
+    DWORD count = 0;
+    store->GetCount(&count);
+    for (DWORD i = 0; i < count; ++i) {
+        PROPERTYKEY key{};
+        if (FAILED(store->GetAt(i, &key))) continue;
+        // A key with no registered description is internal plumbing; Explorer hides those too.
+        IPropertyDescription* d = nullptr;
+        if (FAILED(PSGetPropertyDescription(key, IID_PPV_ARGS(&d))) || !d) continue;
+        PWSTR display = nullptr;
+        d->GetDisplayName(&display);
+        d->Release();
+        std::wstring name = display ? display : L"";
+        if (display) CoTaskMemFree(display);
+        if (name.empty() || by_name.count(name)) continue;
+        PROPVARIANT pv;
+        PropVariantInit(&pv);
+        if (SUCCEEDED(store->GetValue(key, &pv)) && pv.vt != VT_EMPTY && pv.vt != VT_NULL) {
+            PWSTR text = nullptr;
+            if (SUCCEEDED(PSFormatForDisplayAlloc(key, pv, PDFF_DEFAULT, &text)) && text) {
+                std::wstring value = text;
+                CoTaskMemFree(text);
+                while (!value.empty() && iswspace(value.back())) value.pop_back();
+                if (!value.empty()) by_name[name] = value;
+            }
+        }
+        PropVariantClear(&pv);
+    }
+    store->Release();
+    for (auto& kv : by_name) out.emplace_back(kv.first, kv.second);
+    return out;
+}
+
 std::string machine_property_list() {
     IPropertyDescriptionList* list = nullptr;
     if (FAILED(PSEnumeratePropertyDescriptions(PDEF_VIEWABLE, IID_PPV_ARGS(&list))) || !list) return "[]";

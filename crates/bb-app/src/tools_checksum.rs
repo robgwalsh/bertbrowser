@@ -7,16 +7,31 @@
 //! every name in one goes through `ChecksumPath::resolve` before it becomes a path to open.
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use bb_core::cancel::CancelToken;
 use bb_core::checksums::{
     ChecksumAlgorithm, ChecksumAlgorithms, ChecksumCompare, ChecksumFile, ChecksumFileParse,
-    ChecksumLine, ChecksumPath, ChecksumRunner, ChecksumVerify, ChecksumVerifyState,
-    FileSystemFileHasher,
+    ChecksumLine, ChecksumOutcome, ChecksumPath, ChecksumProgress, ChecksumRunner, ChecksumVerify,
+    ChecksumVerifyState, FileSystemFileHasher,
 };
 use serde_json::{Value, json};
 
+use crate::app::{Inner, lock};
+use crate::events::Model;
 use crate::ids::{AppError, AppResult};
+
+/// How often a run's progress may reach the window: four readers report per file.
+const PROGRESS_EVERY: Duration = Duration::from_millis(100);
+
+/// What a run has to read, taken off the session so the reading happens without it locked.
+pub(crate) struct Job {
+    generation: u64,
+    paths: Vec<String>,
+    missing: Vec<ChecksumAlgorithm>,
+    cancel: CancelToken,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Mode {
@@ -73,6 +88,18 @@ pub(crate) struct ChecksumSession {
     paste_matched: bool,
     verify_summary: Option<String>,
     verifying: Option<(ChecksumFileParse, String)>,
+    /// Something is waiting to be read; the next `take_job` hands it to a worker.
+    pending: bool,
+    force: bool,
+    running: bool,
+    generation: u64,
+    cancel: CancelToken,
+    progress_headline: String,
+    progress_detail: String,
+    progress_fraction: f64,
+    last_emit: Option<Instant>,
+    /// Said after a Stop: the digests that were finished are kept, and this says what was not.
+    stopped: Option<String>,
 }
 
 fn file_name_of(path: &str) -> String {
@@ -98,6 +125,16 @@ impl ChecksumSession {
             paste_matched: false,
             verify_summary: None,
             verifying: None,
+            pending: false,
+            force: false,
+            running: false,
+            generation: 0,
+            cancel: CancelToken::new(),
+            progress_headline: String::new(),
+            progress_detail: String::new(),
+            progress_fraction: 0.0,
+            last_emit: None,
+            stopped: None,
         }
     }
 
@@ -182,12 +219,24 @@ impl ChecksumSession {
         row.verify_state == Some(ChecksumVerifyState::Refused)
     }
 
-    /// Reads whatever is missing (everything, when forced). Ticking a fifth box after a run over a
-    /// big folder must not re-read the other four algorithms' worth of bytes.
+    /// Asks for whatever is missing to be read (everything, when forced). Ticking a fifth box after a
+    /// run over a big folder must not re-read the other four algorithms' worth of bytes. The reading
+    /// is a job a worker runs (`take_job`), or `hash_now` for a caller with nowhere else to wait.
     pub fn run(&mut self, force: bool) {
         if self.selected.is_empty() || self.rows.is_empty() {
             return;
         }
+        self.pending = true;
+        self.force |= force;
+    }
+
+    /// The reading waiting to be done, if any; the session is marked running until `apply`.
+    pub(crate) fn take_job(&mut self) -> Option<Job> {
+        if !self.pending {
+            return None;
+        }
+        self.pending = false;
+        let force = std::mem::take(&mut self.force);
         let wanted = self.selected.clone();
         let missing: Vec<ChecksumAlgorithm> = if force {
             wanted
@@ -203,13 +252,36 @@ impl ChecksumSession {
         };
         if missing.is_empty() {
             self.project();
-            return;
+            return None;
         }
-        let targets: Vec<usize> = (0..self.rows.len())
-            .filter(|i| !Self::is_refused(&self.rows[*i]))
-            .collect();
-        let paths: Vec<String> = targets.iter().map(|i| self.rows[*i].path.clone()).collect();
-        let sizes: HashMap<String, i64> = paths
+        self.cancel.cancel();
+        self.cancel = CancelToken::new();
+        self.generation += 1;
+        self.running = true;
+        self.stopped = None;
+        self.progress_headline = "Reading\u{2026}".into();
+        self.progress_detail.clear();
+        self.progress_fraction = 0.0;
+        Some(Job {
+            generation: self.generation,
+            paths: self
+                .rows
+                .iter()
+                .filter(|r| !Self::is_refused(r))
+                .map(|r| r.path.clone())
+                .collect(),
+            missing,
+            cancel: self.cancel.clone(),
+        })
+    }
+
+    /// Reads a job's files. Blocks; run it off the UI thread.
+    pub(crate) fn read(
+        job: &Job,
+        progress: Option<&(dyn Fn(ChecksumProgress) + Sync)>,
+    ) -> ChecksumOutcome {
+        let sizes: HashMap<String, i64> = job
+            .paths
             .iter()
             .filter_map(|p| {
                 std::fs::metadata(p)
@@ -218,34 +290,101 @@ impl ChecksumSession {
             })
             .collect();
         let hasher = FileSystemFileHasher::new();
-        let outcome = ChecksumRunner::new(&hasher).run(
-            &paths,
-            &missing,
+        ChecksumRunner::new(&hasher).run(
+            &job.paths,
+            &job.missing,
             Some(&sizes),
-            None,
-            &CancelToken::new(),
-        );
-        for (k, result) in outcome.rows.iter().enumerate() {
-            let Some(&i) = targets.get(k) else { break };
-            let row = &mut self.rows[i];
-            match &result.digests {
-                None => {
-                    row.error = Some(
-                        "Could not be read \u{2014} it may be locked, gone, or a cloud file that is not on this device."
-                            .into(),
-                    );
-                }
-                Some(d) => {
-                    row.error = None;
-                    for (a, digest) in &d.by_algorithm {
-                        row.computed.insert(slot(*a), digest.clone());
+            progress,
+            &job.cancel,
+        )
+    }
+
+    /// What a job read, put on its rows - matched by path, because a stopped run hands back only the
+    /// files it finished. A job a newer one superseded changes nothing.
+    pub(crate) fn apply(&mut self, generation: u64, outcome: &ChecksumOutcome) -> bool {
+        if generation != self.generation {
+            return false;
+        }
+        self.running = false;
+        let by_path: HashMap<&str, &bb_core::checksums::ChecksumRow> =
+            outcome.rows.iter().map(|r| (r.path.as_str(), r)).collect();
+        let mut unread = 0usize;
+        for row in self.rows.iter_mut() {
+            if Self::is_refused(row) {
+                continue;
+            }
+            match by_path.get(row.path.as_str()) {
+                None => unread += 1,
+                Some(result) => match &result.digests {
+                    None => {
+                        row.error = Some(
+                            "Could not be read \u{2014} it may be locked, gone, or a cloud file that is not on this device."
+                                .into(),
+                        );
                     }
-                }
+                    Some(d) => {
+                        row.error = None;
+                        for (a, digest) in &d.by_algorithm {
+                            row.computed.insert(slot(*a), digest.clone());
+                        }
+                    }
+                },
             }
         }
+        self.stopped = (outcome.cancelled && unread > 0).then(|| {
+            format!(
+                "Stopped \u{2014} {} file(s) were not read.",
+                bb_core::format::thousands(unread as i64)
+            )
+        });
         self.has_run = true;
         self.project();
         self.reconcile();
+        true
+    }
+
+    /// Reads now, on this thread: the harness's `checksum-file`, which has nothing else to wait on.
+    pub(crate) fn hash_now(&mut self) {
+        if let Some(job) = self.take_job() {
+            let outcome = Self::read(&job, None);
+            self.apply(job.generation, &outcome);
+        }
+    }
+
+    pub(crate) fn stop(&mut self) {
+        if self.running {
+            self.progress_headline = "Stopping\u{2026}".into();
+            self.cancel.cancel();
+        }
+    }
+
+    fn progress(&mut self, generation: u64, p: &ChecksumProgress) -> bool {
+        if generation != self.generation || !self.running || self.cancel.is_cancelled() {
+            return false;
+        }
+        self.progress_fraction = if p.bytes_total > 0 {
+            (p.bytes_done as f64 / p.bytes_total as f64).clamp(0.0, 1.0)
+        } else if p.files_total > 0 {
+            p.files_done as f64 / p.files_total as f64
+        } else {
+            0.0
+        };
+        self.progress_headline = match &p.current_name {
+            Some(name) => format!("Reading\u{2026} {name}"),
+            None => "Reading\u{2026}".into(),
+        };
+        self.progress_detail = format!(
+            "{} of {} files \u{b7} {} of {}",
+            bb_core::format::thousands(p.files_done as i64),
+            bb_core::format::thousands(p.files_total as i64),
+            bb_core::format::byte_size(p.bytes_done),
+            bb_core::format::byte_size(p.bytes_total)
+        );
+        let due = self.last_emit.is_none_or(|t| t.elapsed() >= PROGRESS_EVERY);
+        if due {
+            self.last_emit = Some(Instant::now());
+        }
+        due
     }
 
     fn project(&mut self) {
@@ -399,6 +538,13 @@ impl ChecksumSession {
             "Select files and press Hash."
         };
         json!({
+            "running": self.running,
+            "progress": {
+                "headline": self.progress_headline,
+                "detail": self.progress_detail,
+                "fraction": self.progress_fraction,
+            },
+            "stopped": self.stopped,
             "mode": if self.mode == Mode::Hash { "hash" } else { "verify" },
             "title": self.title,
             "hasRun": self.has_run,
@@ -409,7 +555,7 @@ impl ChecksumSession {
             "verifySummary": self.verify_summary,
             "emptyMessage": if self.rows.is_empty() { empty_message } else { "" },
             "canCompare": self.mode == Mode::Hash && !self.rows.is_empty(),
-            "canSave": self.rows.iter().any(|r| !r.computed.is_empty()),
+            "canSave": !self.running && self.rows.iter().any(|r| !r.computed.is_empty()),
             "algorithms": ChecksumAlgorithms::ALL.iter().map(|a| json!({
                 "id": a.name(),
                 "label": ChecksumAlgorithms::display_name(*a),
@@ -452,10 +598,44 @@ pub(crate) fn write_checksum_file(
     names: &[String],
 ) -> AppResult<()> {
     let folder = bb_paths::split_last(path).0.to_string();
-    let session = ChecksumSession::hash(names, vec![algorithm]);
+    let mut session = ChecksumSession::hash(names, vec![algorithm]);
+    session.hash_now();
     match session.save(path, algorithm) {
         Ok(None) => Ok(()),
         Ok(Some(note)) => Err(AppError::Invalid(note)),
         Err(e) => Err(AppError::Invalid(format!("{e} (folder {folder})"))),
+    }
+}
+
+impl Inner {
+    /// Hands whatever the checksum window is waiting to read to a worker, which reports progress as it
+    /// goes and puts its digests on the rows when it is done (`Model::Checksum` both times). A window
+    /// with nothing waiting changes nothing. Spec: ChecksumViewModel.HashAsync.
+    pub(crate) fn checksum_kick(self: &Arc<Self>) {
+        let job = match lock(&self.extra.tools.checksum).as_mut() {
+            Some(session) => session.take_job(),
+            None => None,
+        };
+        let Some(job) = job else { return };
+        self.hub.model(Model::Checksum);
+        self.schedule(move |inner| {
+            let report = |p: ChecksumProgress| {
+                let due = lock(&inner.extra.tools.checksum)
+                    .as_mut()
+                    .is_some_and(|s| s.progress(job.generation, &p));
+                if due {
+                    inner.hub.model(Model::Checksum);
+                }
+            };
+            let outcome = ChecksumSession::read(&job, Some(&report));
+            let applied = lock(&inner.extra.tools.checksum)
+                .as_mut()
+                .is_some_and(|s| s.apply(job.generation, &outcome));
+            if applied {
+                // A paste that named another algorithm can have asked for more while this ran.
+                inner.checksum_kick();
+                inner.hub.model(Model::Checksum);
+            }
+        });
     }
 }

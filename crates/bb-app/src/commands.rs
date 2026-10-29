@@ -367,8 +367,13 @@ impl Inner {
             compare_scanning,
             compare_can_sync,
             differences_only,
-            undo: summary.undo,
-            redo: summary.redo,
+            // "Ctrl+Z: undo move 3 items to Documents": the caption a menu row and a toolbar button show.
+            undo: summary
+                .undo
+                .map(|d| self.undo_caption("edit.undo", "undo", &d)),
+            redo: summary
+                .redo
+                .map(|d| self.undo_caption("edit.redo", "redo", &d)),
             undo_entries: summary.entries,
             transferring,
             paused,
@@ -428,7 +433,7 @@ impl Inner {
                                 .launcher
                                 .can_run_elevated(&row.full_path)
                                 .unwrap_or_else(|| {
-                                    [".exe", ".bat", ".cmd", ".com", ".msi", ".ps1"]
+                                    [".exe", ".bat", ".cmd", ".msc"]
                                         .iter()
                                         .any(|e| lower.ends_with(e))
                                 });
@@ -622,12 +627,14 @@ impl Inner {
             }
             "nav.up" => (ctx.path.is_empty() || parent_path(&ctx.path).is_none())
                 .then(|| "This is already the top.".to_string()),
-            "nav.refresh" => ctx
-                .path
-                .is_empty()
-                .then(|| "Nothing to refresh.".to_string()),
             "nav.drive-root" => match drive_root(&ctx.path) {
-                Some(root) if !root.eq_ignore_ascii_case(&ctx.path) => None,
+                Some(root)
+                    if !root
+                        .trim_end_matches('\\')
+                        .eq_ignore_ascii_case(ctx.path.trim_end_matches('\\')) =>
+                {
+                    None
+                }
                 _ => s("This is already the top of the drive."),
             },
             "nav.containing-folder" => {
@@ -720,7 +727,7 @@ impl Inner {
                 .verb_reason(ctx, FileVerb::Paste)
                 .or_else(|| self.verb_reason(ctx, FileVerb::New)),
             "edit.undo" => {
-                if ctx.transferring && !ctx.paused {
+                if ctx.transferring {
                     s("An operation is running.")
                 } else if ctx.undo.is_none() {
                     s("There is nothing to undo.")
@@ -729,7 +736,7 @@ impl Inner {
                 }
             }
             "edit.redo" => {
-                if ctx.transferring && !ctx.paused {
+                if ctx.transferring {
                     s("An operation is running.")
                 } else if ctx.redo.is_none() {
                     s("There is nothing to redo.")
@@ -918,7 +925,14 @@ impl Inner {
             "nav.downloads" => self.goto_known_folder(tab, KnownFolders::downloads()),
             "nav.containing-folder" => self.containing_folder(tab),
             "tab.new" | "tab.duplicate" => self.open_tab(pane, &path, true).map(|_| ()),
-            "tab.close" => self.close_tab(tab),
+            "tab.close" => {
+                let last = {
+                    let shell = lock(&self.shell);
+                    shell.layout.leaves().len() == 1
+                        && shell.panes.get(&pane).is_some_and(|p| p.tabs.len() == 1)
+                };
+                if last { Ok(()) } else { self.close_tab(tab) }
+            }
             "tab.close-others" => self.close_other_tabs(tab),
             "tab.reopen" => {
                 let closed = lock(&self.shell)
@@ -1174,7 +1188,13 @@ impl Inner {
                 Ok(())
             }
             "app.keyboard" => self.settings_open_page("keyboard"),
-            "app.settings" => self.settings_open_page("general"),
+            "app.settings" => {
+                if lock(&self.extra.ui).settings_page.is_some() {
+                    Ok(())
+                } else {
+                    self.settings_open_page("general")
+                }
+            }
             "app.command-bars" => self.settings_open_page("command-bars"),
             "app.match-windows-theme" => {
                 let on = !self.theme_is_following();
@@ -1183,6 +1203,20 @@ impl Inner {
             }
             "app.bookmark-folder" => self.toggle_bookmark(&path, true),
             _ => Err(AppError::Invalid(format!("'{id}' has no handler here"))),
+        }
+    }
+
+    /// What Undo and Redo say they will do. Spec: ShellViewModel.Described.
+    fn undo_caption(&self, command: &str, verb: &str, description: &str) -> String {
+        let what = format!("{verb} {}", bb_core::undo::UndoText::as_object(description));
+        match self.keymap_gesture(command) {
+            g if g.is_empty() => {
+                let mut c = what.chars();
+                c.next()
+                    .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+                    .unwrap_or_default()
+            }
+            g => format!("{g}: {what}"),
         }
     }
 
@@ -1304,7 +1338,7 @@ fn checked_in(ctx: &Ctx, id: &str) -> bool {
         "preview.mode-raw" => ctx.side_pane == 1 && ctx.preview_mode == 1,
         "preview.mode-hex" => ctx.side_pane == 1 && ctx.preview_mode == 2,
         "preview.wrap" => ctx.side_pane == 1 && ctx.preview_wrap,
-        "preview.fit" => ctx.side_pane == 1 && ctx.preview_fit,
+        "preview.fit" => ctx.side_pane == 1 && !ctx.preview_fit,
         "preview.auto-advance" => ctx.side_pane == 1 && ctx.auto_advance,
         "preview.loop" => ctx.side_pane == 1 && ctx.loop_video,
         "preview.autoplay" => ctx.side_pane == 1 && ctx.auto_play,
@@ -1328,15 +1362,28 @@ fn caption_in(ctx: &Ctx, id: &str) -> Option<String> {
     };
     let verb = |v: FileVerb| Some(FileVerbRules::for_verb(v, &snapshot).header);
     match id {
+        // Every file verb says what it would do now, in the words of the rule the right-click menu
+        // shows ("Delete 3 items..."). Spec: MainWindow.Commands Verb().
         "file.open" => verb(FileVerb::Open),
+        "file.run-as-admin" => verb(FileVerb::RunAsAdmin),
         "file.open-new-tab" => verb(FileVerb::OpenInNewTab),
+        "file.open-terminal" => verb(FileVerb::OpenInTerminal),
+        "file.open-vscode" => verb(FileVerb::OpenInVSCode),
         "file.rename" => verb(FileVerb::Rename),
         "file.delete" => verb(FileVerb::Delete),
-        "file.delete-permanently" => verb(FileVerb::DeletePermanently),
+        "file.properties" => verb(FileVerb::Properties),
         "file.compress" => verb(FileVerb::Compress),
         "file.extract-here" => verb(FileVerb::ExtractHere),
+        "file.extract-to" => verb(FileVerb::ExtractTo),
+        "file.unlock-archive" => verb(FileVerb::UnlockArchive),
         "file.checksum" => verb(FileVerb::Checksum),
+        "file.verify-checksums" => verb(FileVerb::VerifyChecksums),
+        "file.compare-files" => verb(FileVerb::CompareFiles),
+        "file.settle-by-content" => verb(FileVerb::SettleByContent),
         "file.bookmark" => verb(FileVerb::Bookmark),
+        "edit.cut" => verb(FileVerb::Cut),
+        "edit.copy" => verb(FileVerb::Copy),
+        "edit.paste" => verb(FileVerb::Paste),
         "edit.copy-path" => verb(FileVerb::CopyPath),
         "edit.copy-name" => verb(FileVerb::CopyName),
         "edit.undo" => ctx.undo.clone(),

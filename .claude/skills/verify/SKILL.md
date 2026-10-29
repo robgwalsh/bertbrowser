@@ -382,6 +382,15 @@ dialog-press <Name>         presses a named button of the open dialog; fails whe
                             Delete: DeleteConfirm / DeleteCancel. Select by pattern: SelectPattern
                             box, SelectPatternOk / SelectPatternCancel
 assert-dialog-text <Name> <text>  a named text of the open dialog contains this
+dialog-tick <Name> on|off   sets a named box of the open dialog or tool window
+dialog-select <Name> <text> selects the first row of a named list whose text contains this
+dialog-commit <Name> <text> types into a named box and presses Enter
+assert-window <kind>|none   which tool windows are open. disk-usage, duplicates, changes, checksum,
+                            compare-files, undo-history, transfer and theme-editor are modeless
+                            windows of their own (parked with the main one), not dialog cards: the
+                            folders stay live behind them. Open one with `live-dialogs on` + `run`
+window-shot <kind> [name]   PNG of an open tool window, caption and all
+window-close <kind>         closes a tool window as its close button would
                             (changes is the "What changed" window: with a run's default settings
                             it shows the recording-off banner — the state every fresh install
                             has — and after `changes-seed` it shows rows. `settings history` is

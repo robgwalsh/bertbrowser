@@ -1,4 +1,5 @@
 #include "views/ops_card.h"
+#include "views/tool_state.h"
 
 #include "gfx/icons.gen.h"
 #include "views/command_ui.h"
@@ -63,6 +64,7 @@ Card make_card(const std::wstring& title, float width, std::unique_ptr<StackPane
     auto* dock = c.root->emplace<DockPanel>();
     dock->style.bg = tok::OverlayBackground;
     auto* head = dock->emplace<Panel>();
+    head->name = "CardHeader";  // a tool window shows the title in its own caption instead
     head->dock = Dock::Top;
     head->pad = 14;
     auto* t = head->emplace<TextBlock>(title);
@@ -605,6 +607,23 @@ std::unique_ptr<Widget> history_dialog(DialogContext& cx) {
         core::Core* core = &main.core();
         const json::Value h = query(*core, "history");
         const json::Value& rows = h["rows"];
+        {
+            bool can_undo = false, can_redo = false;
+            for (size_t i = 0; i < rows.size(); ++i) (rows[i]["isDone"].boolean() ? can_undo : can_redo) = true;
+            auto* head = f::row(body, 8);
+            auto* undo = f::button(*head, L"Undo", [core] {
+                uint64_t op = 0;
+                bb_undo_step(core->app(), 1, &op);
+            }, 90);
+            undo->name = "HistoryUndo";
+            undo->set_enabled(can_undo && h["canStep"].boolean());
+            auto* redo = f::button(*head, L"Redo", [core] {
+                uint64_t op = 0;
+                bb_undo_step(core->app(), -1, &op);
+            }, 90);
+            redo->name = "HistoryRedo";
+            redo->set_enabled(can_redo && h["canStep"].boolean());
+        }
         if (rows.size() == 0) {
             f::note(body, L"Nothing has been done yet that can be taken back. Moves, renames, deletes and the like appear here.");
         } else {
@@ -646,6 +665,22 @@ std::unique_ptr<Widget> history_dialog(DialogContext& cx) {
                 const bool open = expanded->count(id) > 0;
                 auto* sub = f::row(*item, 8);
                 dim(*sub, meta, tok::TextMuted)->flex = 1;
+                const std::wstring reveal = w(r["revealPath"]);
+                if (!reveal.empty()) {
+                    // A folder opens, a file is shown where it is, and one that has gone shows its folder.
+                    // Spec: UndoHistoryWindow.Reveal_Click.
+                    f::button(*sub, L"Show", [&main, reveal] {
+                        std::wstring path = reveal;
+                        DWORD attrs = GetFileAttributesW(path.c_str());
+                        if (attrs == INVALID_FILE_ATTRIBUTES) {
+                            path = path.substr(0, path.find_last_of(L"\\/"));
+                            attrs = GetFileAttributesW(path.c_str());
+                            if (attrs == INVALID_FILE_ATTRIBUTES) return;
+                        }
+                        const bool dir = (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                        try_tool_call(main, "reveal", "{\"path\":" + json_quote(path) + ",\"isDirectory\":" + (dir ? "true" : "false") + "}");
+                    }, 70)->name = "HistoryShow" + std::to_string(id);
+                }
                 f::button(*sub, open ? L"Hide items" : L"Items", [expanded, id, &main] {
                     if (!expanded->erase(id)) expanded->insert(id);
                     if (main.on_undo_changed) main.on_undo_changed();

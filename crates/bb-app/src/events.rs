@@ -48,6 +48,10 @@ pub enum Model {
     Notice = 18,
     /// The delete confirmation's survey measured another item (`ops_query("delete-survey")`).
     DeleteSurvey = 19,
+    /// The duplicate finder's scan moved or finished (`tools("duplicates.model")`).
+    Duplicates = 20,
+    /// The checksum window's reading moved or finished (`tools("checksum.model")`).
+    Checksum = 21,
 }
 
 #[derive(Clone, Debug, PartialEq)]

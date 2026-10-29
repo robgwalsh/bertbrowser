@@ -155,7 +155,10 @@ impl Inner {
                 }
                 inner.refresh_tabs_showing(std::slice::from_ref(&plan.directory));
                 let (ok, text) = match &outcome.failed {
-                    Some(failed) => (false, format!("{}{elevated}", failed.message)),
+                    Some(failed) => {
+                        inner.seams.notice.say(&failed.message, "New");
+                        (false, format!("{}{elevated}", failed.message))
+                    }
                     None => (true, format!("Created '{}'", plan.name)),
                 };
                 inner.set_active_status(text.clone());

@@ -282,6 +282,8 @@ impl Inner {
         Ok(json!({
             "loading": candidates.is_loading,
             "full": candidates.is_full,
+            "empty": candidates.is_empty(),
+            "max": bb_core::columns::ColumnLayoutRules::MAX_COLUMNS,
             "groups": candidates.groups.iter().map(|g| json!({
                 "title": g.title,
                 "items": g.items.iter().map(|i| json!({

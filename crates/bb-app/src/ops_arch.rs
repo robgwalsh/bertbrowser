@@ -26,14 +26,35 @@ use crate::ops_ui::{JobMeta, TransferTracker};
 
 static READER: LazyLock<LibraryArchiveReader> = LazyLock::new(LibraryArchiveReader::default);
 
-/// The passwords given this session, by archive. Never written anywhere.
+/// The passwords given this session, by archive. Never written anywhere. One that turned out wrong
+/// is forgotten, and remembered only as having been refused, so the next ask says so.
 #[derive(Default)]
-pub struct SessionPasswords(Mutex<HashMap<String, String>>);
+pub struct SessionPasswords(
+    Mutex<HashMap<String, String>>,
+    Mutex<std::collections::HashSet<String>>,
+);
 
 impl SessionPasswords {
+    fn key(archive_file: &str) -> String {
+        PathKey::canonicalize(archive_file).unwrap_or_else(|_| archive_file.to_string())
+    }
+
     pub fn remember(&self, archive_file: &str, password: &str) {
-        let key = PathKey::canonicalize(archive_file).unwrap_or_else(|_| archive_file.to_string());
+        let key = Self::key(archive_file);
+        lock(&self.1).remove(&key);
         lock(&self.0).insert(key, password.to_string());
+    }
+
+    /// The archive still reads as locked with the password given: it was wrong.
+    pub fn refused(&self, archive_file: &str) {
+        let key = Self::key(archive_file);
+        if lock(&self.0).remove(&key).is_some() {
+            lock(&self.1).insert(key);
+        }
+    }
+
+    pub fn was_refused(&self, archive_file: &str) -> bool {
+        lock(&self.1).contains(&Self::key(archive_file))
     }
 }
 
@@ -368,20 +389,33 @@ impl Inner {
             Box::new(move |inner, _op, _cancel| {
                 let plan = ShortcutPlanner::local().plan(&sources, &directory);
                 if !plan.has_work() {
-                    let text = "Nothing to make a shortcut to.".to_string();
+                    let text = match plan.problems.first() {
+                        Some(p) => format!("No shortcut created \u{2014} {}", p.message),
+                        None => "Nothing to make a shortcut to".to_string(),
+                    };
                     inner.set_active_status(text.clone());
                     return (false, text);
                 }
                 let writer = crate::shell_link::ShellLinkWriter;
                 let outcome = ShortcutExecutor::local(&writer).execute(&plan);
+                // What was made is selected where it was made. Spec: ShellViewModel.CreateShortcutsAsync.
+                inner.select_many_after_refresh(&directory, outcome.created.clone());
                 inner.refresh_tabs_showing(std::slice::from_ref(&directory));
-                let mut text = format!("Created {} shortcut(s)", outcome.created.len());
-                if let Some(first) = outcome.failed.first() {
-                    text.push_str(&format!(
-                        ", {} failed \u{2014} {}",
-                        outcome.failed.len(),
-                        first.message
-                    ));
+                let noun = if outcome.created.len() == 1 {
+                    "shortcut"
+                } else {
+                    "shortcuts"
+                };
+                let refused = outcome.failed.len() + plan.problems.len();
+                let mut text = format!("Created {} {noun}", outcome.created.len());
+                if refused > 0 {
+                    let first = outcome
+                        .failed
+                        .first()
+                        .map(|f| f.message.clone())
+                        .or_else(|| plan.problems.first().map(|p| p.message.clone()))
+                        .unwrap_or_default();
+                    text.push_str(&format!("; {refused} could not be \u{2014} {first}"));
                 }
                 inner.set_final_status(text.clone());
                 (outcome.failed.is_empty(), text)

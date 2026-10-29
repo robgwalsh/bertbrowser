@@ -1,5 +1,6 @@
 #include "views/tool_dialogs.h"
 
+#include "views/file_pickers.h"
 #include "views/forms.h"
 #include "views/main_view.h"
 #include "views/model.h"
@@ -38,6 +39,7 @@ Card make_card(const std::wstring& title, float width) {
     auto* dock = c.root->emplace<DockPanel>();
     dock->style.bg = tok::OverlayBackground;
     auto* head = dock->emplace<Panel>();
+    head->name = "CardHeader";  // a tool window shows the title in its own caption instead
     head->dock = Dock::Top;
     head->pad = 14;
     auto* t = head->emplace<TextBlock>(title);
@@ -76,6 +78,11 @@ std::wstring parent_of(const std::wstring& path) {
 }
 
 // A card that says why the window could not open.
+std::wstring bb_file_name(const std::wstring& path) {
+    const size_t cut = path.find_last_of(L"\\/");
+    return cut == std::wstring::npos ? path : path.substr(cut + 1);
+}
+
 std::unique_ptr<Panel> refusal(DialogContext& cx, const std::wstring& title, const std::wstring& why) {
     Card c = make_card(title, 460);
     f::text(*c.body, why, tok::TextSecondary, 13.0f)->wrap = true;
@@ -141,6 +148,25 @@ std::unique_ptr<Panel> checksum_card(DialogContext& cx, const json::Value& m) {
         box->set_enabled(!verify);
     }
 
+    // Reading happens off the UI thread; the window says how far it has got, and can be stopped.
+    const bool running = m["running"].boolean();
+    if (running) {
+        const json::Value& p = m["progress"];
+        auto* line = f::row(*c.body, 10);
+        auto* head = f::text(*line, W(p["headline"]), tok::TextSecondary, 13.0f);
+        head->name = "ChecksumProgress";
+        head->flex = 1;
+        f::text(*line, W(p["detail"]), tok::TextMuted, 12.5f);
+        f::button(*line, L"Stop", [cx] {
+            try_tool_call(cx.main, "checksum.stop");
+            cx.main.open_dialog(L"checksum-show");
+        }, 80)->name = "ChecksumStop";
+        auto* bar = c.body->emplace<ProgressBar>();
+        bar->height = 6;
+        bar->set_value(p["fraction"].num());
+    }
+    if (!m["stopped"].is_null()) f::text(*c.body, W(m["stopped"]), tok::WarningForeground, 13.0f)->name = "ChecksumStopped";
+
     if (!verify && m["canCompare"].boolean()) {
         auto* paste = f::row(*c.body, 8);
         f::text(*paste, L"Compare with", tok::TextSecondary, 13.0f)->width = 96;
@@ -191,6 +217,14 @@ std::unique_ptr<Panel> checksum_card(DialogContext& cx, const json::Value& m) {
             auto* digest = mono(*line, W(dg["digest"]), dg["pasteMatch"].boolean() ? tok::TextLink : tok::TextPrimary, 12.0f);
             digest->wrap = true;
             digest->flex = 1;
+            const std::wstring text = W(dg["digest"]);
+            auto* copy = f::button(*line, L"Copy", [cx, text] {
+                if (Widget* any = cx.main.dialog_widget("ChecksumRows")) {
+                    if (any->root()) any->root()->clipboard.write(text);
+                }
+                bb_status_set(cx.main.core().app(), core::s(L"Copied the checksum"));
+            }, 64);
+            copy->name = "CopyDigest:" + row["name"].str() + ":" + dg["algorithm"].str();
         }
     }
 
@@ -218,15 +252,46 @@ std::unique_ptr<Panel> checksum_card(DialogContext& cx, const json::Value& m) {
         }
     }
     if (!verify) {
-        auto* save = add_button(c, L"Save…", [cx, folder, first_algorithm, extension] {
-            if (folder.empty() || first_algorithm.empty()) return;
-            const json::Value r = try_tool_call(cx.main, "checksum.save",
-                                                "{\"path\":" + json_quote(folder + L"\\checksums" + extension) + ",\"algorithm\":" + json_quote(first_algorithm) + "}");
-            tools_ui(cx.main).checksum_note = r["ok"].boolean() ? (r["note"].is_null() ? L"Saved checksums" + extension + L" beside the files." : W(r["note"])) : W(r["error"]);
+        // Windows' Save as, starting beside the files with the first ticked algorithm's extension, rather
+        // than writing a fixed name over whatever is there. Spec: ChecksumWindow.Save_Click.
+        std::vector<std::pair<std::wstring, std::wstring>> filters;
+        unsigned at = 0;
+        std::vector<std::wstring> ids;
+        for (size_t i = 0; i < m["algorithms"].size(); ++i) {
+            const json::Value& a = m["algorithms"][i];
+            filters.push_back({W(a["label"]) + L" (*" + W(a["extension"]) + L")", L"*" + W(a["extension"])});
+            ids.push_back(W(a["id"]));
+            if (W(a["id"]) == first_algorithm) at = static_cast<unsigned>(i);
+        }
+        const std::wstring suggested = m["rows"].size() == 1 ? W(m["rows"][0]["name"]) : bb_file_name(folder);
+        auto* save = add_button(c, L"Save\u2026", [cx, folder, extension, filters, ids, at, suggested] {
+            if (folder.empty() || ids.empty() || !cx.main.shows_dialogs()) return;
+            PickPath pick;
+            pick.title = L"Save checksum file";
+            pick.folder = folder;
+            pick.file_name = suggested + extension;
+            pick.default_ext = extension.size() > 1 ? extension.substr(1) : L"";
+            pick.filters = filters;
+            pick.filter_index = at;
+            ToolWindow* w = cx.main.tool_window(L"checksum");
+            const auto path = pick_save_file(w ? w->window().hwnd() : cx.main.window().hwnd(), pick);
+            if (!path) return;
+            // The algorithm is the one the chosen name's extension says, so a .md5 is written as MD5.
+            std::wstring algorithm = ids[at];
+            const json::Value of = try_tool_call(cx.main, "checksum.algorithm-of", "{\"path\":" + json_quote(*path) + "}");
+            if (!of["algorithm"].is_null()) algorithm = W(of["algorithm"]);
+            const json::Value r = try_tool_call(cx.main, "checksum.save", "{\"path\":" + json_quote(*path) + ",\"algorithm\":" + json_quote(algorithm) + "}");
+            tools_ui(cx.main).checksum_note = r["ok"].boolean() ? (r["note"].is_null() ? L"Saved " + bb_file_name(*path) + L"." : W(r["note"])) : W(r["error"]);
             cx.main.open_dialog(L"checksum-show");
         });
         save->name = "ChecksumSave";
         save->set_enabled(m["canSave"].boolean());
+        auto* again = add_button(c, L"Hash again", [cx] {
+            try_tool_call(cx.main, "checksum.rehash");
+            cx.main.open_dialog(L"checksum-show");
+        }, false, 120);
+        again->name = "ChecksumRehash";
+        again->set_enabled(!running && m["rows"].size() > 0);
     }
     add_button(c, L"Copy all", [anchor, all] {
         if (!all.empty() && anchor->root()) anchor->root()->clipboard.write(all);
@@ -238,13 +303,33 @@ std::unique_ptr<Panel> checksum_card(DialogContext& cx, const json::Value& m) {
 std::unique_ptr<Panel> checksum_start(DialogContext& cx, bool verify) {
     tools_ui(cx.main).checksum_note.clear();
     const std::vector<SelectedRow> files = selected_files(cx.main);
-    if (files.empty()) {
-        return refusal(cx, verify ? L"Verify checksums" : L"Checksum", verify ? L"Select a checksum file (.sha256, .md5, .sfv ...) to verify." : L"Select one or more files to hash.");
+    auto is_checksum_file = [&](const std::wstring& path) {
+        return !try_tool_call(cx.main, "checksum.algorithm-of", "{\"path\":" + json_quote(path) + "}")["algorithm"].is_null();
+    };
+    // A single checksum file opens in Verify: being shown a .sha256's own digest is not what anybody meant.
+    if (!verify && files.size() == 1 && is_checksum_file(files[0].path)) verify = true;
+    std::wstring against;
+    if (verify) {
+        if (files.size() == 1 && is_checksum_file(files[0].path)) {
+            against = files[0].path;
+        } else if (cx.main.shows_dialogs()) {
+            // Verify is not about the selection: it asks which checksum file to check against.
+            // Spec: DirectoryTabView.VerifyChecksums.
+            PickPath pick;
+            pick.title = L"Verify against a checksum file";
+            pick.folder = cx.main.core().tab_text(cx.main.active_tab(), BB_TEXT_PATH);
+            pick.filters = {{L"Checksum files", L"*.sfv;*.md5;*.sha1;*.sha256;*.sha512"}, {L"All files (*.*)", L"*.*"}};
+            ToolWindow* w = cx.main.tool_window(L"checksum");
+            if (const auto chosen = pick_open_file(w ? w->window().hwnd() : cx.main.window().hwnd(), pick)) against = *chosen;
+        }
+        if (against.empty()) return nullptr;  // nothing chosen: no window
+    } else if (files.empty()) {
+        return refusal(cx, L"Checksum", L"Select one or more files to hash.");
     }
     std::wstring error;
     json::Value m;
     if (verify) {
-        m = try_tool_call(cx.main, "checksum.verify", "{\"path\":" + json_quote(files[0].path) + "}", &error);
+        m = try_tool_call(cx.main, "checksum.verify", "{\"path\":" + json_quote(against) + "}", &error);
     } else {
         std::vector<std::wstring> paths;
         for (const SelectedRow& r : files) paths.push_back(r.path);
@@ -405,6 +490,7 @@ std::unique_ptr<Panel> disk_usage_card(DialogContext& cx, const json::Value& m) 
     // folded into one tile that is not a folder.
     std::vector<tw::TreemapTile> tiles;
     std::vector<std::wstring> tile_paths;
+    std::vector<bool> tile_dirs;
     const size_t max_tiles = static_cast<size_t>(m["maxTiles"].num(300));
     double folded_weight = 0;
     size_t folded = 0;
@@ -417,14 +503,22 @@ std::unique_ptr<Panel> disk_usage_card(DialogContext& cx, const json::Value& m) 
             continue;
         }
         tiles.push_back({W(ch["name"]), W(ch["sizeText"]), ch["size"].num(), false});
-        tile_paths.push_back(ch["isDirectory"].boolean() && !ch["synthetic"].boolean() ? W(ch["path"]) : std::wstring());
+        tile_paths.push_back(ch["synthetic"].boolean() ? std::wstring() : W(ch["path"]));
+        tile_dirs.push_back(ch["isDirectory"].boolean());
     }
     if (folded > 0) {
         tiles.push_back({std::to_wstring(folded) + L" smaller items", L"", folded_weight, true});
         tile_paths.push_back({});
+        tile_dirs.push_back(false);
     }
-    map->on_tile = [open_at, tile_paths](size_t i) {
-        if (i < tile_paths.size() && !tile_paths[i].empty()) open_at(tile_paths[i]);
+    MainView* main_view = &cx.main;
+    auto reveal = [main_view](const std::wstring& path, bool dir) {
+        try_tool_call(*main_view, "reveal", "{\"path\":" + json_quote(path) + ",\"isDirectory\":" + (dir ? "true" : "false") + "}");
+    };
+    map->on_tile = [open_at, reveal, tile_paths, tile_dirs](size_t i) {
+        if (i >= tile_paths.size() || tile_paths[i].empty()) return;
+        if (tile_dirs[i]) open_at(tile_paths[i]);
+        else reveal(tile_paths[i], false);
     };
     map->set_tiles(std::move(tiles));
 
@@ -435,6 +529,7 @@ std::unique_ptr<Panel> disk_usage_card(DialogContext& cx, const json::Value& m) 
     list->columns = {{L"Name", 0, true, false, false}, {L"Size", 110, false, true, false}};
     std::vector<tw::TableRow> rows;
     std::vector<std::wstring> row_paths;
+    std::vector<bool> row_dirs;
     for (size_t i = 0; i < children.size(); ++i) {
         const json::Value& ch = children[i];
         tw::TableRow row;
@@ -445,11 +540,14 @@ std::unique_ptr<Panel> disk_usage_card(DialogContext& cx, const json::Value& m) 
         row.bar_slot = true;
         row.muted = ch["unknown"].boolean();
         rows.push_back(std::move(row));
-        row_paths.push_back(ch["isDirectory"].boolean() && !ch["synthetic"].boolean() ? W(ch["path"]) : std::wstring());
+        row_paths.push_back(ch["synthetic"].boolean() ? std::wstring() : W(ch["path"]));
+        row_dirs.push_back(ch["isDirectory"].boolean());
     }
     list->set_rows(std::move(rows));
-    list->on_activate = [open_at, row_paths](int i) {
-        if (i >= 0 && static_cast<size_t>(i) < row_paths.size() && !row_paths[static_cast<size_t>(i)].empty()) open_at(row_paths[static_cast<size_t>(i)]);
+    list->on_activate = [open_at, reveal, row_paths, row_dirs](int i) {
+        if (i < 0 || static_cast<size_t>(i) >= row_paths.size() || row_paths[static_cast<size_t>(i)].empty()) return;
+        if (row_dirs[static_cast<size_t>(i)]) open_at(row_paths[static_cast<size_t>(i)]);
+        else reveal(row_paths[static_cast<size_t>(i)], false);
     };
     auto* foot = left->emplace<Panel>();
     foot->height = 15;
@@ -469,14 +567,19 @@ std::unique_ptr<Panel> disk_usage_card(DialogContext& cx, const json::Value& m) 
     files->show_header = false;
     files->columns = {{L"Name", 0, true, false, false}, {L"Folder", 0, true, false, false}, {L"Size", 84, false, true, false}};
     std::vector<tw::TableRow> frows;
+    std::vector<std::wstring> fpaths;
     for (size_t i = 0; i < m["largest"].size(); ++i) {
         const json::Value& fl = m["largest"][i];
         tw::TableRow row;
         row.cells = {W(fl["name"]), W(fl["relativePath"]), W(fl["sizeText"])};
         frows.push_back(std::move(row));
+        fpaths.push_back(W(fl["path"]));
     }
     files->empty_text = W(m["largestEmpty"]);
     files->set_rows(std::move(frows));
+    files->on_activate = [reveal, fpaths](int i) {
+        if (i >= 0 && static_cast<size_t>(i) < fpaths.size()) reveal(fpaths[static_cast<size_t>(i)], false);
+    };
 
     // The banner explains an answer that cannot be drawn as numbers: an unindexed drive must not read
     // like an empty one. Docked at the bottom in a slot of its own.
@@ -592,7 +695,31 @@ std::unique_ptr<Panel> changes_card(DialogContext& cx, const json::Value& m) {
     }
     table->empty_text = W(m["emptyMessage"]);
     table->set_rows(std::move(rows));
+    // A double-click shows the item where it is, or the folder it was in once it is gone.
+    // Spec: ChangeTimelineWindow.Row_DoubleClick.
+    const json::Value list = m["rows"];
+    MainView* main_view = &cx.main;
+    table->on_activate = [main_view, list](int i) {
+        if (i < 0 || static_cast<size_t>(i) >= list.size()) return;
+        const json::Value& r = list[static_cast<size_t>(i)];
+        const std::wstring path = W(r["path"]), folder = W(r["folder"]);
+        const DWORD attrs = GetFileAttributesW(path.c_str());
+        const bool there = attrs != INVALID_FILE_ATTRIBUTES && !r["deleted"].boolean();
+        const std::wstring target = there ? path : folder;
+        const bool dir = there ? (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0 : true;
+        if (target.empty() || (!there && GetFileAttributesW(folder.c_str()) == INVALID_FILE_ATTRIBUTES)) return;
+        try_tool_call(*main_view, "reveal", "{\"path\":" + json_quote(target) + ",\"isDirectory\":" + (dir ? "true" : "false") + "}");
+    };
     f::text(*c.body, W(m["summary"]), tok::TextSecondary, 13.0f)->name = "ChangesSummary";
+    // The selected row as text: what changed, the path and when.
+    Widget* anchor = c.root.get();
+    add_button(c, L"Copy", [main_view, table, list, anchor] {
+        if (table->selected < 0 || static_cast<size_t>(table->selected) >= list.size()) return;
+        const json::Value& r = list[static_cast<size_t>(table->selected)];
+        const std::wstring text = W(r["kind"]) + L"\t" + W(r["path"]) + L"\t" + W(r["when"]);
+        if (anchor->root()) anchor->root()->clipboard.write(text);
+        bb_status_set(main_view->core().app(), core::s(L"Copied the change"));
+    })->name = "ChangesCopy";
     add_button(c, L"Close", cx.close, true);
     return std::move(c.root);
 }
@@ -616,61 +743,159 @@ std::unique_ptr<Panel> changes_show(DialogContext& cx) {
 
 // ---- the duplicate finder --------------------------------------------------------------------------------
 
+// "What do I have two of?": files that are byte-for-byte identical, grouped, with the copies ticked here handed
+// to the ordinary delete confirmation. The scan is the core's, off the UI thread, and only ever started by Scan:
+// it reads real files. Ticks are this window's, by position, and go whenever the groups are replaced. One copy
+// of every group always stays. Spec: Views/DuplicatesWindow, ViewModels/DuplicatesViewModel.
 std::unique_ptr<Panel> duplicates_card(DialogContext& cx) {
-    Card c = make_card(L"Duplicate files", 820);
-    DuplicatesState& d = cx.main.duplicates();
-    if (!d.has) {
-        f::note(*c.body, L"Nothing has been scanned yet. Find duplicates looks under the folder you are in.");
-        add_button(c, L"Close", cx.close, true);
-        return std::move(c.root);
+    Card c = make_card(L"Duplicate files", 860);
+    MainView& main = cx.main;
+    DuplicatesState& d = main.duplicates();
+    if (!d.has) main.sync_duplicates();
+    const json::Value& m = d.result;
+    const bool scanning = m["scanning"].boolean();
+
+    // Where, and Scan / Stop.
+    auto* top = f::row(*c.body, 10);
+    auto* scan = f::button(*top, scanning ? L"Stop" : L"Scan", [cx, scanning] {
+        if (scanning) {
+            tool_call(cx.main, "duplicates.cancel");
+            return;
+        }
+        const json::Value& now = cx.main.duplicates().result;
+        const std::string root = now["root"].is_null() ? "null" : json_quote(W(now["root"]));
+        tool_call(cx.main, "duplicates.scan", "{\"root\":" + root + "}");
+    }, 90);
+    scan->name = scanning ? "DuplicatesStop" : "DuplicatesScan";
+    scan->primary = !scanning;
+    auto* where = f::text(*top, W(m["rootDisplay"]), tok::TextPrimary, 13.0f);
+    where->name = "DuplicatesRoot";
+    where->flex = 1;
+
+    // The knobs, remembered for next time.
+    auto* knobs = f::row(*c.body, 10);
+    f::text(*knobs, L"Ignore files under", tok::TextSecondary, 13.0f);
+    std::vector<std::wstring> labels;
+    std::vector<int64_t> sizes;
+    int at = 0;
+    for (size_t i = 0; i < m["minSizes"].size(); ++i) {
+        labels.push_back(W(m["minSizes"][i]["label"]));
+        sizes.push_back(m["minSizes"][i]["bytes"].i64());
+        if (sizes.back() == m["minSize"].i64()) at = static_cast<int>(i);
     }
-    const json::Value& groups = d.result["groups"];
-    f::text(*c.body, std::to_wstring(groups.size()) + L" groups — " + format_bytes(static_cast<int64_t>(d.result["wastedBytes"].num())) + L" could be reclaimed.", tok::TextSecondary, 13.0f)
-        ->name = "DuplicatesSummary";
-    auto* keep = f::row(*c.body, 8);
-    f::text(*keep, L"Keep one copy:", tok::TextSecondary, 13.0f);
-    for (const char* strategy : {"newest", "oldest", "shallowest"}) {
-        const std::string s = strategy;
-        std::wstring label = core::wide(s);
-        label[0] = static_cast<wchar_t>(std::towupper(label[0]));
-        f::button(*keep, label, [cx, s] {
-            DuplicatesState& st = cx.main.duplicates();
-            st.ticked.clear();
-            for (size_t g = 0; g < st.result["groups"].size(); ++g) {
-                const size_t kept = static_cast<size_t>(st.result["groups"][g]["keep"][s].i64());
-                for (size_t i = 0; i < st.result["groups"][g]["files"].size(); ++i) {
-                    if (i != kept) st.ticked.insert({g, i});
-                }
-            }
+    auto* floor = f::combo(*knobs, labels, at, 110, [cx, sizes](int i) {
+        if (i < 0 || static_cast<size_t>(i) >= sizes.size()) return;
+        bb_settings_set(cx.main.core().app(), core::s(L"duplicateMinSizeBytes"), core::s(std::to_wstring(sizes[static_cast<size_t>(i)])));
+        cx.main.sync_duplicates();
+    });
+    floor->name = "DuplicatesMinSize";
+    floor->set_enabled(!scanning);
+    auto* skip = f::check(*knobs, L"Skip Windows and Program Files", m["skipSystem"].boolean(), [cx](bool on) {
+        bb_settings_set(cx.main.core().app(), core::s(L"duplicateSkipSystemFolders"), core::s(on ? L"true" : L"false"));
+        cx.main.sync_duplicates();
+    });
+    skip->name = "DuplicatesSkipSystem";
+    skip->set_enabled(!scanning);
+
+    // Why the answer cannot be believed, when it cannot: an unindexed drive must not look like a tidy one.
+    if (!m["message"].str().empty()) {
+        auto* banner = f::row(*c.body, 10);
+        banner->name = "DuplicatesBanner";
+        banner->style.bg = tok::WarningBackground;
+        banner->pad = 8;
+        auto* text = f::text(*banner, W(m["message"]), tok::WarningForeground, 13.0f);
+        text->flex = 1;
+        text->wrap = true;
+        if (m["canRetry"].boolean()) {
+            f::button(*banner, L"Try again", [cx] { bb_index_do(cx.main.core().app(), core::s(L"start")); }, 90);
+        }
+    }
+
+    if (scanning) {
+        const json::Value& p = m["progress"];
+        auto* line = f::text(*c.body, W(p["headline"]) + (p["detail"].str().empty() ? L"" : L"  " + W(p["detail"])), tok::TextSecondary, 13.0f);
+        line->name = "DuplicatesProgress";
+        auto* bar = c.body->emplace<ProgressBar>();
+        bar->height = 6;
+        bar->set_indeterminate(p["indeterminate"].boolean());
+        if (!p["indeterminate"].boolean()) bar->set_value(p["fraction"].num());
+    }
+
+    const json::Value& groups = m["groups"];
+    // The summary counts what is ticked here, so it is said here.
+    size_t ticked = 0;
+    int64_t ticked_bytes = 0;
+    for (const auto& [g, i] : d.ticked) {
+        if (g < groups.size() && i < groups[g]["files"].size()) {
+            ++ticked;
+            ticked_bytes += groups[g]["sizeBytes"].i64();
+        }
+    }
+    auto* picks = f::row(*c.body, 8);
+    if (groups.size() > 0) {
+        std::wstring summary = std::to_wstring(groups.size()) + L" groups \u00b7 " + format_bytes(m["wastedBytes"].i64()) + L" reclaimable";
+        if (ticked > 0) summary += L" \u00b7 " + std::to_wstring(ticked) + L" selected (" + format_bytes(ticked_bytes) + L")";
+        auto* sum = f::text(*picks, summary, tok::TextSecondary, 13.0f);
+        sum->name = "DuplicatesSummary";
+        sum->flex = 1;
+        f::button(*picks, L"None", [cx] {
+            cx.main.duplicates().ticked.clear();
             cx.main.open_dialog(L"duplicates");
-        }, 110)->name = "Keep-" + s;
+        }, 70)->name = "Keep-none";
+        for (const char* strategy : {"oldest", "newest", "shallowest"}) {
+            const std::string st = strategy;
+            std::wstring label = L"Keep " + core::wide(st);
+            f::button(*picks, label, [cx, st] {
+                DuplicatesState& ds = cx.main.duplicates();
+                ds.ticked.clear();
+                const json::Value& gs = ds.result["groups"];
+                for (size_t g = 0; g < gs.size(); ++g) {
+                    const size_t kept = static_cast<size_t>(gs[g]["keep"][st].i64());
+                    for (size_t i = 0; i < gs[g]["files"].size(); ++i) {
+                        if (i != kept) ds.ticked.insert({g, i});
+                    }
+                }
+                cx.main.open_dialog(L"duplicates");
+            }, 130)->name = "Keep-" + st;
+        }
     }
 
     auto* table = c.body->emplace<tw::TableList>();
     table->name = "DuplicateRows";
     table->height = 330;
-    table->columns = {{L"", 34, false, false, false}, {L"Name", 0, true, false, false}, {L"Folder", 0, true, false, false}, {L"Size", 100, false, true, false}};
+    table->empty_text = W(m["emptyMessage"]);
+    table->columns = {{L"", 34, false, false, false},
+                      {L"Name", 0, true, false, false},
+                      {L"Folder", 0, true, false, false},
+                      {L"Modified", 140, false, false, false},
+                      {L"Size", 90, false, true, false}};
     std::vector<tw::TableRow> rows;
     std::vector<std::pair<size_t, size_t>> index;  // per row: group, file (file == npos for a heading)
     for (size_t g = 0; g < groups.size(); ++g) {
         tw::TableRow h;
         h.heading = true;
-        h.cells = {L"", std::to_wstring(groups[g]["files"].size()) + L" copies of " + format_bytes(static_cast<int64_t>(groups[g]["sizeBytes"].num())), L"", L""};
+        const int64_t size = groups[g]["sizeBytes"].i64();
+        const size_t n = groups[g]["files"].size();
+        h.cells = {L"", std::to_wstring(n) + L" copies of " + format_bytes(size), L"",
+                   format_bytes(size * static_cast<int64_t>(n > 0 ? n - 1 : 0)) + L" spare", L""};
         rows.push_back(std::move(h));
         index.push_back({g, static_cast<size_t>(-1)});
-        for (size_t i = 0; i < groups[g]["files"].size(); ++i) {
+        for (size_t i = 0; i < n; ++i) {
             const json::Value& file = groups[g]["files"][i];
-            const bool ticked = d.ticked.count({g, i}) > 0;
+            const bool on = d.ticked.count({g, i}) > 0;
             tw::TableRow row;
-            row.cells = {ticked ? L"☑" : L"☐", W(file["name"]), file["dir"].str().empty() ? std::wstring(L"(this folder)") : W(file["dir"]),
-                         format_bytes(static_cast<int64_t>(file["sizeBytes"].num()))};
-            row.muted = !ticked;
+            std::wstring folder = file["dir"].str().empty() ? std::wstring(L"(this folder)") : W(file["dir"]);
+            if (file["hardlinks"].size() > 0) folder += L"  (also hard-linked elsewhere)";
+            row.cells = {on ? L"\u2611" : L"\u2610", W(file["name"]), folder, format_file_time(file["modified"].i64()), format_bytes(file["sizeBytes"].i64())};
+            row.muted = !on;
             rows.push_back(std::move(row));
             index.push_back({g, i});
         }
     }
     table->set_rows(std::move(rows));
-    table->on_activate = [cx, index](int i) {
+    // A click on the box (or Space) ticks; a double-click shows the copy where it lives, which is how two
+    // identical files are told apart before deciding which to keep.
+    table->on_toggle = [cx, index](int i) {
         if (i < 0 || static_cast<size_t>(i) >= index.size() || index[static_cast<size_t>(i)].second == static_cast<size_t>(-1)) return;
         DuplicatesState& st = cx.main.duplicates();
         const auto key = index[static_cast<size_t>(i)];
@@ -686,10 +911,18 @@ std::unique_ptr<Panel> duplicates_card(DialogContext& cx) {
         }
         cx.main.open_dialog(L"duplicates");
     };
-    const size_t n = d.ticked.size();
-    auto* remove = add_button(c, L"Remove ticked", [cx] { duplicates_ask_remove(cx.main); }, false, 150);
+    table->on_activate = [cx, index](int i) {
+        if (i < 0 || static_cast<size_t>(i) >= index.size() || index[static_cast<size_t>(i)].second == static_cast<size_t>(-1)) return;
+        const auto [g, f] = index[static_cast<size_t>(i)];
+        const json::Value& file = cx.main.duplicates().result["groups"][g]["files"][f];
+        tool_call(cx.main, "reveal", "{\"path\":" + json_quote(W(file["path"])) + ",\"isDirectory\":false}");
+    };
+
+    if (!m["caveat"].str().empty()) f::text(*c.body, W(m["caveat"]), tok::TextSecondary, 13.0f)->name = "DuplicatesCaveat";
+
+    auto* remove = add_button(c, L"Delete selected copies\u2026", [cx] { duplicates_ask_remove(cx.main); }, false, 190);
     remove->name = "RemoveTicked";
-    remove->set_enabled(n > 0);
+    remove->set_enabled(ticked > 0 && !scanning);
     add_button(c, L"Close", cx.close, true);
     return std::move(c.root);
 }
@@ -859,37 +1092,12 @@ std::vector<std::wstring> duplicates_removable(MainView& main) {
     return out;
 }
 
-// What is still duplicated: the removed copies leave their groups, and a group left with one copy is not a
-// group any more. The ticks go with them.
+// What is still duplicated: the removed copies leave their groups, in the core (which the guard reads) and so
+// here. The ticks go with them.
 void duplicates_prune(MainView& main, const std::vector<std::wstring>& removed) {
-    std::set<std::string> gone;
-    for (const auto& p : removed) gone.insert(core::utf8(p));
-    DuplicatesState& d = main.duplicates();
-    for (auto& kv : d.result.o) {
-        if (kv.first != "groups") continue;
-        std::vector<json::Value> kept;
-        double wasted = 0;
-        for (size_t g = 0; g < kv.second.a.size(); ++g) {
-            json::Value group = kv.second.a[g];
-            for (auto& member : group.o) {
-                if (member.first != "files") continue;
-                std::vector<json::Value> left;
-                for (size_t i = 0; i < member.second.a.size(); ++i) {
-                    if (!gone.count(member.second.a[i]["path"].str())) left.push_back(member.second.a[i]);
-                }
-                member.second.a = std::move(left);
-            }
-            if (group["files"].size() >= 2) {
-                wasted += group["sizeBytes"].num() * static_cast<double>(group["files"].size() - 1);
-                kept.push_back(std::move(group));
-            }
-        }
-        kv.second.a = std::move(kept);
-        for (auto& w : d.result.o) {
-            if (w.first == "wastedBytes") w.second.n = wasted;
-        }
-    }
-    d.ticked.clear();
+    tool_call(main, "duplicates.prune", "{\"paths\":" + json_array(removed) + "}");
+    main.duplicates().ticked.clear();
+    main.sync_duplicates();
 }
 
 // The ticked copies, deleted at once - for a scripted run, which stands in for someone who said yes to the

@@ -387,6 +387,9 @@ impl Inner {
                 // A container that wants a password is not a folder Windows closed: say so, and the
                 // host offers to ask for it.
                 let locked = bb_core::archives::ArchiveLockedError::in_error(&e).is_some();
+                if locked && let Some(archive) = self.archive_file_for(&path) {
+                    self.extra.ops.passwords.refused(&archive);
+                }
                 let message =
                     if let Some(locked) = bb_core::archives::ArchiveLockedError::in_error(&e) {
                         locked.message.clone()
@@ -935,6 +938,54 @@ impl Inner {
         }
     }
 
+    /// Marks several paths to be selected in every tab showing `directory` once its listing arrives.
+    pub(crate) fn select_many_after_refresh(&self, directory: &str, paths: Vec<String>) {
+        let Ok(key) = PathKey::canonicalize(directory) else {
+            return;
+        };
+        for (_, cell) in self.all_tabs() {
+            let mut t = lock(&cell);
+            if PathKey::canonicalize(&t.path).is_ok_and(|k| k == key) {
+                t.pending_selection = paths.clone();
+            }
+        }
+    }
+
+    /// Moves any tab sitting in (or below) a renamed folder over to its new path: otherwise it points at
+    /// a name that no longer exists, which a refresh can only turn into an error.
+    /// Spec: ShellViewModel.FollowRenamedFoldersAsync.
+    pub(crate) fn follow_renamed_folders(
+        self: &Arc<Self>,
+        completed: &[bb_core::rename::CompletedRename],
+    ) {
+        for rename in completed.iter().filter(|r| r.is_directory) {
+            let Ok(from) = PathKey::canonicalize(&rename.source_path) else {
+                continue;
+            };
+            for (tab, cell) in self.all_tabs() {
+                let path = lock(&cell).path.clone();
+                let Ok(key) = PathKey::canonicalize(&path) else {
+                    continue;
+                };
+                // Canonicalizing only changes case, so the old path's length indexes the tab's own.
+                let next = if key == from {
+                    Some(rename.final_path.clone())
+                } else if key.starts_with(&from) && key[from.len()..].starts_with('\\') {
+                    Some(format!(
+                        "{}{}",
+                        rename.final_path.trim_end_matches('\\'),
+                        &path[from.len()..]
+                    ))
+                } else {
+                    None
+                };
+                if let Some(next) = next {
+                    let _ = self.navigate(tab, &next);
+                }
+            }
+        }
+    }
+
     /// Goes to the folder a file is in and selects it: "show me where this is".
     pub(crate) fn reveal_file(self: &Arc<Self>, tab: TabId, file: &str) -> AppResult<()> {
         let Some(parent) = parent_path(file) else {
@@ -1058,6 +1109,9 @@ impl Inner {
                     .collect();
             }
         }
+        // Each newly previewed file starts fitted to the pane; actual size is a choice made per file.
+        // Spec: PreviewPaneViewModel (FitImageToPane reset on every load).
+        t.preview_fit = false;
         drop(t);
         self.hub.emit(AppEvent::TabChanged { tab });
         Ok(())
@@ -1164,13 +1218,23 @@ impl Inner {
         // An archive opens as a folder when the setting says so and the container can be read (or only
         // needs its password). One that cannot be read goes to whatever owns the extension, rather than
         // taking the tab inside it to show an empty folder.
-        if bb_core::archives::ArchiveFormats::is_archive_name(&row.name)
+        let inside = crate::commands::ArchivePathCheck::in_archive(&lock(&cell).path);
+        if !inside
+            && bb_core::archives::ArchiveFormats::is_archive_name(&row.name)
             && lock(&self.settings).enter_archives_on_double_click
         {
+            // A name is a claim and only the bytes settle it: one that is not what its name says goes
+            // to whatever owns the extension; anything else (an unsupported kind included) is entered,
+            // and its listing says what is wrong. Spec: DirectoryTabViewModel.EnterArchiveOrLaunchAsync.
             let index = self.fs.read_archive(&row.full_path);
-            if index.ok() || index.failure == bb_core::archives::ArchiveFailure::PasswordRequired {
+            if index.failure != bb_core::archives::ArchiveFailure::Damaged {
                 return self.navigate(tab, &row.full_path);
             }
+        }
+        // Nothing inside a container has a path another program can open.
+        if inside {
+            self.set_status(tab, format!("Extract {} to open it.", row.name));
+            return Ok(());
         }
         match self.seams.launcher.launch(&row.full_path, false) {
             Ok(()) => Ok(()),

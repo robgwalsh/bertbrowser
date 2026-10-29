@@ -76,6 +76,36 @@ void FolderTreeProvider::load(uint64_t node) const {
     filter(nodes_[node]);
 }
 
+bool FolderTreeProvider::reload(uint64_t node) {
+    auto it = nodes_.find(node);
+    if (it == nodes_.end() || !it->second.loaded) return false;
+    // What the node had, by path, so a folder still there keeps its id.
+    std::unordered_map<std::wstring, uint64_t> had;
+    for (const uint64_t kid : it->second.kids) {
+        std::wstring key = nodes_[kid].path;
+        CharUpperBuffW(key.data(), static_cast<DWORD>(key.size()));
+        had[key] = kid;
+    }
+    const std::vector<uint64_t> before = it->second.kids;
+    it->second.loaded = false;
+    it->second.kids.clear();
+    load(node);
+    // load() made fresh nodes for everything; put the old ids back where the folder is the same one.
+    Node& n = nodes_[node];
+    for (uint64_t& kid : n.kids) {
+        std::wstring key = nodes_[kid].path;
+        CharUpperBuffW(key.data(), static_cast<DWORD>(key.size()));
+        const auto old = had.find(key);
+        if (old == had.end()) continue;
+        nodes_[old->second].label = nodes_[kid].label;
+        nodes_[old->second].attributes = nodes_[kid].attributes;
+        nodes_.erase(kid);
+        kid = old->second;
+    }
+    filter(n);
+    return n.kids != before;
+}
+
 size_t FolderTreeProvider::child_count(uint64_t node) const {
     load(node);
     return nodes_[node].shown.size();

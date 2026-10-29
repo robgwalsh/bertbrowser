@@ -36,6 +36,7 @@ mod palette;
 mod panes_api;
 mod pool;
 mod preview;
+mod properties;
 mod requests;
 mod rows;
 mod saved;
@@ -51,7 +52,9 @@ mod tools;
 mod tools_changes;
 mod tools_checksum;
 mod tools_disk;
+mod tools_duplicates;
 mod tools_filecompare;
+mod undo_host;
 
 pub use api::TabInfo;
 pub use api_ext::parse_aspect;

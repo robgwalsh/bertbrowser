@@ -14,6 +14,20 @@ fn call(f: &Fixture, verb: &str, args: Value) -> Value {
         .app
         .tools(verb, &args.to_string())
         .unwrap_or_else(|e| panic!("{verb}: {e}"));
+    // A checksum verb that reads files starts a run off the thread: wait for it, as the window does
+    // for its event, and answer with the model it left.
+    if matches!(
+        verb,
+        "checksum.hash"
+            | "checksum.verify"
+            | "checksum.algorithms"
+            | "checksum.expected"
+            | "checksum.rehash"
+    ) {
+        f.settle();
+        let model = f.app.tools("checksum.model", "{}").unwrap();
+        return serde_json::from_str(&model).unwrap();
+    }
     serde_json::from_str(&text).unwrap()
 }
 
@@ -701,4 +715,47 @@ fn status_of(f: &Fixture, tab: TabId, name: &str) -> String {
 fn an_unknown_verb_is_refused() {
     let f = Fixture::new();
     assert!(call_err(&f, "nonsense", json!({})).contains("unknown tool verb"));
+}
+
+// ---- the duplicate finder ----
+
+#[test]
+fn a_duplicate_scan_runs_off_the_ui_thread_and_never_lets_every_copy_go() {
+    let f = Fixture::new();
+    std::fs::create_dir_all(f.path("twins")).unwrap();
+    for name in ["twins/a.bin", "twins/b.bin", "twins/c.bin"] {
+        std::fs::write(f.path(name), vec![7u8; 4096]).unwrap();
+    }
+    let root = f.path("twins");
+    let loaded = call(&f, "duplicates.load", json!({ "root": root }));
+    assert_eq!(false, loaded["hasScanned"]);
+    assert_eq!(
+        "Press Scan to look for identical files.",
+        loaded["emptyMessage"]
+    );
+    call(&f, "duplicates.scan", json!({ "root": root, "minSize": 1 }));
+    f.settle();
+    let m = call(&f, "duplicates.model", json!({}));
+    assert_eq!(false, m["scanning"]);
+    let groups = m["groups"].as_array().unwrap();
+    assert_eq!(1, groups.len(), "{m}");
+    let paths: Vec<String> = groups[0]["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["path"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(3, paths.len());
+
+    // Every copy ticked: the group contributes nothing.
+    let all = call(&f, "duplicates.removable", json!({ "paths": paths }));
+    assert!(all["paths"].as_array().unwrap().is_empty());
+    let two = call(&f, "duplicates.removable", json!({ "paths": paths[..2] }));
+    assert_eq!(2, two["paths"].as_array().unwrap().len());
+
+    // Once two have gone the group is gone, and the last copy cannot be offered up again.
+    let after = call(&f, "duplicates.prune", json!({ "paths": paths[..2] }));
+    assert!(after["groups"].as_array().unwrap().is_empty());
+    let last = call(&f, "duplicates.removable", json!({ "paths": paths[2..] }));
+    assert!(last["paths"].as_array().unwrap().is_empty());
 }

@@ -56,6 +56,8 @@ add_library(bbviews STATIC
   views/tool_widgets.cpp
   views/tool_state.cpp
   views/tool_dialogs.cpp
+  views/tool_window.cpp
+  views/file_pickers.cpp
   views/tool_banner.cpp
   views/main_view.cpp
   views/ops_dialogs.cpp

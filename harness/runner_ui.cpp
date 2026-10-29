@@ -13,7 +13,9 @@
 #include "views/command_ui.h"
 #include "views/ops_menus.h"
 #include "views/dialogs.h"
+#include "views/forms.h"
 #include "views/json.h"
+#include "views/tool_state.h"
 #include "views/model.h"
 
 namespace bbh {
@@ -1280,7 +1282,13 @@ void Runner::install_ui() {
             throw FormatError("'" + to_utf8(kind) + "' is not a dialog. Try: " + join(bb::views::dialog_kinds(), ", ") + ".");
         }
         s_.settle(250);
-        auto bitmap = s_.view().render_dialog(k);
+        // Checksums read off the thread: building the window starts the run, and the photograph is of
+        // what it arrives at.
+        if (k == L"checksum" || k == L"checksum-verify") {
+            s_.view().render_dialog(k);
+            s_.settle(250);
+        }
+        auto bitmap = s_.view().render_dialog(k == L"checksum" || k == L"checksum-verify" ? std::wstring(L"checksum-show") : k);
         if (!bitmap) throw AssertionError("the " + to_utf8(k) + " dialog could not be rendered.");
         write_shot(*bitmap, name.empty() ? L"dialog-" + k : name);
     };
@@ -1315,6 +1323,76 @@ void Runner::install_ui() {
         if (button->on_click) button->on_click();
         s_.settle();
     };
+    // assert-window <kind> | none -- which tool windows are open (disk-usage, duplicates, changes, checksum,
+    // compare-files, undo-history, transfer, theme-editor). They are windows of their own, so the folders
+    // stay live while they are up.
+    verbs_[L"assert-window"] = [this](const std::wstring& r) {
+        const std::wstring want = lower(require(r, "assert-window"));
+        s_.settle();
+        const auto open = s_.view().open_tool_windows();
+        std::string list;
+        for (const auto& k : open) list += (list.empty() ? "" : ", ") + to_utf8(k);
+        if (want == L"none") {
+            if (!open.empty()) throw AssertionError("expected no tool window; open: " + list + ".");
+            return;
+        }
+        if (!s_.view().tool_window(want)) throw AssertionError("the " + to_utf8(want) + " window is not open" + (list.empty() ? "." : "; open: " + list + "."));
+    };
+    // window-shot <kind> [name] -- PNG of an open tool window, caption and all.
+    verbs_[L"window-shot"] = [this](const std::wstring& r) {
+        auto [kind, name] = split_first(require(r, "window-shot"));
+        s_.settle(250);
+        bb::views::ToolWindow* w = s_.view().tool_window(lower(kind));
+        if (!w) throw AssertionError("the " + to_utf8(kind) + " window is not open.");
+        auto& win = w->window();
+        win.root().invalidate_all();
+        win.render();
+        if (!win.bitmap()) throw AssertionError("the " + to_utf8(kind) + " window is not drawing into a bitmap.");
+        write_shot(*win.bitmap(), name.empty() ? L"window-" + lower(kind) : name);
+    };
+    // window-close <kind> -- closes a tool window as its caption's close button would.
+    verbs_[L"window-close"] = [this](const std::wstring& r) {
+        const std::wstring kind = lower(require(r, "window-close"));
+        if (!s_.view().tool_window(kind)) throw AssertionError("the " + to_utf8(kind) + " window is not open.");
+        PostMessageW(s_.view().tool_window(kind)->window().hwnd(), WM_CLOSE, 0, 0);
+        s_.settle();
+    };
+    // dialog-tick <Name> on|off -- sets a named box of the open dialog (or tool window), as a click would.
+    verbs_[L"dialog-tick"] = [this](const std::wstring& r) {
+        auto [name, state] = split_first(require(r, "dialog-tick"));
+        auto* box = dynamic_cast<bb::ui::CheckBox*>(s_.view().dialog_widget(to_utf8(name)));
+        if (!box) throw AssertionError("The open dialog has no box named '" + to_utf8(name) + "'.");
+        if (!box->flags.enabled) throw AssertionError("'" + to_utf8(name) + "' is disabled.");
+        const bool on = on_off(state, "dialog-tick");
+        box->set_checked(on);
+        if (box->on_toggle) box->on_toggle(on);
+        s_.settle();
+    };
+    // dialog-select <Name> <text> -- selects the first row of a named list in the open dialog or tool window whose
+    // text contains this, as a click would.
+    verbs_[L"dialog-select"] = [this](const std::wstring& r) {
+        auto [name, want] = split_first(require(r, "dialog-select"));
+        auto* list = dynamic_cast<bb::views::forms::ItemList*>(s_.view().dialog_widget(to_utf8(name)));
+        if (!list) throw AssertionError("The open dialog has no list named '" + to_utf8(name) + "'.");
+        for (size_t i = 0; i < list->entries.size(); ++i) {
+            const auto& e = list->entries[i];
+            if (e.heading || !core::icontains(e.text, want)) continue;
+            list->select(static_cast<int>(i), true);
+            s_.settle();
+            return;
+        }
+        throw AssertionError("No row of '" + to_utf8(name) + "' says '" + to_utf8(want) + "'.");
+    };
+    // dialog-commit <Name> <text> -- types into a named box and presses Enter.
+    verbs_[L"dialog-commit"] = [this](const std::wstring& r) {
+        auto [name, text] = split_first(require(r, "dialog-commit"));
+        auto* edit = dynamic_cast<bb::ui::Edit*>(s_.view().dialog_widget(to_utf8(name)));
+        if (!edit) throw AssertionError("The open dialog has no box named '" + to_utf8(name) + "'.");
+        edit->set_text(text);
+        if (edit->on_changed) edit->on_changed(edit->text());
+        if (edit->on_commit) edit->on_commit();
+        s_.settle();
+    };
     // assert-dialog-text <Name> <text> -- the named text of the open dialog contains this.
     verbs_[L"assert-dialog-text"] = [this](const std::wstring& r) {
         auto [name, want] = split_first(require(r, "assert-dialog-text"));
@@ -1327,12 +1405,20 @@ void Runner::install_ui() {
         const fs::path path = r.empty() ? fs::path(s_.core().tab_text(tab(), BB_TEXT_PATH)) : sandbox_.resolve(r);
         std::error_code ec;
         if (!fs::is_directory(path, ec)) throw AssertionError("There is no folder at '" + to_utf8(path.wstring()) + "' to search.");
-        BbOwnedStr o{};
-        core::check(bb_duplicates_scan(s_.core().app(), core::s(path.wstring()), 1, &o), "duplicates");
+        // The window's own way in - pointed at the folder, then Scan - with the floor at one byte so the
+        // sandbox's small files count. The scan runs off the UI thread; settle waits for it.
+        const std::wstring root = core::wide(bb::views::json_quote(path.wstring()));
+        auto call = [this](const wchar_t* verb, const std::wstring& args) {
+            BbOwnedStr o{};
+            core::check(bb_tools(s_.core().app(), core::s(verb), core::s(args), &o), "duplicates");
+            bb_str_free(o);
+        };
+        call(L"duplicates.load", L"{\"root\":" + root + L"}");
+        call(L"duplicates.scan", L"{\"root\":" + root + L",\"minSize\":1}");
+        s_.settle();
+        s_.view().sync_duplicates();
         auto& d = s_.view().duplicates();
-        d.result = bb::json::parse(to_utf8(core::take(o)));
-        d.has = true;
-        d.ticked.clear();
+        if (d.result["scanning"].boolean()) throw AssertionError("the duplicate scan did not finish.");
         if (o_.verbose) say("# " + std::to_string(d.result["groups"].size()) + " groups, " + std::to_string(static_cast<int64_t>(d.result["wastedBytes"].num())) + " bytes reclaimable");
     };
     verbs_[L"duplicates-keep"] = [this](const std::wstring& r) {

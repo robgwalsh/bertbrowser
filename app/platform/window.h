@@ -27,6 +27,9 @@ struct WindowOptions {
     bool activate = true;       // show() takes the foreground (never when parked)
     unsigned dpi_override = 0;  // 0 = the monitor's; the harness pins 96 so captures do not depend on the desktop
     bool quit_on_destroy = false;  // WM_DESTROY posts WM_QUIT (the main window)
+    // A window of the app's own beside the main one (a tool window): stays above its owner, minimizes
+    // with it, and has no taskbar button of its own.
+    HWND owner = nullptr;
 };
 
 class Window {
@@ -46,6 +49,10 @@ public:
     const WindowOptions& options() const { return options_; }
 
     void show();
+    // Makes the client area this size (DIPs), keeping the window where it is.
+    void set_client_size_dip(float w, float h);
+    // Puts the window over the middle of `other`, kept on that monitor's work area. Not when parked.
+    void center_over(HWND other);
     // Lay out if asked and paint the dirty region now. Recovers from a device loss.
     HRESULT render();
     // Frame colours for DWM (dark mode, border, caption, caption text); unsupported attributes are ignored.

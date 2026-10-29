@@ -112,6 +112,9 @@ public:
     std::wstring text;
     bool checked() const { return checked_; }
     void set_checked(bool v);
+    // Neither on nor off: a selection whose items disagree. Drawn as a dash; a click settles it on.
+    bool indeterminate() const { return indeterminate_; }
+    void set_indeterminate(bool v);
     std::function<void(bool)> on_toggle;
 
     Size measure(Size avail) override;
@@ -129,6 +132,7 @@ public:
 private:
     void toggle();
     bool checked_ = false;
+    bool indeterminate_ = false;
     bool pressed_ = false;
 };
 

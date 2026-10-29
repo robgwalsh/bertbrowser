@@ -7,6 +7,8 @@
 
 #include <functional>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace bb::views::ops {
 
@@ -56,5 +58,17 @@ std::unique_ptr<ui::Widget> rename_dialog(DialogContext& cx, bool expanded);
 std::unique_ptr<ui::Widget> compress_dialog(DialogContext& cx);
 std::unique_ptr<ui::Widget> extract_dialog(DialogContext& cx);
 std::unique_ptr<ui::Widget> password_dialog(DialogContext& cx);
+
+// What an extract is about: the archive the tab is inside (with the selection in it, or everything), or the one
+// archive selected in an ordinary folder. No archive: nothing to extract.
+struct ExtractSubject {
+    std::wstring archive;
+    std::vector<std::wstring> names;
+    bool inside = false;
+};
+ExtractSubject extract_subject(MainView& main);
+// Where Extract here puts it (beside, or a new folder named after it). Spec: ExtractRules.DestinationFor.
+std::wstring extract_destination(MainView& main, const std::wstring& archive);
+void run_extract(MainView& main, const ExtractSubject& s, const std::wstring& destination, bool skip);
 
 }  // namespace bb::views::ops

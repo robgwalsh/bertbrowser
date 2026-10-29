@@ -223,13 +223,21 @@ CheckBox::CheckBox(std::wstring label) : text(std::move(label)) {
 }
 
 void CheckBox::set_checked(bool v) {
-    if (v == checked_) return;
+    if (v == checked_ && !indeterminate_) return;
     checked_ = v;
+    indeterminate_ = false;
+    invalidate();
+}
+
+void CheckBox::set_indeterminate(bool v) {
+    if (v == indeterminate_) return;
+    indeterminate_ = v;
     invalidate();
 }
 
 void CheckBox::toggle() {
-    checked_ = !checked_;
+    checked_ = indeterminate_ ? true : !checked_;
+    indeterminate_ = false;
     invalidate();
     if (on_toggle) on_toggle(checked_);
 }
@@ -242,9 +250,12 @@ Size CheckBox::measure(Size) {
 void CheckBox::paint(PaintContext& pc) {
     Widget::paint(pc);
     const Rect box = Rect::xywh(bounds.l, bounds.t + (bounds.height() - kBox) / 2, kBox, kBox);
-    pc.fill(box, checked_ ? tok::AccentBackground : (hovered() ? tok::ButtonSecondaryHoverBackground : tok::ButtonSecondaryBackground));
+    const bool filled = checked_ || indeterminate_;
+    pc.fill(box, filled ? tok::AccentBackground : (hovered() ? tok::ButtonSecondaryHoverBackground : tok::ButtonSecondaryBackground));
     pc.stroke(box, focused() ? tok::BorderFocus : tok::BorderDefault);
-    if (checked_) {
+    if (indeterminate_) {
+        pc.line({box.l + 4.0f, box.t + 8.5f}, {box.l + 12.0f, box.t + 8.5f}, tok::AccentForeground, 1.8f);
+    } else if (checked_) {
         pc.line({box.l + 3.5f, box.t + 8.5f}, {box.l + 6.5f, box.t + 11.5f}, tok::AccentForeground, 1.6f);
         pc.line({box.l + 6.5f, box.t + 11.5f}, {box.l + 12.5f, box.t + 4.5f}, tok::AccentForeground, 1.6f);
     }

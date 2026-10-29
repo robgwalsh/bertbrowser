@@ -83,6 +83,10 @@ impl Inner {
         )
     }
 
+    pub(crate) fn search_name_taken(&self, name: &str) -> bool {
+        self.searches_repo().exists(name).unwrap_or(false)
+    }
+
     /// Saves (or replaces, by name) a search. `scope_path` is the pinned folder for a `Folder` scope.
     pub(crate) fn search_save(
         &self,

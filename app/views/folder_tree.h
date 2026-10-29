@@ -28,6 +28,19 @@ public:
     // Hidden folders are left out unless asked for, and dimmed when they are shown. Every node found is kept either way, so
     // a change re-filters in place: ids, expansion and selection survive it. True when it changed.
     bool set_show_hidden(bool on);
+    // Reads the sub-folders of every loaded node `keep` says yes to again, after something may have made,
+    // renamed, moved or deleted one. A folder still there keeps its id (so expansion and selection survive);
+    // one that has gone is dropped. True when anything changed.
+    template <class Keep>
+    bool reload_where(Keep keep) {
+        bool changed = false;
+        std::vector<uint64_t> ids;
+        for (const auto& kv : nodes_) {
+            if (kv.first != 0 && kv.second.loaded && keep(kv.first)) ids.push_back(kv.first);
+        }
+        for (const uint64_t id : ids) changed |= reload(id);
+        return changed;
+    }
 
 private:
     struct Node {
@@ -38,6 +51,7 @@ private:
         std::vector<uint64_t> shown;  // the ones `show_hidden_` lets through
     };
     void load(uint64_t node) const;
+    bool reload(uint64_t node);
     uint64_t add(Node n) const;
     void filter(Node& n) const;
 

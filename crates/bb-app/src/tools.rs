@@ -20,11 +20,13 @@ use crate::tools_filecompare::FileCompareSession;
 
 #[derive(Default)]
 pub(crate) struct ToolsState {
-    checksum: Mutex<Option<ChecksumSession>>,
+    pub(crate) checksum: Mutex<Option<ChecksumSession>>,
     filecompare: Mutex<Option<FileCompareSession>>,
     changes: Mutex<Option<ChangesSession>>,
     /// The last duplicate scan's groups, by path: what "never every copy" is checked against.
     pub(crate) duplicate_groups: Mutex<Vec<Vec<String>>>,
+    /// The duplicate finder's scan and what it found.
+    pub(crate) duplicates: Mutex<crate::tools_duplicates::DuplicatesSession>,
 }
 
 fn invalid(text: impl Into<String>) -> AppError {
@@ -69,30 +71,150 @@ impl App {
             "duplicates.removable" => {
                 json!({ "paths": self.duplicates_removable(&strings(&args["paths"])) })
             }
+            // `{root?, minSize?, skipSystem?}`: a new scan, off the UI thread; no root is this PC.
+            "duplicates.scan" => {
+                inner.duplicates_scan(
+                    args["root"].as_str().map(str::to_string),
+                    args["minSize"].as_i64(),
+                    args["skipSystem"].as_bool(),
+                )?;
+                inner.duplicates_model()
+            }
+            "duplicates.cancel" => {
+                inner.duplicates_cancel();
+                inner.duplicates_model()
+            }
+            "duplicates.model" => inner.duplicates_model(),
+            // ---- saving a search ----
+            // `{}` -> `{name, query, scope: current|pc, folder}` the Save search dialog starts from: the
+            // tab's search, a whole-PC one scoped to this PC, and the folder to pin it to (null inside an
+            // archive or with no folder). Spec: SavedSearchesViewModel.SeedFor.
+            "search.save-seed" => {
+                let tab = lock(&inner.shell).active_tab_id().ok_or(AppError::Stale)?;
+                let cell = inner.tab(tab)?;
+                let (query, path, global) = {
+                    let t = lock(&cell);
+                    (
+                        t.active_search_text().to_string(),
+                        t.path.clone(),
+                        t.is_global_search(),
+                    )
+                };
+                let pinnable = (!path.is_empty()
+                    && !crate::commands::ArchivePathCheck::in_archive(&path))
+                .then_some(path);
+                json!({
+                    "name": bb_core::rules::SavedSearchRules::default_name(&query),
+                    "query": query,
+                    "scope": if global { "pc" } else { "current" },
+                    "folder": pinnable,
+                })
+            }
+            // `{name, query, scope, folder?}` -> `{problem, replacing}`, checked as it is typed. A new
+            // search may take a name already saved: it replaces that one, and the button says so.
+            "search.save-check" => {
+                let (name, query, scope, folder) = saved_search_args(&args);
+                let replacing = !name.trim().is_empty() && inner.search_name_taken(name.trim());
+                json!({
+                    "problem": inner.search_problem(name, query, scope, folder, Some(name.trim())),
+                    "replacing": replacing,
+                })
+            }
+            "search.save" => {
+                let (name, query, scope, folder) = saved_search_args(&args);
+                inner.search_save(name, query.trim(), scope, folder)?;
+                json!({ "ok": true })
+            }
+            // ---- properties ----
+            // `{paths}`: what the Properties dialog shows for these items.
+            "properties.model" => inner.properties_json(&strings(&args["paths"]), None),
+            // `{paths, readOnly?, hidden?}`: set the attributes; a flag left out is not touched.
+            "properties.apply" => inner.properties_apply(
+                &strings(&args["paths"]),
+                args["readOnly"].as_bool(),
+                args["hidden"].as_bool(),
+            ),
+            // `{root?}`: the window opened on this folder (none: this PC), nothing scanned yet.
+            "duplicates.load" => {
+                inner.duplicates_load(args["root"].as_str().map(str::to_string));
+                inner.duplicates_model()
+            }
+            // `{path, isDirectory}`: what a tool window's double-click does - a folder opens in a tab
+            // beside this one, a file is shown selected where it lives. Spec: MainWindow.RevealFromDiskUsage.
+            "reveal" => {
+                let path = args["path"].as_str().unwrap_or("").to_string();
+                if path.is_empty() {
+                    return Err(invalid("reveal needs a path"));
+                }
+                let (pane, tab) = {
+                    let shell = lock(&inner.shell);
+                    (shell.active_pane, shell.active_tab_id())
+                };
+                if args["isDirectory"].as_bool().unwrap_or(false) {
+                    inner.open_tab(pane, &path, false)?;
+                } else if let Some(tab) = tab {
+                    inner.reveal_file(tab, &path)?;
+                }
+                json!({})
+            }
+            // `{paths}` the delete took: out of the groups the window and the guard both read.
+            "duplicates.prune" => {
+                inner.duplicates_prune(&strings(&args["paths"]));
+                inner.duplicates_model()
+            }
             // ---- checksums ----
             "checksum.hash" => {
                 let selected = match args.get("algorithms").filter(|a| a.is_array()) {
                     Some(list) => crate::tools_checksum::parse_algorithms(&strings(list).join(",")),
                     None => parse_algorithms(&lock(&inner.settings).checksum_algorithms),
                 };
-                let session = ChecksumSession::hash(&strings(&args["paths"]), selected);
-                let model = session.model();
-                *lock(&state.checksum) = Some(session);
-                model
+                // The old window's reading, if any, is not this one's.
+                if let Some(old) = lock(&state.checksum).as_mut() {
+                    old.stop();
+                }
+                *lock(&state.checksum) =
+                    Some(ChecksumSession::hash(&strings(&args["paths"]), selected));
+                inner.checksum_kick();
+                with_checksum(self, |_| {})?
             }
             "checksum.verify" => {
                 let selected = parse_algorithms(&lock(&inner.settings).checksum_algorithms);
-                let session = ChecksumSession::verify(need(&args, "path")?, selected);
-                let model = session.model();
-                *lock(&state.checksum) = Some(session);
-                model
+                if let Some(old) = lock(&state.checksum).as_mut() {
+                    old.stop();
+                }
+                *lock(&state.checksum) =
+                    Some(ChecksumSession::verify(need(&args, "path")?, selected));
+                inner.checksum_kick();
+                with_checksum(self, |_| {})?
             }
-            "checksum.algorithms" => with_checksum(self, |s| {
-                s.set_algorithms(parse_algorithms(&strings(&args["algorithms"]).join(",")));
-            })?,
-            "checksum.expected" => with_checksum(self, |s| {
-                s.set_expected(args["text"].as_str().unwrap_or(""))
-            })?,
+            "checksum.algorithms" => {
+                with_checksum(self, |s| {
+                    s.set_algorithms(parse_algorithms(&strings(&args["algorithms"]).join(",")));
+                })?;
+                inner.checksum_kick();
+                with_checksum(self, |_| {})?
+            }
+            "checksum.expected" => {
+                with_checksum(self, |s| {
+                    s.set_expected(args["text"].as_str().unwrap_or(""))
+                })?;
+                inner.checksum_kick();
+                with_checksum(self, |_| {})?
+            }
+            // Read everything again, as the window's Hash button does.
+            "checksum.rehash" => {
+                with_checksum(self, |s| s.run(true))?;
+                inner.checksum_kick();
+                with_checksum(self, |_| {})?
+            }
+            "checksum.stop" => with_checksum(self, |s| s.stop())?,
+            // `{path}` -> `{algorithm}`: what a checksum file's name says it holds, or null for a
+            // name that is not one. A single one selected opens Verify rather than being hashed.
+            "checksum.algorithm-of" => {
+                let a =
+                    bb_core::checksums::ChecksumAlgorithms::from_extension(args["path"].as_str());
+                json!({ "algorithm": a.map(|a| a.name()) })
+            }
             "checksum.model" => with_checksum(self, |_| {})?,
             "checksum.save" => {
                 let algorithm = algorithm(&args["algorithm"])?;
@@ -154,7 +276,15 @@ impl App {
             // ---- the change timeline ----
             "changes.open" => {
                 let hidden = lock(&inner.settings).show_hidden_items;
-                let scope = args["path"].as_str().map(str::to_string);
+                // Inside an archive the timeline watches the archive's own folder: the log records
+                // real paths, and an entry is not one. Spec: ShellViewModel.OpenChanges.
+                let scope =
+                    bb_core::changes::ChangeLogRules::scope_for(args["path"].as_str(), |p| {
+                        std::path::Path::new(p).is_file()
+                            && bb_core::archives::ArchiveFormats::is_archive_name(
+                                bb_paths::file_name(p),
+                            )
+                    });
                 *lock(&state.changes) = Some(ChangesSession::new(scope, hidden));
                 with_changes(self, |_| {})?
             }
@@ -208,6 +338,25 @@ fn ticked_keys(args: &Value) -> Option<HashSet<String>> {
     args.get("ticked")
         .filter(|t| t.is_array())
         .map(|t| strings(t).into_iter().collect())
+}
+
+/// A saved search as the dialog states it: the folder only counts for a pinned scope.
+fn saved_search_args(args: &Value) -> (&str, &str, bb_core::data::SavedSearchScope, Option<&str>) {
+    use bb_core::data::SavedSearchScope;
+    let scope = match args["scope"].as_str().unwrap_or("") {
+        "folder" => SavedSearchScope::Folder,
+        "pc" => SavedSearchScope::ThisPc,
+        _ => SavedSearchScope::CurrentFolder,
+    };
+    let folder = (scope == SavedSearchScope::Folder)
+        .then(|| args["folder"].as_str())
+        .flatten();
+    (
+        args["name"].as_str().unwrap_or(""),
+        args["query"].as_str().unwrap_or(""),
+        scope,
+        folder,
+    )
 }
 
 fn with_checksum(app: &App, change: impl FnOnce(&mut ChecksumSession)) -> AppResult<Value> {

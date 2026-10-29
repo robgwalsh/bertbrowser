@@ -48,6 +48,9 @@ public:
     std::wstring empty_text;  // drawn in the body when there are no rows
     std::function<void(int)> on_select;
     std::function<void(int)> on_activate;
+    // A row with a tick box in its first column: a click there, or Space, toggles it rather than activating
+    // the row, which a double-click still does.
+    std::function<void(int)> on_toggle;
 
     void set_rows(std::vector<TableRow> r);
     Size measure(Size avail) override;

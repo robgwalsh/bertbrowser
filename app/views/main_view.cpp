@@ -6,6 +6,7 @@
 #include "views/folder_tree.h"
 #include "views/media_pane.h"
 #include "views/ops.h"
+#include "views/ops_card.h"
 #include "views/ops_menus.h"
 #include "views/property_host.h"
 #include "views/shell_props.h"
@@ -930,6 +931,8 @@ MainView::MainView(core::Core& core, platform::Window& window)
 }
 
 MainView::~MainView() {
+    // The tool windows' trees call into the core as they go, so they close while it is still alive.
+    tools_.clear();
     RemoveClipboardFormatListener(window_.hwnd());
     window_.on_clipboard_changed = nullptr;
     bb_app_set_event_sink(core_.app(), nullptr, nullptr);
@@ -1043,6 +1046,11 @@ void MainView::handle(const BbEvent& e) {
                 }
                 cut_paste_op_ = 0;
             }
+            // An operation may have made, renamed, moved or deleted a folder: the open branches of the tree read
+            // their sub-folders again. Spec: ShellViewModel.RefreshAfterCreateAsync (the tree's half).
+            if (tree_ && tree_provider_ && tree_provider_->reload_where([this](uint64_t id) { return tree_->is_expanded(id); })) {
+                tree_->refresh();
+            }
             [[fallthrough]];
         case BB_EVT_UNDO_CHANGED:
         case BB_EVT_BUSY_CHANGED:
@@ -1065,6 +1073,8 @@ void MainView::handle(const BbEvent& e) {
             if (e.a == 17) sync_questions(L"confirm");
             if (e.a == 18) sync_questions(L"notice");
             if (e.a == 19 && on_delete_survey) on_delete_survey();
+            if (e.a == 20) sync_duplicates();
+            if (e.a == 21 && tool_window(L"checksum")) open_dialog(L"checksum-show");
             if (e.a == 13) {
                 for (auto& kv : by_tab_) {
                     if (kv.second->metadata()) kv.second->metadata()->refresh();
@@ -1123,6 +1133,7 @@ void MainView::apply_theme() {
     window_.set_frame_colors(luma < 128, rgb(gfx::tok::TitleBarBorder), rgb(gfx::tok::TitleBarBackground),
                              rgb(gfx::tok::TitleBarForeground));
     window_.root().invalidate_all();
+    for (auto& kv : tools_) style_tool_window(*kv.second);
 }
 
 TabView* MainView::tab_view(uint64_t tab) {
@@ -1274,11 +1285,6 @@ bool MainView::host_command(const std::wstring& id) {
         if (TabView* tv = active_view()) tv->begin_path_edit();
         return true;
     }
-    if (id == L"app.settings") {
-        bb_settings_page_open(core_.app(), core::s(L""));
-        sync_overlays();
-        return true;
-    }
     // The side pane's own: the core only decides whether they may run (a pane is open, something plays).
     if (id == L"preview.fit-width" || id == L"preview.play" || id == L"preview.play-next" || id == L"preview.fullscreen") {
         TabView* tv = active_view();
@@ -1315,7 +1321,7 @@ bool MainView::host_command(const std::wstring& id) {
     static const std::pair<const wchar_t*, const wchar_t*> dialogs[] = {
         {L"file.new-folder", L"new-folder"}, {L"file.new-file", L"new-file"},       {L"file.rename", L"rename"},
         {L"file.delete", L"delete"},         {L"file.delete-permanently", L"delete-permanently"},
-        {L"file.properties", L"properties"}, {L"file.compress", L"compress"},       {L"file.extract-here", L"extract"},
+        {L"file.properties", L"properties"}, {L"file.compress", L"compress"},
         {L"file.extract-to", L"extract"},    {L"file.unlock-archive", L"archive-password"},
         {L"app.about", L"about"},            {L"search.syntax", L"search-syntax"},  {L"search.save", L"saved-search"},
         {L"select.pattern", L"select-pattern"}, {L"select.unpattern", L"deselect-pattern"},
@@ -1328,7 +1334,14 @@ bool MainView::host_command(const std::wstring& id) {
         open_dialog(kind);
         return true;
     }
-    if (id == L"tools.duplicates" && !headless_dialogs_) {
+    // Extract here asks nothing: it goes where ExtractRules says, keeping both on a clash. Spec: ExtractAsync(askWhere: false).
+    if (id == L"file.extract-here") {
+        const ops::ExtractSubject subject = ops::extract_subject(*this);
+        if (subject.archive.empty()) return false;
+        ops::run_extract(*this, subject, ops::extract_destination(*this, subject.archive), false);
+        return true;
+    }
+    if (id == L"tools.duplicates" && shows_dialogs()) {
         open_duplicates(core_.tab_text(active_tab_, BB_TEXT_PATH));
         return true;
     }
@@ -1461,13 +1474,24 @@ bool MainView::transfer_to_chosen(bool move) {
 }
 
 void MainView::open_duplicates(const std::wstring& folder) {
-    BbOwnedStr o{};
-    if (bb_duplicates_scan(core_.app(), core::s(folder), 1024 * 1024, &o) == BB_OK) {
-        duplicates_.result = json::parse(core::utf8(core::take(o)));
-        duplicates_.has = true;
-        duplicates_.ticked.clear();
-    }
+    // Pointed at the folder (none: this PC) and waiting for Scan: a scan reads real files, so it is asked for.
+    const std::string root = folder.empty() ? "null" : json_quote(folder);
+    try_tool_call(*this, "duplicates.load", "{\"root\":" + root + "}");
+    duplicates_.ticked.clear();
+    sync_duplicates();
     open_dialog(L"duplicates");
+}
+
+void MainView::sync_duplicates() {
+    std::wstring error;
+    json::Value m = try_tool_call(*this, "duplicates.model", "", &error);
+    if (m.is_null()) return;
+    const int64_t version = m["version"].i64();
+    if (version != duplicates_.version) duplicates_.ticked.clear();
+    duplicates_.version = version;
+    duplicates_.result = std::move(m);
+    duplicates_.has = true;
+    if (tool_window(L"duplicates")) open_dialog(L"duplicates");
 }
 
 // "Copy as path" quotes every path, as Explorer's does, one per line; a name is bare text. A scripted run
@@ -1521,7 +1545,7 @@ void MainView::tree_verb(const std::wstring& id, const std::wstring& folder) {
         tools_ui(*this).disk_root = folder;
         open_dialog(L"disk-usage-at");
     } else if (id == L"tools.duplicates") {
-        if (!headless_dialogs_) open_duplicates(folder);
+        if (shows_dialogs()) open_duplicates(folder);
     } else if (id == L"file.open-new-tab") {
         uint64_t tab = 0;
         bb_tab_open(app, 0, core::s(folder), true, &tab);
@@ -1712,8 +1736,73 @@ void MainView::sync_overlays() {
     if (sidebar_) sidebar_->sync();
 }
 
+namespace {
+
+// One window per tool: disk usage pointed somewhere else, or checksums verifying instead of hashing, is the
+// same window showing something else.
+std::wstring tool_key(const std::wstring& kind) {
+    if (kind == L"disk-usage-at") return L"disk-usage";
+    if (kind == L"checksum-verify" || kind == L"checksum-show") return L"checksum";
+    // A window's "-show" kind rebuilds it from the model it already has.
+    if (kind.size() > 5 && kind.compare(kind.size() - 5, 5, L"-show") == 0) return kind.substr(0, kind.size() - 5);
+    return kind;
+}
+
+}  // namespace
+
+bool MainView::is_tool_window(const std::wstring& kind) {
+    static const wchar_t* const kinds[] = {L"disk-usage",   L"disk-usage-at", L"duplicates", L"changes",      L"checksum",
+                                           L"checksum-verify", L"checksum-show", L"compare-files", L"compare-files-show",
+                                           L"changes-show", L"undo-history", L"transfer",
+                                           L"theme-editor"};
+    for (const wchar_t* k : kinds) {
+        if (kind == k) return true;
+    }
+    return false;
+}
+
+ToolWindow* MainView::tool_window(const std::wstring& kind) {
+    const auto it = tools_.find(tool_key(kind));
+    return it == tools_.end() ? nullptr : it->second.get();
+}
+
+void MainView::close_tool(const std::wstring& kind) { tools_.erase(tool_key(kind)); }
+
+std::vector<std::wstring> MainView::open_tool_windows() const {
+    std::vector<std::wstring> out;
+    for (const auto& kv : tools_) out.push_back(kv.first);
+    return out;
+}
+
+void MainView::style_tool_window(ToolWindow& w) {
+    const std::vector<uint32_t> argb = core_.palette();
+    if (argb.size() != gfx::tok::Count) return;
+    auto rgb = [&](gfx::Token t) {
+        const uint32_t v = argb[t];
+        return RGB((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
+    };
+    const uint32_t bg = argb[gfx::tok::WindowBackground];
+    const int luma = (((bg >> 16) & 0xFF) * 299 + ((bg >> 8) & 0xFF) * 587 + (bg & 0xFF) * 114) / 1000;
+    w.apply_theme(luma < 128, rgb(gfx::tok::TitleBarBorder), rgb(gfx::tok::TitleBarBackground), rgb(gfx::tok::TitleBarForeground));
+}
+
 void MainView::open_dialog(const std::wstring& kind) {
     if (!shows_dialogs() || !dialog_exists(kind)) return;
+    if (is_tool_window(kind)) {
+        const std::wstring key = tool_key(kind);
+        auto card = build_dialog(kind, DialogContext{*this, [this, key] { defer([this, key] { close_tool(key); }); }});
+        if (!card) return;
+        if (ToolWindow* open = tool_window(key)) {
+            open->replace(std::move(card));
+            open->focus();
+            return;
+        }
+        auto w = std::make_unique<ToolWindow>(*this, key, std::move(card));
+        ToolWindow* raw = w.get();
+        tools_[key] = std::move(w);
+        raw->show();
+        return;
+    }
     close_dialog();
     auto card = build_dialog(kind, DialogContext{*this, [this] { close_dialog(); }});
     if (!card) return;
@@ -1721,6 +1810,20 @@ void MainView::open_dialog(const std::wstring& kind) {
     dialog_kind_ = kind;
     bb_ui_set_dialog_open(core_.app(), true);
     dialogs_->show(std::move(card));
+}
+
+void MainView::open_new_file(const std::wstring& extension, const std::wstring& label, const std::wstring& folder) {
+    new_file_template_ = {extension, label};
+    dialog_folder_ = folder;
+    open_dialog(L"new-file");
+    dialog_folder_.clear();
+    new_file_template_ = {};
+}
+
+void MainView::reopen_on(const std::wstring& kind, std::vector<std::wstring> paths) {
+    dialog_paths_ = std::move(paths);
+    open_dialog(kind);
+    dialog_paths_.clear();
 }
 
 void MainView::ask_delete(std::vector<std::wstring> paths, std::function<void(bool)> after) {
@@ -1732,7 +1835,13 @@ void MainView::ask_delete(std::vector<std::wstring> paths, std::function<void(bo
 }
 
 Widget* MainView::dialog_widget(std::string_view name) {
-    return dialog_open_ && dialogs_ ? dialogs_->find(name) : nullptr;
+    if (dialog_open_ && dialogs_) {
+        if (Widget* w = dialogs_->find(name)) return w;
+    }
+    for (auto& kv : tools_) {
+        if (Widget* w = kv.second->find(name)) return w;
+    }
+    return nullptr;
 }
 
 bool MainView::focus_file_list() {
@@ -1789,6 +1898,8 @@ void MainView::sync_transfer() {
     transfer_cancel_->set_enabled(queue_["canCancel"].boolean());
     browser_->request_layout();
     if (on_transfer_changed) on_transfer_changed();
+    // The queue window goes when there is nothing left to show in it. Spec: MainWindow (TransferProgress null).
+    if (!active && tool_window(L"transfer")) defer([this] { close_tool(L"transfer"); });
 }
 
 std::wstring MainView::transfer_text() const {

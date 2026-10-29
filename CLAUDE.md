@@ -175,6 +175,15 @@ behavior - this table only says where.
   input is posted, never synthesised. Dialogs are shown modelessly and captured. A `shot` that is one
   flat colour fails. The harness asserts every hazard seam is faked after create (launcher, folder
   handler, elevation, prompts, index) - keep that when adding a seam (`app/seams.rs`).
+- **Tool windows are windows, dialogs are cards.** Disk usage, duplicates, changes, checksums, file
+  compare, history, transfer and the theme editor are modeless owned `platform::Window`s
+  (`MainView::is_tool_window`, `views/tool_window.cpp`) and never set "a dialog is up", so the
+  folders stay live; everything else is a modal card in the `DialogLayer`. A run reports dialogs
+  instead of opening them unless `live-dialogs on`.
+- **The product's confirm and notice seams park a worker on the window** (`Questions`,
+  `Model::Confirm`/`Notice`, the `confirm`/`notice` dialogs). Ask from a worker thread only: a
+  question on the UI thread could never be answered, and `UiPrompts` refuses it. An undo walk can park
+  on an elevation offer while holding the history, so what the UI thread reads of it is `try_lock`.
 
 ## Cross-cutting gotchas
 

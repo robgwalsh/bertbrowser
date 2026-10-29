@@ -30,6 +30,17 @@ pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+/// The lock if nobody holds it, None while someone does. For what the UI thread reads of the undo
+/// history: an undo walk holds it throughout, and one parked on the user's answer to an elevation
+/// offer would otherwise hold the thread that has to show the question.
+pub(crate) fn try_lock<T>(m: &Mutex<T>) -> Option<MutexGuard<'_, T>> {
+    match m.try_lock() {
+        Ok(g) => Some(g),
+        Err(std::sync::TryLockError::Poisoned(p)) => Some(p.into_inner()),
+        Err(std::sync::TryLockError::WouldBlock) => None,
+    }
+}
+
 /// Never reports a watcher: a search then takes the stale-while-revalidate path, exactly what a
 /// first search in a fresh session does.
 pub(crate) struct NoWatchers;
@@ -542,9 +553,12 @@ impl Inner {
         init: impl FnOnce(&mut TabData),
     ) -> AppResult<TabId> {
         let id = TabId(self.new_id());
-        let data = {
+        let (data, default_columns) = {
             let settings = lock(&self.settings);
-            TabData::new(id, pane, &settings)
+            (
+                TabData::new(id, pane, &settings),
+                settings.file_list_columns.clone(),
+            )
         };
         let cell: TabCell = Arc::new(Mutex::new(data));
         {
@@ -556,15 +570,21 @@ impl Inner {
                 .active
                 .and_then(|t| shell.tabs.get(&t).cloned());
             if let Some(template) = template {
-                // A new tab starts as its neighbour was arranged: sort, columns, side pane.
+                // A new tab starts as its neighbour was arranged: sort, the flat view, columns it
+                // arranged itself (otherwise it keeps following the default), the side pane. Not the
+                // preview's mode: a new tab's preview starts Auto. Spec: PaneFactory.CloneTab.
                 let t = lock(&template);
                 let mut mine = lock(&cell);
                 mine.sort_by = t.sort_by.clone();
                 mine.sort_desc = t.sort_desc;
+                mine.is_flat_view = t.is_flat_view;
+                // A tab whose arrangement is the saved default is following it, whatever its flag
+                // says, and so is the copy.
+                if t.columns_customized && t.columns != default_columns {
+                    mine.columns = t.columns.clone();
+                    mine.columns_customized = true;
+                }
                 mine.side_pane = t.side_pane;
-                mine.preview_mode = t.preview_mode;
-                mine.preview_wrap = t.preview_wrap;
-                mine.preview_fit = t.preview_fit;
             }
             init(&mut lock(&cell));
             shell.tabs.insert(id, cell);

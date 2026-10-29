@@ -146,8 +146,18 @@ impl Inner {
         self.seams.elevation.offer(&model.to_string())
     }
 
+    /// The History window's model. While a walk holds the history (and may be waiting on the user),
+    /// the last one is answered again rather than blocking the window that has to ask the question.
     pub(crate) fn history_json(&self) -> Value {
-        let undo = lock(&self.undo);
+        let Some(undo) = crate::app::try_lock(&self.undo) else {
+            return lock(&self.extra.history_cache).clone();
+        };
+        let model = self.history_json_of(&undo);
+        *lock(&self.extra.history_cache) = model.clone();
+        model
+    }
+
+    fn history_json_of(&self, undo: &bb_core::undo::UndoStack) -> Value {
         let now = FileTime::now();
         let cursor = undo.cursor();
         let entries = undo.entries();
@@ -763,6 +773,65 @@ impl App {
                     })).collect::<Vec<_>>(),
                 })
             }
+            // `{name, directory, suffix}` -> `{problem, path}`: what Compress would create, checked as
+            // the name is typed (a name Windows refuses, or a file already there, is refused here).
+            // Spec: CreateArchiveDialog.Update.
+            "compress-check" => {
+                let a = parse(arg)?;
+                let name = text(&a["name"]).trim().to_string();
+                let suffix = text(&a["suffix"]);
+                let file = if name.to_lowercase().ends_with(&suffix.to_lowercase()) {
+                    name.clone()
+                } else {
+                    format!("{name}{suffix}")
+                };
+                let path = format!("{}\\{file}", text(&a["directory"]).trim_end_matches('\\'));
+                let problem = if name.is_empty() {
+                    Some("Give the archive a name.".to_string())
+                } else {
+                    bb_core::rename::RenamePattern::validate(&name)
+                }
+                .or_else(|| {
+                    std::path::Path::new(&path)
+                        .exists()
+                        .then(|| format!("{file} is already there."))
+                });
+                json!({ "problem": problem, "path": path })
+            }
+            // `{archive}` -> `{destination}`: where Extract here puts it - beside the archive when it
+            // carries its own top folder, else in a new folder named after it. Spec: ExtractRules.
+            "extract-destination" => {
+                let a = parse(arg)?;
+                let archive = text(&a["archive"]);
+                let index = bb_core::archives::ArchiveBrowser::read_archive(&*inner.fs, archive);
+                json!({
+                    "destination": bb_core::archives::ExtractRules::destination_for(
+                        &index,
+                        archive,
+                        |p| std::path::Path::new(p).is_dir(),
+                        |p| std::path::Path::new(p).is_file(),
+                    ),
+                })
+            }
+            // `{destination}` -> `{problem}`. Spec: ExtractDialog.Validate.
+            "extract-check" => {
+                let a = parse(arg)?;
+                let path = text(&a["destination"]).trim();
+                let qualified = path.starts_with("\\\\")
+                    || (path.len() >= 3
+                        && path.as_bytes()[1] == b':'
+                        && matches!(path.as_bytes()[2], b'\\' | b'/'));
+                let problem = if path.is_empty() {
+                    Some("Choose a folder to extract into.")
+                } else if !qualified {
+                    Some("That is not a full path.")
+                } else if std::path::Path::new(path).is_file() {
+                    Some("That is a file, not a folder.")
+                } else {
+                    None
+                };
+                json!({ "problem": problem })
+            }
             "archive-of" => match inner.archive_file_for(arg) {
                 Some(file) => {
                     let index = bb_core::archives::ArchiveBrowser::read_archive(&*inner.fs, &file);
@@ -770,6 +839,7 @@ impl App {
                         "archive": file,
                         "entry": crate::ops_arch::archive_of(arg).map(|a| a.entry_path).unwrap_or_default(),
                         "locked": index.failure == bb_core::archives::ArchiveFailure::PasswordRequired,
+                        "refused": inner.extra.ops.passwords.was_refused(&file),
                     })
                 }
                 None => Value::Null,

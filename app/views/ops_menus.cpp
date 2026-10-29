@@ -115,10 +115,36 @@ MenuItems tree_items(MainView& main, const Spec& s, const std::wstring& subject)
     return MenuItems{std::move(group)};
 }
 
+// The file types the New submenu offers after New file, each a New file dialog with the type's extension and
+// name (Settings > New items). Spec: Views/NewItemMenu.
+void add_new_file_types(MainView& main, MenuItems& items, const std::wstring& folder, bool enabled) {
+    if (items.empty() || !items.front().is_submenu()) return;
+    const json::Value types = try_model([&](BbOwnedStr* o) { return bb_new_file_types(main.core().app(), o); });
+    if (types.size() == 0) return;
+    MenuItems& sub = items.front().sub;
+    sub.push_back(MenuItem::separator());
+    for (size_t i = 0; i < types.size(); ++i) {
+        const std::wstring label = core::wide(types[i]["label"].str());
+        const std::wstring ext = core::wide(types[i]["extension"].str());
+        std::wstring caption;
+        for (const wchar_t ch : label) caption += ch == L'&' ? std::wstring(L"&&") : std::wstring(1, ch);
+        MenuItem m = MenuItem::make(caption, {}, ext);
+        m.icon = icon_for("NewFile");
+        m.enabled = enabled;
+        MainView* mv = &main;
+        m.on_invoke = [mv, ext, label, folder] { mv->open_new_file(ext, label, folder); };
+        sub.push_back(std::move(m));
+    }
+}
+
 MenuItems built_in_items(MainView& main, const Spec& s, MenuKind kind, const std::wstring& subject) {
     const bool files = kind == MenuKind::Files, background = kind == MenuKind::Background, tree = kind == MenuKind::Tree;
     if ((background && !s.background) || (tree && !s.tree)) return {};
-    if (tree) return tree_items(main, s, subject);
+    if (tree) {
+        MenuItems items = tree_items(main, s, subject);
+        if (std::string_view(s.id) == "new") add_new_file_types(main, items, subject, true);
+        return items;
+    }
     const bool always = files ? s.files_always : s.background_always;
     std::vector<BarRow> rows;
     for (const char* c : s.commands) {
@@ -139,7 +165,11 @@ MenuItems built_in_items(MainView& main, const Spec& s, MenuKind kind, const std
         rows.clear();
         rows.push_back(std::move(m));
     }
-    return build_menu_items(main.menu_env(), rows);
+    MenuItems items = build_menu_items(main.menu_env(), rows);
+    if (std::string_view(s.id) == "new") {
+        add_new_file_types(main, items, L"", command_row(main.core(), "file.new-file").enabled);
+    }
+    return items;
 }
 
 MenuItem from_entry(const ShellEntry& e, const std::shared_ptr<ShellMenuSession>& session, MainView& main) {

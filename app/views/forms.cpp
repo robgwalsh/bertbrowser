@@ -90,6 +90,14 @@ void ItemList::set_entries(std::vector<ListEntry> e, int select_row) {
     invalidate();
 }
 
+void ItemList::update_entry(int i, ListEntry e) {
+    if (i < 0 || i >= static_cast<int>(entries.size())) return;
+    entries[static_cast<size_t>(i)] = std::move(e);
+    icon_geo_[static_cast<size_t>(i)] = nullptr;
+    icon_gen_[static_cast<size_t>(i)] = 0;
+    invalidate();
+}
+
 void ItemList::select(int i, bool notify) {
     if (i < -1 || i >= static_cast<int>(entries.size())) return;
     selected = i;

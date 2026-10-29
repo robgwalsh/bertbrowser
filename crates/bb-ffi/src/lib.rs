@@ -387,6 +387,12 @@ pub extern "C" fn bb_version() -> BbStr {
     BbStr::of(VERSION.get_or_init(|| env!("CARGO_PKG_VERSION").encode_utf16().collect()))
 }
 
+/// Whether this build is on the unstable release channel, decided from its own version string.
+#[unsafe(no_mangle)]
+pub extern "C" fn bb_is_unstable() -> bool {
+    bb_core::updates::ReleaseChannel::is_unstable(Some(env!("CARGO_PKG_VERSION")))
+}
+
 /// The message behind the last non-OK status on this thread. The view is valid until the next
 /// `bb_*` call on the same thread.
 #[unsafe(no_mangle)]

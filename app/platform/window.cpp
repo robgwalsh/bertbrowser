@@ -61,7 +61,7 @@ Window::Window(gfx::Resources& res, const WindowOptions& options) : res_(res), o
     const int h = MulDiv(options_.height_dip, static_cast<int>(guess), 96);
     const int x = out_of_sight ? -32000 : CW_USEDEFAULT;
     const int y = out_of_sight ? -32000 : CW_USEDEFAULT;
-    hwnd_ = CreateWindowExW(ex, kClassName, options_.title.c_str(), WS_OVERLAPPEDWINDOW, x, y, w, h, nullptr, nullptr,
+    hwnd_ = CreateWindowExW(ex, kClassName, options_.title.c_str(), WS_OVERLAPPEDWINDOW, x, y, w, h, options_.owner, nullptr,
                             GetModuleHandleW(nullptr), this);
     if (!hwnd_) {
         return;
@@ -89,14 +89,35 @@ Window::Window(gfx::Resources& res, const WindowOptions& options) : res_(res), o
         set_frame_colors(true, RGB(0x3c, 0x3c, 0x3c), RGB(0x1e, 0x1e, 0x1e), RGB(0xe0, 0xe0, 0xe0));
     }
     // Make the client area exactly the asked size in pixels (the frame differs by chrome mode and DPI).
-    const int want_w = MulDiv(options_.width_dip, static_cast<int>(dpi_), 96);
-    const int want_h = MulDiv(options_.height_dip, static_cast<int>(dpi_), 96);
+    set_client_size_dip(static_cast<float>(options_.width_dip), static_cast<float>(options_.height_dip));
+    create_surface();
+}
+
+void Window::set_client_size_dip(float w_dip, float h_dip) {
+    const int want_w = static_cast<int>(std::lround(w_dip * static_cast<float>(dpi_) / 96.0f));
+    const int want_h = static_cast<int>(std::lround(h_dip * static_cast<float>(dpi_) / 96.0f));
     RECT win{}, client{};
     GetWindowRect(hwnd_, &win);
     GetClientRect(hwnd_, &client);
     SetWindowPos(hwnd_, nullptr, 0, 0, (win.right - win.left) + (want_w - client.right),
                  (win.bottom - win.top) + (want_h - client.bottom), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-    create_surface();
+}
+
+void Window::center_over(HWND other) {
+    if (options_.parked || options_.offscreen || !other) return;
+    RECT owner{}, me{};
+    GetWindowRect(other, &owner);
+    GetWindowRect(hwnd_, &me);
+    const int w = me.right - me.left, h = me.bottom - me.top;
+    int x = owner.left + ((owner.right - owner.left) - w) / 2;
+    int y = owner.top + std::max(0L, ((owner.bottom - owner.top) - h) / 3);
+    MONITORINFO mi{sizeof(mi)};
+    if (GetMonitorInfoW(MonitorFromWindow(other, MONITOR_DEFAULTTONEAREST), &mi)) {
+        const RECT& wa = mi.rcWork;
+        x = std::clamp(x, static_cast<int>(wa.left), std::max(static_cast<int>(wa.left), static_cast<int>(wa.right) - w));
+        y = std::clamp(y, static_cast<int>(wa.top), std::max(static_cast<int>(wa.top), static_cast<int>(wa.bottom) - h));
+    }
+    SetWindowPos(hwnd_, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 Window::~Window() {

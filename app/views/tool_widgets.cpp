@@ -148,7 +148,12 @@ bool TableList::on_mouse_down(const MouseEvent& e) {
         selected = i;
         invalidate();
         if (on_select) on_select(i);
-        if (e.clicks >= 2 && on_activate) on_activate(i);
+        const float tick_w = columns.empty() ? 0.0f : columns.front().width;
+        if (on_toggle && e.clicks == 1 && e.pt.x < bounds.l + tick_w) {
+            on_toggle(i);
+        } else if (e.clicks >= 2 && on_activate) {
+            on_activate(i);
+        }
     }
     return true;
 }
@@ -188,8 +193,13 @@ bool TableList::on_key_down(const KeyEvent& e) {
     switch (e.vk) {
         case VK_DOWN: move(1); return true;
         case VK_UP: move(-1); return true;
-        case VK_RETURN:
         case VK_SPACE:
+            if (selected >= 0 && on_toggle) {
+                on_toggle(selected);
+                return true;
+            }
+            [[fallthrough]];
+        case VK_RETURN:
             if (selected >= 0 && on_activate) on_activate(selected);
             return true;
         default: return false;

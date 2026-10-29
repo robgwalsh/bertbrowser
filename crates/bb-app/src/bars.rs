@@ -342,11 +342,12 @@ impl Inner {
             CommandBarLists::CUSTOM_COMMANDS => self.custom_command_ids().len(),
             CommandBarLists::COMMAND_BARS => self.bars_saved().len(),
             CommandBarLists::DRIVES => self.drive_list().len(),
-            CommandBarLists::UNDO_STEPS => lock(&self.undo).cursor(),
-            CommandBarLists::REDO_STEPS => {
-                let undo = lock(&self.undo);
-                undo.entries().len() - undo.cursor()
+            // Nothing to list while a walk holds the history; it says what it did when it finishes.
+            CommandBarLists::UNDO_STEPS => {
+                crate::app::try_lock(&self.undo).map_or(0, |u| u.cursor())
             }
+            CommandBarLists::REDO_STEPS => crate::app::try_lock(&self.undo)
+                .map_or(0, |undo| undo.entries().len() - undo.cursor()),
             _ => 0,
         }
     }
@@ -407,7 +408,9 @@ impl Inner {
                 .map(|(root, label)| json!({ "id": root, "name": root, "detail": label }))
                 .collect(),
             CommandBarLists::UNDO_STEPS => {
-                let undo = lock(&self.undo);
+                let Some(undo) = crate::app::try_lock(&self.undo) else {
+                    return Vec::new();
+                };
                 let cursor = undo.cursor();
                 undo.entries()[..cursor]
                     .iter()
@@ -417,7 +420,9 @@ impl Inner {
                     .collect()
             }
             CommandBarLists::REDO_STEPS => {
-                let undo = lock(&self.undo);
+                let Some(undo) = crate::app::try_lock(&self.undo) else {
+                    return Vec::new();
+                };
                 let cursor = undo.cursor();
                 undo.entries()[cursor..]
                     .iter()

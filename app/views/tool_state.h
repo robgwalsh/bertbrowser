@@ -22,6 +22,11 @@ struct ToolsUi {
     std::wstring checksum_note;
     // The file compare shows as text even though the pair does not look like text.
     bool compare_force_text = false;
+    // The theme editor: the colour being edited, what the list is filtered to, and what it last said.
+    std::string theme_token;
+    std::wstring theme_search;
+    bool theme_all = false;
+    std::wstring theme_status;
 };
 
 ToolsUi& tools_ui(MainView& main);

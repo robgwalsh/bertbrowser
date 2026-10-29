@@ -313,6 +313,9 @@ extern "C" {
 // The core version, as a view into static storage.
 struct BbStr bb_version(void);
 
+// Whether this build is on the unstable release channel, decided from its own version string.
+bool bb_is_unstable(void);
+
 // The message behind the last non-OK status on this thread. The view is valid until the next
 // `bb_*` call on the same thread.
 void bb_last_error(struct BbStr *out);

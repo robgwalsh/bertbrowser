@@ -2,6 +2,7 @@
 // the archive password. Each one plans through the core (`rename-preview`, `compress-defaults`) and carries
 // out through the same exports the harness uses, so what the picture shows is what the verb will do.
 #include "views/ops_card.h"
+#include "views/file_pickers.h"
 
 #include <filesystem>
 
@@ -241,10 +242,38 @@ std::unique_ptr<Widget> rename_dialog(DialogContext& cx, bool expanded) {
             bb_op_rename(core.app(), views.data(), static_cast<uint32_t>(views.size()), core::s(st->name->text()), &op);
         }
         bb_settings_set(core.app(), core::s(L"advancedRenameExpanded"), core::s(st->expanded ? L"true" : L"false"));
+        if (st->expanded) {
+            // Kept without its text. Spec: RenameDialog.SaveOptions.
+            const std::string kept = rule_json(*st);
+            const std::string keep_knobs = "{\"template\":\"\",\"find\":\"\",\"replace\":\"\"" + kept.substr(kept.find(",\"useRegex\""));
+            bb_settings_set(core.app(), core::s(L"advancedRename"), core::s(core::wide(keep_knobs)));
+        }
         close();
     }, true);
     st->rename->name = "RenameOk";
 
+    // The knobs from last time, not the text: a regular expression from last week waiting behind F2 is a trap,
+    // but setting the counter again every time is a nuisance. Spec: RenameDialog.LoadOptions.
+    {
+        BbOwnedStr ar{};
+        if (bb_settings_get(main.core().app(), core::s(L"advancedRename"), &ar) == BB_OK) {
+            json::Value v;
+            try {
+                v = json::parse(core::utf8(core::take(ar)));
+            } catch (const std::exception&) {
+            }
+            if (v.is_object()) {
+                static const char* scopes[] = {"Stem", "Extension", "WholeName"};
+                static const char* cases[] = {"AsIs", "Lower", "Upper", "Title", "Sentence"};
+                st->regex->set_checked(v["useRegex"].boolean());
+                st->match_case->set_checked(v["matchCase"].boolean());
+                for (int i = 0; i < 3; ++i) if (v["scope"].str() == scopes[i]) st->scope->set_selected(i);
+                for (int i = 0; i < 5; ++i) if (v["case"].str() == cases[i]) st->casebox->set_selected(i);
+                if (!v["counterStart"].is_null()) st->start->set_text(std::to_wstring(v["counterStart"].i64()));
+                if (!v["counterStep"].is_null()) st->step->set_text(std::to_wstring(v["counterStep"].i64()));
+            }
+        }
+    }
     st->ready = true;
     set_prompt(*st);
     if (expanded || remembered) set_expanded(*st, true);
@@ -269,11 +298,18 @@ std::unique_ptr<Widget> compress_dialog(DialogContext& cx) {
     std::vector<std::wstring> sources;
     for (const auto& r : rows) sources.push_back(r.path);
     if (sources.empty()) sources.push_back(folder);
+    // Compressing the folder itself puts the archive beside it, not inside what it archives.
+    std::wstring directory = folder;
+    if (rows.empty()) {
+        const std::wstring trimmed = folder.size() > 3 && folder.back() == L'\\' ? folder.substr(0, folder.size() - 1) : folder;
+        const size_t cut = trimmed.find_last_of(L'\\');
+        if (cut != std::wstring::npos && trimmed.size() > 3) directory = trimmed.substr(0, cut < 3 ? 3 : cut);
+    }
     const json::Value defaults = query(main.core(), "compress-defaults", "{\"sources\":" + qa(sources) + ",\"directory\":" + q(folder) + "}");
     Card c = make_card(L"Compress", 480);
     std::wstring what;
     for (size_t i = 0; i < rows.size() && i < 4; ++i) what += (i ? L"\n" : L"") + rows[i].name;
-    if (rows.size() > 4) what += L"\n…and " + std::to_wstring(rows.size() - 4) + L" more";
+    if (rows.size() > 4) what += L"\n\u2026and " + std::to_wstring(rows.size() - 4) + L" more";
     f::text(*c.body, rows.empty() ? L"The whole folder" : what, tok::TextSecondary, 13.0f)->wrap = true;
     f::text(*c.body, L"Archive name", tok::TextSecondary, 13.0f);
     auto* name = f::field(*c.body, w(defaults["name"]), -1, nullptr);
@@ -290,84 +326,147 @@ std::unique_ptr<Widget> compress_dialog(DialogContext& cx) {
     level->name = "CompressLevel";
     f::text(*c.body, L"Where", tok::TextSecondary, 13.0f);
     auto* r = f::row(*c.body);
-    auto* dest = f::field(*r, folder, 330, nullptr);
+    auto* dest = f::field(*r, directory, 330, nullptr);
     dest->name = "CompressWhere";
-    f::button(*r, L"Browse…", nullptr);
+    auto* result = f::text(*c.body, L"", tok::TextMuted, 12.5f);
+    result->name = "CompressResult";
+    result->wrap = true;
+    auto* problem = f::text(*c.body, L"", tok::ErrorForeground, 13.0f);
+    problem->name = "CompressProblem";
+    problem->wrap = true;
     add_button(c, L"Cancel", cx.close);
-    add_button(c, L"Compress", [&main, formats, sources, name, format, level, dest, close = cx.close] {
+    Button* ok = add_button(c, L"Compress", nullptr, true);
+    ok->name = "CompressOk";
+    core::Core* core = &main.core();
+    auto target = std::make_shared<std::wstring>();
+    auto check = [core, formats, name, format, level, dest, result, problem, ok, target] {
         const json::Value& f_ = formats[static_cast<size_t>(std::max(0, format->selected()))];
-        std::wstring file = name->text();
-        const std::wstring suffix = w(f_["suffix"]);
-        if (file.size() < suffix.size() || _wcsicmp(file.c_str() + file.size() - suffix.size(), suffix.c_str()) != 0) file += suffix;
+        // A format with no levels (tar) says so by greying the choice rather than ignoring it.
+        const bool levels = f_["supportsLevel"].boolean(true);
+        for (size_t i = 0; i < 3; ++i) level->set_item_enabled(i, levels);
+        const json::Value r = query(*core, "compress-check", "{\"name\":" + q(name->text()) + ",\"directory\":" + q(dest->text()) + ",\"suffix\":" + q(w(f_["suffix"])) + "}");
+        const bool fine = r["problem"].is_null();
+        *target = w(r["path"]);
+        result->set_text(fine ? L"Creates: " + *target : L"");
+        problem->set_text(fine ? L"" : w(r["problem"]));
+        ok->set_enabled(fine);
+        result->invalidate();
+        problem->invalidate();
+        ok->invalidate();
+    };
+    f::button(*r, L"Browse\u2026", [&main, dest, check] {
+        if (!main.shows_dialogs()) return;
+        PickPath pick;
+        pick.title = L"Put the archive in";
+        pick.folder = dest->text();
+        if (const auto chosen = pick_folder(main.window().hwnd(), pick)) {
+            dest->set_text(*chosen);
+            check();
+        }
+    })->name = "CompressBrowse";
+    name->on_changed = [check](const std::wstring&) { check(); };
+    dest->on_changed = [check](const std::wstring&) { check(); };
+    format->on_change = [check](int) { check(); };
+    check();
+    ok->on_click = [&main, formats, sources, format, level, target, check, ok, close = cx.close] {
+        check();  // the folder may have gained a file of that name while this sat open
+        if (!ok->flags.enabled) return;
+        const json::Value& f_ = formats[static_cast<size_t>(std::max(0, format->selected()))];
         static const char* levels[] = {"store", "normal", "maximum"};
         run(main.core(), "compress",
-            "{\"sources\":" + qa(sources) + ",\"target\":" + q(join_path(dest->text(), file)) + ",\"format\":" + q(w(f_["label"])) +
+            "{\"sources\":" + qa(sources) + ",\"target\":" + q(*target) + ",\"format\":" + q(w(f_["label"])) +
                 ",\"level\":\"" + levels[std::max(0, level->selected())] + "\"}");
         close();
-    }, true)->name = "CompressOk";
+    };
+    name->on_commit = [ok] {
+        if (ok->flags.enabled && ok->on_click) ok->on_click();
+    };
     return std::move(c.root);
 }
 
 // ---- extract -------------------------------------------------------------------------------------------------
 
-std::unique_ptr<Widget> extract_dialog(DialogContext& cx) {
-    MainView& main = cx.main;
+// What to extract: the archive the tab is inside (and the selection in it, or everything), or the one archive
+// selected in an ordinary folder. Spec: DirectoryTabView.ExtractTarget.
+ExtractSubject extract_subject(MainView& main) {
+    ExtractSubject s;
     const auto rows = main.selected_rows();
     const std::wstring tab_path = main.core().tab_text(main.active_tab(), BB_TEXT_PATH);
-    // Standing on an archive file in an ordinary folder, or inside one: either way it is one archive.
-    std::wstring archive_file;
-    std::vector<std::wstring> names;
     const json::Value inside = query(main.core(), "archive-of", core::utf8(tab_path));
     if (!inside.is_null()) {
-        archive_file = w(inside["archive"]);
-        for (const auto& r : rows) names.push_back(r.path);
+        s.archive = w(inside["archive"]);
+        s.inside = true;
+        for (const auto& r : rows) s.names.push_back(r.path);
     } else if (rows.size() == 1) {
         const json::Value sel = query(main.core(), "archive-of", core::utf8(rows[0].path));
-        if (!sel.is_null()) archive_file = w(sel["archive"]);
+        if (!sel.is_null()) s.archive = w(sel["archive"]);
     }
+    return s;
+}
+
+void run_extract(MainView& main, const ExtractSubject& s, const std::wstring& destination, bool skip) {
+    std::string arg = "{\"tab\":" + std::to_string(main.active_tab()) + ",\"names\":" + qa(s.names) + ",\"destination\":" + q(destination) +
+                      ",\"conflict\":\"" + (skip ? "skip" : "keep-both") + "\"";
+    // An archive file selected in an ordinary folder is its own subject.
+    if (!s.inside) arg += ",\"archive\":" + q(s.archive);
+    run(main.core(), "extract", arg + "}");
+}
+
+std::wstring extract_destination(MainView& main, const std::wstring& archive) {
+    return w(query(main.core(), "extract-destination", "{\"archive\":" + q(archive) + "}")["destination"]);
+}
+
+std::unique_ptr<Widget> extract_dialog(DialogContext& cx) {
+    MainView& main = cx.main;
+    const ExtractSubject subject = extract_subject(main);
     Card c = make_card(L"Extract", 480);
-    const std::wstring stem = [&] {
-        std::wstring n = archive_file.empty() ? L"Extracted" : archive_file.substr(archive_file.find_last_of(L"\\/") + 1);
-        for (const wchar_t* ext : {L".tar.gz", L".tar.bz2", L".tgz", L".zip", L".7z", L".rar", L".tar"}) {
-            const size_t len = wcslen(ext);
-            if (n.size() > len && _wcsicmp(n.c_str() + n.size() - len, ext) == 0) return n.substr(0, n.size() - len);
-        }
-        const size_t dot = n.find_last_of(L'.');
-        return dot == std::wstring::npos || dot == 0 ? n : n.substr(0, dot);
-    }();
-    f::text(*c.body, archive_file.empty() ? L"The archive" : archive_file.substr(archive_file.find_last_of(L"\\/") + 1), tok::TextSecondary, 13.0f);
-    f::text(*c.body, L"Extract to", tok::TextSecondary, 13.0f);
-    const std::wstring base = archive_file.empty() ? tab_path : parent_dir(archive_file);
-    auto* where = f::radios(*c.body, {L"A folder named after the archive", L"This folder"}, 0, nullptr);
-    where->name = "ExtractWhere";
-    f::text(*c.body, L"Destination", tok::TextSecondary, 13.0f);
+    const std::wstring archive_name = subject.archive.empty() ? L"the archive" : subject.archive.substr(subject.archive.find_last_of(L"\\/") + 1);
+    f::text(*c.body, subject.names.empty() ? L"Extract everything from " + archive_name + L"."
+                                           : L"Extract " + std::to_wstring(subject.names.size()) + L" selected item(s) from " + archive_name + L".",
+            tok::TextPrimary, 13.5f)->wrap = true;
+    f::text(*c.body, L"Into", tok::TextSecondary, 13.0f);
     auto* r = f::row(*c.body);
-    auto* dest = f::field(*r, base, 330, nullptr);
+    auto* dest = f::field(*r, subject.archive.empty() ? std::wstring() : extract_destination(main, subject.archive), 330, nullptr);
     dest->name = "ExtractDestination";
-    f::button(*r, L"Browse…", nullptr);
+    auto* problem = f::text(*c.body, L"", tok::ErrorForeground, 13.0f);
+    problem->name = "ExtractProblem";
+    problem->wrap = true;
     f::text(*c.body, L"If a file is already there", tok::TextSecondary, 13.0f);
-    auto* conflict = f::combo(*c.body, {L"Keep both", L"Skip it"}, 0, 240, nullptr);
+    auto* conflict = f::radios(*c.body, {L"Keep both (number the new one)", L"Skip it (keep what is there)"}, 0, nullptr);
     conflict->name = "ExtractConflict";
     add_button(c, L"Cancel", cx.close);
-    auto* go = add_button(c, L"Extract", [&main, archive_file, names, where, dest, conflict, stem, close = cx.close] {
-        std::wstring target = dest->text();
-        if (where->selected() == 0) target = join_path(target, stem);
-        std::error_code ec;
-        std::filesystem::create_directories(target, ec);
-        const std::string arg = "{\"tab\":" + std::to_string(main.active_tab()) + ",\"names\":" + qa(names) + ",\"destination\":" + q(target) +
-                                ",\"conflict\":\"" + (conflict->selected() == 1 ? "skip" : "keep-both") + "\"}";
-        // An archive file selected in an ordinary folder is its own subject.
-        if (names.empty() && !archive_file.empty()) {
-            std::string with = arg;
-            with.insert(1, "\"archive\":" + q(archive_file) + ",");
-            run(main.core(), "extract", with);
-        } else {
-            run(main.core(), "extract", arg);
-        }
-        close();
-    }, true);
+    Button* go = add_button(c, L"Extract", nullptr, true);
     go->name = "ExtractOk";
-    go->set_enabled(!archive_file.empty());
+    core::Core* core = &main.core();
+    const bool has_archive = !subject.archive.empty();
+    auto check = [core, dest, problem, go, has_archive] {
+        const json::Value r = query(*core, "extract-check", "{\"destination\":" + q(dest->text()) + "}");
+        problem->set_text(r["problem"].is_null() ? L"" : w(r["problem"]));
+        go->set_enabled(has_archive && r["problem"].is_null());
+        problem->invalidate();
+        go->invalidate();
+    };
+    f::button(*r, L"Browse\u2026", [&main, dest, check] {
+        if (!main.shows_dialogs()) return;
+        PickPath pick;
+        pick.title = L"Extract to";
+        pick.folder = dest->text();
+        if (const auto chosen = pick_folder(main.window().hwnd(), pick)) {
+            dest->set_text(*chosen);
+            check();
+        }
+    })->name = "ExtractBrowse";
+    dest->on_changed = [check](const std::wstring&) { check(); };
+    check();
+    go->on_click = [&main, subject, dest, conflict, check, go, close = cx.close] {
+        check();
+        if (!go->flags.enabled) return;
+        // The executor makes the folder as it writes, so a refused plan leaves nothing behind.
+        std::wstring target = dest->text();
+        while (target.size() > 3 && (target.back() == L' ' || target.back() == L'\\')) target.pop_back();
+        run_extract(main, subject, target, conflict->selected() == 1);
+        close();
+    };
     return std::move(c.root);
 }
 
@@ -375,8 +474,15 @@ std::unique_ptr<Widget> extract_dialog(DialogContext& cx) {
 
 std::unique_ptr<Widget> password_dialog(DialogContext& cx) {
     MainView& main = cx.main;
-    Card c = make_card(L"This archive is protected", 440);
-    f::note(*c.body, L"Enter the password to open it. It is kept for this session only.");
+    const std::wstring tab_path = main.core().tab_text(main.active_tab(), BB_TEXT_PATH);
+    const json::Value of = query(main.core(), "archive-of", core::utf8(tab_path));
+    const std::wstring archive = of.is_null() ? std::wstring() : w(of["archive"]);
+    const std::wstring name = archive.empty() ? L"This archive" : archive.substr(archive.find_last_of(L"\\/") + 1);
+    Card c = make_card(L"Password", 440);
+    f::text(*c.body, name + L" is protected. Enter its password to read it.", tok::TextPrimary, 13.5f)->wrap = true;
+    // A wrong one comes straight back as the same locked archive, so the next ask says so. Spec: UnlockAsync.
+    if (!of.is_null() && of["refused"].boolean()) f::text(*c.body, L"That password did not work.", tok::ErrorForeground, 13.0f)->name = "ArchivePasswordRefused";
+    f::note(*c.body, L"Remembered until BertBrowser closes, and never written to disk.");
     f::text(*c.body, L"Password", tok::TextSecondary, 13.0f);
     auto* pw = f::field(*c.body, L"", -1, nullptr);
     pw->width = -1;
@@ -387,10 +493,21 @@ std::unique_ptr<Widget> password_dialog(DialogContext& cx) {
         pw->invalidate();
     });
     add_button(c, L"Cancel", cx.close);
-    add_button(c, L"Unlock", [&main, pw, close = cx.close] {
+    Button* unlock = add_button(c, L"Unlock", nullptr, true);
+    unlock->name = "ArchiveUnlock";
+    unlock->set_enabled(false);
+    pw->on_changed = [unlock](const std::wstring& t) {
+        unlock->set_enabled(!t.empty());
+        unlock->invalidate();
+    };
+    unlock->on_click = [&main, pw, unlock, close = cx.close] {
+        if (!unlock->flags.enabled) return;
         run(main.core(), "unlock", "{\"tab\":" + std::to_string(main.active_tab()) + ",\"password\":" + q(pw->text()) + "}");
         close();
-    }, true)->name = "ArchiveUnlock";
+    };
+    pw->on_commit = [unlock] {
+        if (unlock->on_click) unlock->on_click();
+    };
     return std::move(c.root);
 }
 
