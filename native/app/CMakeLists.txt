@@ -70,7 +70,7 @@ target_include_directories(bbviews PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(bbviews PUBLIC bbapp bbcore_abi mfplat mf mfuuid)
 
 # The product. Never launched to check UI work; the harness is the way to see the interface.
-add_executable(BertBrowser WIN32 app/main.cpp app/version.cpp)
+add_executable(BertBrowser WIN32 app/main.cpp app/version.cpp app/app.rc)
 target_link_libraries(BertBrowser PRIVATE bbviews bbcore)
 
 # The elevated helpers sit beside the app and are found there and nowhere else: what they are

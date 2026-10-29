@@ -13,54 +13,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-
       - name: Derive version from tag
         id: ver
         shell: bash
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Test
-        run: dotnet test bertbrowser.sln -c Release
-
-      - name: Publish
-        run: >
-          dotnet publish src/BertBrowser.App/BertBrowser.App.csproj -c Release
-          -r win-x64 --self-contained true
-          -p:Version=${{ steps.ver.outputs.version }} -o publish
-
-      # The elevated index helper, into the same folder. vpk packs the whole directory, so this is
-      # all it takes to ship it - no installer, manifest or winget change. The app goes first: this
-      # publish is a strict subset of it (no WindowsDesktop framework), so the shared runtime files
-      # are already there and only the helper's own assembly and apphost are added, well under 1 MB.
-      - name: Publish the index helper
-        run: >
-          dotnet publish src/BertBrowser.Indexer/BertBrowser.Indexer.csproj -c Release
-          -r win-x64 --self-contained true
-          -p:Version=${{ steps.ver.outputs.version }} -o publish
-
-      # And the elevated file-operation helper, same folder, same reasoning. It is started only
-      # when the user clicks a shield after an operation was refused, and exits when that one
-      # operation is done.
-      - name: Publish the file-operation helper
-        run: >
-          dotnet publish src/BertBrowser.Elevator/BertBrowser.Elevator.csproj -c Release
-          -r win-x64 --self-contained true
-          -p:Version=${{ steps.ver.outputs.version }} -o publish
+      # fmt, clippy, cargo test, the cmake release build and every non-bench harness script. The
+      # version is stamped into the native tree after the tests, so the About box reports the tag.
+      # The frozen C# tree under csharp/ is not built or tested.
+      - uses: ./.github/actions/native-build
+        with:
+          version: ${{ steps.ver.outputs.version }}
 
       - name: Pack and upload Velopack release
         shell: pwsh
         run: |
           dotnet tool install -g vpk
+          # BertBrowser.exe and the two elevated helpers beside it, nothing else: vpk packs the whole folder.
+          pwsh native/tools/stage-package.ps1 -Out native/out/release/pack
           # Fetch the previous release (if any) so vpk can build a delta package.
           # Fails on the very first release when the repo has none - that's fine.
           vpk download github --repoUrl https://github.com/${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
           if ($LASTEXITCODE -ne 0) { Write-Host "No previous release found; building full package only." }
+          # The pack id stays BertBrowser, so an installed C# copy takes the native build as its next update.
           vpk pack --packId BertBrowser --packVersion ${{ steps.ver.outputs.version }} `
-            --packDir publish --mainExe BertBrowser.exe --packTitle BertBrowser `
-            --packAuthors "Rob Walsh" --icon src/BertBrowser.App/Assets/app.ico
+            --packDir native/out/release/pack --mainExe BertBrowser.exe --packTitle BertBrowser `
+            --packAuthors "Rob Walsh" --icon native/app/app/app.ico
           if ($LASTEXITCODE -ne 0) { exit 1 }
           vpk upload github --repoUrl https://github.com/${{ github.repository }} `
             --token ${{ secrets.GITHUB_TOKEN }} --publish `

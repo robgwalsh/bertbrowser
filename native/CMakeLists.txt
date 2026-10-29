@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(bertbrowser VERSION 2.0.0 LANGUAGES CXX)
+project(bertbrowser VERSION 2.0.0 LANGUAGES CXX RC)
 
 # Single-config generator (Ninja) through CMakePresets.json; build.ps1 enters the VS developer shell.
 if(NOT CMAKE_BUILD_TYPE)
@@ -79,4 +79,3 @@ add_dependencies(bbcore_harness cargo_build_harness)
 
 add_subdirectory(app)
 add_subdirectory(harness)
-add_subdirectory(spikes)

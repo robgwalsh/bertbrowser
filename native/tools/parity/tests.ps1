@@ -15,7 +15,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
-$csDir = Join-Path $Root "tests\BertBrowser.Core.Tests"
+$csDir = Join-Path $Root "csharp\tests\BertBrowser.Core.Tests"
 $rsDir = Join-Path $Root "native\crates"
 $droppedFile = Join-Path $PSScriptRoot "dropped.txt"
 

@@ -12,7 +12,6 @@ cd native
 cargo test --workspace          # Rust: every crate
 .\build.ps1                     # C++: enters the VS developer shell, configures, builds (debug)
 .\build.ps1 -Config release
-.\out\debug\spikes\s7_ffi.exe   # a spike
 ```
 
 `build.ps1` runs `cargo build -p bb-ffi` and `cbindgen` as part of the CMake build, so the C++ tree
@@ -26,4 +25,3 @@ always links the current Rust code. The header `include/bbcore.h` is generated a
 - `crates/bb-bench`: the benchmark driver.
 - `app/`: the C++ UI as a static library `bbapp` plus `BertBrowser.exe` (WinMain only).
 - `harness/`: `bb-harness.exe`, the offscreen UI harness that runs `tools/ui/*.bbs`.
-- `spikes/`: Phase 0 risk spikes; removed after M5.

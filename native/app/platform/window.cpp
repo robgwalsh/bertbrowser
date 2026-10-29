@@ -40,6 +40,14 @@ void Window::register_class() {
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.lpszClassName = kClassName;
+    // The application icon is resource 1 of BertBrowser.exe (app/app.rc); the harness and the tests
+    // have none, and a null icon is the default one.
+    const HINSTANCE module = GetModuleHandleW(nullptr);
+    const auto icon = [module](int cx, int cy) {
+        return static_cast<HICON>(LoadImageW(module, MAKEINTRESOURCEW(1), IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR | LR_SHARED));
+    };
+    wc.hIcon = icon(GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON));
+    wc.hIconSm = icon(GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
     RegisterClassExW(&wc);
     done = true;
 }

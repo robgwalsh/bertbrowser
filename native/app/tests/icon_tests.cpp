@@ -94,7 +94,7 @@ TEST(icon_names_match_the_manifest) {
     std::string file = __FILE__;
     const size_t at = file.find("native");
     if (at == std::string::npos) return;
-    std::ifstream in(file.substr(0, at) + "tools/icon/icons.txt");
+    std::ifstream in(file.substr(0, at) + "native/tools/icons/icons.txt");
     if (!in) {
         std::printf("  (icons.txt not found next to the sources; skipped)\n");
         return;

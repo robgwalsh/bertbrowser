@@ -1,14 +1,19 @@
-# Publishes the latest code in main as the "unstable" channel: same build and same test suite as a
+# Publishes the latest code in main as the "unstable" channel: same build and same checks as a
 # release, packed on a separate Velopack channel and published as a rolling GitHub pre-release.
 #
 # It cannot disturb a release. Different tag, different channel, different feed file - an installed
 # release copy looks for releases.win.json and never sees releases.unstable.json, and GitHub's
 # "latest" excludes pre-releases, so the README's stable download links skip this entirely.
+#
+# Pull requests that touch the native tree or the UI scripts run the same checks and build, and stop
+# before anything is packed or published.
 name: Unstable
 
 on:
   push:
     branches: [main]
+  pull_request:
+    paths: ["native/**", "tools/ui/**", ".github/**"]
   workflow_dispatch:
 
 permissions:
@@ -17,10 +22,11 @@ permissions:
 # Pushes queue rather than cancel. Cancelling a run mid-upload strands a *draft* release holding the
 # `unstable` tag, and a draft has no tag as far as `gh release delete` is concerned - while vpk's own
 # collision check does see it, and refuses to publish. Every run after that would fail until someone
-# cleared it by hand. A superseded build costs three minutes; a wedged channel costs a repair.
+# cleared it by hand. A superseded build costs a few minutes; a wedged channel costs a repair.
+# Pull requests publish nothing, so they get a group of their own and may be superseded freely.
 concurrency:
-  group: unstable
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('unstable-pr-{0}', github.ref) || 'unstable' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   unstable:
@@ -29,10 +35,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0        # tags, so the last released version can be found
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
 
       # The next patch after the last release, plus the run number: 1.1.2 -> 1.1.3-unstable.42.
       # SemVer compares dot-separated numeric identifiers numerically, so .10 is above .7 - which a
@@ -50,49 +52,35 @@ jobs:
           echo "Latest release tag ${latest}; building ${version}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Test
-        run: dotnet test bertbrowser.sln -c Release
-
-      - name: Publish
-        run: >
-          dotnet publish src/BertBrowser.App/BertBrowser.App.csproj -c Release
-          -r win-x64 --self-contained true
-          -p:Version=${{ steps.ver.outputs.version }} -o publish
-
-      # The elevated index helper, into the same folder - see release.yml for why the order matters.
-      - name: Publish the index helper
-        run: >
-          dotnet publish src/BertBrowser.Indexer/BertBrowser.Indexer.csproj -c Release
-          -r win-x64 --self-contained true
-          -p:Version=${{ steps.ver.outputs.version }} -o publish
-
-      # And the elevated file-operation helper, same folder, same reasoning. It is started only
-      # when the user clicks a shield after an operation was refused, and exits when that one
-      # operation is done.
-      - name: Publish the file-operation helper
-        run: >
-          dotnet publish src/BertBrowser.Elevator/BertBrowser.Elevator.csproj -c Release
-          -r win-x64 --self-contained true
-          -p:Version=${{ steps.ver.outputs.version }} -o publish
+      # fmt, clippy, cargo test, the cmake release build and the harness scripts. The version is
+      # stamped into the native tree after the tests, so the About box reports this build.
+      - uses: ./.github/actions/native-build
+        with:
+          version: ${{ steps.ver.outputs.version }}
 
       # Deltas matter more here than on a release: an unstable copy takes an update on every push, so
-      # it is a few MB each time instead of ~75. The delta is built here, against the package
-      # downloaded from the release that is still up - the replacement below happens afterwards and
-      # has no bearing on it, and a client applies the delta against its own local package anyway.
+      # it is a few MB each time instead of a full package. The delta is built here, against the
+      # package downloaded from the release that is still up - the replacement below happens
+      # afterwards and has no bearing on it, and a client applies the delta against its own local
+      # package anyway.
       #
       # --pre is required: the only release carrying releases.unstable.json is a pre-release, so
       # without it the download finds nothing and the delta silently comes out full-sized.
+      #
+      # The pack id stays BertBrowser, so an installed C# copy takes this native build as its next update.
       - name: Pack
+        if: github.event_name != 'pull_request'
         shell: pwsh
         run: |
           dotnet tool install -g vpk
+          pwsh native/tools/stage-package.ps1 -Out native/out/release/pack
           # Absent on the first run, and during another run's upload window. vpk logs it and exits 0;
           # a full-only package is a correct release, just a fat one.
           vpk download github --repoUrl https://github.com/${{ github.repository }} `
             --token ${{ secrets.GITHUB_TOKEN }} --channel unstable --pre
           vpk pack --packId BertBrowser --packVersion ${{ steps.ver.outputs.version }} `
-            --packDir publish --mainExe BertBrowser.exe --packTitle BertBrowser `
-            --packAuthors "Rob Walsh" --icon src/BertBrowser.App/Assets/app.ico `
+            --packDir native/out/release/pack --mainExe BertBrowser.exe --packTitle BertBrowser `
+            --packAuthors "Rob Walsh" --icon native/app/app/app.ico `
             --channel unstable
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
@@ -104,6 +92,7 @@ jobs:
       # Everything above this point can fail without touching what is published. Do not reorder -
       # a pack that failed after the delete would leave no unstable release at all.
       - name: Clear the previous rolling release
+        if: github.event_name != 'pull_request'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -121,6 +110,7 @@ jobs:
 
       # The release name is the bare version, because it is what the README's badge displays.
       - name: Publish the rolling unstable release
+        if: github.event_name != 'pull_request'
         shell: pwsh
         run: |
           vpk upload github --repoUrl https://github.com/${{ github.repository }} `
@@ -129,44 +119,51 @@ jobs:
             --tag unstable --targetCommitish ${{ github.sha }}
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
-  # The Core benchmarks (tools/BertBrowser.Bench, Tier A), gated on allocations only. A shared
+  # The bb-core micro-benchmarks (native/crates/bb-bench, Tier A), gated on allocations only. A shared
   # runner's wall clock is noise and is reported in the job summary, never judged; the bytes a
   # benchmark allocates are deterministic and a regression there fails this job.
   #
   # A separate job beside the build on purpose: an allocation regression turns the run red without
   # withholding the unstable build, and a broken benchmark can never block shipping. Tiers B and C
-  # (the UI harness and the real executable) stay local — no GPU, and a timing on a shared runner
-  # means nothing. See bench/README.md for the baseline's lifecycle; the first run after it goes
-  # missing writes a candidate into the artifact and passes.
+  # (the UI harness and the real executable) stay local - no GPU, and a timing on a shared runner
+  # means nothing. See bench/README.md for the baseline's lifecycle.
+  #
+  # native/bench/baselines/ci-windows-latest.json is recorded by CI itself (a baseline from another
+  # machine counts allocations differently). Until one is committed, `compare --ci` writes a candidate
+  # next to the results and passes, so the first run uploads the file to commit.
   bench:
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-dotnet@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
         with:
-          dotnet-version: 10.0.x
+          workspaces: native
 
-      - name: Build
-        run: dotnet build bertbrowser.sln -c Release
+      - name: Build the bench driver
+        shell: pwsh
+        working-directory: native
+        run: cargo build -p bb-bench --release
 
-      # In-process, so nothing is generated and built on the runner; allocation counts are the same
-      # either way. The short job is three warm-up and three measured iterations per benchmark.
       - name: Benchmarks (Tier A, short job)
         shell: pwsh
+        working-directory: native
         run: >
-          dotnet tools/BertBrowser.Bench/bin/Release/net10.0/BertBrowser.Bench.dll run
-          --ci --toolchain inprocess --scale 1
+          .\target\release\bb-bench.exe run --ci --scale 1
           --machine-key ci-windows-latest --out bench-results/current.json
 
       - name: Compare allocations against the committed baseline
         shell: pwsh
+        working-directory: native
         run: >
-          dotnet tools/BertBrowser.Bench/bin/Release/net10.0/BertBrowser.Bench.dll compare --ci
+          .\target\release\bb-bench.exe compare --ci
           --baseline bench/baselines/ci-windows-latest.json --current bench-results/current.json
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: bench-results-${{ github.run_number }}
-          path: bench-results/
+          path: native/bench-results/
