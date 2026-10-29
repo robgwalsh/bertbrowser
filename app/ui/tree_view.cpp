@@ -115,6 +115,7 @@ void TreeView::paint(PaintContext& pc) {
     painted_rows_ = 0;
     pc.clip(bounds.intersect(pc.dirty));
     const auto [first, last] = visible_range();
+    const uint32_t icon_px = device_px(pc, 16.0f);
     for (size_t i = first; i < last; ++i) {
         const Rect rr = row_rect(i);
         if (!rr.intersects(pc.dirty)) continue;
@@ -134,7 +135,12 @@ void TreeView::paint(PaintContext& pc) {
                 pc.line({cx + 2, cy}, {cx - 2, cy + 4}, t, 1.3f);
             }
         }
-        pc.text(provider_->label(e.id), Rect{cv.r + 2.0f, rr.t, rr.r, rr.b}, style.font,
+        float text_l = cv.r + 2.0f;
+        if (const ThumbPtr image = provider_->icon(e.id, icon_px)) {
+            images_.draw(pc, image, Rect::xywh(text_l, rr.t + (row_height - 16.0f) / 2, 16.0f, 16.0f));
+            text_l += 22.0f;
+        }
+        pc.text(provider_->label(e.id), Rect{text_l, rr.t, rr.r, rr.b}, style.font,
                 sel ? tok::ListSelectedForeground : style.fg);
         if (sel && focused()) pc.stroke(rr, tok::BorderFocus);
     }

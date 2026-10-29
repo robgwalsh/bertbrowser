@@ -179,13 +179,15 @@ void Session::settle(int quiet_ms) {
     // And one more look: an event handled above may have started more work.
     if (busy()) settle(0);
     window_->render();
-    // Tiles ask for their pictures as they are painted; wait for those too, then paint them in.
-    for (int i = 0; i < 400 && view_->thumbnails_pending() > 0; ++i) {
+    // Tiles ask for their pictures, and rows for a program's or shortcut's own icon, as they are painted; wait
+    // for those too, then paint them in.
+    const auto pictures = [&] { return view_->thumbnails_pending() + view_->icons_pending(); };
+    for (int i = 0; i < 400 && pictures() > 0; ++i) {
         pump();
         Sleep(5);
         window_->render();
     }
-    if (view_->thumbnails_pending() == 0) {
+    if (pictures() == 0) {
         pump();
         window_->render();
     }

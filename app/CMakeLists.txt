@@ -41,6 +41,7 @@ add_library(bbviews STATIC
   views/sidebar.cpp
   views/dialogs.cpp
   views/thumbs.cpp
+  views/shell_icons.cpp
   views/shell_props.cpp
   views/folder_tree.cpp
   views/pane_images.cpp

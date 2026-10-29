@@ -21,6 +21,7 @@
 #include "views/metadata_pane.h"
 #include "views/preview_pane.h"
 #include "views/thumbs.h"
+#include "views/shell_icons.h"
 #include "views/sidebar.h"
 #include "views/core.h"
 #include "views/json.h"
@@ -75,8 +76,10 @@ public:
     size_t row_count() const override { return listing_ ? listing_->size() : 0; }
     uint64_t row_id(size_t row) const override;
     std::wstring cell_text(size_t row, int column_id) const override;
+    ui::ThumbPtr row_image(size_t row, uint32_t px, bool* faded) const override;
     const ui::IconData* row_icon(size_t row) const override;
     ui::Token row_tint(size_t row) const override;
+    ShellIcons* icons = nullptr;
     std::wstring row_path(size_t row) const;
     bool selected(size_t row) const override { return row < sel_.size() && sel_[row]; }
     void select(ui::SelectOp op, size_t first, size_t last) override;
@@ -87,6 +90,10 @@ private:
     std::shared_ptr<core::Listing> listing_;
     std::vector<char> sel_;
     std::vector<int> cells_;
+    // Whether the rows are real files a program's or shortcut's own icon can be read from - not the inside of
+    // an archive, whose paths only look real. Asked of the disk once per place.
+    std::wstring checked_path_;
+    bool real_paths_ = true;
 };
 
 // One tab: navigation row, path, search, the details list, the message over an empty folder.
@@ -317,6 +324,9 @@ public:
     void defer(std::function<void()> fn);
     // Thumbnails asked for and not yet drawn, across every tab (the harness waits for them to be none).
     size_t thumbnails_pending() const;
+    // File, folder and drive icons, shared by every list and the folder tree.
+    ShellIcons& shell_icons() { return *icons_; }
+    size_t icons_pending() const { return icons_->pending(); }
     // A preview scheduled or being read in any tab (the harness waits for it to land).
     bool preview_pending() const;
     // Where tile thumbnails come from: the shell (the product) or a generator (the harness).
@@ -382,6 +392,7 @@ private:
     StatusBar* status_ = nullptr;
     ui::Splitter* main_split_ = nullptr;
     ui::TreeView* tree_ = nullptr;
+    std::unique_ptr<ShellIcons> icons_;
     std::unique_ptr<FolderTreeProvider> tree_provider_;
     ui::Panel* pane_host_ = nullptr;
     ui::Widget* layout_root_ = nullptr;

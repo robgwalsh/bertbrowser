@@ -2,7 +2,37 @@
 #pragma once
 #include "ui/widget.h"
 
+#include <unordered_map>
+#include <vector>
+
 namespace bb::ui {
+
+// A decoded picture: BGRA, premultiplied alpha, tightly packed. Thumbnails and shell icons.
+struct ThumbImage {
+    uint32_t width = 0, height = 0;
+    std::vector<uint8_t> bgra;
+};
+using ThumbPtr = std::shared_ptr<const ThumbImage>;
+
+// Device bitmaps for small pictures that repeat (a list's file icons): one per distinct image, made once per
+// device. Holding the image keeps its address from being reused by another while the entry lives.
+class ImageCache {
+public:
+    // Draws `image` filling `into` (it is expected to be made at that size in pixels already).
+    void draw(PaintContext& pc, const ThumbPtr& image, const Rect& into, float opacity = 1.0f);
+    void clear() { map_.clear(); }
+
+private:
+    struct Entry {
+        ThumbPtr image;
+        ComPtr<ID2D1Bitmap> bitmap;
+        uint32_t generation = 0;
+    };
+    std::unordered_map<const ThumbImage*, Entry> map_;
+};
+
+// The pixel size of `dip` on the device being painted.
+uint32_t device_px(const PaintContext& pc, float dip);
 
 class TextBlock : public Widget {
 public:

@@ -7,7 +7,7 @@
 
 namespace bb::views {
 
-FolderTreeProvider::FolderTreeProvider() {
+FolderTreeProvider::FolderTreeProvider(ShellIcons* icons) : icons_(icons) {
     nodes_[0] = Node{};
     next_ = 1;
 }
@@ -32,7 +32,11 @@ void FolderTreeProvider::load(uint64_t node) const {
         }
         return;
     }
-    std::vector<std::pair<std::wstring, std::wstring>> found;  // label, path
+    struct Found {
+        std::wstring label, path;
+        uint32_t attributes;
+    };
+    std::vector<Found> found;
     WIN32_FIND_DATAW fd{};
     std::wstring base = nodes_[node].path;
     if (base.empty() || base.back() != L'\\') base += L'\\';
@@ -43,14 +47,14 @@ void FolderTreeProvider::load(uint64_t node) const {
             if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
             if (fd.cFileName[0] == L'.' && (fd.cFileName[1] == 0 || (fd.cFileName[1] == L'.' && fd.cFileName[2] == 0))) continue;
             if (!show_hidden && (fd.dwFileAttributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM))) continue;
-            found.emplace_back(fd.cFileName, base + fd.cFileName);
+            found.push_back({fd.cFileName, base + fd.cFileName, fd.dwFileAttributes});
         } while (FindNextFileW(h, &fd));
         FindClose(h);
     }
     std::sort(found.begin(), found.end(),
-              [](const auto& a, const auto& b) { return StrCmpLogicalW(a.first.c_str(), b.first.c_str()) < 0; });
+              [](const Found& a, const Found& b) { return StrCmpLogicalW(a.label.c_str(), b.label.c_str()) < 0; });
     for (auto& f : found) {
-        const uint64_t id = add(Node{f.first, f.second, false, {}});
+        const uint64_t id = add(Node{f.label, f.path, false, {}, f.attributes});
         nodes_[node].kids.push_back(id);
     }
 }
@@ -76,6 +80,15 @@ bool FolderTreeProvider::has_children(uint64_t node) const {
     if (it == nodes_.end()) return false;
     // Unloaded means "maybe": a chevron now, the truth when it is opened.
     return it->second.loaded ? !it->second.kids.empty() : true;
+}
+
+ui::ThumbPtr FolderTreeProvider::icon(uint64_t node, uint32_t px) const {
+    const auto it = nodes_.find(node);
+    if (!icons_ || it == nodes_.end()) return nullptr;
+    const Node& n = it->second;
+    // A drive's path is its root ("C:\"); everything under it is a folder.
+    if (n.path.size() == 3) return icons_->drive(n.path, px);
+    return icons_->file(n.path, true, n.attributes, px);
 }
 
 std::wstring FolderTreeProvider::path_of(uint64_t node) const {

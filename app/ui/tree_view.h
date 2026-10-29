@@ -2,6 +2,7 @@
 // (0 is the invisible root); the widget keeps the flattened list of expanded nodes and asks for labels
 // of the visible rows only.
 #pragma once
+#include "ui/controls.h"
 #include "ui/scroll.h"
 
 #include <unordered_set>
@@ -16,6 +17,8 @@ public:
     virtual std::wstring label(uint64_t node) const = 0;
     // Lazy trees answer "maybe" without enumerating. Default: ask for the count.
     virtual bool has_children(uint64_t node) const { return child_count(node) > 0; }
+    // A picture before the label, `px` pixels square, or null for none (the settings pages have none).
+    virtual ThumbPtr icon(uint64_t /*node*/, uint32_t /*px*/) const { return nullptr; }
 };
 
 class TreeView : public Widget {
@@ -79,6 +82,7 @@ private:
     ScrollBar v_;
     size_t painted_rows_ = 0;
     bool bar_drag_ = false;
+    ImageCache images_;
 };
 
 }  // namespace bb::ui

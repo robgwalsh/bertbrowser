@@ -153,6 +153,7 @@ void ListView::paint(PaintContext& pc) {
         pc.clip(body_.intersect(pc.dirty));
         const auto [first, last] = visible_range();
         const float x0 = body_.l - h_.offset();
+        const uint32_t icon_px = device_px(pc, 16.0f);
         for (size_t row = first; row < last; ++row) {
             const Rect rr = row_rect(row);
             if (!rr.intersects(pc.dirty)) continue;
@@ -179,9 +180,14 @@ void ListView::paint(PaintContext& pc) {
                     const std::wstring text = provider_->cell_text(row, col.id);
                     float icon_w = 0;
                     if (first_column) {
-                        if (const IconData* icon = provider_->row_icon(row)) {
+                        const Rect slot = Rect::xywh(x + kCellPad, rr.t + (row_height - 16.0f) / 2, 16.0f, 16.0f);
+                        bool faded = false;
+                        if (const ThumbPtr image = provider_->row_image(row, icon_px, &faded)) {
+                            images_.draw(pc, image, slot, faded ? 0.5f : 1.0f);
+                            icon_w = 22.0f;
+                        } else if (const IconData* icon = provider_->row_icon(row)) {
                             IconCache& cache = icon_cache_[icon];
-                            Icon::draw(pc, *icon, Rect::xywh(x + kCellPad, rr.t + (row_height - 16.0f) / 2, 16.0f, 16.0f),
+                            Icon::draw(pc, *icon, slot,
                                        sel ? tok::ListSelectedForeground : tok::TextSecondary, cache.geometry, cache.generation);
                             icon_w = 22.0f;
                         }

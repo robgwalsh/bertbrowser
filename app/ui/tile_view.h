@@ -15,13 +15,6 @@
 
 namespace bb::ui {
 
-// A decoded thumbnail: BGRA, premultiplied alpha, tightly packed.
-struct ThumbImage {
-    uint32_t width = 0, height = 0;
-    std::vector<uint8_t> bgra;
-};
-using ThumbPtr = std::shared_ptr<const ThumbImage>;
-
 class ThumbnailSink {
 public:
     virtual ~ThumbnailSink() = default;
@@ -139,6 +132,8 @@ private:
     bool bar_drag_ = false;
     bool updating_ = false;
     std::unordered_map<uint64_t, Entry> cache_;
+    static constexpr float kPlaceholderIcon = 32.0f;  // the file's icon, until its picture arrives
+    ImageCache images_;
     size_t in_flight_ = 0;
 };
 

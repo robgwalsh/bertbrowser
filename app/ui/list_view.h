@@ -25,7 +25,10 @@ public:
     virtual std::wstring cell_text(size_t row, int column_id) const = 0;
     virtual bool selected(size_t row) const = 0;
     virtual void select(SelectOp op, size_t first, size_t last) = 0;
-    // An icon drawn before the first column's text, or null for none.
+    // A picture drawn before the first column's text (the file's own icon), `px` pixels square; `faded` draws it
+    // at half strength (a hidden file). Null falls back to `row_icon`.
+    virtual ThumbPtr row_image(size_t /*row*/, uint32_t /*px*/, bool* /*faded*/) const { return nullptr; }
+    // An outline icon drawn there instead, or null for none.
     virtual const IconData* row_icon(size_t /*row*/) const { return nullptr; }
     // A faint fill behind the row (what a folder comparison says about it), or kNoToken for none.
     virtual Token row_tint(size_t /*row*/) const { return kNoToken; }
@@ -147,6 +150,7 @@ private:
         uint32_t generation = 0;
     };
     std::unordered_map<const IconData*, IconCache> icon_cache_;
+    ImageCache images_;
 };
 
 }  // namespace bb::ui

@@ -47,6 +47,32 @@ void TextBlock::paint(PaintContext& pc) {
     }
 }
 
+// ---- ImageCache ------------------------------------------------------------------------------------
+
+void ImageCache::draw(PaintContext& pc, const ThumbPtr& image, const Rect& into, float opacity) {
+    if (!image || !image->width || !image->height) return;
+    auto it = map_.find(image.get());
+    if (it == map_.end()) {
+        if (map_.size() >= 1024) map_.clear();  // per-file icons come and go; a folder of them is bounded
+        it = map_.emplace(image.get(), Entry{image, nullptr, 0}).first;
+    }
+    Entry& e = it->second;
+    if (!e.bitmap || e.generation != pc.res.dev.generation()) {
+        const D2D1_BITMAP_PROPERTIES props =
+            D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        e.bitmap.Reset();
+        pc.dc->CreateBitmap(D2D1::SizeU(image->width, image->height), image->bgra.data(), image->width * 4, props, &e.bitmap);
+        e.generation = pc.res.dev.generation();
+    }
+    if (e.bitmap) pc.dc->DrawBitmap(e.bitmap.Get(), into.d2d(), opacity, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+}
+
+uint32_t device_px(const PaintContext& pc, float dip) {
+    float dx = 96.0f, dy = 96.0f;
+    pc.dc->GetDpi(&dx, &dy);
+    return static_cast<uint32_t>(std::lround(dip * dx / 96.0f));
+}
+
 // ---- Icon ------------------------------------------------------------------------------------------
 
 Size Icon::measure(Size) { return fixed_or({size, size}); }

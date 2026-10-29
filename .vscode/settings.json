@@ -3,5 +3,6 @@
     "**/bin": true,
     "**/obj": true
   },
-  "dotnet.defaultSolution": "bertbrowser.sln"
+  "dotnet.defaultSolution": "bertbrowser.sln",
+  "cmake.sourceDirectory": "C:/Source/bertbrowser/native"
 }

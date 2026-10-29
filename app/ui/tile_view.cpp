@@ -217,6 +217,7 @@ void TileView::paint(PaintContext& pc) {
     const auto [first, last] = lay.visible(v_.offset(), bounds.height());
     const Point ptr = root() ? root()->pointer() : Point{};
     const bool active = focused();
+    const uint32_t placeholder_px = device_px(pc, kPlaceholderIcon);
     const gfx::LayoutOptions cap_opt = [&] {
         gfx::LayoutOptions o;
         o.wrap = true;
@@ -257,7 +258,14 @@ void TileView::paint(PaintContext& pc) {
                 pc.dc->DrawBitmap(e.bitmap.Get(), dst.d2d(), 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
             }
         } else {
-            pc.stroke(slot, tok::BorderSubtle);  // the placeholder: an empty frame until the image arrives
+            // The placeholder: the file's icon in an empty frame until the picture arrives.
+            pc.stroke(slot, tok::BorderSubtle);
+            bool faded = false;
+            if (const ThumbPtr icon = provider_->row_image(row, placeholder_px, &faded)) {
+                const float d = kPlaceholderIcon;
+                images_.draw(pc, icon, Rect::xywh(slot.l + (slot.width() - d) / 2, slot.t + (slot.height() - d) / 2, d, d),
+                             faded ? 0.5f : 1.0f);
+            }
         }
         const Rect cap = lay.caption_rect(row).offset(bounds.l, bounds.t - v_.offset());
         const std::wstring text = provider_->cell_text(row, caption_column);

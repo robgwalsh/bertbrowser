@@ -150,6 +150,14 @@ private:
 void ListAdapter::reset(std::shared_ptr<core::Listing> l) {
     listing_ = std::move(l);
     reload_selection();
+    std::wstring path = core_.tab_text(tab_, BB_TEXT_PATH);
+    if (path != checked_path_) {
+        // A whole-PC search has no folder and its rows come from the index: real. Inside an archive the place
+        // is the archive file itself, or a path under it that does not exist on disk.
+        const DWORD attrs = path.empty() ? FILE_ATTRIBUTE_DIRECTORY : GetFileAttributesW(path.c_str());
+        real_paths_ = attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY);
+        checked_path_ = std::move(path);
+    }
 }
 
 void ListAdapter::reload_selection() {
@@ -182,6 +190,15 @@ Token ListAdapter::row_tint(size_t row) const {
         case 6: return tok::CompareDiffers;
         default: return gfx::kNoToken;
     }
+}
+
+ui::ThumbPtr ListAdapter::row_image(size_t row, uint32_t px, bool* faded) const {
+    BbRow r{};
+    if (!icons || !listing_ || !listing_->row(row, r)) return nullptr;
+    if (faded) *faded = (r.flags & BB_ROW_HIDDEN) != 0;
+    const bool dir = (r.flags & BB_ROW_DIRECTORY) != 0;
+    // A virtual path never reaches the shell as a file: its type's icon only.
+    return icons->file(core::w(r.full_path), dir, r.attributes, px, real_paths_);
 }
 
 const IconData* ListAdapter::row_icon(size_t row) const {
@@ -221,6 +238,7 @@ void ListAdapter::select(SelectOp op, size_t first, size_t last) {
 
 TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     : main_(main), core_(core), tab_(tab), adapter_(core, tab) {
+    adapter_.icons = &main.shell_icons();
     style.bg = tok::ListBackground;
     BbApp* app = core.app();
 
@@ -733,7 +751,10 @@ bool PaneView::on_mouse_down(const MouseEvent&) {
 // ---- MainView ----------------------------------------------------------------------------------------
 
 MainView::MainView(core::Core& core, platform::Window& window)
-    : core_(core), window_(window), tree_provider_(std::make_unique<FolderTreeProvider>()) {
+    : core_(core),
+      window_(window),
+      icons_(std::make_unique<ShellIcons>(window.hwnd())),
+      tree_provider_(std::make_unique<FolderTreeProvider>(icons_.get())) {
     // WindowRoot holds the window and, last, the popup layer that covers it.
     auto outer = std::make_unique<Panel>();
     outer->name = "WindowRoot";
@@ -843,6 +864,8 @@ MainView::MainView(core::Core& core, platform::Window& window)
     tree_->dock = Dock::Fill;
     tree_->name = "FolderTree";
     tree_->set_provider(tree_provider_.get());
+    // A program's or special folder's own icon came back from the shell: repaint whatever shows it.
+    icons_->on_ready = [this] { window_.root().invalidate_all(); };
     pane_host_ = main_split_->emplace<Panel>();
     pane_host_->name = "PaneHostSite";
 
@@ -915,6 +938,10 @@ bool MainView::on_window_message(UINT msg, WPARAM wp, LPARAM lp) {
         auto run = std::move(deferred_);
         deferred_.clear();
         for (auto& fn : run) fn();
+        return true;
+    }
+    if (msg == WM_BB_ICONS) {
+        icons_->drain();
         return true;
     }
     if (msg == WM_BB_THUMBS) {
