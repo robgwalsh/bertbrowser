@@ -15,4 +15,4 @@ add_executable(bb-harness
   ../app/app/version.cpp
 )
 target_include_directories(bb-harness PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(bb-harness PRIVATE bbviews psapi)
+target_link_libraries(bb-harness PRIVATE bbviews psapi winmm)

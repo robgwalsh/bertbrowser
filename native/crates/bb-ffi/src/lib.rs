@@ -18,6 +18,12 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(non_camel_case_types)]
 
+// The process heap is slow for the many small allocations parsing, planning and listing make:
+// measured at twice the time of mimalloc across the Tier A suite. Everything Rust allocates is
+// freed by Rust (`bb_str_free`, `bb_event_free`), so the C++ side never sees which heap it is.
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::any::Any;
 use std::cell::RefCell;
 use std::ffi::c_void;

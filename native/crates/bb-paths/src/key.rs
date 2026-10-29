@@ -34,12 +34,18 @@ impl PathKey {
     /// no trailing separator (except drive roots like `C:\`), upper-cased with the simple
     /// per-character mapping.
     pub fn canonicalize(path: &str) -> Result<String, PathError> {
+        if let Some(end) = simple_absolute_len(path) {
+            return Ok(fold_upper(&path[..end]));
+        }
         Ok(fold_upper(&Self::normalize_display(path)?))
     }
 
     /// The same normalization as [`canonicalize`](Self::canonicalize) but preserving the original
     /// casing, for display.
     pub fn normalize_display(path: &str) -> Result<String, PathError> {
+        if let Some(end) = simple_absolute_len(path) {
+            return Ok(path[..end].to_string());
+        }
         if path.trim().is_empty() {
             return Err(PathError::Empty);
         }
@@ -56,13 +62,19 @@ impl PathKey {
         let key = Self::canonicalize(dir_key)?;
         // A drive root keeps its separator ("C:\"), so lo must not double it.
         let body = key.strip_suffix('\\').unwrap_or(&key);
-        Ok((format!("{body}\\"), format!("{body}]")))
+        let mut lo = String::with_capacity(body.len() + 1);
+        lo.push_str(body);
+        lo.push('\\');
+        let mut hi = String::with_capacity(body.len() + 1);
+        hi.push_str(body);
+        hi.push(']');
+        Ok((lo, hi))
     }
 
     /// True if `key` is strictly under `dir_key`. One question only: re-canonicalizes and allocates.
     pub fn is_under(key: &str, dir_key: &str) -> Result<bool, PathError> {
-        let (lo, hi) = Self::prefix_bounds(dir_key)?;
-        Ok(key >= lo.as_str() && key < hi.as_str())
+        // Inside `[dir + "\", dir + "]")` is exactly "starts with dir + "\", so the bounds are not built.
+        Ok(Self::is_under_key(key, &Self::canonicalize(dir_key)?))
     }
 
     /// [`is_under`](Self::is_under) for a caller that already holds two canonical keys: the same
@@ -116,6 +128,9 @@ pub fn parent_key(key: &str) -> Option<String> {
 /// Simple (one character to one character) upper-casing, which is what `ToUpperInvariant` did. The
 /// full mapping would turn `ß` into `SS` and give two distinct Windows paths one key.
 pub fn fold_upper(s: &str) -> String {
+    if s.is_ascii() {
+        return s.to_ascii_uppercase();
+    }
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         let mut upper = c.to_uppercase();
@@ -125,6 +140,45 @@ pub fn fold_upper(s: &str) -> String {
         }
     }
     out
+}
+
+/// The end (exclusive, trailing separator dropped unless it is the root) of `path` when it is a plain
+/// `X:\a\b` path that `GetFullPathNameW` would hand back unchanged apart from a trailing separator,
+/// so the Win32 call can be skipped. Anything unusual (forward slashes, `.`/`..`, doubled or trailing
+/// dot/space components, colons, wildcards, control characters, relative or UNC forms) is None and
+/// takes the full route.
+fn simple_absolute_len(path: &str) -> Option<usize> {
+    let b = path.as_bytes();
+    if b.len() < 3 || !b[0].is_ascii_alphabetic() || b[1] != b':' || b[2] != b'\\' {
+        return None;
+    }
+    if b.len() == 3 {
+        return Some(3);
+    }
+    let mut start = 3;
+    for i in 3..=b.len() {
+        let at_end = i == b.len();
+        if !at_end {
+            let c = b[i];
+            if c != b'\\' {
+                if c < 0x20 || matches!(c, b'"' | b'<' | b'>' | b'|' | b'*' | b'?' | b':' | b'/') {
+                    return None;
+                }
+                continue;
+            }
+        }
+        let comp = &b[start..i];
+        if comp.is_empty() {
+            // Only a single trailing separator is simple.
+            return if at_end { Some(start - 1) } else { None };
+        }
+        let last = comp[comp.len() - 1];
+        if last == b'.' || last == b' ' {
+            return None;
+        }
+        start = i + 1;
+    }
+    Some(b.len())
 }
 
 /// `GetFullPathNameW`: resolves `.`/`..`, turns `/` into `\`, and qualifies against the current
@@ -217,4 +271,48 @@ fn unc_share_len(rest: &[u8]) -> usize {
         }
     }
     rest.len()
+}
+
+#[cfg(test)]
+mod fast_path_tests {
+    use super::*;
+
+    /// Whatever the fast path accepts, `GetFullPathNameW` plus the trailing trim must agree with.
+    #[test]
+    fn fast_path_agrees_with_win32() {
+        let cases = [
+            "C:\\",
+            "c:\\Users",
+            "C:\\Users\\",
+            "C:\\Users\\bench\\notes.txt",
+            "D:\\a b\\c d.e",
+            "C:\\a\\\\b",
+            "C:\\a\\.\\b",
+            "C:\\a\\..\\b",
+            "C:\\a.\\b",
+            "C:\\a \\b",
+            "C:\\a\\b.",
+            "C:\\a\\...",
+            "C:\\a/b",
+            "C:\\a:b",
+            "C:\\a\\\\",
+            "C:\\a\\b\\\\",
+            "C:\\caf\u{e9}\\\u{df}x",
+            "C:\\a\\con",
+            "C:\\a*",
+            "C:a",
+            "\\\\srv\\share\\x",
+            "C:\\a\\b ",
+            "C:\\.hidden\\x",
+        ];
+        let mut accepted = 0;
+        for p in cases {
+            let slow = trim_trailing_separator(full_path(p).unwrap());
+            if let Some(end) = simple_absolute_len(p) {
+                accepted += 1;
+                assert_eq!(&p[..end], slow, "{p}");
+            }
+        }
+        assert!(accepted >= 6);
+    }
 }

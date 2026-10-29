@@ -14,6 +14,7 @@
 //! start. Spec: Core/Services/Preview/SyntaxTokenizer.cs.
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::LazyLock;
 
 use super::classifier::extension_of;
@@ -132,6 +133,28 @@ impl SyntaxTokenizer {
     }
 }
 
+/// The spans a scanner has produced so far, collapsed as they arrive: an empty span is dropped, and
+/// one that continues the last of the same class extends it. Collapsing on the way in rather than in
+/// a second pass keeps a megabyte of source from holding two vectors of a quarter-million spans.
+#[derive(Default)]
+struct Spans(Vec<SyntaxSpan>);
+
+impl Spans {
+    fn push(&mut self, span: SyntaxSpan) {
+        if span.length == 0 {
+            return;
+        }
+        if let Some(last) = self.0.last_mut()
+            && last.class == span.class
+            && last.start + last.length == span.start
+        {
+            last.length += span.length;
+            return;
+        }
+        self.0.push(span);
+    }
+}
+
 // --- the generic scanner ---
 
 struct LanguageRules {
@@ -139,11 +162,57 @@ struct LanguageRules {
     block_comments: &'static [(&'static str, &'static str)],
     string_delimiters: &'static [char],
     backslash_escapes: bool,
-    keywords: HashSet<&'static str>,
+    keywords: KeywordSet,
+}
+
+/// Keywords are short ASCII words looked up once per identifier in the file, so the set hashes with
+/// FNV-1a rather than SipHash: nothing here is attacker-chosen, and a megabyte of source asks a
+/// million times.
+type KeywordSet = HashSet<&'static str, BuildHasherDefault<Fnv>>;
+
+/// The longest keyword in any table, so a lookup can build the word on the stack.
+const MAX_KEYWORD: usize = 16;
+
+struct Fnv(u64);
+
+impl Default for Fnv {
+    fn default() -> Fnv {
+        Fnv(0xcbf2_9ce4_8422_2325)
+    }
+}
+
+impl Hasher for Fnv {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0 ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+}
+
+impl LanguageRules {
+    /// Whether the identifier is a keyword. Every keyword is ASCII and at most `MAX_KEYWORD` long,
+    /// so anything else is not one, and no `String` is built to ask.
+    fn is_keyword(&self, word: &[char]) -> bool {
+        if word.len() > MAX_KEYWORD {
+            return false;
+        }
+        let mut buffer = [0u8; MAX_KEYWORD];
+        for (slot, &c) in buffer.iter_mut().zip(word) {
+            if !c.is_ascii() {
+                return false;
+            }
+            *slot = c as u8;
+        }
+        std::str::from_utf8(&buffer[..word.len()]).is_ok_and(|w| self.keywords.contains(w))
+    }
 }
 
 fn scan_generic(text: &[char], rules: &LanguageRules) -> Vec<SyntaxSpan> {
-    let mut spans = Vec::new();
+    let mut spans = Spans::default();
     let mut i = 0;
     while i < text.len() {
         let start = i;
@@ -178,8 +247,7 @@ fn scan_generic(text: &[char], rules: &LanguageRules) -> Vec<SyntaxSpan> {
             while i < text.len() && is_identifier_part(text[i]) {
                 i += 1;
             }
-            let word: String = text[start..i].iter().collect();
-            let class = if rules.keywords.contains(word.as_str()) {
+            let class = if rules.is_keyword(&text[start..i]) {
                 SyntaxClass::Keyword
             } else {
                 SyntaxClass::Text
@@ -196,7 +264,7 @@ fn scan_generic(text: &[char], rules: &LanguageRules) -> Vec<SyntaxSpan> {
         };
         spans.push(SyntaxSpan::new(start, 1, class));
     }
-    spans
+    spans.0
 }
 
 fn try_block_comment(text: &[char], i: &mut usize, rules: &LanguageRules) -> bool {
@@ -257,7 +325,7 @@ fn try_string(text: &[char], i: &mut usize, rules: &LanguageRules) -> bool {
 // --- XML/HTML, which is shaped nothing like the others ---
 
 fn scan_xml(text: &[char]) -> Vec<SyntaxSpan> {
-    let mut spans = Vec::new();
+    let mut spans = Spans::default();
     let mut i = 0;
     while i < text.len() {
         let start = i;
@@ -340,13 +408,13 @@ fn scan_xml(text: &[char]) -> Vec<SyntaxSpan> {
         }
         spans.push(SyntaxSpan::new(start, i - start, SyntaxClass::Text));
     }
-    spans
+    spans.0
 }
 
 // --- Markdown: a line-shaped language, so scanned by line ---
 
 fn scan_markdown(text: &[char]) -> Vec<SyntaxSpan> {
-    let mut spans = Vec::new();
+    let mut spans = Spans::default();
     let mut i = 0;
     let mut in_fence = false;
     while i < text.len() {
@@ -423,7 +491,7 @@ fn scan_markdown(text: &[char]) -> Vec<SyntaxSpan> {
             SyntaxClass::Text,
         ));
     }
-    spans
+    spans.0
 }
 
 fn markdown_marker_length(trimmed: &[char]) -> usize {
@@ -469,25 +537,10 @@ fn is_punctuation(c: char) -> bool {
     c > ' ' && c < '\u{7F}' && !c.is_alphanumeric() && c != '_'
 }
 
-/// Collapses adjacent spans of the same class and drops empties, then checks the result really
+/// Checks (the collapsing and dropping of empties happened as the spans were pushed, see `Spans`) the result really
 /// does cover the text, the invariant the view depends on. A scanner bug becomes plain text here
 /// rather than an exception three layers up.
-fn merge(spans: Vec<SyntaxSpan>, length: usize) -> Vec<SyntaxSpan> {
-    let mut merged: Vec<SyntaxSpan> = Vec::with_capacity(spans.len());
-    for span in spans {
-        if span.length == 0 {
-            continue;
-        }
-        if let Some(last) = merged.last_mut()
-            && last.class == span.class
-            && last.start + last.length == span.start
-        {
-            last.length += span.length;
-            continue;
-        }
-        merged.push(span);
-    }
-
+fn merge(merged: Vec<SyntaxSpan>, length: usize) -> Vec<SyntaxSpan> {
     let plain = || vec![SyntaxSpan::new(0, length, SyntaxClass::Text)];
     let mut covered = 0;
     for span in &merged {
@@ -501,8 +554,10 @@ fn merge(spans: Vec<SyntaxSpan>, length: usize) -> Vec<SyntaxSpan> {
 
 // --- tables ---
 
-fn words(words: &'static str) -> HashSet<&'static str> {
-    words.split_ascii_whitespace().collect()
+fn words(words: &'static str) -> KeywordSet {
+    let set: KeywordSet = words.split_ascii_whitespace().collect();
+    assert!(set.iter().all(|w| w.len() <= MAX_KEYWORD));
+    set
 }
 
 static RULES: LazyLock<HashMap<SyntaxLanguage, LanguageRules>> = LazyLock::new(|| {

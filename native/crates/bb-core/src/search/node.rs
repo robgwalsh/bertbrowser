@@ -64,28 +64,46 @@ pub enum SearchNode {
     Content(String),
 }
 
+/// `*` + the term + `*`: the term as typed when `plain`, else GLOB-escaped (see `GlobText::escape`).
+fn star_wrapped(term: &str, plain: bool, keep_wildcards: bool) -> String {
+    let mut out = String::with_capacity(term.len() + 10);
+    out.push('*');
+    if plain {
+        out.push_str(term);
+    } else {
+        GlobText::escape_into(&mut out, term, keep_wildcards);
+    }
+    out.push('*');
+    out
+}
+
 impl SearchNode {
     pub fn name(term: &str, literal: bool) -> SearchNode {
+        Self::name_owned(term.to_string(), literal)
+    }
+
+    /// [`name`](Self::name) for a caller that already owns the folded term.
+    pub fn name_owned(term: String, literal: bool) -> SearchNode {
+        let pattern = star_wrapped(&term, !literal, false);
+        let glob = star_wrapped(&term, false, !literal);
         SearchNode::Name {
-            term: term.to_string(),
+            term,
             literal,
-            pattern: format!(
-                "*{}*",
-                if literal {
-                    GlobText::escape(term, false)
-                } else {
-                    term.to_string()
-                }
-            ),
-            glob: format!("*{}*", GlobText::escape(term, !literal)),
+            pattern,
+            glob,
         }
     }
 
     pub fn path(term: &str) -> SearchNode {
+        let glob = star_wrapped(term, false, true);
+        let mut pattern = String::with_capacity(term.len() + 2);
+        pattern.push('*');
+        pattern.push_str(term);
+        pattern.push('*');
         SearchNode::Path {
             term: term.to_string(),
-            pattern: format!("*{term}*"),
-            glob: format!("*{}*", GlobText::escape(term, true)),
+            pattern,
+            glob,
         }
     }
 

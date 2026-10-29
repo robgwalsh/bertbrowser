@@ -5,8 +5,11 @@
 //! call) and on for a separate pass, which is what keeps the allocation gate deterministic and the
 //! timings clean of its bookkeeping.
 
-use std::alloc::{GlobalAlloc, Layout, System};
+use std::alloc::{GlobalAlloc, Layout};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+
+/// The allocator the shipped app uses (`bb-ffi`), so a benchmark pays what the app pays.
+static INNER: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 pub struct CountingAlloc;
 
@@ -26,7 +29,7 @@ unsafe impl GlobalAlloc for CountingAlloc {
             BYTES.fetch_add(layout.size() as u64, Relaxed);
             CALLS.fetch_add(1, Relaxed);
         }
-        unsafe { System.alloc(layout) }
+        unsafe { INNER.alloc(layout) }
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
@@ -34,11 +37,11 @@ unsafe impl GlobalAlloc for CountingAlloc {
             BYTES.fetch_add(layout.size() as u64, Relaxed);
             CALLS.fetch_add(1, Relaxed);
         }
-        unsafe { System.alloc_zeroed(layout) }
+        unsafe { INNER.alloc_zeroed(layout) }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(ptr, layout) }
+        unsafe { INNER.dealloc(ptr, layout) }
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
@@ -47,7 +50,7 @@ unsafe impl GlobalAlloc for CountingAlloc {
             BYTES.fetch_add(new_size.saturating_sub(layout.size()) as u64, Relaxed);
             CALLS.fetch_add(1, Relaxed);
         }
-        unsafe { System.realloc(ptr, layout, new_size) }
+        unsafe { INNER.realloc(ptr, layout, new_size) }
     }
 }
 

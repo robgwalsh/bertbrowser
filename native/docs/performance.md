@@ -50,155 +50,155 @@ How to read the native numbers next to the .NET ones in the repository's `docs/p
 | Power plan | High performance |
 | Corpus | synthetic, scale 1 (100,000 rows) |
 | Job | default, counting-allocator toolchain |
-| Recorded | 2026-10-28 at `3683e277a` (uncommitted changes) |
+| Recorded | 2026-10-29 at `4060bcc29` (uncommitted changes) |
 
 ### Tier A — Core micro-benchmarks (BenchmarkDotNet)
 
 | Benchmark | Median | p95 | Allocated/op | Gen0/kop | n |
 |---|---:|---:|---:|---:|---:|
-| `core.db.open` | 41.9 ns | 43.1 ns | 0 B | 0 | 15 |
-| `core.db.openwithoutpragmas` | 70.4 µs | 71.1 µs | 100 B | 2000 | 15 |
-| `core.delete.plan1000(mode=Permanent)` | 3.58 ms | 3.59 ms | 5.57 MB | 37489000 | 15 |
-| `core.delete.plan1000(mode=Recycle)` | 3.58 ms | 3.63 ms | 5.57 MB | 37489000 | 15 |
-| `core.digest.append64mb(algorithm=Crc32)` | 16.4 ms | 22.9 ms | 1.00 MB | 8000 | 15 |
-| `core.digest.append64mb(algorithm=Md5)` | 111 ms | 115 ms | 1.00 MB | 8000 | 15 |
-| `core.digest.append64mb(algorithm=Sha1)` | 42.6 ms | 46.8 ms | 1.00 MB | 8000 | 15 |
-| `core.digest.append64mb(algorithm=Sha256)` | 44.4 ms | 47.4 ms | 1.00 MB | 8000 | 15 |
-| `core.digest.append64mb(algorithm=Sha512)` | 124 ms | 125 ms | 1.00 MB | 8000 | 15 |
-| `core.dirsize.getmany(n=2000)` | 5.80 ms | 6.05 ms | 3.59 MB | 22002000 | 15 |
-| `core.dirsize.getmany(n=50)` | 118 µs | 119 µs | 82.2 KB | 553000 | 15 |
-| `core.dirsizewrite.upsertmany10k` | 82.9 ms | 346 ms | 0 B | 0 | 15 |
-| `core.filelistdiff.compute10k` | 14.4 ms | 15.2 ms | 23.1 MB | 150420000 | 15 |
-| `core.filesystem.listdirectory` | 7.19 ms | 7.33 ms | 2.90 MB | 40026000 | 15 |
-| `core.fsindex.search(query=dm:2026-09-15)` | 6.64 ms | 6.86 ms | 218 KB | 4236000 | 15 |
-| `core.fsindex.search(query=ext:txt)` | 5.13 ms | 5.59 ms | 880 KB | 18464000 | 15 |
-| `core.fsindex.search(query=re:^img_)` | 16.5 ms | 17.2 ms | 1.93 MB | 59489000 | 15 |
-| `core.fsindex.search(query=report ext:cs size:>1kb)` | 6.30 ms | 6.61 ms | 14.4 KB | 243000 | 15 |
-| `core.fsindex.search(query=report)` | 7.08 ms | 7.70 ms | 186 KB | 3392000 | 15 |
-| `core.fsindex.search(query=size:>100gb)` | 5.48 ms | 5.61 ms | 4.38 KB | 30000 | 15 |
-| `core.fsindex.search(query=size:>100mb)` | 6.36 ms | 7.11 ms | 141 KB | 2459000 | 15 |
-| `core.fsindex.searchglobal(query=dm:2026-09-15)` | 40.4 ms | 42.5 ms | 945 KB | 17669000 | 15 |
-| `core.fsindex.searchglobal(query=ext:txt)` | 7.05 ms | 7.13 ms | 992 KB | 19132000 | 15 |
-| `core.fsindex.searchglobal(query=re:^img_)` | 61.8 ms | 64.4 ms | 6.25 MB | 182116000 | 15 |
-| `core.fsindex.searchglobal(query=report ext:cs size:>1kb)` | 31.1 ms | 34.4 ms | 59.4 KB | 1012000 | 15 |
-| `core.fsindex.searchglobal(query=report)` | 43.7 ms | 51.6 ms | 816 KB | 14511000 | 15 |
-| `core.fsindex.searchglobal(query=size:>100gb)` | 26.8 ms | 29.0 ms | 1.12 KB | 9000 | 15 |
-| `core.fsindex.searchglobal(query=size:>100mb)` | 37.1 ms | 38.8 ms | 660 KB | 11718000 | 15 |
-| `core.fsindexscan.duplicatecandidates` | 6.63 ms | 6.83 ms | 37.3 KB | 31000 | 15 |
-| `core.fsindexscan.findcoveringroot` | 14.8 µs | 15.1 µs | 1.71 KB | 16000 | 15 |
-| `core.fsindexscan.hassizedata` | 11.1 µs | 11.3 µs | 2.12 KB | 16000 | 15 |
-| `core.fsindexscan.subtree` | 12.8 ms | 13.3 ms | 4.59 MB | 53191000 | 15 |
-| `core.fsindexwrite.upsert20k` | 100 ms | 104 ms | 252 KB | 20000000 | 15 |
-| `core.gif.next60frames` | 615 µs | 650 µs | 17.9 MB | 64000 | 15 |
-| `core.gif.nextshared60frames` | 250 µs | 257 µs | 354 KB | 4000 | 15 |
-| `core.glob.wildcardmatch10k` | 289 µs | 293 µs | 0 B | 0 | 15 |
-| `core.hash.hashfile64mb` | 44.5 ms | 44.8 ms | 1.00 MB | 5000 | 15 |
-| `core.hash.hashprefix64k` | 12.2 ms | 12.6 ms | 100 MB | 500000 | 15 |
-| `core.pathkey.canonicalizedeep` | 934 ns | 958 ns | 1.40 KB | 7000 | 15 |
-| `core.pathkey.canonicalizeshort` | 611 ns | 629 ns | 1.13 KB | 7000 | 15 |
-| `core.pathkey.canonicalizetrailing` | 833 ns | 839 ns | 1.35 KB | 8000 | 15 |
-| `core.pathkey.isunderkeyloop` | 98.0 µs | 99.1 µs | 0 B | 0 | 15 |
-| `core.pathkey.isunderloop` | 46.7 ms | 48.5 ms | 62.1 MB | 550000000 | 15 |
-| `core.pathkey.prefixbounds` | 1.02 µs | 1.03 µs | 1.45 KB | 11000 | 15 |
-| `core.preview.readhex5000rows` | 2.66 ms | 2.70 ms | 1.07 MB | 10002000 | 15 |
-| `core.preview.readtext1mb` | 2.53 ms | 2.64 ms | 2.43 MB | 3000 | 15 |
-| `core.rename.planliteral1000` | 8.51 ms | 8.59 ms | 13.0 MB | 90063000 | 15 |
-| `core.rename.plannumbered1000` | 8.46 ms | 8.66 ms | 12.9 MB | 96089000 | 15 |
-| `core.searchgrammar.compile(query=content:todo OR ext:md)` | 418 ns | 422 ns | 278 B | 7000 | 15 |
-| `core.searchgrammar.compile(query=dm:2026-09-15)` | 443 ns | 447 ns | 296 B | 7000 | 15 |
-| `core.searchgrammar.compile(query=ext:txt)` | 413 ns | 417 ns | 269 B | 7000 | 15 |
-| `core.searchgrammar.compile(query=re:^img_)` | 48.5 ns | 51.4 ns | 8 B | 1000 | 15 |
-| `core.searchgrammar.compile(query=report OR draft OR final ext:docx;pdf;txt size:>1kb !archive dm:2024 path:source is:file)` | 2.23 µs | 2.26 µs | 1.49 KB | 34000 | 15 |
-| `core.searchgrammar.compile(query=report ext:cs size:>1kb)` | 741 ns | 748 ns | 380 B | 12000 | 15 |
-| `core.searchgrammar.compile(query=report)` | 256 ns | 261 ns | 264 B | 5000 | 15 |
-| `core.searchgrammar.compile(query=size:>100gb)` | 318 ns | 321 ns | 288 B | 5000 | 15 |
-| `core.searchgrammar.compile(query=size:>100mb)` | 317 ns | 319 ns | 288 B | 5000 | 15 |
-| `core.searchgrammar.matches10k(query=content:todo OR ext:md)` | 138 µs | 138 µs | 0 B | 0 | 15 |
-| `core.searchgrammar.matches10k(query=dm:2026-09-15)` | 43.2 µs | 43.4 µs | 0 B | 0 | 15 |
-| `core.searchgrammar.matches10k(query=ext:txt)` | 66.9 µs | 67.3 µs | 0 B | 0 | 15 |
-| `core.searchgrammar.matches10k(query=re:^img_)` | 252 µs | 255 µs | 0 B | 0 | 15 |
-| `core.searchgrammar.matches10k(query=report OR draft OR final ext:docx;pdf;txt size:>1kb !archive dm:2024 path:source is:file)` | 1.01 ms | 1.20 ms | 0 B | 0 | 15 |
-| `core.searchgrammar.matches10k(query=report ext:cs size:>1kb)` | 327 µs | 336 µs | 0 B | 0 | 15 |
-| `core.searchgrammar.matches10k(query=report)` | 302 µs | 309 µs | 0 B | 0 | 15 |
-| `core.searchgrammar.matches10k(query=size:>100gb)` | 41.6 µs | 41.7 µs | 0 B | 0 | 15 |
-| `core.searchgrammar.matches10k(query=size:>100mb)` | 41.8 µs | 42.0 µs | 0 B | 0 | 15 |
-| `core.searchgrammar.parse(query=content:todo OR ext:md)` | 1.56 µs | 1.73 µs | 1.51 KB | 20000 | 15 |
-| `core.searchgrammar.parse(query=dm:2026-09-15)` | 1.98 µs | 2.03 µs | 1.05 KB | 13000 | 15 |
-| `core.searchgrammar.parse(query=ext:txt)` | 1.02 µs | 1.03 µs | 1.03 KB | 11000 | 15 |
-| `core.searchgrammar.parse(query=re:^img_)` | 15.6 µs | 15.7 µs | 21.7 KB | 180000 | 15 |
-| `core.searchgrammar.parse(query=report OR draft OR final ext:docx;pdf;txt size:>1kb !archive dm:2024 path:source is:file)` | 6.91 µs | 6.95 µs | 3.58 KB | 94000 | 15 |
-| `core.searchgrammar.parse(query=report ext:cs size:>1kb)` | 2.11 µs | 2.15 µs | 1.20 KB | 28000 | 15 |
-| `core.searchgrammar.parse(query=report)` | 1.28 µs | 1.29 µs | 988 B | 16000 | 15 |
-| `core.searchgrammar.parse(query=size:>100gb)` | 1.21 µs | 1.23 µs | 1010 B | 13000 | 15 |
-| `core.searchgrammar.parse(query=size:>100mb)` | 1.21 µs | 1.22 µs | 1010 B | 13000 | 15 |
-| `core.textdecode.decode(kind=binary)` | 2.46 µs | 2.69 µs | 0 B | 0 | 15 |
-| `core.textdecode.decode(kind=latin1)` | 3.23 ms | 3.32 ms | 2.43 MB | 3000 | 15 |
-| `core.textdecode.decode(kind=utf16)` | 1.76 ms | 1.77 ms | 1.93 MB | 4000 | 15 |
-| `core.textdecode.decode(kind=utf8)` | 2.51 ms | 2.54 ms | 1.43 MB | 2000 | 15 |
-| `core.tokenize.tokenize1mb(language=CSharp)` | 22.5 ms | 24.9 ms | 27.6 MB | 99405000 | 15 |
-| `core.tokenize.tokenize1mb(language=Json)` | 15.9 ms | 16.6 ms | 26.6 MB | 25651000 | 15 |
-| `core.transfer.expandmerge4000` | 6.85 ms | 6.98 ms | 8.40 MB | 81307000 | 15 |
-| `core.transfer.plan1000` | 6.43 ms | 6.50 ms | 10.4 MB | 70540000 | 15 |
+| `core.db.open` | 44.2 ns | 45.1 ns | 0 B | 0 | 15 |
+| `core.db.openwithoutpragmas` | 75.0 µs | 81.1 µs | 100 B | 2000 | 15 |
+| `core.delete.plan1000(mode=Permanent)` | 639 µs | 644 µs | 376 KB | 9089000 | 15 |
+| `core.delete.plan1000(mode=Recycle)` | 646 µs | 650 µs | 376 KB | 9089000 | 15 |
+| `core.digest.append64mb(algorithm=Crc32)` | 14.2 ms | 15.1 ms | 1.00 MB | 8000 | 15 |
+| `core.digest.append64mb(algorithm=Md5)` | 111 ms | 112 ms | 1.00 MB | 8000 | 15 |
+| `core.digest.append64mb(algorithm=Sha1)` | 39.8 ms | 40.5 ms | 1.00 MB | 8000 | 15 |
+| `core.digest.append64mb(algorithm=Sha256)` | 45.4 ms | 50.5 ms | 1.00 MB | 8000 | 15 |
+| `core.digest.append64mb(algorithm=Sha512)` | 134 ms | 258 ms | 1.00 MB | 8000 | 15 |
+| `core.dirsize.getmany(n=2000)` | 6.54 ms | 16.5 ms | 1.16 MB | 10006000 | 15 |
+| `core.dirsize.getmany(n=50)` | 79.8 µs | 106 µs | 22.0 KB | 256000 | 15 |
+| `core.dirsizewrite.upsertmany10k` | 19.9 ms | 26.3 ms | 0 B | 0 | 15 |
+| `core.filelistdiff.compute10k` | 2.47 ms | 2.69 ms | 1.62 MB | 30420000 | 15 |
+| `core.filesystem.listdirectory` | 5.41 ms | 5.62 ms | 2.90 MB | 40021000 | 15 |
+| `core.fsindex.search(query=dm:2026-09-15)` | 6.58 ms | 6.94 ms | 215 KB | 4220000 | 15 |
+| `core.fsindex.search(query=ext:txt)` | 4.69 ms | 4.77 ms | 877 KB | 18448000 | 15 |
+| `core.fsindex.search(query=re:^img_)` | 14.1 ms | 15.9 ms | 1.92 MB | 59473000 | 15 |
+| `core.fsindex.search(query=report ext:cs size:>1kb)` | 6.36 ms | 6.62 ms | 11.2 KB | 227000 | 15 |
+| `core.fsindex.search(query=report)` | 7.28 ms | 7.61 ms | 183 KB | 3376000 | 15 |
+| `core.fsindex.search(query=size:>100gb)` | 5.50 ms | 5.61 ms | 1.27 KB | 14000 | 15 |
+| `core.fsindex.search(query=size:>100mb)` | 6.04 ms | 6.28 ms | 138 KB | 2443000 | 15 |
+| `core.fsindex.searchglobal(query=dm:2026-09-15)` | 39.7 ms | 41.4 ms | 945 KB | 17669000 | 15 |
+| `core.fsindex.searchglobal(query=ext:txt)` | 6.32 ms | 6.88 ms | 992 KB | 19132000 | 15 |
+| `core.fsindex.searchglobal(query=re:^img_)` | 56.9 ms | 58.6 ms | 6.25 MB | 182116000 | 15 |
+| `core.fsindex.searchglobal(query=report ext:cs size:>1kb)` | 31.8 ms | 33.6 ms | 59.4 KB | 1012000 | 15 |
+| `core.fsindex.searchglobal(query=report)` | 44.6 ms | 46.5 ms | 816 KB | 14511000 | 15 |
+| `core.fsindex.searchglobal(query=size:>100gb)` | 27.1 ms | 30.4 ms | 1.12 KB | 9000 | 15 |
+| `core.fsindex.searchglobal(query=size:>100mb)` | 38.2 ms | 40.5 ms | 660 KB | 11718000 | 15 |
+| `core.fsindexscan.duplicatecandidates` | 7.39 ms | 7.58 ms | 34.2 KB | 15000 | 15 |
+| `core.fsindexscan.findcoveringroot` | 14.4 µs | 14.5 µs | 688 B | 11000 | 15 |
+| `core.fsindexscan.hassizedata` | 9.68 µs | 9.81 µs | 38 B | 4000 | 15 |
+| `core.fsindexscan.subtree` | 12.3 ms | 12.4 ms | 4.59 MB | 53179000 | 15 |
+| `core.fsindexwrite.upsert20k` | 94.2 ms | 102 ms | 252 KB | 20000000 | 15 |
+| `core.gif.next60frames` | 626 µs | 637 µs | 17.9 MB | 64000 | 15 |
+| `core.gif.nextshared60frames` | 248 µs | 254 µs | 354 KB | 4000 | 15 |
+| `core.glob.wildcardmatch10k` | 265 µs | 268 µs | 0 B | 0 | 15 |
+| `core.hash.hashfile64mb` | 41.4 ms | 41.5 ms | 1.00 MB | 5000 | 15 |
+| `core.hash.hashprefix64k` | 10.2 ms | 10.4 ms | 100 MB | 500000 | 15 |
+| `core.pathkey.canonicalizedeep` | 133 ns | 134 ns | 85 B | 1000 | 15 |
+| `core.pathkey.canonicalizeshort` | 50.0 ns | 52.9 ns | 24 B | 1000 | 15 |
+| `core.pathkey.canonicalizetrailing` | 98.7 ns | 100 ns | 60 B | 1000 | 15 |
+| `core.pathkey.isunderkeyloop` | 95.8 µs | 96.7 µs | 0 B | 0 | 15 |
+| `core.pathkey.isunderloop` | 2.79 ms | 2.85 ms | 1.44 MB | 50000000 | 15 |
+| `core.pathkey.prefixbounds` | 104 ns | 106 ns | 155 B | 3000 | 15 |
+| `core.preview.readhex5000rows` | 1.91 ms | 2.04 ms | 1.07 MB | 10002000 | 15 |
+| `core.preview.readtext1mb` | 2.05 ms | 2.06 ms | 2.43 MB | 3000 | 15 |
+| `core.rename.planliteral1000` | 1.64 ms | 1.65 ms | 1.15 MB | 25063000 | 15 |
+| `core.rename.plannumbered1000` | 1.71 ms | 1.73 ms | 1.15 MB | 31089000 | 15 |
+| `core.searchgrammar.compile(query=content:todo OR ext:md)` | 200 ns | 202 ns | 286 B | 7000 | 15 |
+| `core.searchgrammar.compile(query=dm:2026-09-15)` | 208 ns | 216 ns | 296 B | 7000 | 15 |
+| `core.searchgrammar.compile(query=ext:txt)` | 184 ns | 187 ns | 277 B | 7000 | 15 |
+| `core.searchgrammar.compile(query=re:^img_)` | 24.8 ns | 29.2 ns | 8 B | 1000 | 15 |
+| `core.searchgrammar.compile(query=report OR draft OR final ext:docx;pdf;txt size:>1kb !archive dm:2024 path:source is:file)` | 1.13 µs | 1.14 µs | 1.52 KB | 34000 | 15 |
+| `core.searchgrammar.compile(query=report ext:cs size:>1kb)` | 359 ns | 363 ns | 388 B | 12000 | 15 |
+| `core.searchgrammar.compile(query=report)` | 124 ns | 126 ns | 264 B | 5000 | 15 |
+| `core.searchgrammar.compile(query=size:>100gb)` | 132 ns | 134 ns | 288 B | 5000 | 15 |
+| `core.searchgrammar.compile(query=size:>100mb)` | 134 ns | 136 ns | 288 B | 5000 | 15 |
+| `core.searchgrammar.matches10k(query=content:todo OR ext:md)` | 206 µs | 208 µs | 0 B | 0 | 15 |
+| `core.searchgrammar.matches10k(query=dm:2026-09-15)` | 67.3 µs | 68.3 µs | 0 B | 0 | 15 |
+| `core.searchgrammar.matches10k(query=ext:txt)` | 88.2 µs | 90.7 µs | 0 B | 0 | 15 |
+| `core.searchgrammar.matches10k(query=re:^img_)` | 237 µs | 238 µs | 0 B | 0 | 15 |
+| `core.searchgrammar.matches10k(query=report OR draft OR final ext:docx;pdf;txt size:>1kb !archive dm:2024 path:source is:file)` | 1.08 ms | 1.09 ms | 0 B | 0 | 15 |
+| `core.searchgrammar.matches10k(query=report ext:cs size:>1kb)` | 368 µs | 370 µs | 0 B | 0 | 15 |
+| `core.searchgrammar.matches10k(query=report)` | 332 µs | 334 µs | 0 B | 0 | 15 |
+| `core.searchgrammar.matches10k(query=size:>100gb)` | 65.4 µs | 66.0 µs | 0 B | 0 | 15 |
+| `core.searchgrammar.matches10k(query=size:>100mb)` | 65.7 µs | 66.1 µs | 0 B | 0 | 15 |
+| `core.searchgrammar.parse(query=content:todo OR ext:md)` | 427 ns | 436 ns | 664 B | 13000 | 15 |
+| `core.searchgrammar.parse(query=dm:2026-09-15)` | 1.53 µs | 1.54 µs | 153 B | 7000 | 15 |
+| `core.searchgrammar.parse(query=ext:txt)` | 209 ns | 212 ns | 165 B | 6000 | 15 |
+| `core.searchgrammar.parse(query=re:^img_)` | 9.28 µs | 9.97 µs | 20.8 KB | 175000 | 15 |
+| `core.searchgrammar.parse(query=report OR draft OR final ext:docx;pdf;txt size:>1kb !archive dm:2024 path:source is:file)` | 3.03 µs | 3.09 µs | 3.30 KB | 51000 | 15 |
+| `core.searchgrammar.parse(query=report ext:cs size:>1kb)` | 541 ns | 547 ns | 956 B | 16000 | 15 |
+| `core.searchgrammar.parse(query=report)` | 160 ns | 165 ns | 94 B | 5000 | 15 |
+| `core.searchgrammar.parse(query=size:>100gb)` | 295 ns | 304 ns | 87 B | 7000 | 15 |
+| `core.searchgrammar.parse(query=size:>100mb)` | 293 ns | 305 ns | 87 B | 7000 | 15 |
+| `core.textdecode.decode(kind=binary)` | 2.47 µs | 2.58 µs | 0 B | 0 | 15 |
+| `core.textdecode.decode(kind=latin1)` | 3.14 ms | 3.18 ms | 2.43 MB | 3000 | 15 |
+| `core.textdecode.decode(kind=utf16)` | 1.41 ms | 1.79 ms | 1.93 MB | 4000 | 15 |
+| `core.textdecode.decode(kind=utf8)` | 1.95 ms | 1.96 ms | 1.43 MB | 2000 | 15 |
+| `core.tokenize.tokenize1mb(language=CSharp)` | 8.41 ms | 9.22 ms | 10.0 MB | 20000 | 15 |
+| `core.tokenize.tokenize1mb(language=Json)` | 7.30 ms | 7.69 ms | 16.0 MB | 21000 | 15 |
+| `core.transfer.expandmerge4000` | 2.17 ms | 2.25 ms | 3.87 MB | 56798000 | 15 |
+| `core.transfer.plan1000` | 987 µs | 995 µs | 707 KB | 16037000 | 15 |
 
 ### Tier B — UI scenarios (offscreen harness)
 
 | Scenario | Median | p95 | n |
 |---|---:|---:|---:|
-| `ui.flat-20k.flat.off` | 76.3 ms | 76.9 ms | 5 |
-| `ui.flat-20k.flat.on` | 651 ms | 712 ms | 5 |
-| `ui.flat-20k.flat.sort.name` | 60.9 ms | 61.4 ms | 5 |
-| `ui.flat-20k.flat.sort.size` | 61.0 ms | 62.2 ms | 5 |
-| `ui.listing-10k.back` | 105 ms | 106 ms | 5 |
-| `ui.listing-10k.list` | 100 ms | 103 ms | 5 |
-| `ui.listing-10k.refresh` | 94.3 ms | 107 ms | 5 |
-| `ui.listing-10k.up` | 60.3 ms | 61.2 ms | 5 |
-| `ui.preview.preview.code` | 360 ms | 364 ms | 5 |
-| `ui.preview.preview.hex2mb` | 507 ms | 543 ms | 5 |
-| `ui.preview.preview.png` | 361 ms | 363 ms | 5 |
-| `ui.preview.preview.text2mb` | 356 ms | 360 ms | 5 |
-| `ui.search-local.search.clear` | 60.9 ms | 61.7 ms | 5 |
-| `ui.search-local.search.ext` | 152 ms | 1.53 s | 5 |
-| `ui.search-local.search.regex` | 124 ms | 124 ms | 5 |
-| `ui.search-local.search.word` | 140 ms | 141 ms | 5 |
-| `ui.sort-select-10k.select.all` | 45.6 ms | 45.7 ms | 5 |
-| `ui.sort-select-10k.select.files` | 92.6 ms | 94.3 ms | 5 |
-| `ui.sort-select-10k.select.invert` | 91.9 ms | 94.2 ms | 5 |
-| `ui.sort-select-10k.select.none` | 45.7 ms | 46.2 ms | 5 |
-| `ui.sort-select-10k.sort.first` | 46.9 ms | 47.0 ms | 5 |
-| `ui.sort-select-10k.sort.modified` | 46.8 ms | 62.3 ms | 5 |
-| `ui.sort-select-10k.sort.name` | 44.8 ms | 45.4 ms | 5 |
-| `ui.sort-select-10k.sort.size` | 45.3 ms | 60.2 ms | 5 |
-| `ui.sort-select-10k.sort.type` | 153 ms | 154 ms | 5 |
-| `ui.startup.startup.hosted` | 90.7 ms | 109 ms | 5 |
-| `ui.tabs-panes.pane.close` | 105 ms | 121 ms | 5 |
-| `ui.tabs-panes.pane.split` | 75.7 ms | 77.0 ms | 5 |
-| `ui.tabs-panes.pane.switch` | 51.4 ms | 51.6 ms | 5 |
-| `ui.tabs-panes.tab.close` | 42.6 ms | 43.1 ms | 5 |
-| `ui.tabs-panes.tab.new` | 76.3 ms | 77.7 ms | 5 |
-| `ui.tabs-panes.tab.switch` | 44.4 ms | 44.9 ms | 5 |
-| `ui.tiles-5k.tiles.back` | 124 ms | 141 ms | 5 |
-| `ui.tiles-5k.tiles.large` | 215 ms | 218 ms | 5 |
-| `ui.tiles-5k.tiles.on` | 219 ms | 221 ms | 5 |
-| `ui.tiles-5k.tiles.scroll` | 123 ms | 140 ms | 5 |
-| `ui.transfer-2k.copy.2k` | 2.73 s | 3.40 s | 5 |
-| `ui.transfer-2k.delete.2k` | 1.27 s | 2.31 s | 5 |
+| `ui.flat-20k.flat.off` | 20.3 ms | 22.4 ms | 5 |
+| `ui.flat-20k.flat.on` | 270 ms | 278 ms | 5 |
+| `ui.flat-20k.flat.sort.name` | 18.0 ms | 19.4 ms | 5 |
+| `ui.flat-20k.flat.sort.size` | 18.8 ms | 19.8 ms | 5 |
+| `ui.listing-10k.back` | 35.0 ms | 36.4 ms | 5 |
+| `ui.listing-10k.list` | 36.1 ms | 38.0 ms | 5 |
+| `ui.listing-10k.refresh` | 32.6 ms | 35.5 ms | 5 |
+| `ui.listing-10k.up` | 15.8 ms | 16.3 ms | 5 |
+| `ui.preview.preview.code` | 174 ms | 175 ms | 5 |
+| `ui.preview.preview.hex2mb` | 263 ms | 306 ms | 5 |
+| `ui.preview.preview.png` | 180 ms | 181 ms | 5 |
+| `ui.preview.preview.text2mb` | 180 ms | 180 ms | 5 |
+| `ui.search-local.search.clear` | 13.7 ms | 14.8 ms | 5 |
+| `ui.search-local.search.ext` | 47.9 ms | 51.0 ms | 5 |
+| `ui.search-local.search.regex` | 49.6 ms | 49.8 ms | 5 |
+| `ui.search-local.search.word` | 52.3 ms | 52.7 ms | 5 |
+| `ui.sort-select-10k.select.all` | 12.4 ms | 13.1 ms | 5 |
+| `ui.sort-select-10k.select.files` | 20.1 ms | 20.1 ms | 5 |
+| `ui.sort-select-10k.select.invert` | 19.9 ms | 21.3 ms | 5 |
+| `ui.sort-select-10k.select.none` | 10.2 ms | 11.3 ms | 5 |
+| `ui.sort-select-10k.sort.first` | 15.0 ms | 16.0 ms | 5 |
+| `ui.sort-select-10k.sort.modified` | 14.8 ms | 16.0 ms | 5 |
+| `ui.sort-select-10k.sort.name` | 14.7 ms | 15.1 ms | 5 |
+| `ui.sort-select-10k.sort.size` | 13.9 ms | 15.2 ms | 5 |
+| `ui.sort-select-10k.sort.type` | 55.7 ms | 57.1 ms | 5 |
+| `ui.startup.startup.hosted` | 53.4 ms | 59.7 ms | 5 |
+| `ui.tabs-panes.pane.close` | 36.5 ms | 37.9 ms | 5 |
+| `ui.tabs-panes.pane.split` | 25.6 ms | 26.4 ms | 5 |
+| `ui.tabs-panes.pane.switch` | 19.8 ms | 20.6 ms | 5 |
+| `ui.tabs-panes.tab.close` | 13.2 ms | 13.8 ms | 5 |
+| `ui.tabs-panes.tab.new` | 23.6 ms | 36.1 ms | 5 |
+| `ui.tabs-panes.tab.switch` | 11.8 ms | 12.8 ms | 5 |
+| `ui.tiles-5k.tiles.back` | 35.4 ms | 35.8 ms | 5 |
+| `ui.tiles-5k.tiles.large` | 136 ms | 137 ms | 5 |
+| `ui.tiles-5k.tiles.on` | 140 ms | 142 ms | 5 |
+| `ui.tiles-5k.tiles.scroll` | 34.4 ms | 36.0 ms | 5 |
+| `ui.transfer-2k.copy.2k` | 1.31 s | 1.61 s | 5 |
+| `ui.transfer-2k.delete.2k` | 839 ms | 1.07 s | 5 |
 
 | Memory snapshot | Managed heap | Private bytes | Working set | Peak working set | Items | Realized | n |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `ui.flat-20k.flat` | 13.1 MB | 35.2 MB | 43.3 MB | 96.6 MB | 200 | 34 | 5 |
-| `ui.listing-10k.listing` | 20.2 MB | 41.5 MB | 47.4 MB | 58.2 MB | 10000 | 34 | 5 |
-| `ui.memory.flat-20k` | 29.7 MB | 57.3 MB | 65.1 MB | 97.9 MB | 20000 | 34 | 5 |
-| `ui.memory.idle` | 9.47 MB | 26.0 MB | 34.4 MB | 34.4 MB | 2 | 2 | 5 |
-| `ui.memory.listing-10k` | 19.9 MB | 38.5 MB | 45.2 MB | 47.8 MB | 10000 | 34 | 5 |
-| `ui.memory.released` | 11.1 MB | 33.2 MB | 40.6 MB | 97.9 MB | 2 | 2 | 5 |
-| `ui.memory.soak-navigate` | 10.7 MB | 38.7 MB | 47.5 MB | 97.9 MB | 2 | 2 | 5 |
-| `ui.memory.soak-tabs` | 10.8 MB | 40.2 MB | 47.5 MB | 97.9 MB | 2 | 2 | 5 |
-| `ui.preview.preview` | 11.1 MB | 31.8 MB | 49.3 MB | 51.1 MB | 10 | 10 | 5 |
-| `ui.search-local.search` | 14.6 MB | 36.2 MB | 44.3 MB | 50.3 MB | 200 | 34 | 5 |
-| `ui.sort-select-10k.sort` | 16.0 MB | 35.9 MB | 45.0 MB | 47.7 MB | 10000 | 34 | 5 |
-| `ui.tabs-panes.tabs` | 15.2 MB | 37.3 MB | 44.0 MB | 53.8 MB | 5000 | 34 | 5 |
-| `ui.tiles-5k.tiles` | 16.4 MB | 44.5 MB | 53.1 MB | 56.2 MB | 5000 | 34 | 5 |
-| `ui.transfer-2k.transfer` | 12.2 MB | 33.9 MB | 43.3 MB | 54.0 MB | 0 | 0 | 5 |
+| `ui.flat-20k.flat` | 9.07 MB | 127 MB | 112 MB | 114 MB | 200 | 34 | 5 |
+| `ui.listing-10k.listing` | 9.14 MB | 86.0 MB | 69.0 MB | 69.8 MB | 10000 | 34 | 5 |
+| `ui.memory.flat-20k` | 9.62 MB | 146 MB | 115 MB | 117 MB | 20000 | 34 | 5 |
+| `ui.memory.idle` | 8.87 MB | 34.2 MB | 35.5 MB | 35.5 MB | 2 | 2 | 5 |
+| `ui.memory.listing-10k` | 9.09 MB | 61.5 MB | 48.5 MB | 48.8 MB | 10000 | 34 | 5 |
+| `ui.memory.released` | 8.70 MB | 146 MB | 115 MB | 117 MB | 2 | 2 | 5 |
+| `ui.memory.soak-navigate` | 9.36 MB | 76.2 MB | 70.8 MB | 130 MB | 2 | 2 | 5 |
+| `ui.memory.soak-tabs` | 8.64 MB | 85.7 MB | 71.6 MB | 130 MB | 2 | 2 | 5 |
+| `ui.preview.preview` | 10.5 MB | 66.3 MB | 55.7 MB | 57.2 MB | 10 | 10 | 5 |
+| `ui.search-local.search` | 11.6 MB | 73.4 MB | 52.0 MB | 55.7 MB | 200 | 34 | 5 |
+| `ui.sort-select-10k.sort` | 9.30 MB | 73.7 MB | 51.6 MB | 53.2 MB | 10000 | 34 | 5 |
+| `ui.tabs-panes.tabs` | 9.51 MB | 72.4 MB | 54.8 MB | 55.2 MB | 5000 | 34 | 5 |
+| `ui.tiles-5k.tiles` | 10.9 MB | 77.7 MB | 63.5 MB | 66.5 MB | 5000 | 34 | 5 |
+| `ui.transfer-2k.transfer` | 8.85 MB | 69.9 MB | 50.5 MB | 58.7 MB | 0 | 0 | 5 |
 
 ## What the numbers do and do not mean
 

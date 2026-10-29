@@ -4,6 +4,11 @@
 
 use std::os::windows::fs::MetadataExt;
 
+use windows_sys::Win32::Storage::FileSystem::{
+    GetFileAttributesExW, GetFileAttributesW, GetFileExInfoStandard, INVALID_FILE_ATTRIBUTES,
+    WIN32_FILE_ATTRIBUTE_DATA,
+};
+
 use crate::FileTime;
 use crate::attributes::{DIRECTORY, REPARSE_POINT};
 
@@ -20,12 +25,38 @@ pub struct TransferEntry {
     pub modified_utc: FileTime,
 }
 
+/// What is at a path, as the planner and executor care: nothing, a file, or a directory (a junction
+/// is a directory whether or not its target still exists).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntryKind {
+    Missing,
+    File,
+    Directory,
+}
+
 /// What `TransferPlanner` needs answered. `Send + Sync` because a run is driven from a worker
 /// thread while the UI holds the same executor.
 pub trait TransferProbe: Send + Sync {
     fn directory_exists(&self, path: &str) -> bool;
 
     fn file_exists(&self, path: &str) -> bool;
+
+    /// Whether anything is there: a file or a directory. One question, so a probe that can answer it
+    /// with one call to the disk does.
+    fn exists(&self, path: &str) -> bool {
+        self.file_exists(path) || self.directory_exists(path)
+    }
+
+    /// What is there, asked once rather than as `directory_exists` then `file_exists`.
+    fn kind(&self, path: &str) -> EntryKind {
+        if self.directory_exists(path) {
+            EntryKind::Directory
+        } else if self.file_exists(path) {
+            EntryKind::File
+        } else {
+            EntryKind::Missing
+        }
+    }
 
     /// The physical path with every symlink/junction resolved, including ones part-way along the
     /// path (`C:\link\sub` where `link` is a junction). Returns the fully-qualified input when
@@ -49,6 +80,43 @@ pub trait TransferEntrySource: TransferProbe {
 #[derive(Default)]
 pub struct FileSystemTransferProbe;
 
+/// The attributes of the entry itself (a link is not followed), or None when nothing is there.
+/// `GetFileAttributesW` rather than `symlink_metadata`: the latter opens and closes a handle, which on
+/// a machine with a file-system filter (every one with Defender) was the larger part of a probe, and a
+/// copy asks five of them per file.
+fn attributes_of(path: &str) -> Option<u32> {
+    let wide: Vec<u16> = super::copier::extended(path)
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    // SAFETY: NUL-terminated and alive for the call.
+    let attributes = unsafe { GetFileAttributesW(wide.as_ptr()) };
+    (attributes != INVALID_FILE_ATTRIBUTES).then_some(attributes)
+}
+
+/// The length of the file at `path`, or None for a folder or nothing. From the directory entry, like
+/// `attributes_of`, with no handle opened.
+pub(crate) fn file_length(path: &str) -> Option<i64> {
+    let wide: Vec<u16> = super::copier::extended(path)
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    // SAFETY: an all-zero attribute record is a valid value for the call to fill in.
+    let mut data: WIN32_FILE_ATTRIBUTE_DATA = unsafe { std::mem::zeroed() };
+    // SAFETY: NUL-terminated path and a record of the type the info level names, both alive for the call.
+    let ok = unsafe {
+        GetFileAttributesExW(
+            wide.as_ptr(),
+            GetFileExInfoStandard,
+            (&mut data as *mut WIN32_FILE_ATTRIBUTE_DATA).cast(),
+        )
+    };
+    if ok == 0 || data.dwFileAttributes & DIRECTORY != 0 {
+        return None;
+    }
+    Some(((i64::from(data.nFileSizeHigh)) << 32) | i64::from(data.nFileSizeLow))
+}
+
 /// Bounds the resolution loop so a cyclic junction layout cannot hang it.
 const MAX_HOPS: usize = 32;
 
@@ -56,11 +124,23 @@ impl TransferProbe for FileSystemTransferProbe {
     /// The attribute bit of the entry itself, as `Directory.Exists` read it: a junction is a
     /// directory whether or not its target still exists.
     fn directory_exists(&self, path: &str) -> bool {
-        std::fs::symlink_metadata(path).is_ok_and(|m| m.file_attributes() & DIRECTORY != 0)
+        attributes_of(path).is_some_and(|a| a & DIRECTORY != 0)
     }
 
     fn file_exists(&self, path: &str) -> bool {
-        std::fs::symlink_metadata(path).is_ok_and(|m| m.file_attributes() & DIRECTORY == 0)
+        attributes_of(path).is_some_and(|a| a & DIRECTORY == 0)
+    }
+
+    fn exists(&self, path: &str) -> bool {
+        attributes_of(path).is_some()
+    }
+
+    fn kind(&self, path: &str) -> EntryKind {
+        match attributes_of(path) {
+            None => EntryKind::Missing,
+            Some(a) if a & DIRECTORY != 0 => EntryKind::Directory,
+            Some(_) => EntryKind::File,
+        }
     }
 
     fn resolve_final_path(&self, path: &str) -> String {

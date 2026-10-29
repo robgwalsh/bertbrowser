@@ -148,7 +148,7 @@ fn try_delete(path: &str) {
 /// off path normalization, which is safe here because every path reaching this is already fully
 /// qualified. It is two backslashes, a question mark and a backslash: written with one backslash
 /// for a while, it made every long copy fail with "filename syntax is incorrect" and no short one.
-fn extended(path: &str) -> String {
+pub(crate) fn extended(path: &str) -> String {
     if path.len() < 260 || path.starts_with(r"\\?\") {
         return path.to_string();
     }

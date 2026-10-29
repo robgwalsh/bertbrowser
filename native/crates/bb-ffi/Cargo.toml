@@ -17,6 +17,7 @@ serde_json.workspace = true
 # The small real files the harness drops into a sandbox (`bb_fixture_write`). On by default so one
 # staticlib serves the app and the harness; they are a few hundred kilobytes of base64.
 bb-test-support = { path = "../bb-test-support", optional = true }
+mimalloc = "0.1.52"
 
 [features]
 default = ["fixtures"]

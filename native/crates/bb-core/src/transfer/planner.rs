@@ -15,7 +15,7 @@ use super::models::{
     PlannedTransfer, RejectedTransfer, TransferPlan, TransferRejection, TransferVerb, join, key_of,
     parent_of,
 };
-use super::probe::{FileSystemTransferProbe, TransferProbe};
+use super::probe::{EntryKind, FileSystemTransferProbe, TransferProbe};
 
 pub struct TransferPlanner {
     probe: Box<dyn TransferProbe>,
@@ -70,10 +70,15 @@ impl TransferPlanner {
         // Distinct sources, and the keys of the directories among them, so a source nested under
         // another can be recognized before anything is planned.
         let sources = Self::distinct(source_paths);
+        let kinds: Vec<EntryKind> = sources
+            .iter()
+            .map(|(path, _)| self.probe.kind(path))
+            .collect();
         let directory_keys: HashSet<String> = sources
             .iter()
-            .filter(|(path, _)| self.probe.directory_exists(path))
-            .map(|(_, key)| key.clone())
+            .zip(&kinds)
+            .filter(|(_, kind)| **kind == EntryKind::Directory)
+            .map(|((_, key), _)| key.clone())
             .collect();
 
         // Reserve the names already spoken for by earlier transfers in this same plan, so two
@@ -82,10 +87,10 @@ impl TransferPlanner {
         let mut transfers = Vec::new();
         let mut rejected = Vec::new();
 
-        for (path, key) in &sources {
-            let is_directory = self.probe.directory_exists(path);
+        for ((path, key), kind) in sources.iter().zip(&kinds) {
+            let is_directory = *kind == EntryKind::Directory;
             let name = bb_paths::file_name(path);
-            if !is_directory && !self.probe.file_exists(path) {
+            if *kind == EntryKind::Missing {
                 rejected.push(RejectedTransfer::new(
                     path,
                     TransferRejection::SourceMissing,
@@ -217,6 +222,6 @@ impl TransferPlanner {
     }
 
     fn exists(&self, path: &str) -> bool {
-        self.probe.directory_exists(path) || self.probe.file_exists(path)
+        self.probe.exists(path)
     }
 }

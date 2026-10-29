@@ -142,9 +142,13 @@ Session::~Session() {
     if (view_) pump();
     guard_.reset();
     view_.reset();
+    // The window owns the widget tree, and the panes in it call back into the core as they go (the preview
+    // stops a GIF's player); the product's main() destroys the window before the app for the same reason.
+    // Left after bb_app_destroy it was a use of freed memory that only a heap which scribbles on freed
+    // blocks (mimalloc) turned into a crash.
+    window_.reset();
     core_.reset();
     if (app_) bb_app_destroy(app_);
-    window_.reset();
     res_.reset();
     dev_.reset();
 }
