@@ -18,5 +18,5 @@ dotnet test csharp/tests/BertBrowser.Core.Tests --filter "FullyQualifiedName~Pat
 csharp/tools/BertBrowser.Harness/bin/Debug/net10.0-windows/BertBrowser.Harness.exe --script tools/ui/smoke.bbs
 ```
 
-Never run `BertBrowser.exe` from here to look at it: use the harness. The scripts and `docs/performance.md`
-are shared with the native app and live in the repository root (`../tools/ui`, `../docs`).
+Never run `BertBrowser.exe` from here to look at it: use the harness. The `.bbs` scripts
+are shared with the native app and live in the repository root (`../tools/ui`); its `docs/performance.md` is here.

@@ -1,72 +1,88 @@
 ---
 name: verify
-description: Run, drive, and screenshot the BertBrowser WPF app without it appearing on the user's screen or taking their keyboard focus. Use whenever asked to run the app, start it, launch it, screenshot it, click through it, check a UI change, or confirm something works in the real interface. Never run `dotnet run` on src/BertBrowser.App — that opens a real window over whatever the user is doing.
+description: Run, drive, and screenshot the BertBrowser app without it appearing on the user's screen or taking their keyboard focus. Use whenever asked to run the app, start it, launch it, screenshot it, click through it, check a UI change, or confirm something works in the real interface. Never run BertBrowser.exe - that opens a real window over whatever the user is doing.
 ---
 
 # Driving BertBrowser's interface
 
 The user multitasks while you work. A window that pops up over what they are doing and takes the
-keyboard is not a minor annoyance — their keystrokes and yours end up in the same input queue. So
-the app is never launched directly. Instead the harness hosts the same `MainWindow`, built from the
-same composition root, in the same process, parked at -32000,-32000 and refused activation, and you
-look at PNGs of it.
+keyboard is not a minor annoyance - their keystrokes and yours end up in the same input queue. So
+the app is never launched directly. Instead `bb-harness.exe` (`native/harness`) builds the same
+window from the same C++ UI library and the same Rust core, in its own process, parked at
+-32000,-32000, refused activation and disabled, rendering through WARP into an offscreen bitmap, and
+you look at PNGs of it. It is a separate exe, never a mode of `BertBrowser.exe`: it links
+`bbcore_harness.lib`, which carries the test fixtures and fakes the product must never contain.
 
 ## Do not
 
-- `dotnet run --project src\BertBrowser.App`
 - run `BertBrowser.exe`
 - synthesise keystrokes or mouse input with any tool
 
-The only exception is the user explicitly asking you to launch the app.
+The only exceptions are the user explicitly asking you to launch the app, and `bb-bench startup`
+(which parks its window offscreen against a scratch data directory).
 
 ## Pick the cheapest tier first
 
 **Is the question about a rule?** What a move refuses, how a numbered rename lands, which items a
-delete protects, how a path is canonicalised, what the planner does with a junction — none of that
-needs a window. Write a test in `tests/BertBrowser.Core.Tests`; `TransferPlannerTests`,
-`RenamePlannerTests` and `DeletePlannerTests` all run against fake filesystems, and the executor
-tests against real files under `%TEMP%`. Deterministic, fast, no UI.
+delete protects, how a path is canonicalised, what the planner does with a junction - none of that
+needs a window. Write a test in `native/crates/bb-core/tests/all/` (`transfer_planner_tests.rs`,
+`rename_planner_tests.rs`, `delete_planner_tests.rs` run against fake filesystems, the executor tests
+against real files under `%TEMP%`). Run it with `cargo test -p bb-core --test all <filter>`, from
+PowerShell. Deterministic, fast, no UI.
 
 **Is the question about the interface?** Layout, theming, what a dialog looks like, whether the tree
-reveals, what the status bar says, how tabs and panes arrange — that is the harness.
+reveals, what the status bar says, how tabs and panes arrange - that is the harness.
 
-**Is the question about speed?** `tools\BertBrowser.Bench\bin\Release\net10.0\BertBrowser.Bench.exe run
---filter *PathKey*` for a Core path, `… ui --scenario listing-10k` for what a user feels — not a
-stopwatch in a script. The harness's `time` verb exists, but only the Bench tool turns its samples into
-something a baseline can be compared with. See `bench/README.md`.
+**Is the question about speed?** `native\target\release\bb-bench.exe run --filter *pathkey*` for a core
+path, `... ui --scenario listing-10k` for what a user feels - not a stopwatch in a script. The harness's
+`time` verb exists, but only `bb-bench` turns its samples into something a baseline can be compared
+with. See `native/bench/README.md`.
 
 ## Running it
 
 ```powershell
-$harness = "C:\Source\bertbrowser\tools\BertBrowser.Harness\bin\Debug\net10.0-windows\BertBrowser.Harness.exe"
+$harness = "C:\Source\bertbrowser\native\out\debug\harness\bb-harness.exe"
 ```
 
-Build with `dotnet build C:\Source\bertbrowser\bertbrowser.sln` first. If the build fails with
-MSB3021 because a running BertBrowser locks `bin\Debug`, kill it
-(`Get-Process BertBrowser | Stop-Process -Force`) and rebuild.
+Build with `cd C:\Source\bertbrowser\native; pwsh .\build.ps1` first (`-Config release` for
+`out\release\...`). `build.ps1` prints a harmless "vswhere.exe not recognized" line. The harness links
+the Rust core, so a Rust change needs the rebuild too, and the regenerated `include\bbcore.h` is to be
+committed. If the link fails with LNK1104 on a running exe, kill it and rebuild.
+
+**Give every run a fresh `--out` directory.** The default sandbox lives under it
+(`<out>\sandbox`), so reusing one carries last run's tree into this one.
 
 ```powershell
-& $harness --script C:\Source\bertbrowser\tools\ui\smoke.bbs          # the canonical pass
-& $harness --script C:\Source\bertbrowser\tools\ui\themes.bbs         # every built-in theme + dialogs
-& $harness --script C:\Source\bertbrowser\tools\ui\system-theme.bbs   # matching the Windows theme
-& $harness --script C:\Source\bertbrowser\tools\ui\transfer.bbs       # the queue, pause, per-item conflicts
-& $harness --script C:\Source\bertbrowser\tools\ui\merge.bbs          # a folder merged into a folder of the same name
-& $harness --script C:\Source\bertbrowser\tools\ui\keys.bbs           # which command a chord runs, and where it is live
-& $harness --script C:\Source\bertbrowser\tools\ui\palette.bbs        # the command palette
-& $harness --script C:\Source\bertbrowser\tools\ui\keyboard.bbs       # the Keyboard settings page and its recorder
-& $harness --script C:\Source\bertbrowser\tools\ui\commands.bbs       # selection, other-pane, view and sort commands
-& $harness --script C:\Source\bertbrowser\tools\ui\command-bars.bbs   # the menu bar, toolbars and their settings page
-& $harness -c "tree .; refresh; shot check" --out $env:TEMP\look      # ad hoc
+$out = "$env:TEMP\look-$(Get-Date -Format HHmmss)"
+& $harness --script C:\Source\bertbrowser\tools\ui\smoke.bbs --out $out          # the canonical pass
+& $harness --script C:\Source\bertbrowser\tools\ui\themes.bbs --out $out-t       # every built-in theme + dialogs
+& $harness --script C:\Source\bertbrowser\tools\ui\system-theme.bbs --out $out-s # matching the Windows theme
+& $harness --script C:\Source\bertbrowser\tools\ui\transfer.bbs --out $out-x     # the queue, pause, per-item conflicts
+& $harness --script C:\Source\bertbrowser\tools\ui\merge.bbs --out $out-m        # a folder merged into a folder of the same name
+& $harness --script C:\Source\bertbrowser\tools\ui\keys.bbs --out $out-k         # which command a chord runs, and where it is live
+& $harness --script C:\Source\bertbrowser\tools\ui\palette.bbs --out $out-p      # the command palette
+& $harness --script C:\Source\bertbrowser\tools\ui\keyboard.bbs --out $out-kb    # the Keyboard settings page and its recorder
+& $harness --script C:\Source\bertbrowser\tools\ui\commands.bbs --out $out-c     # selection, other-pane, view and sort commands
+& $harness --script C:\Source\bertbrowser\tools\ui\command-bars.bbs --out $out-b # the menu bar, toolbars and their settings page
+& $harness -c "tree .; refresh; shot check" --out $out-adhoc                     # ad hoc
 
-# The folder tree keeping its selection through a rebuild. Needs a visible sandbox — see the
+# The folder tree keeping its selection through a rebuild. Needs a visible sandbox - see the
 # last bullet under "What to trust".
-& $harness --script C:\Source\bertbrowser\tools\ui\tree.bbs `
+& $harness --script C:\Source\bertbrowser\tools\ui\tree.bbs --out $out-tree `
     --sandbox C:\Source\bertbrowser-treecheck --allow-outside
+
+# The degraded-index banner: poses a declined elevation prompt.
+& $harness --script C:\Source\bertbrowser\tools\ui\index-degraded.bbs --index-declined --out $out-i
 ```
 
-Then `Read` each path printed after `SHOT `.
+Then `Read` each path printed after `SHOT `. Stdout is the protocol: `OK <command>` per command,
+`SHOT <path>`, `STATE {json}`, `BENCH`/`MEM` samples, `FAIL ...` on the first failure (unless
+`--keep-going`). A verb whose feature is not built yet fails with "is not implemented in the native
+harness yet".
 
-Exit codes: `0` pass · `1` a command or assertion failed · `2` environment · `3` watchdog.
+Exit codes: `0` pass · `1` a command or assertion failed · `2` environment · `3` watchdog · `64` usage.
+A crash prints `CRASH <code> at <module>+<offset>` and a symbolised stack, and writes `crash.dmp` into
+`--out`.
 
 ## Commands
 
@@ -82,7 +98,7 @@ many-fixture [n] [dir]      n files (400 by default) across nested folders, ever
                             fixture small enough to name its rows can prove that
 archive-fixture [dir]       the containers nothing here can write: locked.zip (AES, password
                             hunter2), sealed.7z (encrypted headers, correct-horse) and plain.7z.
-                            Base64 in Core so a script and a unit test see the same bytes
+                            Base64 in `bb-test-support` so a script and a unit test see the same bytes
 mkdir <rel> | write <rel> [bytes] | sandbox
 write-text <rel> <line>|<line>|…
                             a file with content you chose. `write` fills a file with its own name
@@ -92,21 +108,21 @@ write-text <rel> <line>|<line>|…
 write-binary <rel> <bytes> [differ-at]
                             a file that is genuinely not text, so a comparison takes the hex path
                             rather than the line diff. A .bin full of repeated ASCII is not a
-                            binary and FileComparePlan is right to say so. `differ-at` flips one
+                            binary and the file-compare plan is right to say so. `differ-at` flips one
                             byte, which is what puts the first difference somewhere worth scrolling
 checksum-file <rel> <algorithm> <name>,<name>…
                             a real .sfv/.md5/.sha256 over real files, written through the same
-                            ChecksumFile.Render the app's Save goes through
+                            renderer the app's Save goes through
 checksum-algorithms <a>,<a> which boxes the next checksum window opens with (Crc32, Md5, Sha1,
                             Sha256, Sha512) — the window reads them from settings exactly as it
                             does for a person
 hide-menu-item <id> | show-menu-item <id>
                             untick (or re-tick) one of the app's own right-click entries on the
-                            Context menu page, by the ids in Core's BuiltInMenuItems (copy-path,
+                            Context menu page, by the ids in the core's `built_in` menu items (copy-path,
                             open-terminal, cut…); the next `menu` reads it as a person's save would
 command-bars reset | toolbar title|row<n> [text] <item…> | menu <Name> <item…>
 command-bars save|apply|remove <name> | rename <old> to <new> | saved
-                            arrange the menu bar and toolbars through CommandBarService, the app's
+                            arrange the menu bar and toolbars through `CommandBarService`, the app's
                             one writer for them. An item is a command id, `-`, or `@list`
                             (`@workspaces`); `text` labels the toolbar's buttons; a row past the end
                             is made. `apply` goes through the window, so it asks what a person is asked
@@ -133,7 +149,7 @@ marquee <x0,y0> <x1,y1>      poses the rubber-band selection box over that recta
 
 newtab [path] | closetab | reopen | tab <n>
 movetab <from> <to>         put tab <from> in slot <to> (1-indexed), through the same
-                            PaneViewModel.MoveTab a drop on the strip reports to. The drag is
+                            move a drop on the strip reports to. The drag is
                             mouse capture, which a run cannot post; `state`'s tabTitles and
                             `tab <n>` + `assert-path` check where the tabs ended up
 tab-dragging <gap>          poses the strip's insertion line at a gap (0 is before the first tab)
@@ -153,15 +169,15 @@ save-search <name> [current|folder|pc]
 run-saved <name> [newtab]   run one as a click on its sidebar row does (or its "Run in new tab"),
                             debounce and search waited out. A pc-scoped one needs --index, like
                             gsearch
-rename-saved <old> to <new> the edit dialog's rename, through SaveSearchAsync(previousName)
+rename-saved <old> to <new> the edit dialog's rename, through the same save the dialog uses
 remove-saved <name>
 saved-searches              the names on the sidebar, each with its scope
 
 newfolder <name>            create a folder in the active tab's directory, through
-                            PlanNewItem/CreateNewItemAsync (acts on the folder, not the selection)
+                            the new-item planner and executor (acts on the folder, not the selection)
 newfile <name>              same for a file; a name ending in a configured type's extension
                             picks up that type's template, otherwise the file starts empty
-rename <pattern>            the selection, through PlanRename/RenameAsync — the plain box, so the
+rename <pattern>            the selection, through the rename planner and executor — the plain box, so the
                             pattern is literal and braces stay braces
 rename-rule <key=value ...> the same, through the dialog's options panel. Quote a value with a
                             space in it. template= find= replace= regex=on matchcase=on
@@ -175,7 +191,7 @@ move|copy [names] to <folder>
 conflict <answer>            what the conflict dialog comes back with. skip | replace | keep-both |
 conflict <name>=<answer>,…   overwrite | cancel for every clash, or one answer per name — the case
                              the single-answer dialog could not express. A run never clicks, so this
-                             answers through the same IConflictPrompt seam the shell asks on.
+                             answers through the same conflict-prompt seam the shell asks on.
                              Defaults to keep-both for everything, which is what every transfer got
                              before there was a prompt, so scripts that say nothing are unaffected.
                              A name may be a path relative to the drop (`photos/2024/a.jpg`, either
@@ -196,7 +212,7 @@ queue-cancel <n>             is always first and cannot move or be jumped; cance
 shortcut [names] to <folder> the right-drag menu's third verb: a .lnk per item, named Explorer's
                             way ("notes.txt - Shortcut.lnk", stepping aside to "(2)"). Goes through
                             the real IShellLink, which is the point — whether a link this app writes
-                            is one Windows reads back is the one thing a Core test cannot answer
+                            is one Windows reads back is the one thing a core test cannot answer
 extract [names] to <folder> pull entries out of the archive on show, through the same planner,
                             executor and progress surface the menu uses
 compress <format> <name>    zip | tar | tar.gz | tar.bz2 — the selection, or the folder on show
@@ -225,7 +241,7 @@ compare-refused [text]      the other half: assert the pair was turned down (not
                             recorded instead — which is also what makes the wording testable
 compare-filter on|off       "show only differences", on both panes at once
 settle-content              re-judge the selected rows by their bytes, through the same
-                            ContentSettlement the menu item uses, and await it. Identical bytes
+                            content settlement the menu item uses, and await it. Identical bytes
                             raise Newer/Older/Unknown to Same; nothing else moves. Prints
                             "SETTLED <n>". Needs a `compare` first
 compare-end                 stop comparing and clear the colours
@@ -239,7 +255,7 @@ duplicates [folder]         scan for byte-identical files, defaulting to the fol
                             the MFT pass indexes nothing and there is no shortlist otherwise — and
                             awaits the scan, because `settle` does not know about it
 duplicates-keep <strategy>  tick every copy but one: newest, oldest or shallowest
-duplicates-remove           delete the ticked copies through PlanDelete/DeleteAsync, so they land
+duplicates-remove           delete the ticked copies through the delete planner and executor, so they land
                             in the Recycle Bin and `undo` puts them back
 
 changes-seed                write a dozen recorded file changes under the sandbox through the same
@@ -265,9 +281,8 @@ hidden on|off | thumbnails <0..1> | sort <column-id> | theme <id>
 workspaces-placement | saved-searches-placement sidebar|titlebar|hidden
                             where that list is offered, as its Settings page sets it
 list-scroll <px>            scrolls the file list to a vertical offset, in pixels. Worth more than
-                            tree-scroll: the thumbnail view scrolls through VirtualizingWrapPanel,
-                            this app's own IScrollInfo, so what is on screen after a scroll is code
-                            under test rather than something WPF is doing
+                            tree-scroll: the thumbnail view lays tiles out by arithmetic in this app's
+                            own `TileView`, so what is on screen after a scroll is code under test
 reveal <name>               select that row *and* scroll it into view, as opening a bookmarked file
                             does. `select` deliberately does not scroll — clicking a row cannot,
                             since you had to see it to click it — so this is the only way a script
@@ -292,7 +307,7 @@ flat-cap <n>                lowers how many rows one flat listing shows, so a fi
 
 key <chord> [in list|text|readonly|other]
                             what pressing a chord does. **Not a key press** — a run posts no input.
-                            It asks the same KeymapRules.Dispatch the window's key handler asks,
+                            It asks the same `KeymapRules::dispatch` the window's key handler asks,
                             with the focus posed (list unless said), and runs the command it names
                             through the same registry. Prints `KEY <chord> -> <id|nothing>`
 run <command id>            run a command by its CommandCatalog id (tab.new, file.rename, select.all),
@@ -345,17 +360,13 @@ dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, renam
                             everything waiting underneath. It needs a `progress-demo` first, and
                             `progress-demo queued` to put jobs behind the running one.
                             conflicts needs a `conflict-plan` first: it shows what a real move
-                            would clash with, each row carrying its own answer), transfer, conflicts
-                            (transfer is the queue window; it needs a `progress-demo` first, and
-                            `progress-demo queued` to put jobs behind the running one.
-                            conflicts needs a `conflict-plan` first — it shows what a real move
                             would clash with, each row carrying its own answer)
                             (checksum digests the selection and starts on load, unlike duplicates —
                             the user picked these exact files, so there is no whole-PC surprise to
                             guard against. checksum-verify is the same window pointed at a selected
                             checksum file, which `checksum-file` writes.
                             compare-files needs exactly two selected; whether it renders a line diff
-                            or a hex dump is FileComparePlan's decision over the pair, so use
+                            or a hex dump is the file-compare plan's decision over the pair, so use
                             `write-text` pairs for the first and `write-binary` for the second)
                             (changes is the "What changed" window: with a run's default settings
                             it shows the recording-off banner — the state every fresh install
@@ -367,23 +378,21 @@ dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, renam
                             the list read-only, and a bar and Cancel where the buttons were. Posed,
                             like `dialog transfer`, because it is a state that only exists while
                             something slow is happening)
-                            (`columns` is the Add-column list, which the app shows in a Popup —
-                            not a Window — so the harness hosts it in a bare one to photograph it)
+                            (`columns` is the Add-column list, drawn in the popup layer of the window)
                             (new-folder/new-file/search-syntax need no selection; every other
                             kind uses one.
                             rename-advanced is the rename dialog with its options panel open —
                             the panel is opened by a click, and this never clicks)
                             (flat-large is the question a flat view asks before listing an enormous
-                            folder, worded by the real FlatViewRules over a made-up dir_size_cache
+                            folder, worded by the real `FlatViewRules` over a made-up dir_size_cache
                             row: a sandbox holds a dozen files, so it is the only way to see it)
 state                       one JSON line of everything worth asserting on
 session                     save the pane/tab arrangement the way closing the window does,
                             prune it the way a launch does, and reopen it in place — assert on
                             what came back with assert-panes / assert-tabs / assert-path
 rows                        the row names, for when an assertion is about to fail
-columns                     the live GridView's columns as id:width. assert-visible cannot see a
-                            GridViewColumn — it is not a FrameworkElement and never enters the
-                            visual tree — so this is the only way to check one
+columns                     the list's columns as id:width, in order — a column header is not a
+                            named element, so this is the way to check one
 columns add|remove <id>     edit the active tab's columns through ColumnLayoutRules, the same
 columns move <id> <index>   functions the header menu and a header drag go through
 columns width <id> <px>
@@ -398,9 +407,8 @@ menu columns|files|background|tree|workspaces|saved-searches|undo|undo-range|red
                             the file list's over empty space (the folder background), or the
                             folder tree's — for the current folder's row when `tree-expand` has
                             got the tree that far, else for the first drive. They are rendered
-                            detached, not opened: a ContextMenu is a Popup with its own top-level
-                            window that WPF repositions onto the nearest monitor, i.e. onto the
-                            user's screen. files/background/tree carry other programs' entries
+                            detached, not opened: a menu run is never posted a click, and a native
+                            popup could land on the user's screen. files/background/tree carry other programs' entries
                             (7-Zip, Git, TortoiseSVN) from a canned source, so they prove the
                             hosting and never what a real extension offers
 assert-menu-item <text> | assert-no-menu-item <text>
@@ -512,7 +520,7 @@ time <name> <verb> [args][; <verb> [args]…]
                             `select` with `settle-preview` to time a preview as a person sees it
 repeat <n> <verb> [args][; <verb> [args]…]
                             the chain, n times — a soak. Owns the rest of its line, so not inside `time`
-mem [name]                  "MEM {json}": managed heap after a full collection, working set, private
+mem [name]                  "MEM {json}": the managed/heap bytes, working set, private
                             bytes, peak working set, items, realized rows, retained thumbnails
 assert-mem managed|private|workingset under <mb> [since <name>]
                             a ceiling, or with `since` a budget on growth over an earlier `mem <name>`
@@ -529,82 +537,86 @@ bench-fixture <files> <dirs> [dir]
 echo <text> | sleep <ms> | settle [ms]      '#' at the start of a line is a comment
 ```
 
-Options: `--out <dir>` · `--sandbox <dir>` · `--state-dir <dir>` · `--keep-state` ·
-`--allow-outside` · `--size WxH` · `--theme <id>` · `--start <path>` · `--index` ·
-`--timeout <sec>` · `--busy-timeout <ms>` · `--keep-going` · `--verbose` ·
-`--bench-out <file>` (append `time`/`mem` samples as JSON lines, plus the session's own startup as
-`startup.hosted`; what `BertBrowser.Bench ui` reads)
+Options: `--script <path>` · `-c "<cmds; ...>"` · `--out <dir>` · `--sandbox <dir>` · `--state-dir <dir>` ·
+`--keep-state` · `--allow-outside` · `--size WxH` · `--theme <id>` · `--start <path>` · `--index`
+(accepted and ignored: the native harness has no index service yet) · `--index-declined` (poses the
+declined elevation prompt the index banner reacts to) · `--timeout <sec>` · `--busy-timeout <ms>` ·
+`--keep-going` · `--verbose` · `--bench-out <file>` (append `time`/`mem` samples as JSON lines, plus the
+session's own startup as `startup.hosted`; what `bb-bench ui` reads). `--help` prints them all.
 
-Element names come from the XAML: window-level are `FolderTree`, `GlobalSearchBox`,
-`ThumbSlider`, `PaneHostSite`; per tab (resolved against the *active* tab) are `FileListView`,
-`SearchBox`, `PathBox`, `Breadcrumb`, `DetailsView`, `PreviewPane`; per pane, `TabHost`.
+Element names, which `shot` and the `assert-visible`/`assert-hidden` verbs take: window-level are
+`FolderTree`, `GlobalSearchBox`, `ThumbSlider`, `PaneHostSite`, `TitleBarRoot`, `ToolbarRows`,
+`CompareBanner`; per tab (resolved against the *active* tab) are `FileListView`, `SearchBox`,
+`PathBox`, `Breadcrumb`, `DetailsView`, `PreviewPane`, `SidePanePreview`, `SidePaneMetadata`; per pane,
+`TabHost`. They are widget names in the C++ tree, kept identical to the old XAML names so the scripts
+did not change.
 
 ## Blocked on purpose
 
-- **Nothing is launched.** The window is given an `IProcessLauncher` that refuses, because opening a
-  file starts whatever program owns it and *that* window lands on the user's desktop. So `enter` on
-  a file is refused, and "Open in Terminal", custom commands and the portable-device handler all
-  report rather than run. `assert-not-launched` proves a gesture did not even try.
+- **Nothing is launched.** The core is given a launcher that refuses, because opening a file starts
+  whatever program owns it and *that* window lands on the user's desktop. So `enter` on a file is
+  refused, and "Open in Terminal", custom commands and the portable-device handler all report rather
+  than run. `assert-not-launched` proves a gesture did not even try. The folder-handler registration is
+  refused the same way.
 - **The clipboard is not touched.** There is one per session and the user is using it. `move` and
-  `copy` go through `TransferPlanner`/`TransferExecutor` — the same code paste and drag-and-drop go
-  through — without it.
+  `copy` go through the same planner and executor paste and drag-and-drop go through, without it.
 - **Writing outside the sandbox is refused.** This app deletes and moves real files, and the harness
   drives the real executors. `--allow-outside` is the deliberate way past, for when you mean it.
-- **No UAC prompt is ever raised.** A file operation Windows refuses can now be retried with an
-  administrator token, and a prompt takes the *secure desktop* — the one thing parking the window
-  offscreen cannot work around. The run gets `RefusingElevationLauncher`, and `UiSession` asserts it
-  did rather than trusting the registration. Everything above the launcher is real, so the
-  discriminator, the rules and the merge are genuinely exercised; only the process and the token are
-  missing. `dialog elevation` poses the consent window.
-- **A modal the shell raises is recorded, not shown.** `IUserNotice` is how the shell says
-  something that must be acknowledged — so far only "comparing needs two panes". The real one opens
-  a `MessageDialog`, which a run could never dismiss; a run gets one that writes the message down
-  for `compare-refused` to check, which is also what makes the wording itself testable.
-- **No media is ever played.** The preview pane stops at a poster frame until someone presses play,
-  and no script presses it. That keeps a run silent on a machine someone is using — and a
-  `MediaElement` renders through its own composition surface, so it would come back as a hole in a
-  `RenderTargetBitmap` anyway. Assert media through `state`, never a screenshot.
-- **The MFT indexer does not run** unless you pass `--index`. It reads every NTFS volume's master
-  file table — minutes of disk on a machine someone is using — and needs administrator rights the
-  harness does not request. `gsearch` says so rather than reporting an empty result as a finding.
+- **No UAC prompt is ever raised.** A file operation Windows refuses can be retried with an
+  administrator token, and a prompt takes the *secure desktop* - the one thing parking the window
+  offscreen cannot work around. The run gets a refusing elevation launcher, and the session asserts
+  after creating the app that every such hazard seam is faked rather than trusting the configuration.
+  Everything above the launcher is real, so the discriminator, the rules and the merge are genuinely
+  exercised; only the process and the token are missing. `dialog elevation` poses the consent window.
+- **A modal the shell raises is recorded, not shown.** The notice, confirm and prompt seams are how the
+  shell says something that must be acknowledged - so far "comparing needs two panes", the
+  are-you-sure questions, archive passwords. A real one is a dialog a run could never dismiss; a run gets
+  recording fakes, which is also what makes the wording testable (`compare-refused`).
+- **No media is ever played.** The preview pane stops at a poster frame until someone presses play, and
+  no script presses it. That keeps a run silent on a machine someone is using. Assert media through
+  `state`, never a screenshot.
+- **The MFT indexer does not run.** It reads every NTFS volume's master file table - minutes of disk on
+  a machine someone is using - and needs administrator rights the harness does not request.
+  `--index` is accepted and ignored for now; `gsearch` says so rather than reporting an empty result as a
+  finding, and `--index-declined` poses the "user said no" state for the banner.
 
 ## Recipes
 
 **Look at a change you just made**
 
 ```powershell
-& $harness -c "tree .; refresh; shot after-change" --out $env:TEMP\look
+& $harness -c "tree .; refresh; shot after-change" --out $env:TEMP\look-1
 ```
 
 **A dialog, in both themes**
 
 ```powershell
-& $harness -c "tree .; refresh; select notes.txt, report.md; dialog rename dark; theme light-plus; dialog rename light"
+& $harness -c "tree .; refresh; select notes.txt, report.md; dialog rename dark; theme light-plus; dialog rename light" --out $env:TEMP\look-2
 ```
 
 **Prove a move and its undo really happened on disk**
 
 ```powershell
-& $harness -c "tree .; refresh; select photo.jpg; move to Documents; assert-exists Documents/photo.jpg; undo; assert-missing Documents/photo.jpg; assert-exists photo.jpg"
+& $harness -c "tree .; refresh; select photo.jpg; move to Documents; assert-exists Documents/photo.jpg; undo; assert-missing Documents/photo.jpg; assert-exists photo.jpg" --out $env:TEMP\look-3
 ```
 
 ## What to trust
 
-- Captures are a software re-render of the visual tree, not a screen grab, so being offscreen costs
-  nothing and a fullscreen game in front of the window changes nothing. A `shot` that comes back one
-  flat colour fails rather than lying to you.
-- **Do not diff UI screenshots pixel for pixel** — text rasterisation varies with font version and
+- Captures are a software re-render of the widget tree into an offscreen Direct2D bitmap on WARP, not a
+  screen grab, so being offscreen costs nothing and a fullscreen game in front of the window changes
+  nothing. A `shot` that comes back one flat colour fails rather than lying to you.
+- **Do not diff UI screenshots pixel for pixel** - text rasterisation varies with font version and
   DPI. Assert through `state`, `assert-status`, `assert-count`, `assert-row`.
-- **The fixture is deterministic** — same names, same byte counts, one fixed modified date — so two
+- **The fixture is deterministic** - same names, same byte counts, one fixed modified date - so two
   captures of the same script differ only where the change under test made them differ. Anything
-  outside it is not: the folder tree shows the real machine's drives.
-- Each run gets a scratch `BERTBROWSER_DATA_DIR`, so it cannot read or corrupt the user's real
-  search index, settings or themes, and it is deleted afterwards. Use `--keep-state` only when you
-  mean to test something across two runs.
+  outside it is not: the folder tree shows the real machine's drives. Thumbnails in a run are generated
+  (a deterministic picture per row), never the shell's.
+- Each run gets a scratch data directory (`--state-dir`, `BERTBROWSER_DATA_DIR` inside the process), so
+  it cannot read or corrupt the user's real search index, settings or themes, and it is deleted
+  afterwards. Use `--keep-state` only when you mean to test something across two runs.
 - **A run reporting more than one foreground correction means something new is activating the
-  window** — worth investigating rather than ignoring. One is normal: WPF makes the window
-  foreground once during the first layout pass through no event this process is told about, and
-  `ForegroundGuard` hands it straight back within ~10 ms. The count is in `state`.
-- `sandbox` paths under `%TEMP%` sit inside `AppData`, which is hidden — so the folder tree cannot
-  reveal down to them with "Show hidden items" off. Use `--sandbox` somewhere visible if a capture
-  is about the tree.
+  window** - worth investigating rather than ignoring. The `ForegroundGuard` hands the foreground
+  straight back; the count is in `state`.
+- `sandbox` paths under `%TEMP%` sit inside `AppData`, which is hidden - so the folder tree cannot
+  reveal down to them with "Show hidden items" off. Use `--sandbox` somewhere visible (with
+  `--allow-outside`) if a capture is about the tree.
