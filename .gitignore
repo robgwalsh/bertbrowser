@@ -60,6 +60,7 @@ BenchmarkDotNet.Artifacts/
 # bench/baselines/ is committed; see bench/README.md.
 bench-results/
 bench/*.local.json
+csharp/bench/*.local.json
 
 # .NET Core
 project.lock.json

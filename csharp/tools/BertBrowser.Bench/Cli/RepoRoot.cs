@@ -1,8 +1,10 @@
 namespace BertBrowser.Bench.Cli;
 
 /// <summary>
-/// Where the repository is, so every default path (<c>bench/baselines</c>, <c>bench-results</c>,
-/// <c>docs/performance.md</c>) resolves the same way from any working directory.
+/// Where the frozen C# tree is (the folder holding <c>bertbrowser.sln</c>: <c>csharp/</c> in the repository),
+/// so every default path (<c>bench/baselines</c>, <c>bench-results</c>) resolves the same way from any
+/// working directory. The scripts (<c>tools/ui</c>) and <c>docs/performance.md</c> are shared with the native
+/// app and sit one level up, in the repository root.
 /// </summary>
 internal static class RepoRoot
 {
@@ -35,7 +37,7 @@ internal static class RepoRoot
 
     public static string BaselinesDir(string root) => Path.Combine(root, "bench", "baselines");
     public static string ResultsDir(string root) => Path.Combine(root, "bench-results");
-    public static string PerformanceDocPath(string root) => Path.Combine(root, "docs", "performance.md");
+    public static string PerformanceDocPath(string root) => Path.Combine(root, "..", "docs", "performance.md");
     public static string RealConfigPath(string root) => Path.Combine(root, "bench", "real.local.json");
 
     public static string BaselinePath(string root, string machineKey, bool real) =>

@@ -63,7 +63,7 @@ internal static class UiCommand
             return Exit.Errors;
         }
 
-        var scriptDir = Path.Combine(root, "tools", "ui");
+        var scriptDir = Path.Combine(root, "..", "tools", "ui");
         var scripts = scenarios.Count == 0
             ? Directory.GetFiles(scriptDir, ScriptPrefix + "*.bbs").Order(StringComparer.Ordinal).ToList()
             : scenarios.Select(s => Path.Combine(scriptDir, ScriptPrefix + s.TrimStart('-') + ".bbs")).ToList();
