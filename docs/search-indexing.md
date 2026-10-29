@@ -8,12 +8,12 @@ volume's change journal from then on.
 
 | Layer | What it does | Code |
 |---|---|---|
-| **Build** | One raw read of each NTFS volume's `$MFT` → every name, parent, size, timestamp and attribute on the disk | `Services/Mft/MftReader`, `MftVolumeIndexer` |
-| **Maintain** | Tail the USN change journal and patch the index as files are created, renamed and deleted | `MftVolumeIndexer.Tail` |
-| **Query** | An indexed range scan over one SQLite table | `Data/FsIndexRepository`, `Services/SearchService` |
+| **Build** | One raw read of each NTFS volume's `$MFT` → every name, parent, size, timestamp and attribute on the disk | `bb-core/src/mft/reader.rs`, `volume_indexer.rs` |
+| **Maintain** | Tail the USN change journal and patch the index as files are created, renamed and deleted | `MftVolumeIndexer::tail` |
+| **Query** | An indexed range scan over one SQLite table | `data/fs_index.rs`, `fs/search_service.rs` |
 
 Each layer is fast for a different reason, and all three have to hold for the search box to feel
-instant. A fallback path (`IndexCrawler` + `FileSystemWatcher`) covers roots no NTFS volume
+instant. A fallback path (`IndexCrawler` + `ReadDirectoryChangesW`) covers roots no NTFS volume
 provides — network shares, exFAT sticks — and is described at the end.
 
 ## What the index is
@@ -43,8 +43,8 @@ Five decisions in that schema do most of the work:
 - **There is deliberately no index on `name_key`.** A B-tree can accelerate a prefix match; it can
   do nothing for a *substring* match, which is what users actually type. An extra index would double
   the write cost of every build for zero query benefit.
-- **`name_key` is uppercased in C#, not by SQLite.** SQLite's `upper()` and `NOCASE` fold ASCII
-  only, so all case folding happens in `PathKey`/`SearchQuery` with `ToUpperInvariant`, and the
+- **`name_key` is uppercased in Rust, not by SQLite.** SQLite's `upper()` and `NOCASE` fold ASCII
+  only, so all case folding happens in `bb-paths` (`fold_upper`, used by `PathKey` and `SearchQuery`), and the
   columns compare with plain BINARY collation. This is the same invariant the rest of the database
   follows (see the path-key section of `CLAUDE.md`).
 - **`hidden` is the *effective* flag** — the entry's own Hidden attribute OR'd down from every
@@ -69,7 +69,7 @@ Every file on an NTFS volume already has an entry in a single system file, `$MFT
 filesystem to find those names means millions of directory-open/enumerate syscalls, each with a
 security check. Reading `$MFT` means opening `\\.\C:` and streaming one file.
 
-`MftReader.TryReadAll` does exactly that:
+`MftReader::try_read_all` does exactly that:
 
 1. **Read the boot sector** (offset 0) for the volume geometry: bytes per sector, bytes per cluster,
    the `$MFT`'s starting cluster, and bytes per FILE record (typically 1 KB). A missing `NTFS`
@@ -105,7 +105,7 @@ An MFT record knows its own name and its parent's record number, and nothing els
 in the table. So after the read, every entry's path has to be reconstructed by walking parent links
 up to the root (record 5).
 
-Done naively that is O(entries × depth). `MftPathBuilder.TryResolve` memoizes every directory it
+Done naively that is O(entries × depth). `MftPathBuilder::try_resolve` memoizes every directory it
 resolves into a shared cache, so the walk up stops at the first ancestor already known — resolving
 one deep entry caches every directory along the way, and the next sibling short-circuits
 immediately. In practice the whole volume resolves in roughly O(entries). A `MaxDepth` of 512 guards
@@ -145,7 +145,7 @@ real data.
 
 ### Orchestration
 
-`MftIndexService.Start` enumerates fixed NTFS volumes (`GetLogicalDrives` → `GetDriveTypeW` →
+`MftIndexService::start` enumerates fixed NTFS volumes (`GetLogicalDrives` → `GetDriveTypeW` →
 `GetVolumeInformationW`) and gives each one its own background thread: build, then tail, for the
 life of the app. A volume that fails to open, has no usable journal, or throws mid-build is
 non-fatal — searches on it fall back to the crawler. `StatusText` drives the "Indexing C:…" note in
@@ -166,7 +166,7 @@ index helper" material in `CLAUDE.md`.
 journal, so the next launch attaches to a warm index and costs no prompt and no rebuild. Four
 things follow, and each is load-bearing:
 
-- **The pipe name is well-known per user** (`Core/Ipc/IndexEndpoint`), derived on both sides from
+- **The pipe name is well-known per user** (`bb-core/src/ipc/index_endpoint.rs`), derived on both sides from
   the process's own token SID rather than passed as an argument. It used to carry a random nonce,
   which was right while the helper died with its launcher and wrong the moment a helper had to find
   the *next* app. Deriving it also means the elevated process can no longer be pointed at a name
@@ -174,7 +174,7 @@ things follow, and each is load-bearing:
 - **Every session replays what is already known** — `Building` for each drive still going,
   `Complete` for each finished root — before `Ready`. `IndexRefreshed` fired for those volumes
   before the new app existed and will never fire again, so nothing else could carry them.
-- **One helper per user**, enforced by a named mutex (`Core/Ipc/IndexerPresenceLock`). Two would
+- **One helper per user**, enforced by a named mutex (`ipc/indexer_presence_lock.rs`). Two would
   tail one volume's journal into one SQLite file while fighting over the pipe, and there are two
   independent ways to start one. The same mutex is how the app answers "is one running?" without
   talking to it: `SYNCHRONIZE` is not a write right, so a medium-integrity process may open a
@@ -209,7 +209,7 @@ Applying a batch (`Apply`) is where the subtlety is:
   `_pendingRenames`, and is paired with the matching new-name record that follows.
 - **Paths are resolved from the resident directory map**, not from disk. Records arrive in USN
   order, so a directory's creation always precedes its children's.
-- **A directory rename is a prefix rewrite, not a re-crawl.** `FsIndexRepository.Rename` updates the
+- **A directory rename is a prefix rewrite, not a re-crawl.** `FsIndexRepository::rename` updates the
   moved row and rewrites every descendant key with one `UPDATE … SET path_key = @new || substr(...)`
   over the old subtree's range. The in-memory directory map is rewritten to match.
 - **A delete removes the entry and its whole subtree** via the same range bounds.
@@ -222,7 +222,7 @@ Applying a batch (`Apply`) is where the subtlety is:
 ### The query language
 
 A bare word means what it always did — a case-insensitive substring of the name, `*` and `?`
-honoured, several of them ANDed — and on top of that `Core/Services/Search` adds filters:
+honoured, several of them ANDed — and on top of that `bb-core/src/search` adds filters:
 
 | Form | Meaning |
 |---|---|
@@ -292,7 +292,7 @@ Two consequences fall out of that and are easy to undo by accident:
 
 ### The SQL
 
-A scoped search (`FsIndexRepository.Search`) is one statement:
+A scoped search (`FsIndexRepository::search`) is one statement:
 
 ```sql
 SELECT path_key, name, is_dir, size_bytes, modified_utc, hidden, name_key, attributes, created_utc
@@ -352,8 +352,8 @@ for every one of them, and **no temp B-tree anywhere**. A regular expression is 
 visibly so: it cannot stop early, so it always reads the whole scope.
 
 Kept as the reference measurement that shaped the design. The same seven queries now run as
-`core.fsindex.search(…)` and `core.fsindex.searchglobal(…)` in `tools/BertBrowser.Bench`, against a
-synthetic index by default and this machine's own under `--real`; `docs/performance.md` carries the
+`core.fsindex.search(…)` and `core.fsindex.searchglobal(…)` in `bb-bench` (`native/crates/bb-bench`), against a
+synthetic index by default and this machine's own under `--real`; `native/docs/performance.md` carries the
 current numbers, and a regression is judged against the baseline there, not against this table.
 
 ### Rebuilding display paths
@@ -372,21 +372,21 @@ entries regardless of the "Show hidden items" browse setting — `AppData` and s
 results a search is actually for. Global hits are hydrated with size/timestamp from disk after the
 fact, since the fallback enumeration path can leave those blank.
 
-`SearchService.Visible` also drops any hit sitting in a delete's holding folder. Those files are
+`SearchService::visible` also drops any hit sitting in a delete's holding folder. Those files are
 still on disk — that is the whole point, so Ctrl+Z can restore them — but they have been deleted as
 far as the user is concerned, and search saying otherwise reads as a delete that silently failed.
 
 ### Not a query: the flat branch view
 
 Ctrl+B lists every file under the current folder in one list — no folder rows, though the walk
-still descends into them — and it borrows this machinery without being a search. `SearchService.ListSubtreeAsync` runs the same `LiveScan` with a **null query**,
+still descends into them — and it borrows this machinery without being a search. `SearchService::list_subtree` runs the same `LiveScan` with a **null query**,
 where null means *every entry* — deliberately not a query that matches everything, which
 `SearchGrammar` refuses to build and which would have put a permanent member into the
 `Matches`/`WriteSql` agreement contract on behalf of a caller that is not asking a question.
 
 **It never reads `fs_entry` and never starts a crawl.** The index would answer it in milliseconds,
 and that is the wrong trade for a browse surface: "here is what is under this folder" has to be true
-rather than fast, and index rows can be a rebuild behind. `FolderCompareService.UsesIndex` drew the
+rather than fast, and index rows can be a rebuild behind. the folder comparison's `uses_index` drew the
 same line first. The one thing the index does answer is the *estimate* behind the prompt that
 appears before flattening an enormous folder — `dir_size_cache` already stores `file_count` per
 directory, so that is a single primary-key lookup, and a count that is slightly
@@ -419,17 +419,17 @@ already said, and hand every directory to a file opener. `NotNode` needs no spec
 negating "undecided" is "undecided", which is the same rule its `WriteSql` has always kept for a
 superset it cannot invert.
 
-**The first pass asks for candidates, not results.** `ContentTerm.SqlComplete` is false, so `LIMIT`
+**The first pass asks for candidates, not results.** `ContentTerm::sql_complete` is false, so `LIMIT`
 is not pushed down (rows pass the SQL and then fail the read), and the cap becomes
-`ContentSearchRules.MaxCandidates` — 50,000 — instead of the 1,000-result cap, which would otherwise
+`ContentSearchRules::MAX_CANDIDATES` — 50,000 — instead of the 1,000-result cap, which would otherwise
 mean never grepping more than a thousand files.
 
 **The second pass** (`ContentScanner`) reads only the undecided ones, four at a time, streaming
-survivors onto the same `IProgress` the live scan uses. Each file is sniffed at 8 KB to decide
+survivors onto the same progress sink the live scan uses. Each file is sniffed at 8 KB to decide
 encoding and whether it is text at all — so a binary costs 8 KB rather than a megabyte — then read to
-`AppSettings.SearchContentMaxBytes` (1 MB by default). The encoding ladder is
-`TextPreviewReader.Decode`, extracted from the preview pane precisely so there is only one of it.
-Nothing is held open (`FileShare.ReadWrite | Delete`, or a search would block this app's own rename
+`AppSettings::search_content_max_bytes` (1 MB by default). The encoding ladder is
+`TextPreviewReader::decode`, extracted from the preview pane precisely so there is only one of it.
+Nothing is held open (`FILE_SHARE_READ | WRITE | DELETE`, or a search would block this app's own rename
 and delete executors), reparse points and cloud placeholders are refused rather than followed or
 hydrated, and **a null return means this file failed while a throw means the run stopped** — the
 distinction `IFileHasher` documents, and without it a cancel looks like a disk full of broken files.
@@ -453,8 +453,8 @@ tree extrapolates to about 19 s warm, which is why this streams, reports progres
 while keeping what it found.
 
 As above, this is the reference measurement; the scan runs as `core.content.scaninmemory2k` (the
-scanner alone) and `core.content.scandisk2k` (with real reads) in `tools/BertBrowser.Bench`, and
-`docs/performance.md` has the current numbers.
+scanner alone) and `core.content.scandisk2k` (with real reads) in `bb-bench` (`native/crates/bb-bench`), and
+`native/docs/performance.md` has the current numbers.
 
 **Two refusals rather than wrong answers.** `content:` with `in:archives`, and `content:` typed while
 standing inside a container, are both refused by name. The reason is worth keeping: an archive entry
@@ -466,7 +466,7 @@ trusting its callers.
 ### The other reader: duplicates
 
 The search box is not the only thing that reads these rows. The duplicate finder
-(`Core/Services/Duplicates`) shortlists on `size_bytes` — two files of different lengths cannot be
+(`bb-core/src/duplicates`) shortlists on `size_bytes` — two files of different lengths cannot be
 duplicates — so the expensive half of finding them is already paid for by the pass above, and only
 the files that collide are ever opened.
 
@@ -483,7 +483,7 @@ reading a whole disk to discover nothing.
 
 The tail can also write down what it applies. `ChangeRecorder` (one per volume, owned by the tail
 thread) buffers each resolved create / modify / delete / rename as a `ChangeEvent` and flushes it
-into `fs_change` once per drained batch — `Data/Migrations/006_change_log.sql`. The "What changed"
+into `fs_change` once per drained batch — `data/migrations/001_schema.sql`. The "What changed"
 window (Ctrl+Shift+H) reads that table; nothing ever reads the journal on demand, and a record's
 path is only resolvable from the resident directory map at the moment it arrives, so this is the
 only time it could be written.
@@ -501,10 +501,10 @@ only time it could be written.
   shown past the promise the settings page made.
 - **The query is a range scan** on `last_utc` that also supplies the `ORDER BY … DESC`, pinned
   with `INDEXED BY` because given a scope the planner prefers the path index and then sorts.
-  `ChangeLogRepositoryTests.Query_NeedsNoSorter` runs `EXPLAIN QUERY PLAN` to hold it there.
+  `change_log_repository_tests::query_needs_no_sorter` runs `EXPLAIN QUERY PLAN` to hold it there.
 - **It never records itself.** Every write to `bertbrowser.db` is a journal record; the data
   directory is excluded at the recorder, and a flush with nothing buffered opens no connection.
-- **It never takes the index down.** A `SqliteException` in the recorder disables it for the
+- **It never takes the index down.** A SQLite error in the recorder disables it for the
   session; `RunVolume` would otherwise end that volume's tail silently.
 
 ## The fallback path
@@ -519,8 +519,8 @@ runs stale-while-revalidate:
 | Not indexed at all | Live filesystem walk streaming hits in batches of 50 (or every 250 ms) while a single-flight background crawl indexes the subtree for next time |
 
 `IndexCrawler` writes the same `fs_entry` rows with the same chunking and `crawl_gen` contract, and
-`IndexWatcherService` keeps up to 8 roots patched with `FileSystemWatcher` (events queued and drained
-every 250 ms; a buffer overflow marks the root stale and drops the watcher). `FileSystemWatcher`
+`IndexWatcherService` keeps up to 8 roots patched with one `ReadDirectoryChangesW` thread each (events queued and drained
+every 250 ms; a buffer overflow marks the root stale and drops the watcher). watcher
 state is in-memory only, so the *first* crawl-backed search each session intentionally takes the
 stale path: instant cached results, plus one background re-crawl that re-attaches the watcher.
 MFT-covered roots never fall to the crawler, since the USN tail keeps them live.
@@ -549,7 +549,7 @@ the canonical path.
   query costs disk rather than a lookup, and is bounded and cancellable accordingly.
 - **`size:`, `dm:` and `dc:` need a fully indexed drive.** The `FSCTL_ENUM_USN_DATA` fallback
   records names and attributes only, so those filters can never match on a volume built that way. A
-  filtered search that comes back empty asks `FsIndexRepository.HasSizeData` before reporting "no
+  filtered search that comes back empty asks `FsIndexRepository::has_size_data` before reporting "no
   results", and says the drive is unmeasured instead — the same distinction `DiskUsageRules` draws,
   and for the same reason. **`is:` attributes are the exception**: a USN record carries the whole
   mask, so they answer on a volume where the other three cannot, which is why `AttributeTerm` sets
@@ -571,6 +571,9 @@ the canonical path.
 
 ## Where the tests are
 
+Rust integration tests in `native/crates/bb-core/tests/all/`, one file per row, the name snake_cased
+(`NtfsParsingTests` is `ntfs_parsing_tests.rs`).
+
 | Test | Covers |
 |---|---|
 | `NtfsParsingTests` | Boot-sector geometry, runlist decoding, the sector fixup, FILE-record parsing — including that the whole attribute mask survives and that created is read from `$STANDARD_INFORMATION + 0x00` rather than modified's `+ 0x08` |
@@ -584,8 +587,8 @@ the canonical path.
 | `ContentReaderTests` | Real files: the encoding ladder, the sharing flags that stop a search blocking a rename, the per-file budget, and null-for-failure versus throw-for-cancel |
 | `ContentSnippetTests` | Line numbers, and clipping a very long line *around* the match rather than from the left |
 | `ContentScannerTests` | Which candidates are opened, a cancel giving back a floor, the ceilings, and one unreadable file costing the others nothing |
-| `ContentSearchAgreementTests` | The whole pipeline against an independent `File.ReadAllText` of a real tree, on **both** branches — the analogue of `SearchAgreementTests`, which structurally cannot cover a content term |
-| `SizeTextTests`, `DateShorthandTests` | The literal parsers; the clock is injected, and the units are pinned to `ByteSizeFormatter`'s |
+| `ContentSearchAgreementTests` | The whole pipeline against an independent `read_to_string` of a real tree, on **both** branches — the analogue of `SearchAgreementTests`, which structurally cannot cover a content term |
+| `SizeTextTests`, `DateShorthandTests` | The literal parsers; the clock is injected, and the units are pinned to the byte-size formatter's |
 | `FsIndexRepositoryTests` | Range scans, truncation, ancestor path reconstruction, rename/delete subtree rewrites, the vanish sweep, and both new columns' round trip — including a row left at the migration's `''` created date, which must read back as unknown rather than throw |
 | `SearchServiceTests` | Fresh / stale / unindexed routing and live-scan streaming |
 | `SubtreeListingTests` | The flat branch view's listing: descendants at every depth, the relative dir the Folder column shows, that it still descends into the folders it does not show, hidden subtrees, the cap, that nothing streamed is missing from the final list — and the two promises, that an archive root is refused and that listing enrols nothing in the index |

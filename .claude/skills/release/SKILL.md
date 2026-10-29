@@ -6,7 +6,9 @@ description: Ship a new BertBrowser version — pre-flight checks, tag, watch CI
 # Releasing BertBrowser
 
 **The tag is the release.** No file carries a version; CI derives it from the tag, builds, packs
-with Velopack, publishes the GitHub Release, and opens the winget PR. Full detail lives in
+with Velopack (`vpk pack --packId BertBrowser --packDir native/out/release/app`), publishes the GitHub
+Release, and opens the winget PR. The app is the native one; `csharp/` is a frozen reference and is
+never built or shipped. The first native release is `v2.0.0`. Full detail lives in
 [docs/build-and-release.md](../../../docs/build-and-release.md) — this is the procedure to follow.
 
 Nothing here is reversible once the tag is pushed except by deleting the release, so do the
@@ -26,11 +28,13 @@ now the way to stage something privately.
 git fetch origin
 git status -sb                      # clean tree, main in sync with origin/main
 git rev-parse HEAD origin/main      # must match — the tag builds what's on the branch
-dotnet test bertbrowser.sln -c Release
+cd native; cargo test --workspace --release; cd ..   # PowerShell, not the Bash tool (Deny ACEs)
 git tag --sort=-v:refname | head -3 # the last version, to pick the next one
 ```
 
-A red test fails the release *after* the tag exists, which is the annoying case. Run it locally.
+A red test, or a failing harness script, fails the release *after* the tag exists, which is the annoying
+case. Run the tests locally, and `smoke.bbs` on the release harness for anything the user can see (see the
+`verify` skill).
 `main` is now built and tested on every push too, so
 `gh run list --workflow=unstable.yml --branch main --limit 1` says whether the commit you are about
 to tag is already green — check it, but run the suite locally anyway if that run hasn't finished.
@@ -55,7 +59,7 @@ gh run watch <id> --exit-status --interval 15
 ```
 
 Run the watch in the background and write the release notes (step 5) while it builds — the run takes
-~2–3 minutes and the notes need reading the diff anyway.
+few minutes and the notes need reading the diff anyway.
 
 ## 4. Verify what shipped
 
@@ -64,9 +68,14 @@ gh release view vX.Y.Z --json assets -q '.assets[] | "\(.name) \(.size)"'
 ```
 
 A healthy release has **six** assets: `Setup.exe`, `Portable.zip`, `-full.nupkg`, `-delta.nupkg`,
-`releases.win.json`, `RELEASES`. **The delta must be much smaller than the full package** (a few MB
-vs ~75) — same size means `vpk download github` didn't find the previous release and installed
+`releases.win.json`, `RELEASES`. **The delta must be much smaller than the full package** (a small
+fraction of it) — same size means `vpk download github` didn't find the previous release and installed
 copies will take a full download.
+
+For the first native release (`v2.0.0`) also confirm the cutover itself: an installed 1.x copy takes the
+native build as its next update (same pack id `BertBrowser`), its old data lands in
+`~\.bertbrowser\legacy-<yyyymmdd>\`, the old index helper exits on its self-checks, and the new one
+registers its sign-in task. Report any of these that Rob has not checked rather than assuming them.
 
 ## 5. Release notes
 
@@ -82,7 +91,7 @@ useful", "security". Read the actual changes:
 ```powershell
 git log --oneline vPREV..vX.Y.Z
 git diff --stat vPREV..vX.Y.Z
-git show <sha> -- src/BertBrowser.App/Views src/BertBrowser.App/ViewModels   # what the user sees
+git show <sha> -- native/app/views native/crates/bb-app   # what the user sees
 ```
 
 Write from what changed *for a user*, grouped by feature area, not by commit. Code comments in the
