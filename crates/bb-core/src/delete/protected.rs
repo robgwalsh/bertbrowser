@@ -16,11 +16,10 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use bb_paths::PathKey;
-use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::UI::Shell::{
     FOLDERID_Profile, FOLDERID_ProgramData, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesCommon,
     FOLDERID_ProgramFilesCommonX86, FOLDERID_ProgramFilesX86, FOLDERID_System, FOLDERID_SystemX86,
-    FOLDERID_Windows, SHGetKnownFolderPath,
+    FOLDERID_Windows,
 };
 use windows_sys::core::GUID;
 
@@ -79,23 +78,6 @@ impl ProtectedLocations {
     }
 }
 
-/// `Environment.GetFolderPath`: the folder's current path, or None when Windows has none for it.
 fn known_folder(id: &GUID) -> Option<String> {
-    let mut buffer: *mut u16 = std::ptr::null_mut();
-    // SAFETY: the out pointer is valid for the call; the returned buffer is freed below.
-    let hr = unsafe { SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut buffer) };
-    if hr < 0 || buffer.is_null() {
-        return None;
-    }
-    // SAFETY: a NUL-terminated string the shell allocated with CoTaskMemAlloc.
-    let path = unsafe {
-        let mut len = 0usize;
-        while *buffer.add(len) != 0 {
-            len += 1;
-        }
-        let text = String::from_utf16_lossy(std::slice::from_raw_parts(buffer, len));
-        CoTaskMemFree(buffer as *const _);
-        text
-    };
-    Some(path)
+    crate::fs::KnownFolders::path_of(id)
 }

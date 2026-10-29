@@ -1284,6 +1284,45 @@ void Runner::install_ui() {
         if (!bitmap) throw AssertionError("the " + to_utf8(k) + " dialog could not be rendered.");
         write_shot(*bitmap, name.empty() ? L"dialog-" + k : name);
     };
+    // live-dialogs on|off -- a run normally reports a dialog instead of putting it up; on, the next ones really
+    // open, so a script can answer them with dialog-type and dialog-press like a person would.
+    verbs_[L"live-dialogs"] = [this](const std::wstring& r) {
+        s_.view().set_live_dialogs(on_off(r, "live-dialogs"));
+    };
+    // assert-dialog <kind> | none -- which dialog is up.
+    verbs_[L"assert-dialog"] = [this](const std::wstring& r) {
+        const std::wstring want = lower(require(r, "assert-dialog"));
+        s_.settle();
+        const bool up = s_.view().dialog_up();
+        const std::wstring kind = up ? s_.view().dialog_kind() : L"none";
+        if (kind != want) throw AssertionError("expected the " + to_utf8(want) + " dialog; " + (up ? "the " + to_utf8(kind) + " one is up." : "none is up."));
+    };
+    // dialog-type <Name> <text> -- replaces the text of the named box in the open dialog, as typing would.
+    verbs_[L"dialog-type"] = [this](const std::wstring& r) {
+        auto [name, text] = split_first(require(r, "dialog-type"));
+        auto* edit = dynamic_cast<bb::ui::Edit*>(s_.view().dialog_widget(to_utf8(name)));
+        if (!edit) throw AssertionError("The open dialog has no box named '" + to_utf8(name) + "'.");
+        edit->set_text(text);
+        if (edit->on_changed) edit->on_changed(edit->text());
+        s_.settle();
+    };
+    // dialog-press <Name> -- presses the named button of the open dialog; refused when it is disabled.
+    verbs_[L"dialog-press"] = [this](const std::wstring& r) {
+        const std::wstring name = require(r, "dialog-press");
+        auto* button = dynamic_cast<bb::ui::Button*>(s_.view().dialog_widget(to_utf8(name)));
+        if (!button) throw AssertionError("The open dialog has no button named '" + to_utf8(name) + "'.");
+        if (!button->flags.enabled) throw AssertionError("'" + to_utf8(name) + "' is disabled.");
+        if (button->on_click) button->on_click();
+        s_.settle();
+    };
+    // assert-dialog-text <Name> <text> -- the named text of the open dialog contains this.
+    verbs_[L"assert-dialog-text"] = [this](const std::wstring& r) {
+        auto [name, want] = split_first(require(r, "assert-dialog-text"));
+        auto* text = dynamic_cast<bb::ui::TextBlock*>(s_.view().dialog_widget(to_utf8(name)));
+        if (!text) throw AssertionError("The open dialog has no text named '" + to_utf8(name) + "'.");
+        if (text->text().find(want) == std::wstring::npos)
+            throw AssertionError("'" + to_utf8(name) + "' says '" + to_utf8(text->text()) + "', not '" + to_utf8(want) + "'.");
+    };
     verbs_[L"duplicates"] = [this](const std::wstring& r) {
         const fs::path path = r.empty() ? fs::path(s_.core().tab_text(tab(), BB_TEXT_PATH)) : sandbox_.resolve(r);
         std::error_code ec;

@@ -42,6 +42,12 @@ pub enum Model {
     Conflicts = 15,
     /// An operation was refused for permissions and is waiting on the user's answer.
     Elevation = 16,
+    /// A worker is waiting on the user's yes or no (`ops_query("confirm")`).
+    Confirm = 17,
+    /// There is something to tell the user (`ops_query("notice")`).
+    Notice = 18,
+    /// The delete confirmation's survey measured another item (`ops_query("delete-survey")`).
+    DeleteSurvey = 19,
 }
 
 #[derive(Clone, Debug, PartialEq)]

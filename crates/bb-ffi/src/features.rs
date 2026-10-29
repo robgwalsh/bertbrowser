@@ -619,6 +619,27 @@ pub unsafe extern "C" fn bb_saved_do(
     })
 }
 
+/// Select (`select` true) or deselect by pattern on `tab`, as JSON `{total, matched, problem,
+/// summary, usable}`: what `pattern` picks out of the rows on screen, said as it is typed. With
+/// `apply` the matches are added to the selection or taken out of it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_select_pattern(
+    app: *mut BbApp,
+    tab: u64,
+    pattern: BbStr,
+    select: bool,
+    apply: bool,
+    out_json: *mut BbOwnedStr,
+) -> BbStatus {
+    guard(|| {
+        let app = unsafe { app_of(app)? };
+        let json = app
+            .app
+            .select_pattern_json(TabId(tab), &text_of(pattern), select, apply)?;
+        unsafe { put(out_json, &json) }
+    })
+}
+
 /// What a Save workspace (`kind` = `workspace`) or Save menus-and-toolbars (`command-bars`) dialog
 /// shows for `name`, as JSON `{default, problem, taken}`: the name it opens with, why this one
 /// cannot be saved (null when it can), and whether saving replaces one of that name.

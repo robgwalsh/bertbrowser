@@ -459,7 +459,7 @@ void SettingsView::page_history(Widget& p) {
     f::note(p, L"Undo lasts for this session. The budget is released oldest first; the next undo is never released.");
     number_row(p, L"Steps to remember", "undoMaxSteps");
     number_row(p, L"Most data to hold", "undoMaxHeldGigabytes", L"GB");
-    auto* clear = f::button(p, L"Clear the undo history now", [this] { bb_undo_clear(core_.app()); });
+    auto* clear = f::button(p, L"Clear the undo history now", [this] { main_.open_dialog(L"clear-undo"); });
     clear->name = "ClearUndoHistory";
     clear->width = 220;
 }

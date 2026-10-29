@@ -254,9 +254,15 @@ impl Seams {
         data_dir: &std::path::Path,
     ) -> Seams {
         let mut seams = Seams::system(data_dir);
-        let prompts = Arc::new(UiPrompts { hub, questions });
+        let prompts = Arc::new(UiPrompts {
+            hub,
+            questions,
+            ui_thread: std::thread::current().id(),
+        });
         seams.conflicts = prompts.clone();
-        seams.elevation = prompts;
+        seams.elevation = prompts.clone();
+        seams.confirm = prompts.clone();
+        seams.notice = prompts;
         seams
     }
 }
@@ -264,6 +270,26 @@ impl Seams {
 struct UiPrompts {
     hub: EventHub,
     questions: Arc<Questions>,
+    /// The thread the app was made on, which is the host's: a question asked there could never be
+    /// answered, because the answer arrives through that same thread.
+    ui_thread: std::thread::ThreadId,
+}
+
+impl UserConfirm for UiPrompts {
+    fn ask(&self, message: &str, title: &str, confirm_label: &str) -> bool {
+        if std::thread::current().id() == self.ui_thread {
+            debug_assert!(false, "a confirmation asked on the UI thread: {title}");
+            return false;
+        }
+        self.questions
+            .ask_confirm(&self.hub, message, title, confirm_label)
+    }
+}
+
+impl UserNotice for UiPrompts {
+    fn say(&self, message: &str, title: &str) {
+        self.questions.tell(&self.hub, message, title);
+    }
 }
 
 impl AppConflictPrompt for UiPrompts {

@@ -491,7 +491,8 @@ std::unique_ptr<Panel> disk_usage_card(DialogContext& cx, const json::Value& m) 
         text->flex = 1;
         text->wrap = true;
         if (m["canRetry"].boolean()) {
-            f::button(*banner, L"Try again", [cx] { bb_index_do(cx.main.core().app(), core::s(L"retry")); }, 90);
+            // What the banner offers is a start (attach, or launch the helper); a retry is only for a failed build.
+            f::button(*banner, L"Try again", [cx] { bb_index_do(cx.main.core().app(), core::s(L"start")); }, 90);
         }
     }
     add_button(c, L"Close", cx.close, true);
@@ -568,7 +569,8 @@ std::unique_ptr<Panel> changes_card(DialogContext& cx, const json::Value& m) {
             }, 90)->name = "ChangesOpenSettings";
         }
         if (m["canRetry"].boolean()) {
-            f::button(*banner, L"Try again", [cx] { bb_index_do(cx.main.core().app(), core::s(L"retry")); }, 90);
+            // What the banner offers is a start (attach, or launch the helper); a retry is only for a failed build.
+            f::button(*banner, L"Try again", [cx] { bb_index_do(cx.main.core().app(), core::s(L"start")); }, 90);
         }
     }
 
@@ -670,16 +672,22 @@ std::unique_ptr<Panel> duplicates_card(DialogContext& cx) {
     table->set_rows(std::move(rows));
     table->on_activate = [cx, index](int i) {
         if (i < 0 || static_cast<size_t>(i) >= index.size() || index[static_cast<size_t>(i)].second == static_cast<size_t>(-1)) return;
-        auto& ticked = cx.main.duplicates().ticked;
+        DuplicatesState& st = cx.main.duplicates();
         const auto key = index[static_cast<size_t>(i)];
-        if (!ticked.erase(key)) ticked.insert(key);
+        if (!st.ticked.erase(key)) {
+            // One copy always stays: the last unticked one cannot be ticked. Spec: DuplicateGroupViewModel.CanTick.
+            size_t ticked_here = 0;
+            for (const auto& t : st.ticked) ticked_here += t.first == key.first ? 1 : 0;
+            if (ticked_here + 1 >= st.result["groups"][key.first]["files"].size()) {
+                bb_status_set(cx.main.core().app(), core::s(L"One copy always stays - untick another first."));
+                return;
+            }
+            st.ticked.insert(key);
+        }
         cx.main.open_dialog(L"duplicates");
     };
     const size_t n = d.ticked.size();
-    auto* remove = add_button(c, L"Remove ticked", [cx] {
-        uint64_t op = 0;
-        if (duplicates_remove(cx.main, &op)) cx.main.open_dialog(L"duplicates");
-    }, false, 150);
+    auto* remove = add_button(c, L"Remove ticked", [cx] { duplicates_ask_remove(cx.main); }, false, 150);
     remove->name = "RemoveTicked";
     remove->set_enabled(n > 0);
     add_button(c, L"Close", cx.close, true);
@@ -840,18 +848,23 @@ std::vector<std::wstring> duplicates_ticked_paths(MainView& main) {
     return out;
 }
 
-bool duplicates_remove(MainView& main, uint64_t* op) {
-    const std::vector<std::wstring> paths = duplicates_ticked_paths(main);
-    if (paths.empty()) return false;
-    std::vector<BbStr> views;
-    for (const auto& p : paths) views.push_back(core::s(p));
-    uint64_t id = 0;
-    core::check(bb_op_delete(main.core().app(), views.data(), static_cast<uint32_t>(views.size()), BB_DELETE_RECYCLE, &id), "duplicates-remove");
-    if (op) *op = id;
-    // What is still duplicated: the removed copies leave their groups, and a group left with one copy is
-    // not a group any more. The ticks go with them.
+// Of the ticked copies, the ones a delete may take. The rule is the core's (`DuplicateRules::can_remove`):
+// a group with every copy ticked contributes nothing rather than being emptied.
+std::vector<std::wstring> duplicates_removable(MainView& main) {
+    const std::vector<std::wstring> ticked = duplicates_ticked_paths(main);
+    std::vector<std::wstring> out;
+    if (ticked.empty()) return out;
+    const json::Value r = tool_call(main, "duplicates.removable", "{\"paths\":" + json_array(ticked) + "}");
+    for (size_t i = 0; i < r["paths"].size(); ++i) out.push_back(core::wide(r["paths"][i].str()));
+    return out;
+}
+
+// What is still duplicated: the removed copies leave their groups, and a group left with one copy is not a
+// group any more. The ticks go with them.
+void duplicates_prune(MainView& main, const std::vector<std::wstring>& removed) {
+    std::set<std::string> gone;
+    for (const auto& p : removed) gone.insert(core::utf8(p));
     DuplicatesState& d = main.duplicates();
-    const std::set<std::pair<size_t, size_t>> gone = d.ticked;
     for (auto& kv : d.result.o) {
         if (kv.first != "groups") continue;
         std::vector<json::Value> kept;
@@ -862,7 +875,7 @@ bool duplicates_remove(MainView& main, uint64_t* op) {
                 if (member.first != "files") continue;
                 std::vector<json::Value> left;
                 for (size_t i = 0; i < member.second.a.size(); ++i) {
-                    if (!gone.count({g, i})) left.push_back(member.second.a[i]);
+                    if (!gone.count(member.second.a[i]["path"].str())) left.push_back(member.second.a[i]);
                 }
                 member.second.a = std::move(left);
             }
@@ -877,7 +890,34 @@ bool duplicates_remove(MainView& main, uint64_t* op) {
         }
     }
     d.ticked.clear();
+}
+
+// The ticked copies, deleted at once - for a scripted run, which stands in for someone who said yes to the
+// confirmation. The window's button asks first (`duplicates_ask_remove`).
+bool duplicates_remove(MainView& main, uint64_t* op) {
+    const std::vector<std::wstring> paths = duplicates_removable(main);
+    if (paths.empty()) return false;
+    std::vector<BbStr> views;
+    for (const auto& p : paths) views.push_back(core::s(p));
+    uint64_t id = 0;
+    core::check(bb_op_delete(main.core().app(), views.data(), static_cast<uint32_t>(views.size()), BB_DELETE_RECYCLE, &id), "duplicates-remove");
+    if (op) *op = id;
+    duplicates_prune(main, paths);
     return true;
+}
+
+// Remove ticked: the ordinary delete confirmation over the copies the rule allows, and back to this window
+// afterwards with whatever was deleted gone from it. Spec: MainWindow.RemoveDuplicateCopies.
+void duplicates_ask_remove(MainView& main) {
+    const std::vector<std::wstring> paths = duplicates_removable(main);
+    if (paths.empty()) {
+        bb_status_set(main.core().app(), core::s(L"One copy of every file always stays - untick one in each group to remove the rest."));
+        return;
+    }
+    main.ask_delete(paths, [&main, paths](bool confirmed) {
+        if (confirmed) duplicates_prune(main, paths);
+        main.defer([&main] { main.open_dialog(L"duplicates"); });
+    });
 }
 
 // ---- the entry points ---------------------------------------------------------------------------------------

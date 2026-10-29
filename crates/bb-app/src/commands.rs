@@ -13,7 +13,6 @@ use bb_core::commands::{
     CommandCatalog, CommandContext, FileVerb, FileVerbRules, FileVerbSnapshot, FocusState,
     KeyChord, Keymap, KeymapRules,
 };
-use bb_core::delete::DeleteMode;
 use bb_core::layout::SplitOrientation;
 use bb_core::transfer::TransferVerb;
 use serde_json::{Value, json};
@@ -58,6 +57,9 @@ const UI_OWNED: &[&str] = &[
     "file.new-folder",
     "file.new-file",
     "file.rename",
+    // A delete is only ever run from its confirmation, which shows what it comes to.
+    "file.delete",
+    "file.delete-permanently",
     "file.properties",
     "file.compress",
     "file.extract-here",
@@ -170,6 +172,7 @@ pub(crate) struct Ctx {
     has_tab: bool,
     path: String,
     in_archive: bool,
+    archive_locked: bool,
     is_flattened: bool,
     is_flat_browse: bool,
     is_flat_view: bool,
@@ -198,6 +201,10 @@ pub(crate) struct Ctx {
     pane_count: usize,
     other: Option<OtherPane>,
     comparing: bool,
+    /// A comparison is reading its folders; it cannot be rescanned or synced until it has.
+    compare_scanning: bool,
+    /// The comparison's answer is one a sync may be planned from (whole, not refused or cut short).
+    compare_can_sync: bool,
     differences_only: bool,
     undo: Option<String>,
     redo: Option<String>,
@@ -302,6 +309,12 @@ impl Inner {
             ui.compare.is_some(),
             ui.compare.as_ref().is_some_and(|c| c.differences_only),
         );
+        let compare_scanning = ui.compare.as_ref().is_some_and(|c| c.comparing);
+        let compare_can_sync = ui
+            .compare
+            .as_ref()
+            .and_then(|c| c.outcome.as_ref())
+            .is_some_and(|o| o.can_sync());
         let (clipboard_has_files, preview_has_media) =
             (ui.flag("clipboardHasFiles"), ui.flag("previewHasMedia"));
         drop(ui);
@@ -322,6 +335,7 @@ impl Inner {
             has_tab: cell.is_some(),
             path: String::new(),
             in_archive: false,
+            archive_locked: false,
             is_flattened: false,
             is_flat_browse: false,
             is_flat_view: false,
@@ -350,6 +364,8 @@ impl Inner {
             pane_count,
             other,
             comparing,
+            compare_scanning,
+            compare_can_sync,
             differences_only,
             undo: summary.undo,
             redo: summary.redo,
@@ -375,6 +391,7 @@ impl Inner {
             let t = lock(&cell);
             ctx.path = t.path.clone();
             ctx.in_archive = ArchivePathCheck::in_archive(&t.path);
+            ctx.archive_locked = t.archive_locked;
             ctx.is_flattened = t.is_flattened;
             ctx.is_flat_browse = t.is_flat_browse;
             ctx.is_flat_view = t.is_flat_view;
@@ -386,7 +403,7 @@ impl Inner {
             ctx.thumbnail_scale = t.thumbnail_scale;
             ctx.sort_by = t.sort_by.clone();
             ctx.sort_desc = t.sort_desc;
-            ctx.columns_customized = t.columns.is_some();
+            ctx.columns_customized = t.columns_customized;
             ctx.side_pane = t.side_pane;
             ctx.preview_mode = t.preview_mode;
             ctx.preview_wrap = t.preview_wrap;
@@ -532,6 +549,7 @@ impl Inner {
         );
         s.comparing = ctx.comparing;
         s.single_is_archive = ctx.single_is_archive;
+        s.archive_locked = ctx.archive_locked;
         s.all_bookmarked = ctx.all_bookmarked;
         s
     }
@@ -743,9 +761,15 @@ impl Inner {
                 .trim()
                 .is_empty()
                 .then(|| "There is no search to save.".to_string()),
-            "tools.compare-rescan" | "tools.compare-differences" => comparing_only(),
-            "tools.compare-sync" => (!ctx.comparing)
-                .then(|| "Only once a comparison has found something to sync.".to_string()),
+            "tools.compare-differences" => comparing_only(),
+            // Not while a scan is reading: a second one would race it into the same result.
+            "tools.compare-rescan" => (!ctx.comparing || ctx.compare_scanning)
+                .then(|| "Only while two panes are being compared.".to_string()),
+            // A sync is planned from the verdicts, so only from a whole answer that has arrived.
+            "tools.compare-sync" => {
+                (!ctx.comparing || ctx.compare_scanning || !ctx.compare_can_sync)
+                    .then(|| "Only once a comparison has found something to sync.".to_string())
+            }
             "tools.indexer-dismiss" => {
                 (!ctx.banner_shown).then(|| "The banner is not showing.".to_string())
             }
@@ -836,9 +860,13 @@ impl Inner {
 
     fn open_in_other_pane(self: &Arc<Self>, pane: PaneId, path: &str) -> AppResult<()> {
         match self.other_pane(pane) {
+            // The other pane's own tab goes there; focus stays here, where the work is.
             Some(other) => {
-                self.open_tab(other, path, true)?;
-                Ok(())
+                let tab = lock(&self.shell).panes.get(&other).and_then(|p| p.active);
+                match tab {
+                    Some(tab) => self.navigate(tab, path),
+                    None => self.open_tab(other, path, true).map(|_| ()),
+                }
             }
             None => {
                 self.split_pane(pane, SplitOrientation::Vertical, path)?;
@@ -859,8 +887,10 @@ impl Inner {
     fn run_core(self: &Arc<Self>, id: &str, tab: TabId, pane: PaneId) -> AppResult<()> {
         let cell = self.tab(tab)?;
         let path = lock(&cell).path.clone();
-        let profile = std::env::var("USERPROFILE").ok();
-        let known = |leaf: &str| profile.as_ref().map(|p| format!("{p}\\{leaf}"));
+        // Where Windows says they are today: OneDrive's folder backup and a relocated Downloads
+        // move them away from the profile.
+        use bb_core::fs::KnownFolders;
+        let profile = KnownFolders::profile().or_else(|| std::env::var("USERPROFILE").ok());
         match id {
             "nav.back" => self.back(tab),
             "nav.forward" => self.forward(tab),
@@ -883,9 +913,9 @@ impl Inner {
             }
             "nav.drive-root" => self.goto_known_folder(tab, drive_root(&path)),
             "nav.home" => self.goto_known_folder(tab, profile.clone()),
-            "nav.desktop" => self.goto_known_folder(tab, known("Desktop")),
-            "nav.documents" => self.goto_known_folder(tab, known("Documents")),
-            "nav.downloads" => self.goto_known_folder(tab, known("Downloads")),
+            "nav.desktop" => self.goto_known_folder(tab, KnownFolders::desktop()),
+            "nav.documents" => self.goto_known_folder(tab, KnownFolders::documents()),
+            "nav.downloads" => self.goto_known_folder(tab, KnownFolders::downloads()),
             "nav.containing-folder" => self.containing_folder(tab),
             "tab.new" | "tab.duplicate" => self.open_tab(pane, &path, true).map(|_| ()),
             "tab.close" => self.close_tab(tab),
@@ -902,7 +932,12 @@ impl Inner {
             }
             "tab.next" => self.step_tab(pane, 1),
             "tab.previous" => self.step_tab(pane, -1),
-            "tab.goto-last" => self.goto_tab(pane, 7),
+            // The last tab however many there are; a numbered slot past the end lands there too.
+            "tab.goto-last" => self.goto_tab(pane, usize::MAX),
+            _ if id.starts_with("tab.goto-") => match id["tab.goto-".len()..].parse::<usize>() {
+                Ok(slot @ 1..=8) => self.goto_tab(pane, slot - 1),
+                _ => Err(AppError::Invalid(format!("'{id}' has no handler here"))),
+            },
             "tab.move-to-new-pane" => self.move_tab_to_new_pane(tab).map(|_| ()),
             "tab.close-right" => {
                 let later: Vec<TabId> = lock(&self.shell)
@@ -1001,8 +1036,9 @@ impl Inner {
             }
             "file.open-new-tab" => {
                 let folders = self.selected_folders(tab, 10)?;
-                for (i, folder) in folders.iter().enumerate() {
-                    self.open_tab(pane, folder, i == 0)?;
+                // In the background, beside this one, as a middle-click does.
+                for folder in &folders {
+                    self.open_tab(pane, folder, false)?;
                 }
                 Ok(())
             }
@@ -1019,14 +1055,6 @@ impl Inner {
                     }
                     None => Ok(()),
                 }
-            }
-            "file.delete" => {
-                let paths = self.selected_paths(tab)?;
-                self.op_delete(paths, DeleteMode::Recycle).map(|_| ())
-            }
-            "file.delete-permanently" => {
-                let paths = self.selected_paths(tab)?;
-                self.op_delete(paths, DeleteMode::Permanent).map(|_| ())
             }
             "file.bookmark" => {
                 let paths = self.selected_paths(tab)?;

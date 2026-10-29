@@ -417,6 +417,184 @@ std::unique_ptr<Widget> elevation_dialog(DialogContext& cx) {
     return std::move(c.root);
 }
 
+// ---- the delete confirmation ------------------------------------------------------------------------------
+
+// The "are you sure" before a delete: every item and where it lives, what the rules refused, and - as the
+// survey walks the trees off the UI thread - how much each item amounts to. What is listed is what goes.
+// Inside an archive it is the one question the rewrite needs. Spec: Views/DeleteDialog,
+// DirectoryTabView.DeleteSelectionAsync, MainWindow.DeleteTreeFolderAsync.
+std::unique_ptr<Widget> delete_dialog(DialogContext& cx, bool permanent) {
+    MainView& main = cx.main;
+    core::Core* core = &main.core();
+    std::string arg = std::string("{\"permanent\":") + (permanent ? "true" : "false");
+    if (!main.dialog_paths().empty()) arg += ",\"paths\":" + qa(main.dialog_paths());
+    else if (!main.dialog_folder().empty()) arg += ",\"paths\":" + qa({main.dialog_folder()});
+    // Whoever asked for this one (the duplicate finder) hears how it ended.
+    auto after = std::make_shared<std::function<void(bool)>>(main.take_after_delete());
+    arg += "}";
+    json::Value p;
+    std::wstring failed;
+    try {
+        p = query(*core, "delete-preview", arg);
+    } catch (const std::exception& e) {
+        failed = core::wide(e.what());
+    }
+    const bool has_work = p["hasWork"].boolean();
+    Card c = make_card(p.is_null() || p["title"].is_null() ? L"Delete" : w(p["title"]), 560);
+    if (!has_work) {
+        // Nothing survived the rules: say why rather than appearing to do nothing.
+        f::text(*c.body, failed.empty() ? w(p["problems"]) : failed, tok::TextPrimary, 13.5f)->wrap = true;
+        add_button(c, L"OK", cx.close, true)->name = "DeleteOk";
+        c.root->on_destroy = [after] {
+            if (*after) (*after)(false);
+        };
+        return std::move(c.root);
+    }
+    // Inside an archive there is only one kind of delete, whichever key asked for it.
+    const bool erase = p["permanent"].boolean();
+    auto* head = f::row(*c.body, 12);
+    auto* glyph = head->emplace<Icon>(icons::find(erase ? "Error" : "Warning"), 22.0f);
+    glyph->style.fg = erase ? tok::ErrorForeground : tok::TextLink;
+    auto* heading = f::text(*head, w(p["heading"]), tok::TextPrimary, 14.0f, 600);
+    heading->wrap = true;
+    heading->width = 480;
+    heading->name = "DeleteHeading";
+    if (erase) {
+        f::text(*c.body, L"This cannot be undone. These items are erased, not set aside — nothing will bring them back.",
+                tok::ErrorForeground, 13.0f)
+            ->wrap = true;
+    }
+    if (!p["problems"].is_null()) {
+        auto* problems = f::text(*c.body, w(p["problems"]), tok::ErrorForeground, 13.0f);
+        problems->wrap = true;
+        problems->name = "DeleteProblems";
+    }
+    const json::Value items = p["items"];
+    // Usually every item is in one folder: say it once, and give the right-hand column to the sizes.
+    bool one_place = items.size() > 0;
+    for (size_t i = 1; i < items.size() && one_place; ++i) one_place = items[i]["location"].str() == items[0]["location"].str();
+    if (one_place) dim(*c.body, L"In " + w(items[0]["location"]))->name = "DeleteLocation";
+    f::ItemList* list = nullptr;
+    if (items.size() > 0) {
+        list = c.body->emplace<f::ItemList>();
+        list->name = "DeleteItems";
+        list->height = std::min<float>(240.0f, 8.0f + 40.0f * static_cast<float>(items.size()));
+    }
+    auto fill_list = [list, items, one_place](const json::Value& details) {
+        if (!list) return;
+        std::vector<f::ListEntry> entries;
+        for (size_t i = 0; i < items.size(); ++i) {
+            f::ListEntry e;
+            e.text = w(items[i]["name"]);
+            const std::wstring d = i < details.size() ? w(details[i]) : std::wstring();
+            e.detail = one_place ? d : w(items[i]["location"]) + (d.empty() ? L"" : L"   ·   " + d);
+            entries.push_back(std::move(e));
+        }
+        list->set_entries(std::move(entries));
+    };
+    fill_list(json::Value{});
+    if (!p["archive"].boolean()) {
+        auto* totals = c.body->emplace<LiveBody>(main, &MainView::on_delete_survey, [core, fill_list](LiveBody& body) {
+            json::Value s;
+            try {
+                s = query(*core, "delete-survey");
+            } catch (const std::exception&) {
+            }
+            dim(body, w(s["totals"]))->name = "DeleteTotals";
+            fill_list(s["details"]);
+        });
+        (void)totals;
+    }
+    if (!p["undoHint"].str().empty()) f::note(*c.body, w(p["undoHint"]));
+    // Closing it any way but Delete forgets the plan and stops the survey.
+    auto confirmed = std::make_shared<bool>(false);
+    c.root->on_destroy = [core, confirmed, after] {
+        if (!*confirmed) {
+            try {
+                run(*core, "delete-cancel");
+            } catch (const std::exception&) {
+            }
+        }
+        if (*after) (*after)(*confirmed);
+    };
+    add_button(c, L"Cancel", cx.close)->name = "DeleteCancel";
+    add_button(c, p["archive"].boolean() ? L"Remove" : L"Delete", [core, confirmed, after, &main, close = cx.close] {
+        *confirmed = true;
+        try {
+            run(*core, "delete-confirm");
+        } catch (const std::exception& e) {
+            bb_status_set(core->app(), core::s(core::wide(e.what())));
+        }
+        close();
+        if (!*after) main.focus_file_list();
+    }, true)->name = "DeleteConfirm";
+    return std::move(c.root);
+}
+
+// The one Clear of the undo history - the History window's button, the Settings page's and the command all
+// ask this first, because nothing in it can be undone or redone afterwards. Spec: UndoHistoryWindow.ConfirmAndClear.
+std::unique_ptr<Widget> clear_undo_dialog(DialogContext& cx) {
+    core::Core* core = &cx.main.core();
+    const json::Value h = query(*core, "history");
+    Card c = make_card(L"Clear undo history", 480);
+    f::text(*c.body, w(h["clearQuestion"]), tok::TextPrimary, 13.5f)->wrap = true;
+    add_button(c, L"Cancel", cx.close)->name = "ClearUndoCancel";
+    add_button(c, L"Clear history", [core, close = cx.close] {
+        bb_undo_clear(core->app());
+        close();
+    }, true, 120)->name = "ClearUndoConfirm";
+    return std::move(c.root);
+}
+
+// ---- a yes/no question, and something to be told ------------------------------------------------------------
+
+// What a worker asked through the confirm seam (a flat view of a huge folder, an update that is ready). The
+// worker is parked until this answers; closing the card any other way is "no". Spec: Services/UserConfirm.
+std::unique_ptr<Widget> confirm_dialog(DialogContext& cx) {
+    core::Core* core = &cx.main.core();
+    const json::Value q = query(*core, "confirm")["pending"];
+    const bool pending = !q.is_null();
+    Card c = make_card(pending ? w(q["title"]) : L"Confirm", 480);
+    f::text(*c.body, pending ? w(q["message"]) : L"", tok::TextPrimary, 13.5f)->wrap = true;
+    auto answered = std::make_shared<bool>(false);
+    auto answer = [pending, answered, core](bool yes) {
+        if (!pending || *answered) return;
+        *answered = true;
+        try {
+            run(*core, "confirm-answer", yes ? "yes" : "no");
+        } catch (const std::exception&) {
+        }
+    };
+    c.root->on_destroy = [answer] { answer(false); };
+    add_button(c, pending ? w(q["confirm"]).c_str() : L"OK", [answer, close = cx.close] {
+        answer(true);
+        close();
+    }, true, 140)->name = "ConfirmYes";
+    add_button(c, L"Cancel", [answer, close = cx.close] {
+        answer(false);
+        close();
+    })->name = "ConfirmNo";
+    return std::move(c.root);
+}
+
+// A message the user has to read (a comparison that was refused, and why). One at a time, oldest first.
+std::unique_ptr<Widget> notice_dialog(DialogContext& cx) {
+    core::Core* core = &cx.main.core();
+    const json::Value q = query(*core, "notice")["pending"];
+    Card c = make_card(q.is_null() ? L"BertBrowser" : w(q["title"]), 460);
+    f::text(*c.body, q.is_null() ? L"" : w(q["message"]), tok::TextPrimary, 13.5f)->wrap = true;
+    if (!q.is_null()) {
+        c.root->on_destroy = [core] {
+            try {
+                run(*core, "notice-dismiss");
+            } catch (const std::exception&) {
+            }
+        };
+    }
+    add_button(c, L"OK", cx.close, true)->name = "NoticeOk";
+    return std::move(c.root);
+}
+
 // ---- the History window ---------------------------------------------------------------------------------
 
 std::unique_ptr<Widget> history_dialog(DialogContext& cx) {
@@ -501,7 +679,8 @@ std::unique_ptr<Widget> history_dialog(DialogContext& cx) {
         bb_settings_page_open(main.core().app(), core::s(L"history"));
         main.sync_overlays();
     }, false, 150);
-    add_button(c, L"Clear history", [core] { bb_undo_clear(core->app()); }, false, 120);
+    add_button(c, L"Clear history", [&main] { main.open_dialog(L"clear-undo"); }, false, 120)
+        ->set_enabled(query(*core, "history")["count"].i64() > 0);
     add_button(c, L"Close", cx.close, true);
     return std::move(c.root);
 }
@@ -512,6 +691,11 @@ void add_dialogs(std::map<std::wstring, DialogBuilder>& table) {
     table[L"transfer"] = [](DialogContext& cx) { return transfer_dialog(cx); };
     table[L"conflicts"] = [](DialogContext& cx) { return conflicts_dialog(cx); };
     table[L"elevation"] = [](DialogContext& cx) { return elevation_dialog(cx); };
+    table[L"confirm"] = [](DialogContext& cx) { return confirm_dialog(cx); };
+    table[L"clear-undo"] = [](DialogContext& cx) { return clear_undo_dialog(cx); };
+    table[L"delete"] = [](DialogContext& cx) { return delete_dialog(cx, false); };
+    table[L"delete-permanently"] = [](DialogContext& cx) { return delete_dialog(cx, true); };
+    table[L"notice"] = [](DialogContext& cx) { return notice_dialog(cx); };
     table[L"undo-history"] = [](DialogContext& cx) { return history_dialog(cx); };
     table[L"rename"] = [](DialogContext& cx) { return rename_dialog(cx, false); };
     table[L"rename-advanced"] = [](DialogContext& cx) { return rename_dialog(cx, true); };

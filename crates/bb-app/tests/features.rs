@@ -243,6 +243,23 @@ fn every_catalogue_command_has_an_owner_and_a_state() {
     assert!(f.app.command_why_not("no.such").is_err());
 }
 
+/// The runner's match ends in "has no handler here"; nothing the catalogue lists as the core's may
+/// reach it. Each runs on a fresh window with one file selected, so the gate lets most through.
+#[test]
+fn every_core_command_has_a_handler() {
+    for c in bb_core::commands::CommandCatalog::all() {
+        if bb_app::command_owner(c.id) != bb_app::CommandOwner::Core {
+            continue;
+        }
+        let f = Fixture::new();
+        f.select_names(&["notes.txt"]);
+        if let Err(e) = f.app.command_execute(c.id) {
+            assert!(!e.to_string().contains("has no handler"), "{}: {e}", c.id);
+        }
+        f.settle();
+    }
+}
+
 #[test]
 fn the_gate_says_why_in_the_words_of_the_original() {
     let f = Fixture::new();
@@ -393,6 +410,71 @@ fn tab_and_pane_commands_reshape_the_window() {
     f.app.command_run("tab.move-to-other-pane").unwrap();
     assert_eq!(1, f.app.panes().len());
     assert!(why(&f, "pane.close").unwrap().contains("only pane"));
+}
+
+#[test]
+fn numbered_tab_commands_pick_a_slot_and_last_is_the_last() {
+    let f = Fixture::new();
+    let pane = f.app.active_pane();
+    for _ in 0..9 {
+        f.app.command_run("tab.new").unwrap();
+    }
+    let tabs = f.app.pane_tabs(pane).unwrap();
+    assert_eq!(10, tabs.len());
+    let active = || f.app.active_tab_of(pane).unwrap().unwrap();
+    f.app.command_run("tab.goto-1").unwrap();
+    assert_eq!(tabs[0], active());
+    f.app.command_run("tab.goto-3").unwrap();
+    assert_eq!(tabs[2], active());
+    f.app.command_run("tab.goto-8").unwrap();
+    assert_eq!(tabs[7], active());
+    f.app.command_run("tab.goto-last").unwrap();
+    assert_eq!(
+        tabs[9],
+        active(),
+        "last means the last, however many there are"
+    );
+}
+
+#[test]
+fn opening_here_in_the_other_pane_takes_its_tab_there_rather_than_adding_one() {
+    let f = Fixture::new();
+    f.app.command_run("pane.split-right").unwrap();
+    f.settle();
+    let panes = f.app.panes();
+    f.app.activate_pane(panes[0]).unwrap();
+    let tab = f.app.active_tab_of(panes[0]).unwrap().unwrap();
+    f.app.navigate(tab, &f.path("Documents")).unwrap();
+    f.settle();
+    f.app.command_run("pane.open-here-in-other").unwrap();
+    f.settle();
+    assert_eq!(1, f.app.pane_tabs(panes[1]).unwrap().len());
+    let other = f.app.active_tab_of(panes[1]).unwrap().unwrap();
+    assert!(f.app.tab_info(other).unwrap().path.ends_with("Documents"));
+    assert_eq!(
+        panes[0],
+        f.app.active_pane(),
+        "the focus stays where the work is"
+    );
+}
+
+/// Sync deletes from the right, so which side is which must not depend on where the focus was.
+#[test]
+fn the_left_of_a_comparison_is_the_left_pane_whichever_has_the_focus() {
+    let f = Fixture::new();
+    f.app.command_run("pane.split-right").unwrap();
+    f.settle();
+    let panes = f.app.panes();
+    for (pane, folder) in panes.iter().zip(["Documents", "Pictures"]) {
+        let tab = f.app.active_tab_of(*pane).unwrap().unwrap();
+        f.app.navigate(tab, &f.path(folder)).unwrap();
+    }
+    f.settle();
+    f.app.activate_pane(panes[1]).unwrap();
+    f.app.command_run("tools.compare").unwrap();
+    f.settle();
+    let m: Value = json(&f.app.tools("compare.model", "{}").unwrap());
+    assert!(m["left"].as_str().unwrap().ends_with("Documents"), "{m}");
 }
 
 #[test]
@@ -1871,4 +1953,90 @@ fn the_declined_index_offers_then_fails_then_offers_again() {
         "{}",
         f.status()
     );
+}
+
+// ---- select by pattern, and the delete confirmation ----
+
+#[test]
+fn select_by_pattern_counts_as_typed_and_adds_or_takes_away() {
+    let f = Fixture::new();
+    let st: Value = json(&f.app.select_pattern_json(f.tab, "", true, false).unwrap());
+    assert_eq!("7 item(s) here.", st["summary"]);
+    assert_eq!(false, st["usable"], "an empty pattern selects nothing");
+
+    let st: Value = json(
+        &f.app
+            .select_pattern_json(f.tab, "*.md", true, false)
+            .unwrap(),
+    );
+    assert_eq!("1 of 7 item(s) match.", st["summary"]);
+    assert_eq!(
+        0,
+        f.app.tab_info(f.tab).unwrap().selected,
+        "counting selects nothing"
+    );
+
+    f.select_names(&["notes.txt"]);
+    f.app
+        .select_pattern_json(f.tab, "*.md", true, true)
+        .unwrap();
+    assert_eq!(
+        2,
+        f.app.tab_info(f.tab).unwrap().selected,
+        "added to what was selected"
+    );
+    f.app
+        .select_pattern_json(f.tab, "notes*", false, true)
+        .unwrap();
+    let names = f.app.selected_paths(f.tab).unwrap();
+    assert_eq!(1, names.len());
+    assert!(names[0].ends_with("report.md"));
+
+    let st: Value = json(
+        &f.app
+            .select_pattern_json(f.tab, "content:invoice", true, false)
+            .unwrap(),
+    );
+    assert!(st["problem"].is_string(), "{st}");
+    assert_eq!(false, st["usable"]);
+}
+
+#[test]
+fn a_delete_is_asked_about_first_and_only_what_was_shown_goes() {
+    let f = Fixture::new();
+    f.select_names(&["notes.txt"]);
+    // The command is the host's: it puts the confirmation up rather than deleting.
+    assert_eq!(
+        bb_app::CommandOutcome::NeedsUi,
+        f.app.command_execute("file.delete").unwrap()
+    );
+    assert_eq!(
+        bb_app::CommandOutcome::NeedsUi,
+        f.app.command_execute("file.delete-permanently").unwrap()
+    );
+    assert!(std::path::Path::new(&f.path("notes.txt")).exists());
+
+    let p: Value = json(
+        &f.app
+            .ops_query("delete-preview", r#"{"permanent":false}"#)
+            .unwrap(),
+    );
+    assert_eq!(true, p["hasWork"]);
+    assert_eq!("Delete 'notes.txt'?", p["heading"]);
+    assert_eq!(1, p["items"].as_array().unwrap().len());
+    // Cancelled: nothing goes, and the plan is forgotten.
+    f.app.ops_do("delete-cancel", "").unwrap();
+    assert!(f.app.ops_do("delete-confirm", "").is_err());
+    assert!(std::path::Path::new(&f.path("notes.txt")).exists());
+
+    // Permanent, so a test run never fills the real Recycle Bin.
+    let p: Value = json(
+        &f.app
+            .ops_query("delete-preview", r#"{"permanent":true}"#)
+            .unwrap(),
+    );
+    assert_eq!("Permanently delete 'notes.txt'?", p["heading"]);
+    f.app.ops_do("delete-confirm", "").unwrap();
+    f.settle();
+    assert!(!std::path::Path::new(&f.path("notes.txt")).exists());
 }

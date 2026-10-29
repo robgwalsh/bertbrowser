@@ -288,6 +288,8 @@ public:
     BbFocusKind focus_kind() const;
     // Carries out a command that is the host's to carry out. false when it wants a person (a dialog) and was not.
     bool host_command(const std::wstring& id);
+    // What follows a command the core carried out (the keyboard back on the active list).
+    void after_command(const std::wstring& id);
     // A context menu by kind (files, background, columns) as it would be built now; false for an unknown kind.
     bool build_named_menu(const std::wstring& kind, ui::MenuItems* out);
     SettingsView* settings() const { return settings_; }
@@ -304,8 +306,9 @@ public:
     std::function<void()> on_transfer_changed;
     // The same for an open History window.
     std::function<void()> on_undo_changed;
+    std::function<void()> on_delete_survey;  // the delete confirmation measured another item
     // A question the core is waiting on (a clash, an offer of administrator rights) puts its dialog up.
-    void sync_questions(bool conflicts);
+    void sync_questions(const wchar_t* kind);
     DuplicatesState& duplicates() { return duplicates_; }
     // Tells the core which shell properties this machine has, once (the Add column list reads them).
     void ensure_machine_properties();
@@ -331,6 +334,20 @@ public:
     void sync_overlays();
     // Opens a dialog by kind in the window's dialog layer (modal until closed).
     void open_dialog(const std::wstring& kind);
+    // Gives the keyboard to the active tab's list (or its tiles). False when there is no tab.
+    bool focus_file_list();
+    // The delete confirmation over `paths` rather than the selection; `after` hears whether Delete was
+    // pressed once the dialog has gone.
+    void ask_delete(std::vector<std::wstring> paths, std::function<void(bool confirmed)> after);
+    const std::vector<std::wstring>& dialog_paths() const { return dialog_paths_; }
+    // A scripted run normally reports a dialog instead of putting it up; with this on it really opens,
+    // so a script can type into it and press its buttons (`dialog_widget`).
+    void set_live_dialogs(bool on) { live_dialogs_ = on; }
+    bool shows_dialogs() const { return !headless_dialogs_ || live_dialogs_; }
+    bool dialog_up() const { return dialog_open_; }
+    const std::wstring& dialog_kind() const { return dialog_kind_; }
+    ui::Widget* dialog_widget(std::string_view name);
+    std::function<void(bool)> take_after_delete() { return std::exchange(after_delete_, nullptr); }
     // Opens a menu at a point (a right click), keeping its items alive while it is up.
     void show_context_menu(ui::MenuItems items, ui::Point at);
     // Where other programs' menu entries come from: the product's registry-and-COM source until a harness
@@ -393,8 +410,11 @@ private:
     std::string menu_sig_;
     bool bars_pending_ = false;
     bool headless_dialogs_ = false;
+    bool live_dialogs_ = false;
     bool follow_windows_ = true;
     std::wstring dialog_folder_;
+    std::vector<std::wstring> dialog_paths_;  // what the delete confirmation being built asks about
+    std::function<void(bool)> after_delete_;
     // A run's clipboard (see set_headless_dialogs), and its change count, standing in for Windows'.
     std::optional<ClipboardFiles> run_clipboard_;
     uint32_t run_clipboard_seq_ = 0;
@@ -420,6 +440,7 @@ private:
     json::Value index_state_;
     ThumbSource thumb_source_ = ThumbSource::Shell;
     bool dialog_open_ = false;
+    bool questions_waiting_ = false;  // a question or notice arrived while a dialog it may not replace was up
     std::wstring dialog_kind_;
     std::unique_ptr<ui::MenuItems> floating_menu_;
     StatusBar* status_ = nullptr;

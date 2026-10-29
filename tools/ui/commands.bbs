@@ -34,6 +34,47 @@ assert-key Num+ other none
 key Num+
 dialog select-pattern 02-select-pattern
 
+# Answered the way a person would: the count follows the typing, and Select adds the matches to
+# what is already selected; Deselect takes them out again.
+live-dialogs on
+select notes.txt
+key Num+
+assert-dialog select-pattern
+dialog-type SelectPattern *.md
+assert-dialog-text SelectPatternResult 1 of 8
+dialog-press SelectPatternOk
+assert-selected 2
+assert-dialog none
+run select.unpattern
+assert-dialog deselect-pattern
+dialog-type SelectPattern notes*
+dialog-press SelectPatternOk
+assert-selected 1
+run select.pattern
+dialog-type SelectPattern content:invoice
+dialog-press SelectPatternCancel
+live-dialogs off
+run select.none
+
+# --- Delete asks first ---
+
+# Del and Shift+Del put up the confirmation, which lists what goes; nothing is deleted until it is
+# answered, and Cancel leaves everything where it was.
+live-dialogs on
+select budget.xlsx
+key Del
+assert-dialog delete
+assert-dialog-text DeleteHeading Delete 'budget.xlsx'?
+dialog-press DeleteCancel
+assert-dialog none
+assert-exists budget.xlsx
+key Shift+Del
+assert-dialog delete-permanently
+assert-exists budget.xlsx
+dialog-press DeleteConfirm
+live-dialogs off
+assert-missing budget.xlsx
+
 # --- View ---
 
 run view.sort-size

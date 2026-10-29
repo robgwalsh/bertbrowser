@@ -320,6 +320,8 @@ impl Inner {
             t.generation += 1;
             t.cancel.cancel();
             t.cancel = CancelToken::new();
+            t.search_stop.cancel();
+            t.search_stop = CancelToken::new();
             let kind = if parse_has_search(t.active_search_text()) {
                 Kind::Search
             } else if t.is_flat_view {
@@ -373,6 +375,7 @@ impl Inner {
                 }
                 let count = rows.len();
                 t.install(rows, false);
+                t.archive_locked = false;
                 t.status = format!("{count} item(s)");
                 let version = t.version;
                 drop(t);
@@ -383,6 +386,7 @@ impl Inner {
             Err(e) => {
                 // A container that wants a password is not a folder Windows closed: say so, and the
                 // host offers to ask for it.
+                let locked = bb_core::archives::ArchiveLockedError::in_error(&e).is_some();
                 let message =
                     if let Some(locked) = bb_core::archives::ArchiveLockedError::in_error(&e) {
                         locked.message.clone()
@@ -397,6 +401,7 @@ impl Inner {
                 }
                 t.install(Vec::new(), false);
                 t.error = Some(message);
+                t.archive_locked = locked;
                 let version = t.version;
                 drop(t);
                 self.hub.emit(AppEvent::ListingChanged { tab, version });
@@ -624,7 +629,7 @@ impl Inner {
 
     fn run_search(self: &Arc<Self>, tab: TabId, generation: u64, token: CancelToken) {
         let Ok(cell) = self.tab(tab) else { return };
-        let (text, global, path) = {
+        let (text, global, path, stop) = {
             let t = lock(&cell);
             if t.generation != generation {
                 return;
@@ -633,6 +638,7 @@ impl Inner {
                 t.active_search_text().to_string(),
                 t.is_global_search(),
                 t.path.clone(),
+                t.search_stop.clone(),
             )
         };
         let parse = SearchQuery::parse(&text);
@@ -686,7 +692,7 @@ impl Inner {
         // nowhere near fs_entry, which must never learn a virtual path.
         let archive_here = if global { None } else { self.fs.resolve(&path) };
         let result = if global {
-            self.search.search_all(&text, false, progress, &token)
+            self.search.search_all(&text, false, progress, &stop)
         } else if let Some(a) = archive_here {
             let index = self.fs.read_archive(&a.archive_file);
             match bb_core::archives::ArchiveSearchScanner::search(
@@ -695,7 +701,7 @@ impl Inner {
                 &a.entry_path,
                 Some(&query),
                 5_000,
-                &token,
+                &stop,
                 true,
             ) {
                 Ok(hits) => Ok(Some(SearchOutcome::new(
@@ -707,8 +713,11 @@ impl Inner {
                 Err(_) => Ok(None),
             }
         } else {
-            self.search.search(&path, &text, false, progress, &token)
+            self.search.search(&path, &text, false, progress, &stop)
         };
+        // The navigation token, not the stop token: typing more supersedes this run and its results
+        // belong to a query no longer on screen. A Stop leaves that token alone, so the floor the
+        // pass returned is kept and shown.
         let outcome = match result {
             Ok(Some(outcome)) => outcome,
             _ => {
@@ -904,7 +913,7 @@ impl Inner {
         let cell = self.tab(tab)?;
         {
             let mut t = lock(&cell);
-            t.cancel.cancel();
+            t.search_stop.cancel();
             t.is_search_running = false;
             t.status = format!("{} \u{2014} stopped", t.status.trim_end_matches('\u{2026}'));
         }
@@ -1052,6 +1061,68 @@ impl Inner {
         drop(t);
         self.hub.emit(AppEvent::TabChanged { tab });
         Ok(())
+    }
+
+    /// "Select by pattern" (`select`) and "deselect by pattern": what `pattern` picks out of the
+    /// rows on screen, as the dialog says it while typing (`{total, matched, problem, summary}`),
+    /// and with `apply` the matches added to the selection or taken out of it.
+    /// Spec: Views/SelectPatternDialog, DirectoryTabView.SelectByPattern.
+    pub(crate) fn select_by_pattern(
+        &self,
+        tab: TabId,
+        pattern: &str,
+        select: bool,
+        apply: bool,
+    ) -> AppResult<serde_json::Value> {
+        use bb_core::commands::{SelectionPattern, SelectionRow};
+        use bb_core::format::thousands;
+        let rows: Vec<SelectionRow> = {
+            let cell = self.tab(tab)?;
+            let t = lock(&cell);
+            t.listing
+                .rows()
+                .iter()
+                .map(|r| SelectionRow {
+                    name: r.name.clone(),
+                    full_path: r.full_path.clone(),
+                    is_directory: r.is_directory,
+                    size_bytes: r.size.unwrap_or(0),
+                    modified_utc: r.modified,
+                    created_utc: r.created,
+                    attributes: r.attributes,
+                })
+                .collect()
+        };
+        let found = SelectionPattern::matches(pattern, &rows);
+        let total = rows.len();
+        let summary = match &found.problem {
+            Some(problem) => problem.clone(),
+            None if pattern.trim().is_empty() => {
+                format!("{} item(s) here.", thousands(total as i64))
+            }
+            None => format!(
+                "{} of {} item(s) match.",
+                thousands(found.indexes.len() as i64),
+                thousands(total as i64)
+            ),
+        };
+        let usable = found.problem.is_none() && !found.indexes.is_empty();
+        if apply && usable {
+            let indices: Vec<u32> = found.indexes.iter().map(|&i| i as u32).collect();
+            let op = if select {
+                SelectOp::Add
+            } else {
+                SelectOp::Remove
+            };
+            self.select(tab, op, &indices)?;
+        }
+        Ok(serde_json::json!({
+            "total": total,
+            "matched": found.indexes.len(),
+            "problem": found.problem,
+            "summary": summary,
+            "usable": usable,
+        }))
     }
 
     /// Selected rows' positions in the current listing, ascending.

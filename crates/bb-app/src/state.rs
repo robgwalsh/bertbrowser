@@ -41,6 +41,8 @@ pub(crate) struct Extra {
     pub tools: crate::tools::ToolsState,
     /// The operations UI: the transfer in flight, the queue, the questions a window answers.
     pub ops: crate::ops_ui::OpsUi,
+    /// The delete the confirmation is asking about, and its survey.
+    pub delete: crate::delete_confirm::DeleteConfirm,
 }
 
 impl Extra {
@@ -67,6 +69,7 @@ impl Extra {
             gifs: Default::default(),
             tools: Default::default(),
             ops,
+            delete: Default::default(),
         }
     }
 }

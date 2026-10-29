@@ -57,6 +57,7 @@ void PaletteView::pick() {
     if (bb_palette_do(core_.app(), core::s(L"pick"), core::s(L""), &o) != BB_OK) return;
     const json::Value r = json::parse(core::utf8(core::take(o)));
     if (r["ui"].boolean()) main_.host_command(core::wide(r["command"].str()));
+    else if (!r["command"].str().empty()) main_.after_command(core::wide(r["command"].str()));
     main_.sync_overlays();
 }
 

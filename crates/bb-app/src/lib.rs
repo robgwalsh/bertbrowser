@@ -17,6 +17,7 @@ mod columns;
 mod commands;
 mod compare_view;
 mod config;
+mod delete_confirm;
 mod dirwatch;
 mod events;
 mod gif_player;

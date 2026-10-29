@@ -23,6 +23,8 @@ pub(crate) struct ToolsState {
     checksum: Mutex<Option<ChecksumSession>>,
     filecompare: Mutex<Option<FileCompareSession>>,
     changes: Mutex<Option<ChangesSession>>,
+    /// The last duplicate scan's groups, by path: what "never every copy" is checked against.
+    pub(crate) duplicate_groups: Mutex<Vec<Vec<String>>>,
 }
 
 fn invalid(text: impl Into<String>) -> AppError {
@@ -62,6 +64,11 @@ impl App {
         let inner = &self.inner;
         let state = &inner.extra.tools;
         let out: Value = match verb {
+            // ---- duplicates ----
+            // `{paths}` ticked -> `{paths}` a delete may take: never every copy of a group.
+            "duplicates.removable" => {
+                json!({ "paths": self.duplicates_removable(&strings(&args["paths"])) })
+            }
             // ---- checksums ----
             "checksum.hash" => {
                 let selected = match args.get("algorithms").filter(|a| a.is_array()) {

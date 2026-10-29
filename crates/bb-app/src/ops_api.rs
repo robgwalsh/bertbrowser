@@ -289,9 +289,23 @@ impl Inner {
             }
             t
         };
+        // The one Clear, for the History window's button, the Settings page's and the command.
+        let what = if held.bytes > 0 {
+            format!(
+                " BertBrowser is holding {}{} of replaced and deleted files for them, which will be removed for good.",
+                if held.complete { "" } else { "at least " },
+                format::byte_size(held.bytes)
+            )
+        } else {
+            String::new()
+        };
+        let clear_question = format!(
+            "Clear the undo history? None of these actions can be undone or redone afterwards.{what} Items sent to the Recycle Bin stay there."
+        );
         json!({
             "count": entries.len(),
             "cursor": cursor,
+            "clearQuestion": clear_question,
             "released": undo.released_count(),
             "releasedBytes": undo.released_bytes(),
             "maxEntries": budget.max_entries,
@@ -556,6 +570,17 @@ impl App {
                 json!({ "pending": pending, "last": last,
                         "asked": inner.probes.as_ref().map_or(0, |p| p.conflict_asks()) })
             }
+            "confirm" => json!({ "pending": inner.extra.ops.questions.confirm_model() }),
+            // `{"permanent": bool, "paths": [...]}`; no paths means the active tab's selection.
+            "delete-preview" => {
+                let a = parse(arg)?;
+                inner.delete_preview(
+                    strings(&a["paths"]),
+                    a["permanent"].as_bool().unwrap_or(false),
+                )?
+            }
+            "delete-survey" => inner.delete_survey(),
+            "notice" => json!({ "pending": inner.extra.ops.questions.notice_model() }),
             "elevation" => json!({
                 "pending": inner.extra.ops.questions.elevation_model(),
                 "last": lock(&inner.extra.ops.elevation_offer).clone(),
@@ -818,6 +843,26 @@ impl App {
                     }
                     q.answer_conflicts(Some(map));
                 }
+                Ok("{}".into())
+            }
+            "confirm-answer" => {
+                inner
+                    .extra
+                    .ops
+                    .questions
+                    .answer_confirm(arg.trim() == "yes");
+                Ok("{}".into())
+            }
+            "delete-confirm" => {
+                let op = inner.delete_confirm()?;
+                Ok(json!({ "op": op.0 }).to_string())
+            }
+            "delete-cancel" => {
+                inner.delete_cancel();
+                Ok("{}".into())
+            }
+            "notice-dismiss" => {
+                inner.extra.ops.questions.dismiss_notice(&inner.hub);
                 Ok("{}".into())
             }
             "elevation-answer" => {

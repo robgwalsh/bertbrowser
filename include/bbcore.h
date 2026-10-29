@@ -734,6 +734,16 @@ enum BbStatus bb_saved_state(struct BbApp *app, struct BbOwnedStr *out_json);
 // `toggle-bookmark <path>`, `open-bookmark <here|new-tab|pane-right|pane-below> <path>`.
 enum BbStatus bb_saved_do(struct BbApp *app, uint64_t tab, struct BbStr verb, struct BbStr arg);
 
+// Select (`select` true) or deselect by pattern on `tab`, as JSON `{total, matched, problem,
+// summary, usable}`: what `pattern` picks out of the rows on screen, said as it is typed. With
+// `apply` the matches are added to the selection or taken out of it.
+enum BbStatus bb_select_pattern(struct BbApp *app,
+                                uint64_t tab,
+                                struct BbStr pattern,
+                                bool select,
+                                bool apply,
+                                struct BbOwnedStr *out_json);
+
 // What a Save workspace (`kind` = `workspace`) or Save menus-and-toolbars (`command-bars`) dialog
 // shows for `name`, as JSON `{default, problem, taken}`: the name it opens with, why this one
 // cannot be saved (null when it can), and whether saving replaces one of that name.

@@ -33,7 +33,13 @@ settle 500
 assert-bookmarks notes.txt
 shot 02-bookmarks-hidden-left-out
 
+# The tree's Delete asks first, as the list's does: the run puts the confirmation up and answers it.
+live-dialogs on
 tree-menu-run Delete… on Empty
+assert-dialog delete
+assert-exists Empty
+dialog-press DeleteConfirm
+live-dialogs off
 assert-missing Empty
 assert-path sandbox
 tree-menu-run Open in new tab on Documents

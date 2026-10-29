@@ -328,10 +328,16 @@ impl Inner {
             };
             return Err(self.compare_refused(why));
         }
-        let left = lock(&self.shell).active_pane;
-        let right = self.other_pane(left).ok_or_else(|| {
-            AppError::Invalid("There is no other pane \u{2014} split this one first.".into())
-        })?;
+        // The two panes in screen order, whichever has the focus: the banner, the tints and Sync all
+        // speak of "the left" and "the right", and Sync deletes from the right.
+        let (left, right) = {
+            let shell = lock(&self.shell);
+            let leaves = shell.layout.leaves();
+            (
+                *shell.layout.value(leaves[0]),
+                *shell.layout.value(leaves[1]),
+            )
+        };
         self.compare_start(left, right)
     }
 

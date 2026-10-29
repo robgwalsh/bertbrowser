@@ -897,6 +897,14 @@ MainView::MainView(core::Core& core, platform::Window& window)
         dialog_open_ = false;
         dialog_kind_.clear();
         bb_ui_set_dialog_open(core_.app(), false);
+        if (questions_waiting_) {
+            questions_waiting_ = false;
+            // Deferred: a dialog is also closed on the way to opening the next one.
+            defer([this] {
+                if (dialog_open_) return;
+                for (const wchar_t* kind : {L"conflicts", L"elevation", L"confirm", L"notice"}) sync_questions(kind);
+            });
+        }
     };
     Widget* content = window_.root().set_content(std::move(outer));
     popup_ = PopupLayer::install(*content);
@@ -1052,7 +1060,11 @@ void MainView::handle(const BbEvent& e) {
             if (e.a == 4) refresh_tooltips();
             if (e.a == 11) compare_banner_sync(browser_->find("CompareBanner"));
             if (e.a == 14) sync_transfer();
-            if (e.a == 15 || e.a == 16) sync_questions(e.a == 15);
+            if (e.a == 15) sync_questions(L"conflicts");
+            if (e.a == 16) sync_questions(L"elevation");
+            if (e.a == 17) sync_questions(L"confirm");
+            if (e.a == 18) sync_questions(L"notice");
+            if (e.a == 19 && on_delete_survey) on_delete_survey();
             if (e.a == 13) {
                 for (auto& kv : by_tab_) {
                     if (kv.second->metadata()) kv.second->metadata()->refresh();
@@ -1222,6 +1234,7 @@ bool MainView::on_preview_key(const KeyEvent& e) {
     if (!r["claimed"].boolean()) return false;
     // A claimed chord is the command's even when it cannot run now.
     if (r["result"].str() == "ui") host_command(core::wide(r["command"].str()));
+    if (r["result"].str() == "ran") after_command(core::wide(r["command"].str()));
     return true;
 }
 
@@ -1235,8 +1248,25 @@ bool MainView::execute_command(const std::wstring& id, std::wstring* reason, boo
     if (needs_ui) {
         const bool done = host_command(id);
         if (ui) *ui = !done;  // true: it wanted a person (a dialog) and nothing was done
+    } else {
+        after_command(id);
     }
     return true;
+}
+
+// A command that changed which pane or tab is active, or made a new one, leaves the keyboard on that
+// tab's list, as the original's PaneFocusRequested did - otherwise a rebuilt layout leaves it nowhere and
+// the next arrow key goes unheard until a click. Deferred, so it lands after the layout the command
+// changed has been rebuilt from the events already posted.
+void MainView::after_command(const std::wstring& id) {
+    const bool moves_focus = (id.rfind(L"tab.", 0) == 0 || id.rfind(L"pane.", 0) == 0 || id == L"file.open-pane-right" ||
+                              id == L"file.open-pane-below") &&
+                             id != L"pane.focus-tree" && id != L"pane.open-here-in-other" && id != L"pane.copy-to-other" &&
+                             id != L"pane.move-to-other";
+    if (!moves_focus) return;
+    defer([this] {
+        if (!dialog_open_) focus_file_list();
+    });
 }
 
 bool MainView::host_command(const std::wstring& id) {
@@ -1261,7 +1291,8 @@ bool MainView::host_command(const std::wstring& id) {
     }
     // The operations the core runs but only the host can start: they need the selection or a confirmation.
     if (id == L"edit.clear-undo-history") {
-        bb_undo_clear(core_.app());
+        if (!shows_dialogs()) return false;
+        open_dialog(L"clear-undo");
         return true;
     }
     if (id == L"tools.transfer-cancel") {
@@ -1283,16 +1314,17 @@ bool MainView::host_command(const std::wstring& id) {
     // Commands that put a dialog up. A run with no one to answer reports them instead.
     static const std::pair<const wchar_t*, const wchar_t*> dialogs[] = {
         {L"file.new-folder", L"new-folder"}, {L"file.new-file", L"new-file"},       {L"file.rename", L"rename"},
+        {L"file.delete", L"delete"},         {L"file.delete-permanently", L"delete-permanently"},
         {L"file.properties", L"properties"}, {L"file.compress", L"compress"},       {L"file.extract-here", L"extract"},
         {L"file.extract-to", L"extract"},    {L"file.unlock-archive", L"archive-password"},
         {L"app.about", L"about"},            {L"search.syntax", L"search-syntax"},  {L"search.save", L"saved-search"},
-        {L"select.pattern", L"select-pattern"}, {L"select.unpattern", L"select-pattern"},
+        {L"select.pattern", L"select-pattern"}, {L"select.unpattern", L"deselect-pattern"},
         {L"view.add-column", L"columns"},    {L"tools.transfer-details", L"transfer"}, {L"edit.undo-history", L"undo-history"},
         {L"app.customise-theme", L"theme-editor"},
     };
     for (const auto& [command, kind] : dialogs) {
         if (id != command) continue;
-        if (headless_dialogs_) return false;
+        if (!shows_dialogs()) return false;
         open_dialog(kind);
         return true;
     }
@@ -1323,13 +1355,11 @@ bool MainView::host_command(const std::wstring& id) {
         window_.root().set_focus(tree_);
         return true;
     }
-    if (id == L"pane.focus-list" || id == L"search.folder" || id == L"search.pc") {
+    if (id == L"pane.focus-list") return focus_file_list();
+    if (id == L"search.folder" || id == L"search.pc") {
         TabView* tv = active_view();
         if (!tv) return false;
-        Widget* target = id == L"search.folder" ? static_cast<Widget*>(tv->search_box())
-                         : id == L"search.pc"   ? static_cast<Widget*>(tv->global_search_box())
-                         : tv->tiles_mode()     ? static_cast<Widget*>(tv->tiles())
-                                                : static_cast<Widget*>(tv->list());
+        Widget* target = id == L"search.folder" ? static_cast<Widget*>(tv->search_box()) : static_cast<Widget*>(tv->global_search_box());
         if (!target) return false;
         window_.root().set_focus(target);
         // A search box takes focus with its text selected, so typing replaces it.
@@ -1337,7 +1367,7 @@ bool MainView::host_command(const std::wstring& id) {
         return true;
     }
     if (id == L"app.save-workspace" || id == L"app.save-command-bars") {
-        if (headless_dialogs_) return false;
+        if (!shows_dialogs()) return false;
         open_dialog(id == L"app.save-workspace" ? L"save-workspace" : L"save-command-bars");
         return true;
     }
@@ -1348,7 +1378,8 @@ bool MainView::host_command(const std::wstring& id) {
             for (const auto& r : selected_rows()) paths.push_back(id == L"edit.copy-name" ? r.name : r.path);
         }
         if (paths.empty() || paths.front().empty()) return false;
-        copy_text(paths, id != L"edit.copy-name", id == L"edit.copy-folder-path");
+        // "Copy as path" quotes each one, as Explorer's does; this folder's own path is copied bare.
+        copy_text(paths, id == L"edit.copy-path", id == L"edit.copy-folder-path");
         return true;
     }
     return tool_host_command(*this, id);
@@ -1502,9 +1533,7 @@ void MainView::tree_verb(const std::wstring& id, const std::wstring& folder) {
     } else if (id == L"file.bookmark") {
         bb_saved_do(app, 0, core::s(L"toggle-bookmark"), core::s(folder));
     } else if (id == L"file.delete") {
-        const BbStr src = core::s(folder);
-        uint64_t op = 0;
-        bb_op_delete(app, &src, 1, BB_DELETE_RECYCLE, &op);
+        dialog_on(L"delete");
     } else if (id == L"edit.copy-path") {
         copy_text({folder}, true, false);
     }
@@ -1684,7 +1713,7 @@ void MainView::sync_overlays() {
 }
 
 void MainView::open_dialog(const std::wstring& kind) {
-    if (headless_dialogs_ || !dialog_exists(kind)) return;
+    if (!shows_dialogs() || !dialog_exists(kind)) return;
     close_dialog();
     auto card = build_dialog(kind, DialogContext{*this, [this] { close_dialog(); }});
     if (!card) return;
@@ -1692,6 +1721,27 @@ void MainView::open_dialog(const std::wstring& kind) {
     dialog_kind_ = kind;
     bb_ui_set_dialog_open(core_.app(), true);
     dialogs_->show(std::move(card));
+}
+
+void MainView::ask_delete(std::vector<std::wstring> paths, std::function<void(bool)> after) {
+    dialog_paths_ = std::move(paths);
+    after_delete_ = std::move(after);
+    open_dialog(L"delete");
+    dialog_paths_.clear();
+    after_delete_ = nullptr;  // taken by the dialog when it was built
+}
+
+Widget* MainView::dialog_widget(std::string_view name) {
+    return dialog_open_ && dialogs_ ? dialogs_->find(name) : nullptr;
+}
+
+bool MainView::focus_file_list() {
+    TabView* tv = active_view();
+    if (!tv) return false;
+    Widget* target = tv->tiles_mode() ? static_cast<Widget*>(tv->tiles()) : static_cast<Widget*>(tv->list());
+    if (!target) return false;
+    window_.root().set_focus(target);
+    return true;
 }
 
 void MainView::close_dialog() {
@@ -1747,13 +1797,18 @@ std::wstring MainView::transfer_text() const {
     return core::wide(v["headline"].str()) + L"  " + core::wide(v["detail"].str());
 }
 
-void MainView::sync_questions(bool conflicts) {
+void MainView::sync_questions(const wchar_t* kind) {
     if (headless_dialogs_) return;
-    // A transfer is parked until this is answered, so it replaces whatever dialog is up - unless that is
-    // already the question itself.
-    const wchar_t* kind = conflicts ? L"conflicts" : L"elevation";
     const json::Value q = try_model([&](BbOwnedStr* o) { return bb_ops_query(core_.app(), core::s(kind), core::s(L""), o); });
     if (q["pending"].is_null() || (dialog_open_ && dialog_kind_ == kind)) return;
+    // A question parks a worker until it is answered, so it replaces whatever dialog is up - but never
+    // another question, which would be answered "no" by being closed. A notice waits for any dialog, and
+    // whatever is left waiting is asked again once that dialog has gone.
+    const bool question_up = dialog_open_ && (dialog_kind_ == L"conflicts" || dialog_kind_ == L"elevation" || dialog_kind_ == L"confirm");
+    if (question_up || (dialog_open_ && std::wstring(kind) == L"notice")) {
+        questions_waiting_ = true;
+        return;
+    }
     open_dialog(kind);  // closes the one before it
 }
 

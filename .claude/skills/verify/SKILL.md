@@ -373,6 +373,15 @@ dialog <kind> [name]        PNG of a dialog: new-folder, new-file, rename, renam
                             compare-files needs exactly two selected; whether it renders a line diff
                             or a hex dump is the file-compare plan's decision over the pair, so use
                             `write-text` pairs for the first and `write-binary` for the second)
+                            (also: deselect-pattern, delete-permanently, clear-undo, confirm, notice)
+live-dialogs on|off         a run normally reports a dialog rather than putting it up; on, the next
+                            ones really open, so the script answers them as a person would
+assert-dialog <kind>|none   which dialog is up
+dialog-type <Name> <text>   replaces the text of a named box in the open dialog (fires on_changed)
+dialog-press <Name>         presses a named button of the open dialog; fails when it is disabled.
+                            Delete: DeleteConfirm / DeleteCancel. Select by pattern: SelectPattern
+                            box, SelectPatternOk / SelectPatternCancel
+assert-dialog-text <Name> <text>  a named text of the open dialog contains this
                             (changes is the "What changed" window: with a run's default settings
                             it shows the recording-off banner — the state every fresh install
                             has — and after `changes-seed` it shows rows. `settings history` is

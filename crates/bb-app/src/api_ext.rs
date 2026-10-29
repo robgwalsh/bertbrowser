@@ -560,6 +560,20 @@ impl App {
     }
 
     /// What the Save workspace and Save menus-and-toolbars dialogs show for a name, as JSON
+    /// Select (or deselect) by pattern on `tab`: `{total, matched, problem, summary, usable}` for
+    /// what `pattern` picks out of the rows on screen, and with `apply` the selection changed.
+    pub fn select_pattern_json(
+        &self,
+        tab: TabId,
+        pattern: &str,
+        select: bool,
+        apply: bool,
+    ) -> AppResult<String> {
+        Ok(text(
+            &self.inner.select_by_pattern(tab, pattern, select, apply)?,
+        ))
+    }
+
     /// `{default, problem, taken}`: the name they open with, why this one cannot be saved (or
     /// null), and whether saving it replaces one already saved - the button says Replace then.
     /// `kind` is `workspace` or `command-bars`.
@@ -693,6 +707,11 @@ impl App {
         let outcome = DuplicateFinder::new(&candidates, &hasher, &Facts)
             .scan(&request, None, &none)
             .map_err(|e| invalid(&e))?;
+        *lock(&self.inner.extra.tools.duplicate_groups) = outcome
+            .groups
+            .iter()
+            .map(|g| g.files.iter().map(|f| f.display_path.clone()).collect())
+            .collect();
         let groups: Vec<Value> = outcome
             .groups
             .iter()
@@ -723,6 +742,26 @@ impl App {
             "wastedBytes": outcome.wasted_bytes(),
             "groups": groups,
         })))
+    }
+
+    /// Of the ticked copies `paths`, the ones the duplicate finder may hand to a delete: a group of
+    /// the last scan contributes nothing when every copy in it is ticked, because the point is to
+    /// reclaim a redundant copy and a batch that took them all would destroy the only instance of
+    /// a file the user was told they had several of. Spec: DuplicatesViewModel.RemoveTickedAsync.
+    pub fn duplicates_removable(&self, paths: &[String]) -> Vec<String> {
+        let ticked: std::collections::HashSet<String> =
+            paths.iter().map(|p| p.to_lowercase()).collect();
+        let mut out = Vec::new();
+        for group in lock(&self.inner.extra.tools.duplicate_groups).iter() {
+            let chosen: Vec<&String> = group
+                .iter()
+                .filter(|p| ticked.contains(&p.to_lowercase()))
+                .collect();
+            if bb_core::duplicates::DuplicateRules::can_remove(group.len(), chosen.len()) {
+                out.extend(chosen.into_iter().cloned());
+            }
+        }
+        out
     }
 
     /// The search syntax help, grouped, from the table the parser reads: `[{title, blurb,

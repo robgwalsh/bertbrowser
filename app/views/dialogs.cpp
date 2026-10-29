@@ -221,27 +221,6 @@ std::unique_ptr<Panel> rename_advanced(DialogContext& cx) {
     return std::move(c.root);
 }
 
-std::unique_ptr<Panel> delete_dialog(DialogContext& cx) {
-    const auto rows = cx.main.selected_rows();
-    Card c = make_card(rows.size() == 1 ? L"Delete \"" + rows[0].name + L"\"?" : L"Delete " + std::to_wstring(rows.size()) + L" items?", 460);
-    auto* names = f::text(*c.body, join_names(rows, 8), tok::TextSecondary, 13.0f);
-    names->wrap = true;
-    f::text(*c.body, L"What should happen to " + std::wstring(rows.size() == 1 ? L"it?" : L"them?"));
-    auto* rg = f::radios(*c.body, {L"Move to the Recycle Bin (you can get it back)", L"Delete permanently (no way back)"}, 0, nullptr);
-    rg->name = "DeleteMode";
-    add_button(c, L"Delete", [cx, rg] {
-        std::vector<std::wstring> paths;
-        for (const auto& r : cx.main.selected_rows()) paths.push_back(r.path);
-        std::vector<BbStr> views;
-        for (const auto& p : paths) views.push_back(core::s(p));
-        uint64_t op = 0;
-        bb_op_delete(cx.main.core().app(), views.data(), static_cast<uint32_t>(views.size()), rg->selected() == 1 ? BB_DELETE_PERMANENT : BB_DELETE_RECYCLE, &op);
-        cx.close();
-    }, true);
-    add_button(c, L"Cancel", cx.close);
-    return std::move(c.root);
-}
-
 std::unique_ptr<Panel> columns_dialog(DialogContext& cx) {
     Card c = make_card(L"Add a column", 520);
     cx.main.ensure_machine_properties();
@@ -528,12 +507,43 @@ std::unique_ptr<Panel> saved_search(DialogContext& cx) {
     return std::move(c.root);
 }
 
-std::unique_ptr<Panel> select_pattern(DialogContext& cx) {
-    Card c = make_card(L"Select by pattern", 420);
-    labelled_edit(*c.body, L"Pattern", L"*.txt", L"*.jpg  report*  ?.md");
-    f::note(*c.body, L"* matches any run of characters, ? matches one. Several patterns can be separated with a semicolon.");
-    add_button(c, L"Select", cx.close, true);
-    add_button(c, L"Cancel", cx.close);
+// Select / deselect by pattern: the search box's language, judged against the rows on screen, with the
+// count said as it is typed so the answer is known before anything is selected. Spec: Views/SelectPatternDialog.
+std::unique_ptr<Panel> select_pattern(DialogContext& cx, bool select) {
+    Card c = make_card(select ? L"Select by pattern" : L"Deselect by pattern", 420);
+    BbApp* app = cx.main.core().app();
+    const uint64_t tab = cx.main.active_tab();
+    auto* edit = labelled_edit(*c.body, select ? L"Select the items here that match" : L"Deselect the items here that match", L"",
+                               L"*.jpg  report*  size:>1mb");
+    edit->name = "SelectPattern";
+    auto* result = f::text(*c.body, L"", tok::TextSecondary, 13.0f);
+    result->name = "SelectPatternResult";
+    result->wrap = true;
+    f::note(*c.body, L"The search box's language: * matches any run of characters, ? matches one.");
+    Button* ok = add_button(c, select ? L"Select" : L"Deselect", nullptr, true);
+    ok->name = "SelectPatternOk";
+    add_button(c, L"Cancel", cx.close)->name = "SelectPatternCancel";
+    auto ask = [app, tab, select](const std::wstring& pattern, bool apply) {
+        return try_model([&](BbOwnedStr* o) { return bb_select_pattern(app, tab, core::s(pattern), select, apply, o); });
+    };
+    auto refresh = [ask, result, ok](const std::wstring& pattern) {
+        const json::Value st = ask(pattern, false);
+        result->set_text(core::wide(st["summary"].str()));
+        result->style.fg = st["problem"].is_null() ? tok::TextSecondary : tok::ErrorForeground;
+        result->invalidate();
+        ok->set_enabled(st["usable"].boolean());
+        ok->invalidate();
+    };
+    refresh(L"");
+    edit->on_changed = refresh;
+    ok->on_click = [cx, ask, edit] {
+        if (!ask(edit->text(), true)["usable"].boolean()) return;
+        cx.close();
+        cx.main.focus_file_list();
+    };
+    edit->on_commit = [ok] {
+        if (ok->flags.enabled && ok->on_click) ok->on_click();
+    };
     return std::move(c.root);
 }
 
@@ -618,7 +628,6 @@ const std::map<std::wstring, Builder>& builders() {
         {L"new-file", [](DialogContext& cx) { return new_item(cx, true); }},
         {L"rename", rename_dialog},
         {L"rename-advanced", rename_advanced},
-        {L"delete", delete_dialog},
         {L"columns", columns_dialog},
         {L"properties", properties},
         {L"theme-editor", theme_editor},
@@ -628,7 +637,8 @@ const std::map<std::wstring, Builder>& builders() {
         {L"archive-password", archive_password},
         {L"elevation", elevation},
         {L"saved-search", saved_search},
-        {L"select-pattern", select_pattern},
+        {L"select-pattern", [](DialogContext& cx) { return select_pattern(cx, true); }},
+        {L"deselect-pattern", [](DialogContext& cx) { return select_pattern(cx, false); }},
         {L"flat-large", flat_large},
         {L"saved-command-bars", saved_command_bars},
         {L"save-workspace", [](DialogContext& cx) { return save_named(cx, true); }},

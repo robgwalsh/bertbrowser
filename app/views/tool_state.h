@@ -43,8 +43,11 @@ bool tool_host_command(MainView& main, const std::wstring& id);
 // The copies ticked in the duplicate finder, as paths.
 std::vector<std::wstring> duplicates_ticked_paths(MainView& main);
 // Removes them through the ordinary reversible delete (the Recycle Bin, the shared undo history) and
-// leaves the finder showing what is still duplicated. False, with nothing done, when none are ticked;
-// otherwise the operation, which the caller may wait on.
+// leaves the finder showing what is still duplicated - never every copy of a group. False, with nothing
+// done, when none may go; otherwise the operation, which the caller may wait on. A scripted run's way in:
+// it stands in for someone who answered the confirmation.
 bool duplicates_remove(MainView& main, uint64_t* op);
+// The window's Remove ticked: the delete confirmation over the same copies, then back to the finder.
+void duplicates_ask_remove(MainView& main);
 
 }  // namespace bb::views

@@ -945,10 +945,75 @@ pub(crate) fn conflict_model(plan: &TransferPlan, undo_gesture: &str) -> Value {
 pub struct Questions {
     conflict: Mutex<Option<Waiting<Option<Resolutions>>>>,
     elevation: Mutex<Option<Waiting<bool>>>,
+    confirm: Mutex<Option<Waiting<bool>>>,
+    /// Things the user has to be told, oldest first; each stays until the host dismisses it.
+    notices: Mutex<std::collections::VecDeque<Value>>,
     cv: Condvar,
 }
 
 impl Questions {
+    /// A yes/no question from a worker thread (a flat view of a huge folder, an update that is
+    /// ready): parks it until the host answers, `false` if the question is withdrawn.
+    pub(crate) fn ask_confirm(
+        &self,
+        hub: &crate::events::EventHub,
+        message: &str,
+        title: &str,
+        confirm_label: &str,
+    ) -> bool {
+        *lock(&self.confirm) = Some(Waiting {
+            model: json!({ "message": message, "title": title, "confirm": confirm_label }),
+            answer: None,
+        });
+        hub.model(Model::Confirm);
+        let mut slot = lock(&self.confirm);
+        loop {
+            if let Some(w) = slot.as_mut()
+                && let Some(answer) = w.answer.take()
+            {
+                *slot = None;
+                return answer;
+            }
+            if slot.is_none() {
+                return false;
+            }
+            slot = self.cv.wait(slot).unwrap_or_else(|p| p.into_inner());
+        }
+    }
+
+    pub(crate) fn confirm_model(&self) -> Option<Value> {
+        lock(&self.confirm).as_ref().map(|w| w.model.clone())
+    }
+
+    pub(crate) fn answer_confirm(&self, yes: bool) {
+        if let Some(w) = lock(&self.confirm).as_mut() {
+            w.answer = Some(yes);
+        }
+        self.cv.notify_all();
+    }
+
+    /// Something to tell the user; never waits.
+    pub(crate) fn tell(&self, hub: &crate::events::EventHub, message: &str, title: &str) {
+        lock(&self.notices).push_back(json!({ "message": message, "title": title }));
+        hub.model(Model::Notice);
+    }
+
+    pub(crate) fn notice_model(&self) -> Option<Value> {
+        lock(&self.notices).front().cloned()
+    }
+
+    /// The oldest notice has been read; the next, if any, is raised.
+    pub(crate) fn dismiss_notice(&self, hub: &crate::events::EventHub) {
+        let more = {
+            let mut q = lock(&self.notices);
+            q.pop_front();
+            !q.is_empty()
+        };
+        if more {
+            hub.model(Model::Notice);
+        }
+    }
+
     pub(crate) fn ask_conflicts(
         &self,
         hub: &crate::events::EventHub,

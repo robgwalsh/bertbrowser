@@ -12,6 +12,7 @@ mod file_list_diff;
 mod file_system_service;
 mod index_crawler;
 mod index_watcher;
+mod known_folders;
 mod read_only_file;
 mod search_service;
 mod staged_replace;
@@ -26,6 +27,7 @@ pub use file_system_service::{
 };
 pub use index_crawler::IndexCrawler;
 pub use index_watcher::{ChangeApplier, FsChange, FsChangeKind, IndexWatcher, IndexWatcherService};
+pub use known_folders::KnownFolders;
 pub use read_only_file::ReadOnlyFile;
 pub use search_service::{SearchProgress, SearchService, is_held_path};
 pub use staged_replace::StagedReplace;

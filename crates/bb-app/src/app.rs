@@ -63,6 +63,8 @@ pub(crate) struct TabData {
     pub next_row: u64,
     pub status: String,
     pub error: Option<String>,
+    /// The archive being shown wants a password: what "Unlock archive" is for.
+    pub archive_locked: bool,
     pub empty_message: Option<String>,
     pub notice: Option<String>,
     /// The rows come from many folders (a search, or a flat view).
@@ -75,6 +77,9 @@ pub(crate) struct TabData {
     pub generation: u64,
     pub search_gen: u64,
     pub cancel: CancelToken,
+    /// What Stop cancels: the search pass alone, so it returns what it found so far. Navigating
+    /// cancels both, and `cancel` is what says the results no longer belong on screen.
+    pub search_stop: CancelToken,
     pub watcher: Option<DirWatcher>,
     /// The columns this tab shows; None is the catalogue default. Arranged here (`columns_customized`)
     /// or inherited from the saved default.
@@ -126,6 +131,7 @@ impl TabData {
             next_row: 0,
             status: "Ready".to_string(),
             error: None,
+            archive_locked: false,
             empty_message: None,
             notice: None,
             is_flattened: false,
@@ -135,6 +141,7 @@ impl TabData {
             generation: 0,
             search_gen: 0,
             cancel: CancelToken::new(),
+            search_stop: CancelToken::new(),
             watcher: None,
             columns: settings.file_list_columns.clone(),
             columns_customized: false,
@@ -604,6 +611,7 @@ impl Inner {
         {
             let mut t = removed.lock().unwrap_or_else(|p| p.into_inner());
             t.cancel.cancel();
+            t.search_stop.cancel();
             t.watcher = None;
             if !t.path.is_empty() {
                 let path = t.path.clone();
@@ -709,6 +717,7 @@ impl Inner {
         for cell in tabs {
             let mut t = lock(&cell);
             t.cancel.cancel();
+            t.search_stop.cancel();
             t.watcher = None;
         }
         self.compare_pane_closed(pane);
@@ -778,6 +787,7 @@ impl Inner {
         for (_, cell) in self.all_tabs() {
             let mut t = lock(&cell);
             t.cancel.cancel();
+            t.search_stop.cancel();
             t.watcher = None;
         }
         self.db.clear_pool();
