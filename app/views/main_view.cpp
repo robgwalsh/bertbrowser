@@ -912,7 +912,9 @@ MainView::MainView(core::Core& core, platform::Window& window)
 
     hwnd_ = window_.hwnd();
     window_.on_message = [this](UINT msg, WPARAM wp, LPARAM lp) { return on_window_message(msg, wp, lp); };
-    // Paste is available while the clipboard holds files: told now, and again whenever it changes.
+    // Paste is available while the clipboard holds files: told now, and again whenever it changes. A system
+    // message, so it has its own hook - `on_message` only sees the app's own (WM_APP and up).
+    window_.on_clipboard_changed = [this] { push_clipboard_flag(); };
     AddClipboardFormatListener(window_.hwnd());
     push_clipboard_flag();
     window_.root().on_preview_key = [this](const KeyEvent& e) { return on_preview_key(e); };
@@ -921,6 +923,7 @@ MainView::MainView(core::Core& core, platform::Window& window)
 
 MainView::~MainView() {
     RemoveClipboardFormatListener(window_.hwnd());
+    window_.on_clipboard_changed = nullptr;
     bb_app_set_event_sink(core_.app(), nullptr, nullptr);
     window_.on_message = nullptr;
     window_.root().on_preview_key = nullptr;
@@ -948,10 +951,6 @@ bool MainView::on_window_message(UINT msg, WPARAM wp, LPARAM lp) {
         auto run = std::move(deferred_);
         deferred_.clear();
         for (auto& fn : run) fn();
-        return true;
-    }
-    if (msg == WM_CLIPBOARDUPDATE) {
-        push_clipboard_flag();
         return true;
     }
     if (msg == WM_BB_ICONS) {

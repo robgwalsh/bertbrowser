@@ -373,6 +373,9 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_THEMECHANGED:
             if (on_system_settings_changed) on_system_settings_changed();
             break;
+        case WM_CLIPBOARDUPDATE:
+            if (on_clipboard_changed) on_clipboard_changed();
+            return 0;
         case WM_DPICHANGED:
             if (!options_.dpi_override) {
                 dpi_ = HIWORD(wp);

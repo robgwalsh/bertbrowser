@@ -59,6 +59,8 @@ public:
     std::function<void()> on_first_paint;
     // Windows' light/dark, accent or high-contrast setting moved (WM_SETTINGCHANGE and friends).
     std::function<void()> on_system_settings_changed;
+    // What is on the clipboard changed (WM_CLIPBOARDUPDATE, once the window listens for it).
+    std::function<void()> on_clipboard_changed;
     // Application messages (WM_APP..0xBFFF), seen before anything else; true = handled. How the core's
     // events reach the UI thread: its sink PostMessages here and this handler drains them.
     std::function<bool(UINT msg, WPARAM wp, LPARAM lp)> on_message;
