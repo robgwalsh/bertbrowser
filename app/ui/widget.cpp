@@ -500,9 +500,22 @@ void UiRoot::collect_tab_stops(Widget* w, std::vector<Widget*>& out) {
     }
 }
 
+bool Widget::holds(const Widget* w) const {
+    if (!w) return false;
+    if (this == w) return true;
+    for (const auto& c : children_) {
+        if (c->holds(w)) return true;
+    }
+    return false;
+}
+
+bool UiRoot::contains(const Widget* w) const { return content_ && content_->holds(w); }
+
 bool UiRoot::focus_next(bool reverse) {
     std::vector<Widget*> stops;
-    if (content_) collect_tab_stops(content_.get(), stops);
+    Widget* scope = tab_scope ? tab_scope() : nullptr;
+    if (scope) collect_tab_stops(scope, stops);
+    else if (content_) collect_tab_stops(content_.get(), stops);
     if (stops.empty()) {
         return false;
     }

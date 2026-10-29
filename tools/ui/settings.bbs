@@ -45,3 +45,26 @@ settings general
 settings tick Show hidden items off
 settings close
 assert-no-row .hidden-notes.txt
+
+# --- New items: the types the New submenu offers, edited in place and written as they change; an
+# import adds what Windows offers (a fixed list in a run) without disturbing what is there. ---
+
+settings new-items
+press NewTypeAdd
+# A type with no name holds the whole list unwritten, and the strip over the page says why until it is fixed.
+field-type NewTypeName
+assert-visible SettingsProblem
+shot 10a-new-items-problem
+field-type NewTypeName Recipe card
+assert-hidden SettingsProblem
+field-type NewTypeExtension .recipe
+press NewTypeImport
+settle 500
+shot 10-new-items
+settings close
+select notes.txt
+menu files 11-menu-new-types
+assert-menu-item Recipe card
+assert-menu-item Rich Text Document
+assert-menu-item Bitmap image
+deselect

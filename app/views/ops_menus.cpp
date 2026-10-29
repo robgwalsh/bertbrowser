@@ -36,47 +36,51 @@ BarRow command_row(core::Core& core, const std::string& id) {
     r.enabled = st["whyNot"].is_null();
     r.reason = core::wide(st["whyNot"].str());
     r.checked = st["checked"].boolean();
+    r.hidden = st["hidden"].boolean();
     return r;
 }
 
-// What a built-in entry is made of, and whether the menu always shows it or only while it can run.
+// What a built-in entry is made of, and whether the folder tree's menu has it. The file list's menu has
+// every entry, greyed while it cannot run, and leaves out only what the verb rule hides (Extract on
+// something that is not an archive): one menu over a selection and over empty space alike.
+// Spec: DirectoryTabView.PrepareFileListMenu (Offer).
 struct Spec {
     const char* id;
     std::vector<const char*> commands;  // one item each; the group's caption is used when `group` is set
     const wchar_t* group;               // a submenu of the commands, or null for one item per command
-    bool files_always, background, background_always, tree, tree_always;
+    bool tree;
 };
 
 const std::vector<Spec>& specs() {
-    // id, commands, group, files_always, background, background_always, tree, tree_always
+    // id, commands, group, tree
     static const std::vector<Spec> table = {
-        {"new", {"file.new-folder", "file.new-file"}, L"N&ew", true, true, true, true, true},
-        {"open", {"file.open"}, nullptr, true, false, false, false, false},
-        {"run-as-admin", {"file.run-as-admin"}, nullptr, false, false, false, false, false},
-        {"open-new-tab", {"file.open-new-tab"}, nullptr, false, false, false, true, true},
-        {"open-new-pane", {"file.open-pane-right", "file.open-pane-below"}, L"Open in new &pane", false, false, false, true, true},
-        {"open-terminal", {"file.open-terminal"}, nullptr, false, true, false, true, true},
-        {"open-vscode", {"file.open-vscode"}, nullptr, false, true, false, true, true},
-        {"disk-usage", {"tools.disk-usage"}, nullptr, false, true, false, true, true},
-        {"duplicates", {"tools.duplicates"}, nullptr, false, true, false, true, true},
-        {"changes", {"tools.changes"}, nullptr, false, true, false, true, true},
-        {"compare-panes", {"tools.compare"}, nullptr, false, true, false, false, false},
-        {"compress", {"file.compress"}, nullptr, true, false, false, false, false},
-        {"extract", {"file.extract-here", "file.extract-to"}, nullptr, false, false, false, false, false},
-        {"copy-path", {"edit.copy-path"}, nullptr, true, true, true, true, true},
-        {"copy-name", {"edit.copy-name"}, nullptr, false, false, false, false, false},
-        {"compare-files", {"file.compare-files"}, nullptr, false, false, false, false, false},
-        {"settle-by-content", {"file.settle-by-content"}, nullptr, false, false, false, false, false},
-        {"verify-checksums", {"file.verify-checksums"}, nullptr, false, false, false, false, false},
-        {"checksum", {"file.checksum"}, nullptr, false, false, false, false, false},
-        {"cut", {"edit.cut"}, nullptr, true, false, false, false, false},
-        {"copy", {"edit.copy"}, nullptr, true, false, false, false, false},
-        {"paste", {"edit.paste"}, nullptr, true, true, true, false, false},
-        {"rename", {"file.rename"}, nullptr, true, false, false, false, false},
-        {"delete", {"file.delete"}, nullptr, true, false, false, true, true},
-        {"delete-permanently", {"file.delete-permanently"}, nullptr, false, false, false, false, false},
-        {"bookmark", {"file.bookmark"}, nullptr, true, true, true, true, true},
-        {"properties", {"file.properties"}, nullptr, true, true, true, true, true},
+        {"new", {"file.new-folder", "file.new-file"}, L"N&ew", true},
+        {"open", {"file.open"}, nullptr, false},
+        {"run-as-admin", {"file.run-as-admin"}, nullptr, false},
+        {"open-new-tab", {"file.open-new-tab"}, nullptr, true},
+        {"open-new-pane", {"file.open-pane-right", "file.open-pane-below"}, L"Open in new &pane", true},
+        {"open-terminal", {"file.open-terminal"}, nullptr, true},
+        {"open-vscode", {"file.open-vscode"}, nullptr, true},
+        {"disk-usage", {"tools.disk-usage"}, nullptr, true},
+        {"duplicates", {"tools.duplicates"}, nullptr, true},
+        {"changes", {"tools.changes"}, nullptr, true},
+        {"compare-panes", {"tools.compare"}, nullptr, false},
+        {"compress", {"file.compress"}, nullptr, false},
+        {"extract", {"file.extract-here", "file.extract-to"}, nullptr, false},
+        {"copy-path", {"edit.copy-path"}, nullptr, true},
+        {"copy-name", {"edit.copy-name"}, nullptr, false},
+        {"compare-files", {"file.compare-files"}, nullptr, false},
+        {"settle-by-content", {"file.settle-by-content"}, nullptr, false},
+        {"verify-checksums", {"file.verify-checksums"}, nullptr, false},
+        {"checksum", {"file.checksum"}, nullptr, false},
+        {"cut", {"edit.cut"}, nullptr, false},
+        {"copy", {"edit.copy"}, nullptr, false},
+        {"paste", {"edit.paste"}, nullptr, false},
+        {"rename", {"file.rename"}, nullptr, false},
+        {"delete", {"file.delete"}, nullptr, true},
+        {"delete-permanently", {"file.delete-permanently"}, nullptr, false},
+        {"bookmark", {"file.bookmark"}, nullptr, true},
+        {"properties", {"file.properties"}, nullptr, true},
     };
     return table;
 }
@@ -138,22 +142,20 @@ void add_new_file_types(MainView& main, MenuItems& items, const std::wstring& fo
 }
 
 MenuItems built_in_items(MainView& main, const Spec& s, MenuKind kind, const std::wstring& subject) {
-    const bool files = kind == MenuKind::Files, background = kind == MenuKind::Background, tree = kind == MenuKind::Tree;
-    if ((background && !s.background) || (tree && !s.tree)) return {};
+    const bool background = kind == MenuKind::Background, tree = kind == MenuKind::Tree;
+    if (tree && !s.tree) return {};
     if (tree) {
         MenuItems items = tree_items(main, s, subject);
         if (std::string_view(s.id) == "new") add_new_file_types(main, items, subject, true);
         return items;
     }
-    const bool always = files ? s.files_always : s.background_always;
     std::vector<BarRow> rows;
     for (const char* c : s.commands) {
         // The folder's own path is what Copy as path means over empty space.
         std::string id = c;
         if (background && id == "edit.copy-path") id = "edit.copy-folder-path";
         BarRow r = command_row(main.core(), id);
-        if (r.id.empty()) continue;
-        if (!always && !r.enabled) continue;
+        if (r.id.empty() || r.hidden) continue;
         rows.push_back(std::move(r));
     }
     if (rows.empty()) return {};
@@ -374,7 +376,16 @@ bool build_step_menu(MainView& main, const std::wstring& kind, MenuItems* out) {
         else summary = verb + L" " + std::to_wstring(through + 1) + (through == 0 ? L" action" : L" actions");
         MenuItem s = MenuItem::make(summary);
         s.enabled = false;
+        const size_t summary_at = items.size();
         items.push_back(std::move(s));
+        // Pointing at a step marks it and every newer one, and the summary counts them, which is what
+        // a click would undo. Spec: MainWindow.UndoHistory (Mark).
+        for (size_t i = 0; i < shown; ++i) {
+            items[i].on_hover = [shown, summary_at, verb](MenuItems& level, int at) {
+                for (size_t k = 0; k < shown; ++k) level[k].marked = static_cast<int>(k) <= at;
+                level[summary_at].text = verb + L" " + std::to_wstring(at + 1) + (at == 0 ? L" action" : L" actions");
+            };
+        }
     }
     items.push_back(MenuItem::separator());
     MainView* mv = &main;

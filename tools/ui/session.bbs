@@ -12,7 +12,8 @@ newtab Pictures
 assert-tabs 3
 tab-dragging 1
 shot tab-dragging
-movetab 3 1
+tab-drag 3 1
+shot tab-strip TabHost
 tab 1
 assert-path Pictures
 tab 3

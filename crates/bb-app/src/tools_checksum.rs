@@ -261,7 +261,7 @@ impl ChecksumSession {
         self.stopped = None;
         self.progress_headline = "Reading\u{2026}".into();
         self.progress_detail.clear();
-        self.progress_fraction = 0.0;
+        self.progress_fraction = -1.0;
         Some(Job {
             generation: self.generation,
             paths: self
@@ -362,24 +362,23 @@ impl ChecksumSession {
         if generation != self.generation || !self.running || self.cancel.is_cancelled() {
             return false;
         }
+        // A share only once the byte total is known; until then the bar just moves. Spec:
+        // ChecksumViewModel.Apply.
         self.progress_fraction = if p.bytes_total > 0 {
             (p.bytes_done as f64 / p.bytes_total as f64).clamp(0.0, 1.0)
-        } else if p.files_total > 0 {
-            p.files_done as f64 / p.files_total as f64
         } else {
-            0.0
+            -1.0
         };
-        self.progress_headline = match &p.current_name {
-            Some(name) => format!("Reading\u{2026} {name}"),
-            None => "Reading\u{2026}".into(),
+        self.progress_headline = if p.files_total > 1 {
+            format!(
+                "Reading {} of {}\u{2026}",
+                bb_core::format::thousands(p.files_done as i64),
+                bb_core::format::thousands(p.files_total as i64)
+            )
+        } else {
+            "Reading\u{2026}".into()
         };
-        self.progress_detail = format!(
-            "{} of {} files \u{b7} {} of {}",
-            bb_core::format::thousands(p.files_done as i64),
-            bb_core::format::thousands(p.files_total as i64),
-            bb_core::format::byte_size(p.bytes_done),
-            bb_core::format::byte_size(p.bytes_total)
-        );
+        self.progress_detail = p.current_name.clone().unwrap_or_default();
         let due = self.last_emit.is_none_or(|t| t.elapsed() >= PROGRESS_EVERY);
         if due {
             self.last_emit = Some(Instant::now());

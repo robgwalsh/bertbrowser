@@ -106,6 +106,8 @@ typedef enum BbTabText {
   BB_TEXT_SEARCH = 6,
   // The id of the column the list is sorted by.
   BB_TEXT_SORT_BY = 7,
+  // "3 items selected (1.2 MB)"; none with nothing selected.
+  BB_TEXT_SELECTION = 8,
 } BbTabText;
 
 typedef enum BbSelectOp {
@@ -228,6 +230,10 @@ typedef struct BbTabState {
   bool sort_descending;
   bool shows_content_matches;
   bool is_search_running;
+  // A reload has started and its rows have not arrived yet.
+  bool is_loading;
+  // The error is a locked archive: the banner offers Unlock.
+  bool is_archive_locked;
   bool has_error;
   // 0 none, 1 preview, 2 metadata.
   uint32_t side_pane;
@@ -236,6 +242,10 @@ typedef struct BbTabState {
   uint32_t preview_mode;
   bool preview_wrap;
   bool preview_fit;
+  // Bumped when the core selected rows the view should bring into view (a renamed or new item
+  // landing); `reveal_row` is the first of them, or -1.
+  uint64_t reveal_seq;
+  int64_t reveal_row;
 } BbTabState;
 
 // One row, as views into the snapshot. Ask for visible rows at paint time only.
@@ -572,6 +582,25 @@ enum BbStatus bb_new_item(struct BbApp *app,
                           struct BbStr name,
                           uint64_t *out_op);
 
+// Bytes in words, the way every size in the app is written ("1.4 MB", three decimals from GB up).
+enum BbStatus bb_byte_size(int64_t bytes, struct BbOwnedStr *out_text);
+
+// The size text the folder tree shows beside each of `paths_json` (a JSON array of folder paths), as a
+// JSON array in the same order: "1.2 GB", "1.2 GB *" (part unreadable), or "" when the cache has no
+// size for it - blank, never zero. One indexed lookup; no folder is scanned.
+enum BbStatus bb_tree_sizes(struct BbApp *app,
+                            struct BbStr paths_json,
+                            struct BbOwnedStr *out_json);
+
+// The New items page: `{types: [{label, extension, templatePath, enabled}], importing, status}`, the
+// switched-off types included.
+enum BbStatus bb_new_types_state(struct BbApp *app,
+                                 struct BbOwnedStr *out_json);
+
+// Adds the types Windows offers to the list (read off the UI thread); `SettingsChanged("newFileTypes")`
+// follows when it is done.
+enum BbStatus bb_new_types_import(struct BbApp *app);
+
 // The file types the New submenu offers, as JSON `[{label, extension, templatePath}]`.
 enum BbStatus bb_new_file_types(struct BbApp *app, struct BbOwnedStr *out_json);
 
@@ -696,6 +725,21 @@ enum BbStatus bb_columns_state(struct BbApp *app, uint64_t tab, struct BbOwnedSt
 // `order <id>,<id>...` (after a header drag).
 enum BbStatus bb_columns_do(struct BbApp *app, uint64_t tab, struct BbStr verb, struct BbStr arg);
 
+// The column header's right-click checklist: `{builtIns:[{id, header, on, locked}], groups:[{title,
+// items:[...]}], extra:[...]}`.
+enum BbStatus bb_columns_header_menu(struct BbApp *app, uint64_t tab, struct BbOwnedStr *out_json);
+
+// The Columns page: the default set new tabs start from, `{columns:[{id, header, width, removable}]}`.
+enum BbStatus bb_columns_defaults(struct BbApp *app,
+                                  struct BbOwnedStr *out_json);
+
+// One edit of that default set: `add <id>`, `remove <id>`, `move <id> <index>`, `width <id> <dips>`,
+// `reset`. Saved at once; every tab that never arranged its own columns follows.
+enum BbStatus bb_columns_defaults_do(struct BbApp *app,
+                                     struct BbStr verb,
+                                     struct BbStr arg);
+
+// Tab 0 asks about the default set the Columns page edits.
 // What the Add column popup offers for `search`: `{loading, full, groups:[{title, items:[{id,
 // header, detail}]}]}`.
 enum BbStatus bb_columns_candidates(struct BbApp *app,
@@ -809,7 +853,7 @@ enum BbStatus bb_theme_set_system_appearance(struct BbApp *app, bool is_dark, bo
 
 // One verb: `select <id>`, `follow on|off`, `slot light|dark <id>`, `override <token> <#hex>`,
 // `clear-override <token>`, `persist`, `revert`, `reset-all`, `save-as <name>`, `import <path>`,
-// `delete <id>`. `save-as` and `import` answer the new theme's id in `out_result`.
+// `delete <id>`, `export <path>`. `save-as` and `import` answer the new theme's id in `out_result`.
 enum BbStatus bb_theme_do(struct BbApp *app,
                           struct BbStr verb,
                           struct BbStr arg,
@@ -949,6 +993,9 @@ enum BbStatus bb_metadata_picture(struct BbApp *app,
                                   uint8_t *dst,
                                   size_t capacity,
                                   size_t *out_len);
+
+// `bb_compare_settle` off the UI thread: answers at once; the rows re-paint when it is done.
+enum BbStatus bb_compare_settle_start(struct BbApp *app, const struct BbStr *paths, uint32_t n);
 
 // Reads both sides of each path and settles its verdict to "same" where the bytes are identical;
 // nothing else moves. `out_identical` is how many were. Blocking: call it from a worker.

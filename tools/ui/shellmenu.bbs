@@ -99,6 +99,35 @@ settings context-menu new-command
 shot 13-settings-context-menu-new-command
 settings close
 
+# A command of your own: made, then edited and deleted where it is listed.
+settings context-menu
+press MenuNewCommand
+field-type CommandName Diff it
+field-type CommandProgram C:\Tools\diff.exe
+press CommandSave
+list-pick MenuLayoutList Diff it
+field-type CommandName Diff these
+shot 13b-settings-command-edited
+settings close
+select photo.jpg
+menu files 13c-menu-own-command
+assert-menu-item Diff these
+assert-no-menu-item Diff it
+settings context-menu
+list-pick MenuLayoutList Diff these
+press CommandDelete
+settings close
+menu files 13d-menu-own-command-gone
+assert-no-menu-item Diff these
+
+# Reset puts the app's entries back in their original order and all on the menu.
+hide-menu-item rename
+settings context-menu
+press MenuReset
+settings close
+menu files 13e-menu-reset
+assert-menu-order Compress | - | Copy as path | - | Cut | Paste | - | Rename | Bookmark
+
 menu-layout default
 menu files 14-menu-file-default
 assert-menu-order Compress | - | Copy as path | - | Cut | Paste | - | Rename | Bookmark | - | Open Git Bash here | TortoiseSVN | - | Properties

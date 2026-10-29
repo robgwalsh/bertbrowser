@@ -36,6 +36,8 @@ void fill_argb(PaintContext& pc, const Rect& r, uint32_t argb) {
 void TableList::set_rows(std::vector<TableRow> r) {
     rows = std::move(r);
     if (selected >= static_cast<int>(rows.size())) selected = -1;
+    extra_.assign(rows.size(), char{0});
+    anchor_ = selected;
     layout_bar();
     invalidate();
 }
@@ -67,6 +69,33 @@ std::vector<float> TableList::column_x(float total) const {
     std::vector<float> xs{0.0f};
     for (const TableColumn& c : columns) xs.push_back(xs.back() + (c.flex ? share : c.width));
     return xs;
+}
+
+std::vector<int> TableList::picked() const {
+    std::vector<int> out;
+    for (size_t i = 0; i < rows.size(); ++i) {
+        const bool on = static_cast<int>(i) == selected || (multi && i < extra_.size() && extra_[i]);
+        if (on && !rows[i].heading) out.push_back(static_cast<int>(i));
+    }
+    return out;
+}
+
+void TableList::select_only(int i) {
+    selected = i;
+    anchor_ = i;
+    std::fill(extra_.begin(), extra_.end(), char{0});
+    bring_into_view(i);
+    invalidate();
+    if (on_select) on_select(i);
+}
+
+void TableList::bring_into_view(int i) {
+    if (i < 0 || static_cast<size_t>(i) >= rows.size()) return;
+    float top = 0;
+    for (int k = 0; k < i; ++k) top += row_step(rows[static_cast<size_t>(k)]);
+    const float bottom = top + row_step(rows[static_cast<size_t>(i)]);
+    if (top < v_.offset()) v_.set_offset(top);
+    else if (bottom > v_.offset() + v_.viewport) v_.set_offset(bottom - v_.viewport);
 }
 
 int TableList::row_at(Point p) const {
@@ -110,7 +139,7 @@ void TableList::paint(PaintContext& pc) {
         if (y > bounds.b) break;
         const Rect rc = Rect::xywh(bounds.l, y, inner_w, row_height);
         if (row.tint != gfx::kNoToken) pc.fill(Rect::xywh(bounds.l, y, inner_w, step), row.tint);
-        const bool sel = static_cast<int>(i) == selected && !row.heading;
+        const bool sel = (static_cast<int>(i) == selected || (multi && i < extra_.size() && extra_[i])) && !row.heading;
         if (sel) pc.fill(Rect::xywh(bounds.l, y, inner_w, step), focused() ? tok::ListSelectedBackground : tok::ListSelectedInactiveBackground);
         for (size_t c = 0; c < columns.size() && c < row.cells.size(); ++c) {
             Token fg = row.heading ? tok::TextMuted : row.muted ? tok::TextDisabled : sel ? tok::ListSelectedForeground : tok::TextPrimary;
@@ -118,7 +147,13 @@ void TableList::paint(PaintContext& pc) {
             if (c > 0 && !sel && !row.muted && !row.heading) fg = columns[c].right || columns[c].mono ? tok::TextSecondary : fg;
             gfx::FontSpec f = columns[c].mono ? mono_font() : ui_font();
             if (row.heading) f.weight = 600;
-            const Rect cell{bounds.l + xs[c] + 8, rc.t, std::max(bounds.l + xs[c] + 8, bounds.l + xs[c + 1] - 4), rc.b};
+            Rect cell{bounds.l + xs[c] + 8, rc.t, std::max(bounds.l + xs[c] + 8, bounds.l + xs[c + 1] - 4), rc.b};
+            if (static_cast<int>(c) == picture_column && row.picture) {
+                if (const ThumbPtr image = row.picture(device_px(pc, 16.0f))) {
+                    images_.draw(pc, image, Rect::xywh(cell.l, rc.t + (rc.height() - 16) / 2, 16, 16), row.faded ? 0.5f : 1.0f);
+                }
+                cell.l += 22;
+            }
             pc.text(row.cells[c], cell, f, fg, columns[c].right ? gfx::TextAlign::Trailing : gfx::TextAlign::Leading);
         }
         if (row.bar_slot || row.bar >= 0) {
@@ -145,7 +180,21 @@ bool TableList::on_mouse_down(const MouseEvent& e) {
     }
     const int i = row_at(e.pt);
     if (i >= 0 && !rows[static_cast<size_t>(i)].heading) {
-        selected = i;
+        if (multi && e.mods.ctrl) {
+            // Ctrl adds or takes away one row, keeping the rest.
+            if (selected >= 0 && selected != i) extra_[static_cast<size_t>(selected)] = 1;
+            extra_[static_cast<size_t>(i)] = extra_[static_cast<size_t>(i)] && selected != i ? 0 : 1;
+            selected = i;
+            anchor_ = i;
+        } else if (multi && e.mods.shift && anchor_ >= 0) {
+            std::fill(extra_.begin(), extra_.end(), char{0});
+            for (int k = std::min(anchor_, i); k <= std::max(anchor_, i); ++k) extra_[static_cast<size_t>(k)] = 1;
+            selected = i;
+        } else {
+            std::fill(extra_.begin(), extra_.end(), char{0});
+            selected = i;
+            anchor_ = i;
+        }
         invalidate();
         if (on_select) on_select(i);
         const float tick_w = columns.empty() ? 0.0f : columns.front().width;
@@ -163,6 +212,8 @@ bool TableList::on_mouse_move(const MouseEvent& e) {
         invalidate();
         return true;
     }
+    const int i = row_at(e.pt);
+    tooltip = i >= 0 ? rows[static_cast<size_t>(i)].tip : std::wstring();
     return false;
 }
 
@@ -180,19 +231,33 @@ bool TableList::on_wheel(Point, int delta, Mods) {
 }
 
 bool TableList::on_key_down(const KeyEvent& e) {
-    auto move = [&](int dir) {
-        for (int i = selected + dir; i >= 0 && i < static_cast<int>(rows.size()); i += dir) {
-            if (!rows[static_cast<size_t>(i)].heading) {
-                selected = i;
-                invalidate();
-                if (on_select) on_select(i);
-                return;
-            }
-        }
+    // To the nearest row that is not a heading, `dir` rows on (clamped to the ends).
+    auto move = [&](int by) {
+        if (rows.empty()) return;
+        const int last = static_cast<int>(rows.size()) - 1;
+        int i = std::clamp(selected < 0 ? (by > 0 ? -1 : last + 1) + by : selected + by, 0, last);
+        const int dir = by > 0 ? 1 : -1;
+        while (i >= 0 && i <= last && rows[static_cast<size_t>(i)].heading) i += dir;
+        if (i < 0 || i > last) return;
+        select_only(i);
     };
+    const int page = std::max(1, static_cast<int>(v_.viewport / row_height) - 1);
+    if (e.mods.ctrl && e.vk == 'C' && on_copy) {
+        on_copy();
+        return true;
+    }
+    if (e.mods.ctrl && e.vk == 'A' && multi) {
+        std::fill(extra_.begin(), extra_.end(), char{1});
+        invalidate();
+        return true;
+    }
     switch (e.vk) {
         case VK_DOWN: move(1); return true;
         case VK_UP: move(-1); return true;
+        case VK_NEXT: move(page); return true;
+        case VK_PRIOR: move(-page); return true;
+        case VK_HOME: move(-static_cast<int>(rows.size())); return true;
+        case VK_END: move(static_cast<int>(rows.size())); return true;
         case VK_SPACE:
             if (selected >= 0 && on_toggle) {
                 on_toggle(selected);
@@ -210,6 +275,8 @@ bool TableList::on_key_down(const KeyEvent& e) {
 
 void DiffView::set_lines(std::vector<DiffLine> lines) {
     lines_ = std::move(lines);
+    longest_ = 0;
+    for (const DiffLine& l : lines_) longest_ = std::max({longest_, l.lt.size(), l.rt.size()});
     layout_bar();
     invalidate();
 }
@@ -220,10 +287,18 @@ void DiffView::arrange(Rect r) {
 }
 
 void DiffView::layout_bar() {
+    constexpr float kGutter = 46.0f;
+    const float glyph = root() ? res().text.measure(L"0", mono_font()).width : 7.5f;
+    const float inner_w = bounds.width() - ScrollBar::kThickness;
+    h_.extent = static_cast<float>(longest_) * glyph + 8.0f;
+    h_.viewport = std::max(0.0f, std::floor(inner_w / 2) - kGutter - 4.0f);
+    const bool hbar = h_.needed();
     v_.extent = static_cast<float>(lines_.size()) * kRow + 4.0f;
-    v_.viewport = bounds.height();
-    v_.area = v_.needed() ? Rect{bounds.r - ScrollBar::kThickness, bounds.t, bounds.r, bounds.b} : Rect{};
+    v_.viewport = bounds.height() - (hbar ? ScrollBar::kThickness : 0.0f);
+    v_.area = v_.needed() ? Rect{bounds.r - ScrollBar::kThickness, bounds.t, bounds.r, bounds.b - (hbar ? ScrollBar::kThickness : 0.0f)} : Rect{};
+    h_.area = hbar ? Rect{bounds.l, bounds.b - ScrollBar::kThickness, bounds.r - (v_.needed() ? ScrollBar::kThickness : 0.0f), bounds.b} : Rect{};
     v_.set_offset(v_.offset());
+    h_.set_offset(h_.offset());
 }
 
 void DiffView::scroll_to_row(int row) {
@@ -249,18 +324,26 @@ void DiffView::paint(PaintContext& pc) {
         if (l.op == 1 || l.op == 3) pc.fill(left, l.op == 1 ? tok::CompareOlder : tok::CompareDiffers);
         if (l.op == 2 || l.op == 3) pc.fill(right, l.op == 2 ? tok::CompareNewer : tok::CompareDiffers);
         pc.text(l.ln, Rect{left.l + 2, y, left.l + kGutter - 6, y + kRow}, font, tok::TextMuted, gfx::TextAlign::Trailing);
-        pc.text(l.lt, Rect{left.l + kGutter, y, left.r - 4, y + kRow}, font, tok::TextPrimary);
         pc.text(l.rn, Rect{right.l + 2, y, right.l + kGutter - 6, y + kRow}, font, tok::TextMuted, gfx::TextAlign::Trailing);
-        pc.text(l.rt, Rect{right.l + kGutter, y, right.r - 4, y + kRow}, font, tok::TextPrimary);
+        // The text slides under its gutter, which stays put.
+        const float dx = h_.offset();
+        const Rect lt{left.l + kGutter, y, left.r - 4, y + kRow}, rt{right.l + kGutter, y, right.r - 4, y + kRow};
+        pc.clip(lt.intersect(pc.dirty));
+        pc.text(l.lt, Rect{lt.l - dx, y, lt.l - dx + h_.extent + lt.width(), y + kRow}, font, tok::TextPrimary);
+        pc.unclip();
+        pc.clip(rt.intersect(pc.dirty));
+        pc.text(l.rt, Rect{rt.l - dx, y, rt.l - dx + h_.extent + rt.width(), y + kRow}, font, tok::TextPrimary);
+        pc.unclip();
     }
     pc.line({bounds.l + half, bounds.t}, {bounds.l + half, bounds.b}, tok::BorderSubtle);
     pc.unclip();
     v_.paint(pc);
+    h_.paint(pc);
     if (style.border != gfx::kNoToken) pc.stroke(bounds, style.border);
 }
 
 bool DiffView::on_mouse_down(const MouseEvent& e) {
-    if (v_.mouse_down(e.pt)) {
+    if (v_.mouse_down(e.pt) || h_.mouse_down(e.pt)) {
         root()->capture(this);
         invalidate();
         return true;
@@ -269,7 +352,7 @@ bool DiffView::on_mouse_down(const MouseEvent& e) {
 }
 
 bool DiffView::on_mouse_move(const MouseEvent& e) {
-    if (v_.mouse_move(e.pt)) {
+    if (v_.mouse_move(e.pt) || h_.mouse_move(e.pt)) {
         invalidate();
         return true;
     }
@@ -277,12 +360,18 @@ bool DiffView::on_mouse_move(const MouseEvent& e) {
 }
 
 bool DiffView::on_mouse_up(const MouseEvent&) {
-    const bool was = v_.dragging();
+    const bool was = v_.dragging() || h_.dragging();
     v_.mouse_up();
+    h_.mouse_up();
     return was;
 }
 
-bool DiffView::on_wheel(Point, int delta, Mods) {
+bool DiffView::on_wheel(Point, int delta, Mods m) {
+    if (m.shift && h_.needed()) {
+        h_.set_offset(h_.offset() - static_cast<float>(delta) / 120.0f * 48.0f);
+        invalidate();
+        return true;
+    }
     if (!v_.needed()) return false;
     v_.set_offset(v_.offset() - static_cast<float>(delta) / 120.0f * kRow * 3.0f);
     invalidate();
@@ -360,6 +449,38 @@ void TreemapCanvas::on_mouse_leave() {
     hovered_ = -1;
     tooltip.clear();
     invalidate();
+}
+
+// ---- keeping a rebuilt tree's place ----------------------------------------------------------------------
+
+static void collect_places(Widget& w, ListPlaces& out) {
+    if (auto* t = dynamic_cast<TableList*>(&w)) out.tables.emplace_back(t->scroll_offset(), t->selected);
+    if (auto* s = dynamic_cast<ScrollViewer*>(&w)) out.scrollers.emplace_back(s->offset_x(), s->offset_y());
+    for (const auto& c : w.children()) collect_places(*c, out);
+}
+
+static void apply_places(Widget& w, const ListPlaces& in, size_t& ti, size_t& si) {
+    if (auto* t = dynamic_cast<TableList*>(&w); t && ti < in.tables.size()) {
+        const auto& [offset, selected] = in.tables[ti++];
+        t->preset_offset(offset);
+        if (t->selected < 0 && selected >= 0 && selected < static_cast<int>(t->rows.size())) t->selected = selected;
+    }
+    if (auto* s = dynamic_cast<ScrollViewer*>(&w); s && si < in.scrollers.size()) {
+        const auto& [x, y] = in.scrollers[si++];
+        s->preset_offset(x, y);
+    }
+    for (const auto& c : w.children()) apply_places(*c, in, ti, si);
+}
+
+ListPlaces save_places(Widget& tree) {
+    ListPlaces out;
+    collect_places(tree, out);
+    return out;
+}
+
+void restore_places(Widget& tree, const ListPlaces& places) {
+    size_t ti = 0, si = 0;
+    apply_places(tree, places, ti, si);
 }
 
 }  // namespace bb::views::tools

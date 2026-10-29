@@ -26,6 +26,15 @@ assert-count 12
 assert-status under
 shot 01-flat
 
+# The toggle beside the side-pane buttons is the same switch, and is lit while it is on.
+shot 01-flat-toggle FlatViewToggle
+press FlatViewToggle
+assert-not-flat
+assert-count 8
+press FlatViewToggle
+assert-flat
+assert-count 12
+
 # It has a folder being shown, unlike a search result, so New is live and targets the flat root.
 # That is exactly the objection that makes New off during a search.
 newfile FlatChild.txt

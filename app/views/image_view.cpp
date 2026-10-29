@@ -110,7 +110,7 @@ void ImageView::paint(PaintContext& pc) {
 
     // The chequerboard under the picture, only where the picture is.
     const Rect seen = dest.intersect(bounds);
-    if (!seen.empty()) {
+    if (checkerboard && !seen.empty()) {
         constexpr float kSquare = 8.0f;
         pc.fill(seen, tok::PreviewCheckerLight);
         const int c0 = static_cast<int>(std::floor((seen.l - dest.l) / kSquare)), c1 = static_cast<int>(std::ceil((seen.r - dest.l) / kSquare));

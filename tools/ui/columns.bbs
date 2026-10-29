@@ -81,6 +81,19 @@ columns add Created
 columns width Created 180
 session
 assert-columns Name, Size, Type, Modified, Created
+assert-column-width Created 180
+
+# The same through the header: a drag and a gripper are kept, and survive the round trip too.
+header-drag Created 1
+assert-columns Name, Created, Size, Type, Modified
+header-resize Size 150
+assert-column-width Size 150
+session
+assert-columns Name, Created, Size, Type, Modified
+assert-column-width Size 150
+header-drag Name 2
+assert-columns Name, Created, Size, Type, Modified
+columns reset
 
 assert-not-launched
 state
@@ -176,6 +189,15 @@ columns default
 # which is unit tested; what this proves is that the second one arrives at all, since it is a few
 # hundred COM activations away and renders "Reading…" until it does.
 dialog columns 09-add-column
+
+# The page edits the set a new tab starts from (what a tab that was never arranged follows is pinned in
+# the_columns_page_edits_the_default_set_that_new_tabs_start_from); Reset puts the shipped set back.
+settings columns
+list-pick ColumnRows Size
+press ColumnRemove
+shot 09b-columns-page-edited
+press ColumnReset
+settings close
 
 # The reorder insertion line. Placed rather than dragged — a run posts no mouse input — and the
 # capture is secondary: building the line is what once crashed the app, so getting here is the test.

@@ -1,4 +1,5 @@
 #include "views/settings_view.h"
+#include "views/file_pickers.h"
 
 #include "gfx/icons.gen.h"
 #include "views/main_view.h"
@@ -76,12 +77,18 @@ void SettingsView::build_chrome() {
     nav->style.bg = tok::SurfaceRaised;
     nav_ = nav;
 
-    problem_ = card_->emplace<TextBlock>();
-    problem_->dock = Dock::Top;
+    // Stays up for as long as the problem does: a list with a missing field is held unwritten until it is
+    // fixed, and only leaving the page takes the person to it. Spec: SettingsView.xaml (the problem strip).
+    problem_strip_ = card_->emplace<StackPanel>(Orientation::Horizontal, 8.0f);
+    problem_strip_->name = "SettingsProblem";
+    problem_strip_->dock = Dock::Top;
+    problem_strip_->pad = 10;
+    problem_strip_->style.bg = tok::ErrorBackground;
+    problem_ = problem_strip_->emplace<TextBlock>();
     problem_->style.fg = tok::ErrorForeground;
-    problem_->style.bg = tok::ErrorBackground;
     problem_->wrap = true;
-    problem_->set_visible(false);
+    problem_->flex = 1;
+    problem_strip_->set_visible(false);
 
     scroll_ = card_->emplace<ScrollViewer>();
     scroll_->dock = Dock::Fill;
@@ -123,10 +130,20 @@ json::Value SettingsView::get(const char* key) {
 void SettingsView::set_raw(const char* key, const std::string& json_value) {
     try {
         core::check(bb_settings_set(core_.app(), core::s(core::wide(key)), core::s(core::wide(json_value))), key);
-        problem_->set_visible(false);
+        refused_.clear();
     } catch (const core::CoreError& e) {
-        problem_->set_text(core::wide(e.what()));
-        problem_->set_visible(true);
+        refused_ = core::wide(e.what());
+    }
+    const json::Value st = try_model([&](BbOwnedStr* o) { return bb_settings_page_state(core_.app(), o); });
+    show_problem(core::wide(st["problem"].str()));
+}
+
+void SettingsView::show_problem(const std::wstring& core_problem) {
+    const std::wstring text = core_problem.empty() ? refused_ : core_problem;
+    if (problem_->text() != text) problem_->set_text(text);
+    if (problem_strip_->flags.visible != !text.empty()) {
+        problem_strip_->set_visible(!text.empty());
+        card_->request_layout();
     }
 }
 
@@ -159,6 +176,44 @@ void SettingsView::number_row(Widget& p, const wchar_t* label, const char* key, 
     if (*unit) f::text(*row, unit, tok::TextMuted, 13.0f);
 }
 
+void SettingsView::choice_row(Widget& p, const wchar_t* label, const char* key, std::vector<std::pair<std::wstring, std::string>> choices,
+                              const char* when_unset) {
+    auto* row = f::row(p);
+    f::row_label(*row, label, 320);
+    const json::Value v = get(key);
+    // The stored value, as JSON text the choices can be compared with; unset is the default it stands for.
+    std::string now = v.is_null() && when_unset ? when_unset : "";
+    if (v.type == json::Value::Type::String) now = "\"" + v.str() + "\"";
+    else if (v.type == json::Value::Type::Number) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%g", v.num());
+        now = buf;
+    }
+    int at = -1;
+    for (size_t i = 0; i < choices.size(); ++i) {
+        if (choices[i].second == now) at = static_cast<int>(i);
+    }
+    if (at < 0 && !now.empty()) {
+        std::wstring shown = core::wide(now);
+        if (shown.size() > 1 && shown.front() == L'"') shown = shown.substr(1, shown.size() - 2);
+        choices.push_back({shown + L" (current)", now});
+        at = static_cast<int>(choices.size()) - 1;
+    }
+    std::vector<std::wstring> labels;
+    for (const auto& c : choices) labels.push_back(c.first);
+    auto* box = f::combo(*row, labels, at, 200, [this, key, choices](int i) {
+        if (i >= 0 && static_cast<size_t>(i) < choices.size()) set_raw(key, choices[static_cast<size_t>(i)].second);
+    });
+    box->automation_id = key;
+}
+
+std::wstring SettingsView::gesture_or(const wchar_t* command, const wchar_t* fallback) {
+    BbOwnedStr o{};
+    std::wstring g;
+    if (bb_keymap_gesture(core_.app(), core::s(command), &o) == BB_OK) g = core::take(o);
+    return g.empty() ? std::wstring(fallback) : g;
+}
+
 // ---- sync ----------------------------------------------------------------------------------------------------
 
 void SettingsView::sync() {
@@ -183,6 +238,8 @@ void SettingsView::sync() {
     }
     if (page != page_) {
         page_ = page;
+        new_types_loaded_ = false;
+        refused_.clear();
         for (size_t i = 0; i < nav_->children().size(); ++i) {
             if (auto* list = dynamic_cast<f::ItemList*>(nav_->children()[i].get())) {
                 for (size_t k = 0; k < pages_.size(); ++k) {
@@ -192,11 +249,7 @@ void SettingsView::sync() {
         }
         signature_.clear();
     }
-    const std::string problem = st["problem"].str();
-    if (!problem.empty()) {
-        problem_->set_text(core::wide(problem));
-        problem_->set_visible(true);
-    }
+    show_problem(core::wide(st["problem"].str()));
     rebuild_if_changed(false);
     request_layout();
     invalidate();
@@ -208,8 +261,8 @@ void SettingsView::build_nav(const json::Value& pages) {
         try {
             core::check(bb_settings_page_close(core_.app()), "close settings");
         } catch (const core::CoreError& e) {
-            problem_->set_text(core::wide(e.what()));
-            problem_->set_visible(true);
+            refused_ = core::wide(e.what());
+            show_problem(L"");
         }
     });
     back->name = "SettingsBack";
@@ -256,9 +309,12 @@ void SettingsView::rebuild_if_changed(bool force) {
     } else if (page_ == "saved-searches" || page_ == "workspaces") {
         sig += text_of([&](BbOwnedStr* o) { return bb_saved_state(app, o); });
     } else if (page_ == "columns") {
-        sig += text_of([&](BbOwnedStr* o) { return bb_columns_state(app, main_.active_tab(), o); });
+        sig += text_of([&](BbOwnedStr* o) { return bb_columns_defaults(app, o); });
     } else if (page_ == "search-index") {
         sig += text_of([&](BbOwnedStr* o) { return bb_index_state(app, o); });
+    } else if (page_ == "new-items") {
+        const json::Value st = try_model([&](BbOwnedStr* o) { return bb_new_types_state(app, o); });
+        sig += (st["importing"].boolean() ? "importing|" : "idle|") + st["status"].str();
     }
     if (!force && sig == signature_) return;
     signature_ = sig;
@@ -314,26 +370,81 @@ void SettingsView::pose_column_drag(bool on) {
 
 void SettingsView::page_general(Widget& p) {
     f::heading(p, L"General");
-    f::text(p, L"Browsing", tok::TextSecondary, 14.0f, 600);
     bool_row(p, L"Show hidden items", "showHiddenItems");
+    f::note(p, L"Show hidden files and folders in listings and search results");
     bool_row(p, L"Open archives as folders", "enterArchivesOnDoubleClick");
+    f::note(p, L"Double-clicking a zip, 7z, tar or rar walks into it. With this off they open in whichever program owns them \u2014 and the breadcrumb, Enter and typing the path still go in.");
     f::check(p, L"Middle-click a drive/device to open a new panel", get("drivesOpenTarget").str() == "NewPanel",
              [this](bool v) { set_raw("drivesOpenTarget", v ? "\"NewPanel\"" : "\"NewTab\""); });
-    number_row(p, L"Scroll speed (1 is normal)", "scrollSpeedMultiplier");
-    f::gap(p, 6);
-    f::text(p, L"Startup", tok::TextSecondary, 14.0f, 600);
-    bool_row(p, L"Restore last session on startup", "restoreLastSession");
+    f::note(p, L"Middle-clicking a drive or device in the DRIVES & DEVICES sidebar opens it in a new panel instead of a new tab. A plain click always opens a new tab.");
+    const bool restore = get("restoreLastSession").boolean();
+    f::check(p, L"Restore last session on startup", restore, [this](bool v) {
+        set_bool("restoreLastSession", v);
+        signature_.clear();  // the folder box below follows it
+    });
+    f::note(p, L"When off, the app always opens a single tab at the folder below instead of wherever the panes were left.");
     auto* row = f::row(p);
-    f::row_label(*row, L"Open this folder when there is no session", 320);
     const json::Value path = get("startupDefaultPath");
-    auto* e = f::field(*row, core::wide(path.str()), 280, [this](const std::wstring& t) { set_text("startupDefaultPath", t, true); },
+    // Trimmed as it is kept: a path with a stray space on the end is not the folder it looks like.
+    auto trimmed = [](std::wstring t) {
+        while (!t.empty() && iswspace(t.back())) t.pop_back();
+        while (!t.empty() && iswspace(t.front())) t.erase(t.begin());
+        return t;
+    };
+    auto* e = f::field(*row, core::wide(path.str()), 380, [this, trimmed](const std::wstring& t) { set_text("startupDefaultPath", trimmed(t), true); },
                        L"The folder BertBrowser opens in");
     e->automation_id = "startupDefaultPath";
-    f::button(*row, L"Browse…", [] {});
+    e->set_enabled(!restore);
+    auto* browse = f::button(*row, L"Browse\u2026", [this, e, trimmed] {
+        if (!main_.shows_dialogs()) return;
+        PickPath pick;
+        pick.title = L"Open this folder when there is no session";
+        pick.folder = e->text();
+        if (const auto chosen = pick_folder(main_.window().hwnd(), pick)) {
+            e->set_text(*chosen);
+            set_text("startupDefaultPath", trimmed(*chosen), true);
+        }
+    });
+    browse->set_enabled(!restore);
+    choice_row(p, L"Vertical scroll speed", "scrollSpeedMultiplier",
+               {{L"1\u00d7 (normal)", "1"}, {L"1.5\u00d7", "1.5"}, {L"2\u00d7", "2"}, {L"2.5\u00d7", "2.5"}, {L"3\u00d7", "3"}, {L"3.5\u00d7", "3.5"},
+                {L"4\u00d7", "4"}, {L"4.5\u00d7", "4.5"}, {L"5\u00d7", "5"}, {L"5.5\u00d7", "5.5"}, {L"6\u00d7", "6"}});
+    choice_row(p, L"Tile aspect ratio", "tileAspectRatio",
+               {{L"1:1", "\"1:1\""}, {L"4:3", "\"4:3\""}, {L"3:2", "\"3:2\""}, {L"16:10", "\"16:10\""}, {L"16:9", "\"16:9\""}, {L"3:4", "\"3:4\""},
+                {L"2:3", "\"2:3\""}});
     f::gap(p, 6);
-    f::text(p, L"Windows", tok::TextSecondary, 14.0f, 600);
-    f::note(p, L"BertBrowser can open folders in place of File Explorer. The setting is changed in Windows, so nothing here moves until you choose it.");
-    f::check(p, L"Open folders in BertBrowser instead of File Explorer", false, [](bool) {});
+    // Who opens folders is Windows' setting, so it is read from Windows each time rather than kept here, and a
+    // scripted run never touches the machine's registry. Spec: SettingsViewModel.OnOpenFoldersHereChanged.
+    if (main_.scripted()) {
+        f::check(p, L"Open folders in BertBrowser instead of File Explorer", false, nullptr)->set_enabled(false);
+        f::note(p, L"(Not read in a scripted run: it is the machine's registry.)");
+        return;
+    }
+    BbOwnedStr o{};
+    json::Value handler;
+    if (bb_folder_handler_state(&o) == BB_OK) handler = json::parse(core::utf8(core::take(o)));
+    const std::string state = handler["state"].str();
+    const bool ours = state == "RegisteredToThisApp" || state == "RegisteredToThisAppStale";
+    f::check(p, L"Open folders in BertBrowser instead of File Explorer", ours, [this](bool v) {
+        folder_handler_warning_ = bb_folder_handler_set(v) == BB_OK
+                                      ? L""
+                                      : v ? L"Windows would not let BertBrowser register as the folder handler."
+                                          : L"Windows would not let BertBrowser hand folders back to File Explorer.";
+        signature_.clear();
+        sync();
+    })->name = "OpenFoldersHere";
+    f::note(p, L"This PC and Control Panel keep opening in File Explorer, and so does a zip opened from Explorer \u2014 BertBrowser browses archives in its own window. So does anything that runs explorer.exe by name \u2014 Win+E, the taskbar icon, and some apps' \"Show in folder\".");
+    std::wstring warning = folder_handler_warning_;
+    if (warning.empty() && state == "RegisteredToAnotherApp") {
+        // Naming the other program rather than quietly taking the verb over.
+        std::wstring other = core::wide(handler["other"].str());
+        const size_t slash = other.find_last_of(L"\\/");
+        if (slash != std::wstring::npos) other = other.substr(slash + 1);
+        const size_t dot = other.rfind(L'.');
+        if (dot != std::wstring::npos && dot > 0) other = other.substr(0, dot);
+        warning = (other.empty() ? std::wstring(L"Another program") : other) + L" currently opens folders. Turning this on will replace it.";
+    }
+    if (!warning.empty()) f::text(p, warning, tok::WarningForeground, 13.0f)->wrap = true;
 }
 
 void SettingsView::page_appearance(Widget& p) {
@@ -369,17 +480,36 @@ void SettingsView::page_appearance(Widget& p) {
                                 : L"Windows is set to light, so BertBrowser is showing the light theme below.");
         auto* r1 = f::row(p);
         f::row_label(*r1, L"Light theme", 160);
-        auto* c1 = f::combo(*r1, names, light, 240, [this, ids](int i) {
+        // Light themes for the light slot and dark for the dark. Spec: SystemThemeRules.SlotChoices.
+        auto slot_list = [&](const json::Value& allowed, const std::string& held, std::vector<std::wstring>* labels, std::vector<std::string>* keys) {
+            int at = -1;
+            for (size_t k = 0; k < allowed.size(); ++k) {
+                for (size_t i = 0; i < available.size(); ++i) {
+                    if (available[i]["id"].str() != allowed[k].str()) continue;
+                    labels->push_back(names[i]);
+                    keys->push_back(ids[i]);
+                    if (ids[i] == held) at = static_cast<int>(keys->size()) - 1;
+                }
+            }
+            return at;
+        };
+        std::vector<std::wstring> light_names, dark_names;
+        std::vector<std::string> light_ids, dark_ids;
+        const int light_at = slot_list(th["lightChoices"], th["lightSlot"].str(), &light_names, &light_ids);
+        const int dark_at = slot_list(th["darkChoices"], th["darkSlot"].str(), &dark_names, &dark_ids);
+        (void)light;
+        (void)dark;
+        auto* c1 = f::combo(*r1, light_names, light_at, 240, [this, light_ids](int i) {
             BbOwnedStr o{};
-            if (i >= 0 && bb_theme_do(core_.app(), core::s(L"slot"), core::s(L"light " + core::wide(ids[static_cast<size_t>(i)])), &o) == BB_OK) bb_str_free(o);
+            if (i >= 0 && bb_theme_do(core_.app(), core::s(L"slot"), core::s(L"light " + core::wide(light_ids[static_cast<size_t>(i)])), &o) == BB_OK) bb_str_free(o);
         });
         c1->name = "LightThemeCombo";
         f::button(*r1, L"Customise colours…", [this] { main_.open_dialog(L"theme-editor"); });
         auto* r2 = f::row(p);
         f::row_label(*r2, L"Dark theme", 160);
-        auto* c2 = f::combo(*r2, names, dark, 240, [this, ids](int i) {
+        auto* c2 = f::combo(*r2, dark_names, dark_at, 240, [this, dark_ids](int i) {
             BbOwnedStr o{};
-            if (i >= 0 && bb_theme_do(core_.app(), core::s(L"slot"), core::s(L"dark " + core::wide(ids[static_cast<size_t>(i)])), &o) == BB_OK) bb_str_free(o);
+            if (i >= 0 && bb_theme_do(core_.app(), core::s(L"slot"), core::s(L"dark " + core::wide(dark_ids[static_cast<size_t>(i)])), &o) == BB_OK) bb_str_free(o);
         });
         c2->name = "DarkThemeCombo";
         f::button(*r2, L"Customise colours…", [this] { main_.open_dialog(L"theme-editor"); });
@@ -394,6 +524,7 @@ void SettingsView::page_appearance(Widget& p) {
         f::button(*r, L"Customise colours…", [this] { main_.open_dialog(L"theme-editor"); });
     }
     (void)theme_do;
+    for (size_t i = 0; i < th["issues"].size(); ++i) f::text(p, core::wide(th["issues"][i].str()), tok::WarningForeground, 13.0f)->wrap = true;
     f::gap(p, 6);
     f::text(p, L"Preview", tok::TextSecondary, 14.0f, 600);
     // A strip of the colours the theme is made of, so a change is seen without leaving the page.
@@ -412,13 +543,17 @@ void SettingsView::page_appearance(Widget& p) {
 void SettingsView::page_preview(Widget& p) {
     f::heading(p, L"Preview");
     bool_row(p, L"Show the preview pane in new tabs", "showPreviewPane");
-    bool_row(p, L"Play the next item automatically", "previewAutoAdvance");
-    bool_row(p, L"Loop what is playing", "previewLoop");
-    bool_row(p, L"Start playing as soon as an item is selected", "previewAutoPlay");
-    number_row(p, L"Largest text file shown in full", "previewTextMaxBytes", L"bytes");
-    auto* r = f::row(p);
-    f::row_label(*r, L"Thumbnail shape (width:height)", 320);
-    f::field(*r, core::wide(get("tileAspectRatio").str()), 120, [this](const std::wstring& t) { set_text("tileAspectRatio", t); });
+    f::note(p, L"Each tab keeps its own preview pane, so one pane can preview while another shows a full-width list. This is what a new tab starts with; " +
+                   gesture_or(L"view.preview", L"Show preview") + L" toggles the one in front of you.");
+    // Kept inside the bounds the readers were written for. Spec: SettingsViewModel.Apply (Clamp KB*1024, 4 KB..64 MB).
+    const std::vector<std::pair<std::wstring, std::string>> sizes = {
+        {L"64 KB", "65536"},     {L"128 KB", "131072"},   {L"256 KB", "262144"},   {L"512 KB", "524288"},
+        {L"1 MB", "1048576"},    {L"2 MB", "2097152"},    {L"4 MB", "4194304"},    {L"8 MB", "8388608"}};
+    choice_row(p, L"Read at most", "previewTextMaxBytes", sizes);
+    f::note(p, L"Trim text after this amount.");
+    choice_row(p, L"Search inside files up to", "searchContentMaxBytes", sizes);
+    f::note(p, L"How much of each file content: reads. A file longer than this is searched to here and no further, and the status bar says so rather than reporting it as a miss.");
+    f::note(p, L"Previews don't hold file locks!");
 }
 
 void SettingsView::page_search_index(Widget& p) {
@@ -427,18 +562,33 @@ void SettingsView::page_search_index(Widget& p) {
     f::note(p, L"Searching the whole PC reads the NTFS master file table, which needs administrator rights. A small helper does that "
                L"and keeps running when BertBrowser closes.");
     auto* r = f::row(p);
-    const std::string status = st["status"].str();
-    auto* t = f::text(*r, status.empty() ? L"The search index is not running." : core::wide(status));
+    const std::wstring helper = core::wide(st["helperText"].str());
+    auto* t = f::text(*r, L"Background indexer: " + (helper.empty() ? core::wide(st["status"].str()) : helper));
     t->flex = 1;
-    auto* start = f::button(*r, L"Start", [this] { bb_index_do(core_.app(), core::s(L"start")); });
+    t->name = "IndexerStatus";
+    auto* start = f::button(*r, L"Start", [this] {
+        bb_index_do(core_.app(), core::s(L"start"));
+        signature_.clear();
+    });
     start->set_enabled(st["canStart"].boolean());
-    auto* stop = f::button(*r, L"Stop", [] {});
-    stop->set_enabled(false);
+    start->name = "IndexerStart";
+    // Only with a session to say goodbye down; one that is not answering cannot be reached from here.
+    auto* stop = f::button(*r, L"Stop", [this] {
+        bb_index_do(core_.app(), core::s(L"stop"));
+        signature_.clear();
+    });
+    stop->set_enabled(st["canStop"].boolean());
+    stop->name = "IndexerStop";
+    if (!st["canStop"].boolean() && helper == L"Running, but not responding.") stop->tooltip = L"The helper is not answering, so it cannot be stopped from here.";
     f::gap(p, 6);
     bool_row(p, L"Start the indexer when BertBrowser launches", "startIndexerAtLaunch");
-    number_row(p, L"Search inside files up to", "searchContentMaxBytes", L"bytes");
-    number_row(p, L"Duplicate finder skips files smaller than", "duplicateMinSizeBytes", L"bytes");
-    bool_row(p, L"Duplicate finder skips system folders", "duplicateSkipSystemFolders");
+    // The scheduler is the state: read, not remembered. Each change is one elevation prompt.
+    auto* logon = f::check(p, L"Start the indexer automatically when I sign in", st["autostart"].boolean(), [this](bool v) {
+        bb_index_do(core_.app(), core::s(v ? L"autostart-on" : L"autostart-off"));
+    });
+    logon->name = "IndexerAtSignIn";
+    logon->set_enabled(st["autostartCanChoose"].boolean());
+    if (!st["autostartNote"].str().empty()) f::text(p, core::wide(st["autostartNote"].str()), tok::WarningForeground, 13.0f)->wrap = true;
 }
 
 void SettingsView::page_history(Widget& p) {
@@ -446,73 +596,276 @@ void SettingsView::page_history(Widget& p) {
     f::note(p, L"Features that remember what you did are off until you turn them on here, and each has a way to clear it.");
     f::text(p, L"What changed", tok::TextSecondary, 14.0f, 600);
     bool_row(p, L"Record file changes", "recordFileChanges");
-    f::note(p, L"Recording continues while BertBrowser is closed, so the timeline has no holes. Turning it off deletes what was recorded.");
-    number_row(p, L"Keep changes for", "fileChangeRetentionHours", L"hours");
-    f::button(p, L"Clear history now", [this] {
+    f::note(p, L"Keeps a log of every file created, changed, deleted or renamed on every indexed drive, so the \"What changed\" window (" +
+                   gesture_or(L"tools.changes", L"What changed here") +
+                   L") can show what an installer or a build just did. The log lives in BertBrowser's own database in your profile folder, readable by anything that can read your files \u2014 which is why it is off unless you turn it on. Turning it off deletes what was kept, straight away.");
+    choice_row(p, L"Keep changes for", "fileChangeRetentionHours", {{L"1 hour", "1"}, {L"6 hours", "6"}, {L"24 hours", "24"}, {L"7 days", "168"}});
+    f::note(p, L"Older changes are dropped as new ones arrive. Whatever you pick, the log never grows past half a million rows.");
+    BbOwnedStr out{};
+    int64_t recorded = 0;
+    if (bb_tools(core_.app(), core::s(L"changes.count"), core::s(L"{}"), &out) == BB_OK) recorded = json::parse(core::utf8(core::take(out)))["count"].i64();
+    auto* r = f::row(p, 12);
+    auto* clear = f::button(*r, L"Clear history now", [this] {
         // The recorded changes, gone; recording itself stays as the switch above has it.
-        BbOwnedStr out{};
-        const std::wstring verb = L"changes.clear", args = L"{}";
-        if (bb_tools(core_.app(), core::s(verb), core::s(args), &out) == BB_OK) bb_str_free(out);
+        BbOwnedStr o{};
+        if (bb_tools(core_.app(), core::s(L"changes.clear"), core::s(L"{}"), &o) == BB_OK) bb_str_free(o);
+        signature_.clear();
+        sync();
     });
+    clear->name = "ClearChangeLog";
+    clear->set_enabled(recorded > 0);
+    if (recorded > 0) f::text(*r, recorded == 1 ? L"1 change recorded" : std::to_wstring(recorded) + L" changes recorded", tok::TextMuted, 13.0f)->name = "ChangeLogCount";
+    f::note(p, L"Deletes the log straight away.");
     f::gap(p, 6);
     f::text(p, L"Undo", tok::TextSecondary, 14.0f, 600);
-    f::note(p, L"Undo lasts for this session. The budget is released oldest first; the next undo is never released.");
-    number_row(p, L"Steps to remember", "undoMaxSteps");
-    number_row(p, L"Most data to hold", "undoMaxHeldGigabytes", L"GB");
-    auto* clear = f::button(p, L"Clear the undo history now", [this] { main_.open_dialog(L"clear-undo"); });
-    clear->name = "ClearUndoHistory";
-    clear->width = 220;
+    choice_row(p, L"Keep up to", "undoMaxSteps", {{L"10 actions", "10"}, {L"25 actions", "25"}, {L"50 actions", "50"}, {L"100 actions", "100"}, {L"200 actions", "200"}},
+               "50");
+    choice_row(p, L"Hold up to this much set-aside data", "undoMaxHeldGigabytes",
+               {{L"1 GB", "1"}, {L"5 GB", "5"}, {L"10 GB", "10"}, {L"25 GB", "25"}, {L"50 GB", "50"}, {L"100 GB", "100"}}, "10");
+    f::note(p, L"Undo history lasts for this session only; " + gesture_or(L"edit.undo-history", L"Undo history") +
+                   L" shows it. To make undo possible, BertBrowser holds on to what you replace or delete into its own holding folder, and an edited archive's original. When the history goes past either limit, the oldest actions are released and what they held is removed for good. The same happens when you clear the history or close BertBrowser. The action you would undo next is never released, however large it is. Items sent to the Recycle Bin stay there either way.");
+    auto* clear_undo = f::button(p, L"Clear the undo history now", [this] { main_.open_dialog(L"clear-undo"); });
+    clear_undo->name = "ClearUndoHistory";
+    clear_undo->width = 220;
 }
 
-void SettingsView::page_new_items(Widget& p) {
-    f::heading(p, L"New items");
-    f::note(p, L"The file types the New menu offers, besides a folder and an empty file.");
-    const json::Value types = try_model([&](BbOwnedStr* o) { return bb_new_file_types(core_.app(), o); });
-    auto* list = p.emplace<f::ItemList>();
-    list->height = 260;
-    std::vector<f::ListEntry> entries;
-    for (size_t i = 0; i < types.size(); ++i) {
-        f::ListEntry e;
-        e.text = core::wide(types[i]["label"].str());
-        e.detail = core::wide(types[i]["extension"].str());
-        entries.push_back(std::move(e));
+void SettingsView::load_new_types() {
+    const json::Value st = try_model([&](BbOwnedStr* o) { return bb_new_types_state(core_.app(), o); });
+    new_types_.clear();
+    for (size_t i = 0; i < st["types"].size(); ++i) {
+        const json::Value& t = st["types"][i];
+        new_types_.push_back({core::wide(t["label"].str()), core::wide(t["extension"].str()), core::wide(t["templatePath"].str()),
+                              t["enabled"].is_null() || t["enabled"].boolean()});
     }
-    list->set_entries(std::move(entries));
-    auto* r = f::row(p);
-    f::button(*r, L"Add", [] {});
-    f::button(*r, L"Remove", [] {});
-    f::button(*r, L"Import from Windows…", [] {});
+    if (new_type_selected_ >= static_cast<int>(new_types_.size())) new_type_selected_ = static_cast<int>(new_types_.size()) - 1;
+    new_types_loaded_ = true;
 }
 
+void SettingsView::write_new_types() {
+    std::string out = "[";
+    for (size_t i = 0; i < new_types_.size(); ++i) {
+        const NewType& t = new_types_[i];
+        if (i) out += ",";
+        out += "{\"label\":" + json_quote(t.label) + ",\"extension\":" + json_quote(t.extension) +
+               ",\"templatePath\":" + (t.template_path.empty() ? std::string("null") : json_quote(t.template_path)) +
+               ",\"enabled\":" + (t.enabled ? "true" : "false") + "}";
+    }
+    set_raw("newFileTypes", out + "]");
+}
+
+void SettingsView::refresh_new_type_row(int i) {
+    auto* list = dynamic_cast<f::ItemList*>(new_type_list_);
+    if (!list || i < 0 || i >= static_cast<int>(new_types_.size())) return;
+    const NewType& t = new_types_[static_cast<size_t>(i)];
+    f::ListEntry e;
+    e.text = t.label.empty() ? L"(no name)" : t.label;
+    e.detail = t.extension + (t.enabled ? L"" : L"  \u00b7  off");
+    e.muted = !t.enabled;
+    list->update_entry(i, std::move(e));
+}
+
+// The file types on the New submenu, in menu order, and an editor for the one selected; Windows' own
+// list can be imported into it. Spec: SettingsView.xaml (NewItems), SettingsViewModel (NewFileTypes).
+void SettingsView::page_new_items(Widget& p) {
+    const json::Value st = try_model([&](BbOwnedStr* o) { return bb_new_types_state(core_.app(), o); });
+    const bool importing = st["importing"].boolean();
+    // An import that has finished brought new rows; anything else is the page's own copy.
+    if (!new_types_loaded_ || (new_types_importing_ && !importing)) load_new_types();
+    if (!importing) new_types_importing_ = false;
+
+    f::heading(p, L"New file types");
+    f::note(p, L"These appear on the New submenu of the file list and folder tree, in this order. A type with no template file makes an empty file. New \u25b8 Folder is always offered and is not listed here.");
+    auto* cols = f::row(p, 12);
+    auto* left = f::column(*cols, 6);
+    left->width = 240;
+    auto* list = left->emplace<f::ItemList>();
+    list->name = "NewTypeRows";
+    list->height = 300;
+    new_type_list_ = list;
+    std::vector<f::ListEntry> entries;
+    for (size_t i = 0; i < new_types_.size(); ++i) entries.emplace_back();
+    list->set_entries(std::move(entries), new_type_selected_);
+    for (size_t i = 0; i < new_types_.size(); ++i) refresh_new_type_row(static_cast<int>(i));
+    list->on_select = [this](int i) {
+        new_type_selected_ = i;
+        main_.defer([this] { build_page(); });
+    };
+    auto* buttons = f::row(*left, 6);
+    const int sel = new_type_selected_;
+    const bool has = sel >= 0 && sel < static_cast<int>(new_types_.size());
+    f::button(*buttons, L"Add", [this] {
+        new_types_.push_back({L"New file type", L".new", L"", true});
+        new_type_selected_ = static_cast<int>(new_types_.size()) - 1;
+        write_new_types();
+        main_.defer([this] { build_page(); });
+    })->name = "NewTypeAdd";
+    auto* remove = f::button(*buttons, L"Remove", [this] {
+        if (new_type_selected_ < 0 || new_type_selected_ >= static_cast<int>(new_types_.size())) return;
+        new_types_.erase(new_types_.begin() + new_type_selected_);
+        new_type_selected_ = std::min(new_type_selected_, static_cast<int>(new_types_.size()) - 1);
+        write_new_types();
+        main_.defer([this] { build_page(); });
+    });
+    remove->name = "NewTypeRemove";
+    remove->set_enabled(has);
+    auto move = [this](int by) {
+        const int to = new_type_selected_ + by;
+        if (new_type_selected_ < 0 || to < 0 || to >= static_cast<int>(new_types_.size())) return;
+        std::swap(new_types_[static_cast<size_t>(new_type_selected_)], new_types_[static_cast<size_t>(to)]);
+        new_type_selected_ = to;
+        write_new_types();
+        main_.defer([this] { build_page(); });
+    };
+    auto* up = f::button(*buttons, L"\u2191", [move] { move(-1); }, 32);
+    up->name = "NewTypeUp";
+    up->tooltip = L"Move up";
+    up->set_enabled(has && sel > 0);
+    auto* down = f::button(*buttons, L"\u2193", [move] { move(1); }, 32);
+    down->name = "NewTypeDown";
+    down->tooltip = L"Move down";
+    down->set_enabled(has && sel + 1 < static_cast<int>(new_types_.size()));
+
+    // The editor for the selected type; off while nothing is selected.
+    auto* editor = f::column(*cols, 8);
+    editor->flex = 1;
+    const NewType blank;
+    const NewType& t = has ? new_types_[static_cast<size_t>(sel)] : blank;
+    auto edit_row = [&](const wchar_t* label, const std::wstring& value, const char* id, std::function<void(NewType&, const std::wstring&)> apply) {
+        auto* r = f::row(*editor);
+        f::row_label(*r, label, 90);
+        auto* e = f::field(*r, value, 300, [this, apply](const std::wstring& v) {
+            if (new_type_selected_ < 0 || new_type_selected_ >= static_cast<int>(new_types_.size())) return;
+            apply(new_types_[static_cast<size_t>(new_type_selected_)], v);
+            refresh_new_type_row(new_type_selected_);
+            write_new_types();
+        });
+        e->name = id;
+        e->automation_id = id;
+        e->set_enabled(has);
+        return r;
+    };
+    edit_row(L"Name:", t.label, "NewTypeName", [](NewType& n, const std::wstring& v) { n.label = v; });
+    edit_row(L"Extension:", t.extension, "NewTypeExtension", [](NewType& n, const std::wstring& v) { n.extension = v; });
+    auto* template_row = edit_row(L"Template:", t.template_path, "NewTypeTemplate", [](NewType& n, const std::wstring& v) { n.template_path = v; });
+    auto* browse = f::button(*template_row, L"\u2026", [this] {
+        if (new_type_selected_ < 0 || new_type_selected_ >= static_cast<int>(new_types_.size())) return;
+        PickPath pick;
+        pick.title = L"Choose a template file";
+        if (const auto chosen = pick_open_file(main_.window().hwnd(), pick)) {
+            new_types_[static_cast<size_t>(new_type_selected_)].template_path = *chosen;
+            write_new_types();
+            main_.defer([this] { build_page(); });
+        }
+    }, 32);
+    browse->tooltip = L"Browse for a template file";
+    browse->set_enabled(has && !main_.scripted());
+    f::note(*editor, L"Leave the template blank to create an empty file.");
+    auto* shown = f::check(*editor, L"Show this type on the New menu", t.enabled, [this](bool v) {
+        if (new_type_selected_ < 0 || new_type_selected_ >= static_cast<int>(new_types_.size())) return;
+        new_types_[static_cast<size_t>(new_type_selected_)].enabled = v;
+        refresh_new_type_row(new_type_selected_);
+        write_new_types();
+    });
+    shown->name = "NewTypeEnabled";
+    shown->set_enabled(has);
+    f::gap(*editor, 8);
+    auto* import = f::button(*editor, importing ? L"Reading what Windows offers\u2026" : L"Import from Windows\u2026", [this] {
+        new_types_importing_ = true;  // read the list again once it is done, however quickly that is
+        bb_new_types_import(core_.app());
+    });
+    import->name = "NewTypeImport";
+    import->width = 240;
+    import->set_enabled(!importing);
+    f::note(*editor, L"Adds the file types Windows offers in its own New menu.");
+    const std::wstring status = core::wide(st["status"].str());
+    if (!status.empty()) f::text(*editor, status, tok::TextSecondary, 13.0f)->name = "NewTypeImportStatus";
+}
+
+// The default columns a new tab starts from (a tab that was arranged by hand keeps its own). Name is first
+// and stays. Spec: SettingsView.xaml (Columns), SettingsViewModel (Columns).
 void SettingsView::page_columns(Widget& p) {
+    BbApp* app = core_.app();
+    auto edit = [this, app](const std::wstring& verb, const std::wstring& arg) {
+        bb_columns_defaults_do(app, core::s(verb), core::s(arg));
+        main_.defer([this] { build_page(); });
+    };
     f::heading(p, L"Columns");
-    f::note(p, L"The columns the file list shows. Name is always first. Drag a header in the list to reorder; right-click a header to add or remove.");
-    const json::Value st = try_model([&](BbOwnedStr* o) { return bb_columns_state(core_.app(), main_.active_tab(), o); });
+    f::note(p, L"The columns a new tab starts with, in order. A tab whose columns you have arranged by hand keeps its own; right-click a header in the list to change just that tab.");
+    const json::Value st = try_model([&](BbOwnedStr* o) { return bb_columns_defaults(app, o); });
+    const json::Value& cols = st["columns"];
+    if (column_selected_ >= static_cast<int>(cols.size())) column_selected_ = static_cast<int>(cols.size()) - 1;
     auto* list = p.emplace<f::ItemList>();
     list->name = "ColumnRows";
-    list->row_height = 34;
-    list->height = 34.0f * static_cast<float>(std::max<size_t>(3, std::min<size_t>(10, st["columns"].size()))) + 4;
+    list->row_height = 30;
+    list->height = 30.0f * static_cast<float>(std::max<size_t>(4, std::min<size_t>(10, cols.size()))) + 4;
     std::vector<f::ListEntry> entries;
-    for (size_t i = 0; i < st["columns"].size(); ++i) {
-        const json::Value& c = st["columns"][i];
-        if (c["injected"].boolean()) continue;
+    std::vector<std::wstring> ids;
+    for (size_t i = 0; i < cols.size(); ++i) {
         f::ListEntry e;
-        e.text = L"⋮⋮  " + core::wide(c["header"].str());
-        std::wstring detail = core::wide(c["id"].str());
-        if (c["property"].boolean()) detail += L"    " + core::wide(c["canonical"].str());
-        e.detail = detail + L"    " + std::to_wstring(static_cast<int>(c["width"].num())) + L" px";
+        e.text = core::wide(cols[i]["header"].str());
+        e.detail = std::to_wstring(static_cast<int>(std::lround(cols[i]["width"].num()))) + L" px";
         entries.push_back(std::move(e));
+        ids.push_back(core::wide(cols[i]["id"].str()));
     }
-    list->set_entries(std::move(entries));
+    list->set_entries(std::move(entries), column_selected_);
+    list->on_select = [this](int i) {
+        column_selected_ = i;
+        main_.defer([this] { build_page(); });
+    };
     if (dragging_pose_) {
-        // The line a header drag leaves between two columns, placed rather than dragged.
+        // The line a row drag leaves between two columns, placed rather than dragged.
         auto* line = p.emplace<Widget>();
         line->height = 2;
         line->style.bg = tok::AccentBackground;
     }
+    const int sel = column_selected_;
+    const bool has = sel >= 0 && sel < static_cast<int>(ids.size());
+    const std::wstring id = has ? ids[static_cast<size_t>(sel)] : std::wstring();
+    const bool removable = has && cols[static_cast<size_t>(sel)]["removable"].boolean();
+    list->on_key = [this, edit, id, removable, sel](unsigned vk) {
+        if (vk == VK_DELETE && removable) {
+            edit(L"remove", id);
+            return true;
+        }
+        return false;
+    };
     auto* r = f::row(p);
-    f::button(*r, L"Reset", [this] { bb_columns_do(core_.app(), main_.active_tab(), core::s(L"reset"), core::s(L"")); });
-    f::button(*r, L"Use for new tabs", [this] { bb_columns_do(core_.app(), main_.active_tab(), core::s(L"default"), core::s(L"")); });
+    auto* add = f::button(*r, L"Add column\u2026", [this] { main_.open_dialog(L"default-columns"); });
+    add->name = "ColumnAdd";
+    add->icon = &icons::Add;
+    auto* remove = f::button(*r, L"Remove", [edit, id] { edit(L"remove", id); });
+    remove->name = "ColumnRemove";
+    remove->set_enabled(removable);
+    // Name is first whichever way it is asked, so it neither moves nor has anything moved above it.
+    auto* up = f::button(*r, L"\u2191", [this, edit, id, sel] {
+        column_selected_ = sel - 1;
+        edit(L"move", id + L" " + std::to_wstring(sel - 1));
+    }, 32);
+    up->tooltip = L"Move left";
+    up->set_enabled(removable && sel > 1);
+    auto* down = f::button(*r, L"\u2193", [this, edit, id, sel] {
+        column_selected_ = sel + 1;
+        edit(L"move", id + L" " + std::to_wstring(sel + 1));
+    }, 32);
+    down->tooltip = L"Move right";
+    down->set_enabled(removable && sel + 1 < static_cast<int>(ids.size()));
+    f::button(*r, L"Reset", [this, edit] {
+        column_selected_ = 0;
+        edit(L"reset", L"");
+    })->name = "ColumnReset";
+    if (has) {
+        auto* wr = f::row(p);
+        f::row_label(*wr, L"Width of \u201c" + core::wide(cols[static_cast<size_t>(sel)]["header"].str()) + L"\u201d", 220);
+        auto* box = f::field(*wr, std::to_wstring(static_cast<int>(std::lround(cols[static_cast<size_t>(sel)]["width"].num()))), 80,
+                             nullptr);
+        box->name = "ColumnWidth";
+        box->automation_id = "ColumnWidth";
+        box->on_commit = [box, edit, id] {
+            const std::wstring t = box->text();
+            if (!t.empty() && std::all_of(t.begin(), t.end(), [](wchar_t c) { return c >= L'0' && c <= L'9'; })) edit(L"width", id + L" " + t);
+        };
+        f::text(*wr, L"px  (Enter to apply)", tok::TextMuted, 13.0f);
+    }
 }
 
 void SettingsView::page_saved(Widget& p, bool workspaces) {
@@ -546,6 +899,8 @@ void SettingsView::page_saved(Widget& p, bool workspaces) {
         e.detail = core::wide(workspaces ? items[i]["shape"].str() : items[i]["query"].str());
         entries.push_back(std::move(e));
     }
+    std::vector<std::wstring> names;
+    for (size_t i = 0; i < items.size(); ++i) names.push_back(core::wide(items[i]["name"].str()));
     if (entries.empty()) {
         f::ListEntry e;
         e.text = workspaces ? L"No saved workspaces yet" : L"No saved searches yet";
@@ -553,6 +908,35 @@ void SettingsView::page_saved(Widget& p, bool workspaces) {
         entries.push_back(std::move(e));
     }
     list->set_entries(std::move(entries));
+    // Edit (a search) or Rename (a workspace) and Delete, for the selected row - the sidebar's menu's own.
+    // Enter edits, Del deletes. Spec: SettingsView (Saved searches / Workspaces), ListKeyDown.
+    auto* buttons = f::row(p, 8);
+    BbApp* app = core_.app();
+    auto selected = [list, names]() -> std::wstring {
+        return list->selected >= 0 && static_cast<size_t>(list->selected) < names.size() ? names[static_cast<size_t>(list->selected)] : L"";
+    };
+    auto edit = [this, workspaces, selected] {
+        const std::wstring n = selected();
+        if (n.empty()) return;
+        if (workspaces) main_.rename_workspace(n);
+        else main_.edit_saved_search(n);
+    };
+    auto remove = [this, app, workspaces, selected] {
+        const std::wstring n = selected();
+        if (n.empty()) return;
+        bb_saved_do(app, 0, core::s(workspaces ? L"remove-workspace" : L"remove-search"), core::s(n));
+        signature_.clear();
+        sync();
+    };
+    f::button(*buttons, workspaces ? L"Rename…" : L"Edit…", edit, 110)->name = workspaces ? "WorkspaceRename" : "SavedSearchEdit";
+    f::button(*buttons, L"Delete", remove, 90)->name = workspaces ? "WorkspaceDelete" : "SavedSearchDelete";
+    list->on_activate = [edit](int) { edit(); };
+    list->on_key = [remove, edit](unsigned vk) {
+        if (vk == VK_DELETE) remove();
+        else if (vk == VK_F2) edit();
+        else return false;
+        return true;
+    };
 }
 
 // ---- the Menus and toolbars page ------------------------------------------------------------------------------------
@@ -571,15 +955,55 @@ void SettingsView::page_bars(Widget& p) {
     auto* top = f::row(p);
     auto* status = f::text(*top, core::wide(m["status"].str()), tok::TextMuted, 13.0f);
     status->flex = 1;
-    f::button(*top, L"Save as…", [] {});
-    f::button(*top, L"Reset to default", [bars_do] { bars_do(L"reset"); });
+    auto rebuild = [this] { main_.defer([this] { build_page(); }); };
+    f::button(*top, L"Save as\u2026", [this, rebuild] {
+        bar_naming_ = BarNaming::SaveAs;
+        bar_name_text_.clear();
+        rebuild();
+    })->name = "BarSaveAs";
+    // Asks first when the arrangement in force is saved under no name (the core does).
+    auto* reset = f::button(*top, L"Reset to default", [bars_do] { bars_do(L"reset"); });
+    reset->name = "BarReset";
+    reset->set_enabled(!m["isDefault"].boolean());
+    if (bar_naming_ != BarNaming::None) {
+        // A name box in place of a dialog: Save keeps the arrangement in force under it (replacing one of that
+        // name), Rename renames the saved arrangement selected. Spec: SavedWorkspaceDialog (NamedThing.CommandBars).
+        const bool renaming = bar_naming_ == BarNaming::Rename;
+        const std::wstring old_name = core::wide(m["selectedSaved"].str());
+        auto* nr = f::row(p, 6);
+        f::row_label(*nr, renaming ? L"New name for \u201c" + old_name + L"\u201d" : L"Save the menus and toolbars as", 260);
+        auto* box = f::field(*nr, bar_name_text_, 220, [this](const std::wstring& t) { bar_name_text_ = t; });
+        box->automation_id = "BarSaveName";
+        box->name = "BarSaveName";
+        auto commit = [this, bars_do, renaming, old_name, rebuild] {
+            std::wstring name = bar_name_text_;
+            while (!name.empty() && iswspace(name.back())) name.pop_back();
+            while (!name.empty() && iswspace(name.front())) name.erase(name.begin());
+            if (name.empty()) return;
+            bars_do(renaming ? L"rename-saved" : L"save", renaming ? old_name + L" to " + name : name);
+            bars_do(L"select-saved", name);  // what was just named is the one the buttons below act on
+            bar_naming_ = BarNaming::None;
+            rebuild();
+        };
+        box->on_commit = commit;
+        f::button(*nr, renaming ? L"Rename" : L"Save", commit)->name = "BarSaveCommit";
+        f::button(*nr, L"Cancel", [this, rebuild] {
+            bar_naming_ = BarNaming::None;
+            rebuild();
+        });
+        if (!root() || !root()->focused() || !body_->is_ancestor_of(root()->focused())) {
+            main_.defer([this] {
+                if (Widget* w = body_->find("BarSaveName")) root()->set_focus(w);
+            });
+        }
+    }
 
     auto* cols = f::row(p, 14);
     cols->height = 520;
 
     // -- which bar, and the saved arrangements
     auto* left = cols->emplace<StackPanel>(Orientation::Vertical, 6.0f);
-    left->width = 200;
+    left->width = 230;
     f::text(*left, L"Edit", tok::TextSecondary, 13.0f, 600);
     auto* targets = left->emplace<f::ItemList>();
     targets->name = "BarTargets";
@@ -598,8 +1022,15 @@ void SettingsView::page_bars(Widget& p) {
     targets->row_height = 30;
     targets->set_entries(std::move(te), tsel);
     targets->on_select = [bars_do, tkeys](int i) {
-        if (i >= 0 && static_cast<size_t>(i) < tkeys.size()) bars_do(L"select", tkeys[static_cast<size_t>(i)] == L"menus" ? L"menu-bar" : tkeys[static_cast<size_t>(i)]);
+        if (i >= 0 && static_cast<size_t>(i) < tkeys.size()) bars_do(L"select", tkeys[static_cast<size_t>(i)]);
     };
+    // Toolbar rows come and go here; the menu bar and the title bar always exist.
+    auto* trow = f::row(*left, 6);
+    f::button(*trow, L"Add toolbar", [bars_do] { bars_do(L"add-row"); })->name = "BarAddRow";
+    auto* remove_row = f::button(*trow, L"Remove", [bars_do] { bars_do(L"remove-row"); });
+    remove_row->tooltip = L"Remove this toolbar";
+    remove_row->name = "BarRemoveRow";
+    remove_row->set_enabled(m["target"]["kind"].str() == "row");
     f::text(*left, L"Saved arrangements", tok::TextSecondary, 13.0f, 600);
     auto* saved = left->emplace<f::ItemList>();
     saved->flex = 1;
@@ -608,7 +1039,8 @@ void SettingsView::page_bars(Widget& p) {
     int ssel = -1;
     for (size_t i = 0; i < m["saved"].size(); ++i) {
         f::ListEntry e;
-        e.text = core::wide(m["saved"][i]["name"].str());
+        // The one in force is ticked; its shape is the detail either way.
+        e.text = core::wide(m["saved"][i]["name"].str()) + (m["saved"][i]["current"].boolean() ? L"  \u2713" : L"");
         e.detail = core::wide(m["saved"][i]["shape"].str());
         se.push_back(std::move(e));
         snames.push_back(core::wide(m["saved"][i]["name"].str()));
@@ -624,9 +1056,23 @@ void SettingsView::page_bars(Widget& p) {
     saved->on_select = [bars_do, snames](int i) {
         if (i >= 0 && static_cast<size_t>(i) < snames.size()) bars_do(L"select-saved", snames[static_cast<size_t>(i)]);
     };
+    saved->on_activate = [bars_do, snames](int i) {
+        if (i >= 0 && static_cast<size_t>(i) < snames.size()) bars_do(L"apply-saved", snames[static_cast<size_t>(i)]);
+    };
     auto* sr = f::row(*left, 6);
-    f::button(*sr, L"Use", [bars_do, snames, ssel] { if (ssel >= 0) bars_do(L"apply-saved", snames[static_cast<size_t>(ssel)]); });
-    f::button(*sr, L"Remove", [bars_do, snames, ssel] { if (ssel >= 0) bars_do(L"remove-saved", snames[static_cast<size_t>(ssel)]); });
+    auto* use = f::button(*sr, L"Use", [bars_do, snames, ssel] { if (ssel >= 0) bars_do(L"apply-saved", snames[static_cast<size_t>(ssel)]); });
+    use->name = "BarUseSaved";
+    use->set_enabled(ssel >= 0);
+    auto* rename = f::button(*sr, L"Rename\u2026", [this, snames, ssel, rebuild] {
+        if (ssel < 0) return;
+        bar_naming_ = BarNaming::Rename;
+        bar_name_text_ = snames[static_cast<size_t>(ssel)];
+        rebuild();
+    });
+    rename->name = "BarRenameSaved";
+    rename->set_enabled(ssel >= 0);
+    auto* forget = f::button(*sr, L"Remove", [bars_do, snames, ssel] { if (ssel >= 0) bars_do(L"remove-saved", snames[static_cast<size_t>(ssel)]); });
+    forget->set_enabled(ssel >= 0);
 
     // -- what is on the bar
     auto* mid = cols->emplace<StackPanel>(Orientation::Vertical, 6.0f);
@@ -653,28 +1099,40 @@ void SettingsView::page_bars(Widget& p) {
     rows->on_select = [bars_do](int i) { bars_do(L"pick", std::to_wstring(i)); };
     rows->on_activate = [bars_do](int i) { bars_do(L"open", std::to_wstring(i)); };
     auto* rb = f::row(*mid, 6);
-    f::button(*rb, L"Open", [bars_do] { bars_do(L"open"); });
+    const bool row_is_menu = rsel >= 0 && m["rows"][static_cast<size_t>(rsel)]["menu"].boolean();
+    auto* open = f::button(*rb, L"Open", [bars_do, rsel] { if (rsel >= 0) bars_do(L"open", std::to_wstring(rsel)); });
+    open->name = "BarOpen";
+    open->set_enabled(row_is_menu);
     f::button(*rb, L"↑", [bars_do] { bars_do(L"nudge", L"up"); });
     f::button(*rb, L"↓", [bars_do] { bars_do(L"nudge", L"down"); });
     f::button(*rb, L"Remove", [bars_do] { bars_do(L"remove"); });
-    f::button(*rb, L"Separator", [bars_do] { bars_do(L"add-separator"); });
-    auto* addm = f::button(*rb, core::wide(m["addSubmenuLabel"].is_null() ? "Menu" : m["addSubmenuLabel"].str()), [bars_do] { bars_do(L"add-menu"); });
-    addm->set_enabled(m["canAdd"].boolean() || true);
+    auto* rb2 = f::row(*mid, 6);
+    f::button(*rb2, L"Add separator", [bars_do] { bars_do(L"add-separator"); });
+    // At the top of the menu bar only menus can be added: a command needs a menu to be in.
+    auto* addm = f::button(*rb2, m["addSubmenuLabel"].str() == "Submenu" ? L"Add submenu" : L"Add menu", [bars_do] { bars_do(L"add-menu"); });
+    addm->name = "BarAddMenu";
     if (m["canEditCaption"].boolean()) {
         auto* cr = f::row(*mid, 6);
         f::row_label(*cr, L"Name", 60);
         auto* ce = f::field(*cr, core::wide(m["caption"].str()), 240, [bars_do](const std::wstring& t) { bars_do(L"name", t); });
         ce->automation_id = "BarCaption";
+        ce->width = -1;
+        ce->flex = 1;
         f::note(*mid, core::wide(m["captionHint"].str()));
     }
     if (m["isToolbar"].boolean()) {
-        f::check(*mid, L"Show names beside the icons on this toolbar", m["showsText"].boolean(),
+        f::check(*mid, L"Show names beside the icons", m["showsText"].boolean(),
                  [bars_do](bool v) { bars_do(L"show-text", v ? L"on" : L"off"); });
+        // One button can carry its name when the rest of the toolbar is icons only.
+        if (rsel >= 0 && !m["rows"][static_cast<size_t>(rsel)]["separator"].boolean() && !m["showsText"].boolean()) {
+            f::check(*mid, L"Always show this button\u2019s name", m["rows"][static_cast<size_t>(rsel)]["showText"].boolean(),
+                     [bars_do](bool v) { bars_do(L"row-show-text", v ? L"on" : L"off"); });
+        }
     }
 
     // -- the picker
     auto* right = cols->emplace<StackPanel>(Orientation::Vertical, 6.0f);
-    right->width = 250;
+    right->width = 240;
     f::text(*right, L"Add", tok::TextSecondary, 13.0f, 600);
     auto* filter = f::field(*right, core::wide(m["filter"].str()), -1, [bars_do](const std::wstring& t) { bars_do(L"filter", t); }, L"Find a command");
     filter->automation_id = "BarFilter";
@@ -694,14 +1152,19 @@ void SettingsView::page_bars(Widget& p) {
         e.detail = core::wide(c["placedText"].str());
         e.icon = icon_for(c["icon"].str());
         ce.push_back(std::move(e));
-        cids.push_back(core::wide(c["id"].str().empty() ? c["name"].str() : c["id"].str()));
+        // A list is placed by "@id"; a command by its id.
+        const std::string id = c["id"].str().empty() ? c["name"].str() : c["id"].str();
+        cids.push_back(core::wide(c["kind"].str() == "list" ? "@" + id : id));
     }
     choices->set_entries(std::move(ce));
-    choices->on_activate = [bars_do, cids](int i) { if (i >= 0) bars_do(L"add", cids[static_cast<size_t>(i)]); };
+    const bool can_add = m["canAdd"].boolean();
+    choices->on_activate = [bars_do, cids, can_add](int i) { if (i >= 0 && can_add) bars_do(L"add", cids[static_cast<size_t>(i)]); };
     auto* add = f::button(*right, L"Add", [bars_do, choices, cids] {
         if (choices->selected >= 0) bars_do(L"add", cids[static_cast<size_t>(choices->selected)]);
     });
-    (void)add;
+    add->name = "BarAdd";
+    add->set_enabled(can_add);
+    if (!can_add) f::note(*right, L"Open a menu to add commands to it; the menu bar itself holds menus.");
 }
 
 std::vector<std::wstring> SettingsView::bar_rows() const {
@@ -739,8 +1202,11 @@ void SettingsView::page_keys(Widget& p) {
     auto* top = f::row(p);
     auto* filter = f::field(*top, core::wide(m["filter"].str()), 320, [keys_do](const std::wstring& t) { keys_do(L"filter", t); }, L"Filter by name, category or shortcut");
     filter->automation_id = "KeyFilter";
-    f::button(*top, L"Find by key…", [keys_do] { keys_do(L"find"); });
-    f::button(*top, L"Reset all", [keys_do] { keys_do(L"reset-all"); });
+    f::button(*top, L"Find by key…", [keys_do] { keys_do(L"find"); })->name = "KeyFind";
+    auto* reset_all = f::button(*top, L"Reset all", [keys_do] { keys_do(L"reset-all"); });
+    reset_all->name = "KeyResetAll";
+    reset_all->set_enabled(m["hasChanged"].boolean());
+    reset_all->tooltip = L"Every shortcut back to what BertBrowser ships with";
 
     auto* list = p.emplace<f::ItemList>();
     list->name = "KeyRows";
@@ -752,16 +1218,19 @@ void SettingsView::page_keys(Widget& p) {
         const json::Value& r = m["rows"][i];
         f::ListEntry e;
         e.heading = r["heading"].boolean();
-        e.text = core::wide(r["name"].str());
+        // A dot marks a command whose shortcuts are not the ones it ships with.
+        e.text = core::wide(r["name"].str()) + (!e.heading && r["changed"].boolean() ? L"  \u2022" : L"");
         e.icon = e.heading ? nullptr : icon_for(r["icon"].str());
         const std::wstring chords = join_chords(r["chords"]);
-        e.detail = e.heading ? L"" : chords.empty() ? L"none" : chords;
+        const std::wstring where = core::wide(r["where"].str());
+        e.detail = e.heading ? L"" : (chords.empty() ? L"none" : chords) + (where.empty() || chords.empty() ? L"" : L"   " + where);
         e.muted = !e.heading && chords.empty();
         entries.push_back(std::move(e));
         ids.push_back(core::wide(r["id"].str()));
         if (!r["heading"].boolean() && r["id"].str() == m["selected"].str()) sel = static_cast<int>(i);
     }
     list->set_entries(std::move(entries), sel);
+    if (sel >= 0) list->scroll_into_view(sel);  // a command chosen from the palette, or after a reassign
     list->on_select = [keys_do, ids](int i) {
         if (i >= 0 && static_cast<size_t>(i) < ids.size() && !ids[static_cast<size_t>(i)].empty()) keys_do(L"select", ids[static_cast<size_t>(i)]);
     };
@@ -775,16 +1244,36 @@ void SettingsView::page_keys(Widget& p) {
         t->name = "KeyRecorderText";
         t->wrap = true;
     }
+    // The selected command: what it ships with, so a change can be judged against it.
+    const json::Value* chosen = nullptr;
+    for (size_t i = 0; i < m["rows"].size(); ++i) {
+        if (!m["rows"][i]["heading"].boolean() && m["rows"][i]["id"].str() == m["selected"].str()) chosen = &m["rows"][i];
+    }
+    if (chosen && !recording) {
+        const std::wstring where = core::wide((*chosen)["where"].str());
+        auto* d = f::text(*panel, core::wide((*chosen)["defaultText"].str()) + (where.empty() ? L"" : L"; works " + where) + L".", tok::TextMuted, 13.0f);
+        d->name = "KeyDefaultText";
+    }
     auto* br = f::row(*panel, 8);
-    if (m["canReassign"].boolean()) f::button(*br, L"Reassign", [keys_do] { keys_do(L"reassign"); });
+    if (m["canReassign"].boolean()) f::button(*br, L"Reassign", [keys_do] { keys_do(L"reassign"); })->name = "KeyReassign";
     if (recording || m["canReassign"].boolean()) {
-        f::button(*br, L"Cancel", [keys_do] { keys_do(L"cancel"); });
+        f::button(*br, L"Cancel", [keys_do] { keys_do(L"cancel"); })->name = "KeyCancel";
     } else {
-        const bool have = !m["selected"].str().empty();
-        f::button(*br, L"Change…", [keys_do] { keys_do(L"change"); })->set_enabled(have);
-        f::button(*br, L"Add another…", [keys_do] { keys_do(L"add"); })->set_enabled(have);
-        f::button(*br, L"Remove", [keys_do] { keys_do(L"remove"); })->set_enabled(have);
-        f::button(*br, L"Reset", [keys_do] { keys_do(L"reset"); })->set_enabled(have);
+        const bool have = chosen != nullptr;
+        const bool bound = have && (*chosen)["chords"].size() > 0;
+        auto* change = f::button(*br, L"Change…", [keys_do] { keys_do(L"change"); });
+        change->name = "KeyChange";
+        change->set_enabled(have);
+        // Another shortcut only for something that has one already; with none, Change is the way in.
+        auto* add = f::button(*br, L"Add another…", [keys_do] { keys_do(L"add"); });
+        add->name = "KeyAdd";
+        add->set_enabled(bound);
+        auto* remove = f::button(*br, L"Remove", [keys_do] { keys_do(L"remove"); });
+        remove->name = "KeyRemove";
+        remove->set_enabled(bound);
+        auto* reset = f::button(*br, L"Reset", [keys_do] { keys_do(L"reset"); });
+        reset->name = "KeyReset";
+        reset->set_enabled(have && (*chosen)["changed"].boolean());
     }
 }
 

@@ -28,6 +28,9 @@ namespace bb::views {
 
 constexpr UINT WM_BB_ICONS = WM_APP + 5;
 
+// An icon handle as a picture, `px` square, premultiplied (the app's own icon in About). Null if it cannot be drawn.
+ui::ThumbPtr icon_picture(HICON icon, uint32_t px);
+
 class ShellIcons {
 public:
     explicit ShellIcons(HWND ui_window);
@@ -39,6 +42,8 @@ public:
     // means the path is not one the shell may open (inside an archive): the type's icon, never the file's own.
     ui::ThumbPtr file(const std::wstring& path, bool directory, uint32_t attributes, uint32_t px, bool real = true);
     ui::ThumbPtr drive(const std::wstring& root, uint32_t px);
+    // One of Windows' stock pictures (SIID_*), for a row with no file behind it (a portable device).
+    ui::ThumbPtr stock(int siid, uint32_t px);
 
     // On WM_BB_ICONS: takes in what the workers finished and calls `on_ready` when anything changed.
     void drain();
@@ -65,6 +70,7 @@ private:
         Slot stock;
         bool fixed = false;
     };
+    std::unordered_map<int, Slot> stock_;
     std::unordered_map<std::wstring, Drive> drives_;  // by root, asked of Windows once
     std::unordered_map<uint64_t, ui::ThumbPtr> images_;  // (slot, px)
     // Per-file answers, least recently used last, capped: every program ever browsed must not stay pinned.

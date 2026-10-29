@@ -224,6 +224,36 @@ fn selection_gestures() {
 }
 
 #[test]
+fn the_selection_summary_counts_and_totals_what_is_selected() {
+    let f = Fixture::new();
+    assert_eq!(None, f.app.selection_summary(f.tab).unwrap());
+    f.select_names(&["notes.txt"]);
+    let notes = std::fs::metadata(f.path("notes.txt")).unwrap().len() as i64;
+    assert_eq!(
+        Some(format!(
+            "1 item selected ({})",
+            bb_core::format::byte_size(notes)
+        )),
+        f.app.selection_summary(f.tab).unwrap()
+    );
+    f.select_names(&["notes.txt", "photo.jpg"]);
+    let photo = std::fs::metadata(f.path("photo.jpg")).unwrap().len() as i64;
+    assert_eq!(
+        Some(format!(
+            "2 items selected ({})",
+            bb_core::format::byte_size(notes + photo)
+        )),
+        f.app.selection_summary(f.tab).unwrap()
+    );
+    // A folder with no known size adds nothing; on its own there is no total to show.
+    f.select_names(&["Pictures"]);
+    assert_eq!(
+        Some("1 item selected".to_string()),
+        f.app.selection_summary(f.tab).unwrap()
+    );
+}
+
+#[test]
 fn selection_is_cleared_by_a_navigation_and_survives_a_resort() {
     let f = Fixture::new();
     f.select_names(&["photo.jpg"]);

@@ -17,6 +17,7 @@ struct BarRow {
     std::string icon;  // "Icon.Back"
     std::wstring caption, name, gesture, reason;
     bool checked = false, enabled = true, show_text = false;
+    bool hidden = false;  // a file verb the right-click menu leaves out rather than greys
     std::vector<BarRow> children;
 };
 
@@ -64,7 +65,8 @@ public:
     // A button was clicked (its row) / the overflow button was (the rows behind it, the button's rect).
     std::function<void(const BarRow&, ui::Rect)> on_activate;
     std::function<void(const std::vector<BarRow>&, ui::Rect)> on_overflow;
-    // A right click on a button (its row, its rect): the Undo and Redo buttons open their history list.
+    // A right click on a button, or the chevron of a split one (its row, its rect): Undo and Redo open the
+    // list of what they would take back or put again.
     std::function<void(const BarRow&, ui::Rect)> on_context;
 
     ui::Size measure(ui::Size avail) override;
@@ -82,7 +84,13 @@ private:
     int index_at(ui::Point p) const;  // an item index, kOverflow, or -1
     ui::Rect item_rect(size_t i) const;
     ui::Rect overflow_rect() const;
+    // Undo and Redo are split buttons: the face runs the command, the chevron lists the steps.
+    // Spec: CommandBarToolbar.Build (CommandBarRules.DropdownFor).
+    static bool is_split(const BarRow& r) { return r.kind == "command" && (r.id == "edit.undo" || r.id == "edit.redo"); }
+    ui::Rect chevron_rect(size_t i) const;
+    static constexpr float kChevron = 14.0f;
     static constexpr int kOverflow = -2;
+    bool pressed_chevron_ = false;
 
     std::string which_;
     std::string signature_;

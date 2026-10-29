@@ -275,6 +275,14 @@ void TileView::paint(PaintContext& pc) {
             pc.dc->DrawTextLayout(D2D1::Point2F(cap.l, cap.t), layout, pc.brush(fg), D2D1_DRAW_TEXT_OPTIONS_CLIP);
         }
         if (active && row == cursor_) pc.stroke(tr, tok::BorderFocus);
+        if (row == drop_row) {
+            pc.fill(tr, tok::ListDropBackground);
+            pc.stroke(tr, tok::ListDropBorder, 2.0f);
+        }
+    }
+    if (marquee_) {
+        pc.fill(marquee_rect_, tok::MarqueeFill);
+        pc.stroke(marquee_rect_, tok::AccentBackground);
     }
     pc.unclip();
     v_.paint(pc);
@@ -302,6 +310,13 @@ void TileView::scroll_to_row(size_t row) {
     set_scroll_y(y);
 }
 
+void TileView::reveal_cursor(size_t row) {
+    if (row >= count()) return;
+    anchor_ = cursor_ = row;
+    scroll_to_row(row);
+    invalidate();
+}
+
 void TileView::select_row(size_t row) {
     if (!provider_ || row >= count()) return;
     cursor_ = anchor_ = row;
@@ -326,6 +341,12 @@ void TileView::move_cursor(size_t row, const Mods& m) {
 }
 
 bool TileView::on_mouse_down(const MouseEvent& e) {
+    if (e.button == MouseButton::Middle) {
+        const size_t row = row_at(e.pt);
+        if (row == npos || !on_middle) return false;
+        on_middle(row);
+        return true;
+    }
     if (e.button != MouseButton::Left && e.button != MouseButton::Right) return false;
     if (e.button == MouseButton::Left && v_.mouse_down(e.pt)) {
         bar_drag_ = true;
@@ -337,35 +358,115 @@ bool TileView::on_mouse_down(const MouseEvent& e) {
     if (!provider_) return false;
     const size_t row = row_at(e.pt);
     if (row == npos) {
-        if (!e.mods.ctrl && !e.mods.shift) provider_->select(SelectOp::Clear, 0, 0);
+        if (e.button == MouseButton::Right) {
+            if (on_context) on_context(e.pt, npos);
+            return true;
+        }
+        // Empty space: a marquee; Ctrl or Shift keeps what was selected and adds the band to it.
+        marquee_ = true;
+        marquee_add_ = e.mods.ctrl || e.mods.shift;
+        marquee_origin_ = {e.pt.x - bounds.l, e.pt.y - bounds.t + v_.offset()};
+        marquee_rect_ = Rect{e.pt.x, e.pt.y, e.pt.x, e.pt.y};
+        marquee_before_.clear();
+        if (marquee_add_) {
+            for (size_t i = 0, n = count(); i < n; ++i) {
+                if (provider_->selected(i)) marquee_before_.push_back(i);
+            }
+        } else {
+            provider_->select(SelectOp::Clear, 0, 0);
+        }
+        root()->capture(this);
         invalidate();
         return true;
     }
     if (e.button == MouseButton::Right && provider_->selected(row)) {
         cursor_ = row;  // a right press on the selection keeps it
-        invalidate();
-        return true;
-    }
-    if (e.mods.shift && anchor_ != npos) {
-        provider_->select(SelectOp::Replace, std::min(anchor_, row), std::max(anchor_, row));
+    } else if (e.button == MouseButton::Right) {
+        provider_->select(SelectOp::Replace, row, row);
+        anchor_ = cursor_ = row;
+    } else if (e.mods.shift && anchor_ != npos) {
+        provider_->select(e.mods.ctrl ? SelectOp::Add : SelectOp::Replace, std::min(anchor_, row), std::max(anchor_, row));
+        cursor_ = row;
     } else if (e.mods.ctrl) {
         provider_->select(SelectOp::Toggle, row, row);
-        anchor_ = row;
+        anchor_ = cursor_ = row;
+    } else if (on_drag_start && e.button == MouseButton::Left && e.clicks < 2 && provider_->selected(row)) {
+        // Pressing on the selection must not narrow it yet: it may be about to be dragged whole.
+        deferred_row_ = row;
+        anchor_ = cursor_ = row;
     } else {
         provider_->select(SelectOp::Replace, row, row);
-        anchor_ = row;
+        anchor_ = cursor_ = row;
     }
-    cursor_ = row;
     if (e.clicks >= 2 && e.button == MouseButton::Left && on_activate) on_activate(row);
+    const bool may_drag = on_drag_start && e.clicks < 2;
+    if (may_drag) {
+        drag_armed_ = true;
+        drag_origin_ = e.pt;
+        drag_button_ = e.button;
+        root()->capture(this);
+    }
+    if (e.button == MouseButton::Right && on_context) {
+        if (may_drag) {
+            // The menu opens on release, once it is known the press was not the start of a drag.
+            context_pending_ = true;
+            context_point_ = e.pt;
+            context_row_ = row;
+        } else {
+            on_context(e.pt, row);
+        }
+    }
     invalidate();
     return true;
 }
 
+void TileView::update_marquee(Point p) {
+    const float cx = p.x - bounds.l, cy = p.y - bounds.t + v_.offset();
+    const Rect m{std::min(marquee_origin_.x, cx), std::min(marquee_origin_.y, cy), std::max(marquee_origin_.x, cx),
+                 std::max(marquee_origin_.y, cy)};
+    marquee_rect_ = m.offset(bounds.l, bounds.t - v_.offset());
+    // Tiles are laid out by arithmetic, so the swept ones are found without measuring any: every tile of
+    // the rows the band spans, kept if it intersects. Selected in one call per contiguous run.
+    const TileLayout lay = layout();
+    const auto [first, last] = lay.visible(m.t, std::max(1.0f, m.height()));
+    std::vector<size_t> rows = marquee_add_ ? marquee_before_ : std::vector<size_t>{};
+    for (size_t i = first; i < last; ++i) {
+        if (lay.tile_rect(i).intersects(m)) rows.push_back(i);
+    }
+    if (first < last && !rows.empty()) anchor_ = cursor_ = rows.back();
+    std::sort(rows.begin(), rows.end());
+    rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+    provider_->select_rows(rows);  // one bulk call
+    invalidate();
+}
+
 bool TileView::on_mouse_move(const MouseEvent& e) {
+    if (drag_armed_) {
+        if (std::abs(e.pt.x - drag_origin_.x) > 8.0f || std::abs(e.pt.y - drag_origin_.y) > 8.0f) {
+            drag_armed_ = false;
+            context_pending_ = false;
+            deferred_row_ = npos;
+            const MouseButton button = drag_button_;
+            root()->release_capture();
+            // The drag runs OLE's own loop and returns when the button is released.
+            if (on_drag_start) on_drag_start(button);
+        }
+        return true;
+    }
     if (bar_drag_) {
         v_.mouse_move(e.pt);
         update_requests();
         invalidate();
+        return true;
+    }
+    if (marquee_) {
+        const float step = metrics.tile_h() + metrics.gap;
+        if (e.pt.y < bounds.t) {
+            set_scroll_y(v_.offset() - step / 4);
+        } else if (e.pt.y > bounds.b) {
+            set_scroll_y(v_.offset() + step / 4);
+        }
+        update_marquee(e.pt);
         return true;
     }
     invalidate();  // hover highlight follows the pointer
@@ -373,9 +474,48 @@ bool TileView::on_mouse_move(const MouseEvent& e) {
 }
 
 bool TileView::on_mouse_up(const MouseEvent&) {
+    if (drag_armed_) {
+        // A press that turned out to be a plain click: the selection change held back applies now, and so
+        // does the menu a right press asked for.
+        drag_armed_ = false;
+        root()->release_capture();
+        if (deferred_row_ != npos && provider_) {
+            provider_->select(SelectOp::Replace, deferred_row_, deferred_row_);
+            deferred_row_ = npos;
+        }
+        if (context_pending_ && on_context) {
+            context_pending_ = false;
+            on_context(context_point_, context_row_);
+        }
+        invalidate();
+        return true;
+    }
+    if (marquee_) {
+        marquee_ = false;
+        root()->release_capture();
+        invalidate();
+        return true;
+    }
     if (!bar_drag_) return false;
     bar_drag_ = false;
     v_.mouse_up();
+    return true;
+}
+
+void TileView::on_modal_cancel() {
+    drag_armed_ = context_pending_ = marquee_ = bar_drag_ = false;
+    deferred_row_ = npos;
+    invalidate();
+}
+
+bool TileView::on_char(wchar_t c) {
+    if (c < 0x20 || c == 0x7f || !on_typeahead) return false;
+    const uint64_t now = root()->now_ms();
+    if (now - typed_at_ > kTypeAheadMs) typed_.clear();
+    if (c == L' ' && typed_.empty()) return false;
+    typed_.push_back(c);
+    typed_at_ = now;
+    on_typeahead(typed_);
     return true;
 }
 

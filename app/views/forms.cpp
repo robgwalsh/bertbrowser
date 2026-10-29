@@ -7,6 +7,14 @@
 
 namespace bb::views::forms {
 
+void Picture::paint(PaintContext& pc) {
+    if (!source) return;
+    const ThumbPtr image = source(device_px(pc, size));
+    if (!image) return;
+    const float s = std::min(size, std::min(bounds.width(), bounds.height()));
+    images_.draw(pc, image, Rect::xywh(bounds.l + (bounds.width() - s) / 2, bounds.t + (bounds.height() - s) / 2, s, s));
+}
+
 TextBlock* text(Widget& parent, std::wstring t, Token fg, float size, int weight) {
     auto* tb = parent.emplace<TextBlock>(std::move(t));
     tb->style.fg = fg;
@@ -204,6 +212,11 @@ bool ItemList::on_mouse_down(const MouseEvent& e) {
         if (i >= 0 && !entries[static_cast<size_t>(i)].heading && !entries[static_cast<size_t>(i)].separator) on_context(i, e.pt);
         return true;
     }
+    if (e.button == MouseButton::Middle && on_middle) {
+        const int i = row_at(e.pt);
+        if (i >= 0 && !entries[static_cast<size_t>(i)].heading && !entries[static_cast<size_t>(i)].separator && !entries[static_cast<size_t>(i)].muted) on_middle(i);
+        return true;
+    }
     if (e.button != MouseButton::Left) return false;
     if (v_.mouse_down(e.pt)) {
         root()->capture(this);
@@ -240,6 +253,7 @@ bool ItemList::on_wheel(Point, int delta, Mods) {
 }
 
 bool ItemList::on_key_down(const KeyEvent& e) {
+    if (on_key && !e.mods.ctrl && !e.mods.alt && on_key(e.vk)) return true;
     switch (e.vk) {
         case VK_DOWN: select(step(selected, 1), true); return true;
         case VK_UP: select(selected < 0 ? step(-1, 1) : step(selected, -1), true); return true;

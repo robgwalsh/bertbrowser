@@ -100,6 +100,7 @@ public:
 
     // ---- tree ----
     Widget* parent() const { return parent_; }
+    bool holds(const Widget* w) const;  // w is this or below it (never dereferences w)
     UiRoot* root() const { return root_; }
     const std::vector<std::unique_ptr<Widget>>& children() const { return children_; }
     template <class T>
@@ -248,6 +249,10 @@ public:
     Widget* focused() const { return focus_; }
     void set_focus(Widget* w);
     bool focus_next(bool reverse);
+    // Where Tab cycles: the subtree this answers (an open dialog card, a page over the content), or the
+    // whole content when it answers null.
+    std::function<Widget*()> tab_scope;
+    bool contains(const Widget* w) const;
     Widget* hovered() const { return hover_; }
     Widget* captured() const { return capture_; }
     void capture(Widget* w) { capture_ = w; }

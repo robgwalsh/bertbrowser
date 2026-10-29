@@ -8,6 +8,11 @@ refresh
 assert-cannot-undo
 assert-cannot-redo
 assert-history 0
+assert-status-bar undo none
+assert-status-bar selection none
+select notes.txt
+assert-status-bar selection 1 item selected (
+deselect
 dialog undo-history 01-history-empty
 
 # --- Three operations, three entries ---
@@ -20,7 +25,9 @@ select budget.xlsx
 delete
 assert-history 3 cursor=3
 assert-status undo
+assert-status-bar undo undo delete
 shot 02-after-three
+shot 02b-split-buttons TitleToolbar
 dialog undo-history 03-history-all-done
 menu undo 04-undo-menu
 # What pointing at the third entry looks like: all three marked, "Undo 3 actions" underneath.

@@ -27,7 +27,23 @@ pub(crate) struct ToolsState {
     pub(crate) duplicate_groups: Mutex<Vec<Vec<String>>>,
     /// The duplicate finder's scan and what it found.
     pub(crate) duplicates: Mutex<crate::tools_duplicates::DuplicatesSession>,
+    /// Disk usage's folder, read off the UI thread.
+    pub(crate) disk: Mutex<crate::tools_disk::DiskLoad>,
+    /// The portable devices, once read: None until the first read lands.
+    pub(crate) devices: Mutex<Option<Vec<crate::seams::PortableDevice>>>,
+    devices_reading: std::sync::atomic::AtomicBool,
+    /// The rename box's tag reads, by path and modified time: a template is re-planned on every key,
+    /// and the tags do not change under it. Spec: RenameDialog (reads tags once).
+    pub(crate) rename_tags: Mutex<RenameTagCache>,
 }
+
+pub(crate) type RenameTagCache = std::collections::HashMap<
+    String,
+    (
+        Option<bb_core::time::FileTime>,
+        std::collections::HashMap<bb_core::metadata::MetadataField, String>,
+    ),
+>;
 
 fn invalid(text: impl Into<String>) -> AppError {
     AppError::Invalid(text.into())
@@ -110,20 +126,64 @@ impl App {
                     "folder": pinnable,
                 })
             }
-            // `{name, query, scope, folder?}` -> `{problem, replacing}`, checked as it is typed. A new
-            // search may take a name already saved: it replaces that one, and the button says so.
+            // `{name}` -> the seed for editing a saved search: its own values, and the tab's folder offered
+            // for pinning when it has none of its own. Spec: SavedSearchesViewModel.SeedFor(item).
+            "search.edit-seed" => {
+                let name = args["name"].as_str().unwrap_or("");
+                let saved = inner
+                    .saved_searches()
+                    .into_iter()
+                    .find(|s| s.name.eq_ignore_ascii_case(name))
+                    .ok_or_else(|| invalid("That saved search is not there any more."))?;
+                let tab = lock(&inner.shell).active_tab_id();
+                let here = tab
+                    .and_then(|t| inner.tab(t).ok())
+                    .map(|c| lock(&c).path.clone())
+                    .unwrap_or_default();
+                let pinnable = (!here.is_empty()
+                    && !crate::commands::ArchivePathCheck::in_archive(&here))
+                .then_some(here);
+                json!({
+                    "name": saved.name,
+                    "query": saved.query,
+                    "scope": match saved.scope {
+                        bb_core::data::SavedSearchScope::Folder => "folder",
+                        bb_core::data::SavedSearchScope::ThisPc => "pc",
+                        _ => "current",
+                    },
+                    "folder": saved.scope_path.clone().or(pinnable),
+                })
+            }
+            // `{name, query, scope, folder?, previous?}` -> `{problem, replacing}`, checked as it is typed.
+            // A new search may take a name already saved: it replaces that one, and the button says so.
+            // An edit (`previous`) may keep its own name but not take another's.
             "search.save-check" => {
                 let (name, query, scope, folder) = saved_search_args(&args);
-                let replacing = !name.trim().is_empty() && inner.search_name_taken(name.trim());
+                let previous = args["previous"].as_str();
+                let replacing = previous.is_none()
+                    && !name.trim().is_empty()
+                    && inner.search_name_taken(name.trim());
                 json!({
-                    "problem": inner.search_problem(name, query, scope, folder, Some(name.trim())),
+                    "problem": inner.search_problem(name, query, scope, folder, Some(previous.unwrap_or(name.trim()))),
                     "replacing": replacing,
                 })
             }
             "search.save" => {
                 let (name, query, scope, folder) = saved_search_args(&args);
+                // An edit renames first, so the stored casing is the one typed.
+                if let Some(previous) = args["previous"]
+                    .as_str()
+                    .filter(|p| !p.eq_ignore_ascii_case(name.trim()))
+                {
+                    inner.search_rename(previous, name.trim())?;
+                }
                 inner.search_save(name, query.trim(), scope, folder)?;
                 json!({ "ok": true })
+            }
+            // `{old, name}` -> `{problem}` for renaming a workspace.
+            "workspace.rename-check" => {
+                let old = args["old"].as_str().unwrap_or("");
+                json!({ "problem": inner.workspace_rename_problem(old, args["name"].as_str().unwrap_or("")) })
             }
             // ---- properties ----
             // `{paths}`: what the Properties dialog shows for these items.
@@ -237,22 +297,47 @@ impl App {
             }
 
             // ---- comparing two files ----
+            // Each of these begins a comparison on a worker; `Model::FileCompare` says it landed.
             "filecompare.open" => {
-                let session = FileCompareSession::new(need(&args, "left")?, need(&args, "right")?);
+                let mut session =
+                    FileCompareSession::pending(need(&args, "left")?, need(&args, "right")?);
+                let job = session.begin();
                 let model = session.model().clone();
                 *lock(&state.filecompare) = Some(session);
+                inner.filecompare_run(job);
                 model
             }
-            "filecompare.options" => with_filecompare(self, |s| {
-                s.set_options(
-                    args["ignoreWhitespace"].as_bool().unwrap_or(true),
-                    args["ignoreCase"].as_bool().unwrap_or(false),
-                    args["forceText"].as_bool().unwrap_or(false),
-                );
-            })?,
+            "filecompare.options" => {
+                let job = {
+                    let mut guard = lock(&state.filecompare);
+                    let s = guard
+                        .as_mut()
+                        .ok_or_else(|| invalid("Nothing has been compared."))?;
+                    s.set_options(
+                        args["ignoreWhitespace"].as_bool().unwrap_or(true),
+                        args["ignoreCase"].as_bool().unwrap_or(false),
+                        args["forceText"].as_bool().unwrap_or(false),
+                    );
+                    s.begin()
+                };
+                inner.filecompare_run(job);
+                with_filecompare(self, |_| {})?
+            }
             "filecompare.step" => with_filecompare(self, |s| {
                 s.step(args["direction"].as_i64().unwrap_or(1).signum() as i32);
             })?,
+            "filecompare.swap" => {
+                let job = {
+                    let mut guard = lock(&state.filecompare);
+                    let s = guard
+                        .as_mut()
+                        .ok_or_else(|| invalid("Nothing has been compared."))?;
+                    s.swap();
+                    s.begin()
+                };
+                inner.filecompare_run(job);
+                with_filecompare(self, |_| {})?
+            }
             "filecompare.model" => with_filecompare(self, |_| {})?,
 
             // ---- disk usage ----
@@ -260,6 +345,61 @@ impl App {
                 let path = args["path"].as_str().unwrap_or("");
                 crate::tools_disk::require_dir(path)?;
                 inner.disk_usage_model(path)?
+            }
+            // `{path}`: reads it on a worker (a later load supersedes it), and says so with
+            // `Model::DiskUsage`; `diskusage.state` is `{path, loading, model, error}`.
+            "diskusage.load" => {
+                let path = args["path"].as_str().unwrap_or("");
+                crate::tools_disk::require_dir(path)?;
+                inner.disk_usage_load(path.to_string());
+                inner.disk_usage_state()
+            }
+            "diskusage.state" => inner.disk_usage_state(),
+
+            // ---- portable devices ----
+            // `{loaded, devices:[{name, path}]}`; the first ask starts the read (off this thread, it can
+            // take seconds) and `Model::Devices` says when it lands. `{refresh:true}` reads again.
+            "devices.list" => {
+                let refresh = args["refresh"].as_bool().unwrap_or(false);
+                let have = lock(&state.devices).clone();
+                if (have.is_none() || refresh)
+                    && !state
+                        .devices_reading
+                        .swap(true, std::sync::atomic::Ordering::SeqCst)
+                {
+                    inner.schedule(|inner| {
+                        let found = inner.seams.devices.list();
+                        *lock(&inner.extra.tools.devices) = Some(found);
+                        inner
+                            .extra
+                            .tools
+                            .devices_reading
+                            .store(false, std::sync::atomic::Ordering::SeqCst);
+                        inner.hub.model(crate::events::Model::Devices);
+                    });
+                }
+                json!({
+                    "loaded": have.is_some(),
+                    "devices": have.unwrap_or_default().iter()
+                        .map(|d| json!({ "name": d.name, "path": d.shell_path }))
+                        .collect::<Vec<_>>(),
+                })
+            }
+            // `{path}`: Explorer on the device, through the one launcher. Spec: PortableDevices.OpenInExplorer.
+            "devices.open" => {
+                let path = need(&args, "path")?;
+                let windows = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
+                // The full path, so a stray explorer.exe earlier on PATH cannot decide what opens.
+                let explorer = format!("{}\\explorer.exe", windows.trim_end_matches('\\'));
+                let request = bb_shell::LaunchRequest {
+                    file: explorer,
+                    arguments: format!("\"{path}\""),
+                    ..bb_shell::LaunchRequest::default()
+                };
+                match inner.seams.launcher.start(&request) {
+                    Ok(()) => json!({ "ok": true }),
+                    Err(e) => json!({ "ok": false, "error": e }),
+                }
             }
             "treemap.layout" => {
                 let weights: Vec<f64> = args["weights"]
@@ -294,6 +434,9 @@ impl App {
                 with_changes(self, |s| s.use_mark_range())?
             }
             "changes.model" => with_changes(self, |_| {})?,
+            // `{}` -> `{count}`: how many changes the log holds - what the History page's switch is over.
+            "changes.count" => json!({ "count": inner.change_log_count() }),
+            "changes.stamp" => inner.change_log_stamp(),
             "changes.clear" => {
                 inner.change_log_clear()?;
                 json!({"ok": true})
@@ -366,6 +509,21 @@ fn with_checksum(app: &App, change: impl FnOnce(&mut ChecksumSession)) -> AppRes
         .ok_or_else(|| invalid("There is no checksum window."))?;
     change(session);
     Ok(session.model())
+}
+
+impl crate::app::Inner {
+    fn filecompare_run(self: &std::sync::Arc<Self>, job: crate::tools_filecompare::CompareJob) {
+        self.hub.model(crate::events::Model::FileCompare);
+        self.schedule(move |inner| {
+            let (model, hunks) = FileCompareSession::compute(&job);
+            let landed = lock(&inner.extra.tools.filecompare)
+                .as_mut()
+                .is_some_and(|s| s.apply(job.generation, model, hunks));
+            if landed {
+                inner.hub.model(crate::events::Model::FileCompare);
+            }
+        });
+    }
 }
 
 fn with_filecompare(app: &App, change: impl FnOnce(&mut FileCompareSession)) -> AppResult<Value> {

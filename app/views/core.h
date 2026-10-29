@@ -31,10 +31,14 @@ bool icontains(const std::wstring& haystack, const std::wstring& needle);
 // A call that came back with something other than BB_OK.
 class CoreError : public std::runtime_error {
 public:
-    CoreError(BbStatus status, const std::string& what) : std::runtime_error(what), status(status) {}
+    CoreError(BbStatus status, const std::string& what, std::string detail = {})
+        : std::runtime_error(what), status(status), detail(std::move(detail)) {}
     BbStatus status;
+    std::string detail;  // the core's own words, without the call's name
 };
 void check(BbStatus st, const char* what);
+// What to tell a person about `e`: the core's own message for a CoreError, else what() (UTF-16).
+std::wstring message_of(const std::exception& e);
 
 // A refcounted, immutable snapshot of a tab's rows. Views it hands out are valid while this lives.
 class Listing {

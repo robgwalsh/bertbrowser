@@ -308,7 +308,13 @@ LRESULT CALLBACK Window::static_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
     if (!self) {
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
-    return self->handle(msg, wp, lp);
+    if (!on_unhandled) return self->handle(msg, wp, lp);
+    try {
+        return self->handle(msg, wp, lp);
+    } catch (const std::exception& e) {
+        on_unhandled(e);
+        return 0;
+    }
 }
 
 LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
@@ -488,6 +494,10 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_TIMER:
             if (wp == kTickTimer) {
                 root_.tick();
+                return 0;
+            }
+            if (on_timer) {
+                on_timer(wp);
                 return 0;
             }
             break;

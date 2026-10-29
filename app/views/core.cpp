@@ -63,7 +63,13 @@ bool icontains(const std::wstring& haystack, const std::wstring& needle) {
 
 void check(BbStatus st, const char* what) {
     if (st == BB_OK) return;
-    throw CoreError(st, std::string(what) + ": " + utf8(last_error()));
+    const std::string said = utf8(last_error());
+    throw CoreError(st, std::string(what) + ": " + said, said);
+}
+
+std::wstring message_of(const std::exception& e) {
+    if (const auto* c = dynamic_cast<const CoreError*>(&e); c && !c->detail.empty()) return wide(c->detail);
+    return wide(e.what());
 }
 
 Listing::~Listing() {

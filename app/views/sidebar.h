@@ -20,7 +20,10 @@ public:
 
 private:
     void fill(forms::ItemList& list, ui::TextBlock& title, const std::vector<std::wstring>& names, const wchar_t* heading,
-              const wchar_t* empty, bool shown);
+              const wchar_t* empty, bool shown, const std::vector<std::wstring>& details = {});
+    void run_search(const std::wstring& name, bool new_tab);
+    void search_menu(int row, ui::Point at);
+    void workspace_menu(int row, ui::Point at);
     void fill_bookmarks(const json::Value& rows);
     void open_bookmark(const std::wstring& how, const std::wstring& path);
     void bookmark_menu(int row, ui::Point at);
@@ -28,6 +31,8 @@ private:
     core::Core& core_;
     ui::TextBlock *search_title_ = nullptr, *space_title_ = nullptr, *bookmark_title_ = nullptr;
     forms::ItemList *search_list_ = nullptr, *space_list_ = nullptr, *bookmark_list_ = nullptr;
+    ui::StackPanel* space_head_ = nullptr;
+    ui::Button* space_add_ = nullptr;
     std::vector<std::wstring> searches_, workspaces_, bookmark_paths_;
     std::string signature_;
 };

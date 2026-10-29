@@ -1,4 +1,5 @@
 #include "views/ops_card.h"
+#include "views/tool_widgets.h"
 #include "views/tool_state.h"
 
 #include "gfx/icons.gen.h"
@@ -104,8 +105,11 @@ LiveBody::LiveBody(MainView& main, Slot slot, std::function<void(LiveBody&)> fil
 LiveBody::~LiveBody() { link_->body = nullptr; }
 
 void LiveBody::refresh() {
+    // A refill every progress tick must not throw the reader's place in a list away.
+    const tools::ListPlaces places = tools::save_places(*this);
     while (!children().empty()) remove_child(children().back().get());
     fill_(*this);
+    tools::restore_places(*this, places);
     if (after) after();
     request_layout();
     invalidate();
@@ -191,28 +195,27 @@ std::unique_ptr<Widget> transfer_dialog(DialogContext& cx) {
 
         // Every item of the job in flight, so a batch says which ones are through.
         const json::Value& items = v["items"];
+        // A list that paints only the rows in view, so a batch of any size is listed whole.
+        // Spec: TransferProgressWindow.xaml (the items list).
         if (items.size() > 0) {
             f::gap(body, 4);
-            auto* scroll = body.emplace<ScrollViewer>();
-            scroll->height = std::min(180.0f, 38.0f * static_cast<float>(items.size()) + 4);
-            scroll->style.bg = tok::InputBackground;
-            scroll->style.border = tok::BorderSubtle;
-            auto* col = scroll->emplace<StackPanel>(Orientation::Vertical, 0.0f);
-            col->pad = 4;
-            const size_t shown = std::min<size_t>(items.size(), 200);
-            for (size_t i = 0; i < shown; ++i) {
+            auto* table = body.emplace<tools::TableList>();
+            table->name = "TransferItems";
+            table->show_header = false;
+            table->height = std::min(180.0f, 24.0f * static_cast<float>(items.size()) + 4);
+            table->columns = {{L"Name", 0, true, false, false}, {L"Where", 0, true, false, false}, {L"State", 90, false, true, false}};
+            std::vector<tools::TableRow> rows;
+            rows.reserve(items.size());
+            for (size_t i = 0; i < items.size(); ++i) {
                 const json::Value& it = items[i];
-                auto* row = f::row(*col, 8);
-                auto* two = row->emplace<StackPanel>(Orientation::Vertical, 0.0f);
-                two->flex = 1;
-                f::text(*two, w(it["name"]), tok::TextPrimary, 13.0f);
-                dim(*two, w(it["destination"]), tok::TextMuted)->style.font.size = 11.0f;
                 const int s = static_cast<int>(it["state"].i64());
-                auto* st = dim(*row, s == 2 ? L"done" : s == 1 ? L"in progress" : L"waiting");
-                st->width = 76;
-                st->align = gfx::TextAlign::Trailing;
+                tools::TableRow row;
+                row.cells = {w(it["name"]), w(it["destination"]), s == 2 ? L"done" : s == 1 ? L"in progress" : L"waiting"};
+                row.muted = s == 2;
+                row.tip = w(it["destination"]);
+                rows.push_back(std::move(row));
             }
-            if (items.size() > shown) dim(*col, L"…and " + std::to_wstring(items.size() - shown) + L" more", tok::TextMuted);
+            table->set_rows(std::move(rows));
         }
     };
     auto body = std::make_unique<LiveBody>(main, &MainView::on_transfer_changed, fill);
@@ -246,7 +249,12 @@ struct ConflictState {
     bool answered = false;
     std::vector<std::string> answers;  // per row, whatever its widgets show
     std::vector<std::pair<size_t, RadioGroup*>> shown;
+    size_t page = 0;  // which run of kConflictPage rows is on show
 };
+
+// A merge can bring thousands of clashes. Every one keeps its own answer; they are shown a page at a time so
+// the card never builds thousands of rows of widgets. Spec: TransferConflictDialog (a virtualized list).
+constexpr size_t kConflictPage = 200;
 
 int radio_of(const std::string& word, bool allow_replace) {
     if (word == "skip") return 0;
@@ -284,38 +292,65 @@ std::unique_ptr<Widget> conflicts_dialog(DialogContext& cx) {
     scroll->style.bg = tok::InputBackground;
     scroll->style.border = tok::BorderSubtle;
     auto* col = scroll->emplace<StackPanel>(Orientation::Vertical, 0.0f);
-    const size_t shown = std::min<size_t>(rows.size(), 300);
-    for (size_t i = 0; i < shown; ++i) {
-        const json::Value& r = rows[i];
-        auto* item = col->emplace<StackPanel>(Orientation::Vertical, 3.0f);
-        item->pad = 10;
-        f::text(*item, w(r["name"]), tok::TextPrimary, 13.0f, 600);
-        auto* line1 = f::row(*item, 6);
-        auto* l1 = dim(*line1, L"Incoming:");
-        l1->width = 84;
-        auto* d1 = dim(*line1, w(r["incoming"]), r["incomingIsNewer"].boolean() ? tok::TextLink : tok::TextSecondary);
-        if (r["incomingIsNewer"].boolean()) d1->style.font.weight = 600;
-        d1->flex = 1;
-        auto* line2 = f::row(*item, 6);
-        dim(*line2, w(r["existingLabel"]))->width = 84;
-        dim(*line2, w(r["existing"]), tok::TextSecondary)->flex = 1;
-        const bool allow = r["allowReplace"].boolean();
-        std::vector<std::wstring> labels = {L"Skip"};
-        if (allow) labels.push_back(L"Replace");
-        labels.push_back(L"Keep both");
-        auto* rg = f::radios(*item, labels, radio_of(st->answers[i], allow), [st, i, allow](int sel) {
-            const char* words[] = {"skip", "replace", "keep-both"};
-            st->answers[i] = allow ? words[sel] : (sel == 0 ? "skip" : "keep-both");
-        });
-        rg->orientation = Orientation::Horizontal;
-        st->shown.push_back({i, rg});
-        const std::wstring note = w(r["mergeNote"]);
-        if (!note.empty()) dim(*item, note)->wrap = true;
-    }
-    if (rows.size() > shown) {
-        auto* more = col->emplace<StackPanel>(Orientation::Vertical, 0.0f);
-        more->pad = 10;
-        dim(*more, L"…and " + std::to_wstring(rows.size() - shown) + L" more, which keep the answer shown by Apply to all.", tok::TextMuted)->wrap = true;
+    // Fills `col` with the current page's rows (and is called again to turn the page).
+    auto fill = std::make_shared<std::function<void()>>();
+    *fill = [st, col, scroll, rows] {
+        st->shown.clear();
+        while (!col->children().empty()) col->remove_child(col->children().back().get());
+        const size_t from = st->page * kConflictPage;
+        const size_t to = std::min(rows.size(), from + kConflictPage);
+        for (size_t i = from; i < to; ++i) {
+            const json::Value& r = rows[i];
+            auto* item = col->emplace<StackPanel>(Orientation::Vertical, 3.0f);
+            item->pad = 10;
+            f::text(*item, w(r["name"]), tok::TextPrimary, 13.0f, 600);
+            auto* line1 = f::row(*item, 6);
+            auto* l1 = dim(*line1, L"Incoming:");
+            l1->width = 84;
+            auto* d1 = dim(*line1, w(r["incoming"]), r["incomingIsNewer"].boolean() ? tok::TextLink : tok::TextSecondary);
+            if (r["incomingIsNewer"].boolean()) d1->style.font.weight = 600;
+            d1->flex = 1;
+            auto* line2 = f::row(*item, 6);
+            dim(*line2, w(r["existingLabel"]))->width = 84;
+            dim(*line2, w(r["existing"]), tok::TextSecondary)->flex = 1;
+            const bool allow = r["allowReplace"].boolean();
+            std::vector<std::wstring> labels = {L"Skip"};
+            if (allow) labels.push_back(L"Replace");
+            labels.push_back(L"Keep both");
+            auto* rg = f::radios(*item, labels, radio_of(st->answers[i], allow), [st, i, allow](int sel) {
+                const char* words[] = {"skip", "replace", "keep-both"};
+                st->answers[i] = allow ? words[sel] : (sel == 0 ? "skip" : "keep-both");
+            });
+            rg->orientation = Orientation::Horizontal;
+            st->shown.push_back({i, rg});
+            const std::wstring note = w(r["mergeNote"]);
+            if (!note.empty()) dim(*item, note)->wrap = true;
+        }
+        scroll->scroll_to(0, 0);
+        scroll->request_layout();
+    };
+    (*fill)();
+    if (rows.size() > kConflictPage) {
+        const size_t pages = (rows.size() + kConflictPage - 1) / kConflictPage;
+        auto* pager = f::row(*c.body, 8);
+        pager->name = "ConflictPager";
+        auto* where = dim(*pager, L"");
+        where->flex = 1;
+        auto say = [st, where, rows] {
+            const size_t from = st->page * kConflictPage;
+            where->set_text(std::to_wstring(from + 1) + L"\u2013" + std::to_wstring(std::min(rows.size(), from + kConflictPage)) +
+                            L" of " + std::to_wstring(rows.size()));
+        };
+        say();
+        auto turn = [st, fill, say, pages](int by) {
+            const long next = static_cast<long>(st->page) + by;
+            if (next < 0 || next >= static_cast<long>(pages)) return;
+            st->page = static_cast<size_t>(next);
+            (*fill)();
+            say();
+        };
+        f::button(*pager, L"Previous", [turn] { turn(-1); }, 90)->name = "ConflictPrevious";
+        f::button(*pager, L"Next", [turn] { turn(1); }, 90)->name = "ConflictNext";
     }
 
     // One decision for forty taken names is the usual case.
@@ -402,13 +437,16 @@ std::unique_ptr<Widget> elevation_dialog(DialogContext& cx) {
             }
         }
     };
-    add_button(c, L"Skip", [pending, answered, core, close = cx.close] {
+    // Skip is the default: nothing that raises a UAC prompt is one Enter away. Spec: ElevationDialog.xaml.
+    Button* skip = add_button(c, L"Skip", [pending, answered, core, close = cx.close] {
         if (pending && !*answered) {
             *answered = true;
             run(*core, "elevation-answer", "no");
         }
         close();
-    })->name = "ElevationSkip";
+    });
+    skip->name = "ElevationSkip";
+    skip->is_default = true;
     add_button(c, L"Try as administrator", [pending, answered, core, close = cx.close] {
         if (pending && !*answered) {
             *answered = true;
@@ -482,12 +520,17 @@ std::unique_ptr<Widget> delete_dialog(DialogContext& cx, bool permanent) {
         list->name = "DeleteItems";
         list->height = std::min<float>(240.0f, 8.0f + 40.0f * static_cast<float>(items.size()));
     }
-    auto fill_list = [list, items, one_place](const json::Value& details) {
+    ShellIcons* shell = &main.shell_icons();
+    auto fill_list = [list, items, one_place, shell](const json::Value& details) {
         if (!list) return;
         std::vector<f::ListEntry> entries;
         for (size_t i = 0; i < items.size(); ++i) {
             f::ListEntry e;
             e.text = w(items[i]["name"]);
+            // Each item's own icon. Spec: DeleteDialog (the row template's FileIcon).
+            const std::wstring path = w(items[i]["path"]);
+            const bool dir = items[i]["isDirectory"].boolean();
+            e.picture = [shell, path, dir](uint32_t px) { return shell->file(path, dir, dir ? FILE_ATTRIBUTE_DIRECTORY : 0, px); };
             const std::wstring d = i < details.size() ? w(details[i]) : std::wstring();
             e.detail = one_place ? d : w(items[i]["location"]) + (d.empty() ? L"" : L"   ·   " + d);
             entries.push_back(std::move(e));
@@ -519,7 +562,10 @@ std::unique_ptr<Widget> delete_dialog(DialogContext& cx, bool permanent) {
         }
         if (*after) (*after)(*confirmed);
     };
-    add_button(c, L"Cancel", cx.close)->name = "DeleteCancel";
+    // Cancel is the default, so Enter backs out. Spec: DeleteDialog.xaml (IsDefault), DeleteDialog_Loaded.
+    Button* cancel = add_button(c, L"Cancel", cx.close);
+    cancel->name = "DeleteCancel";
+    cancel->is_default = true;
     add_button(c, p["archive"].boolean() ? L"Remove" : L"Delete", [core, confirmed, after, &main, close = cx.close] {
         *confirmed = true;
         try {
@@ -550,6 +596,18 @@ std::unique_ptr<Widget> clear_undo_dialog(DialogContext& cx) {
 
 // ---- a yes/no question, and something to be told ------------------------------------------------------------
 
+// The message with its kind's glyph beside it: a question is a warning, a notice is information. Spec:
+// MessageDialog.Show (the kind), UserConfirm, UserNotice.
+static TextBlock* said_with_glyph(Card& c, const char* icon, Token colour, const std::wstring& text) {
+    auto* head = f::row(*c.body, 12);
+    auto* glyph = head->emplace<Icon>(icons::find(icon), 22.0f);
+    glyph->style.fg = colour;
+    auto* words = f::text(*head, text, tok::TextPrimary, 13.5f);
+    words->wrap = true;
+    words->flex = 1;
+    return words;
+}
+
 // What a worker asked through the confirm seam (a flat view of a huge folder, an update that is ready). The
 // worker is parked until this answers; closing the card any other way is "no". Spec: Services/UserConfirm.
 std::unique_ptr<Widget> confirm_dialog(DialogContext& cx) {
@@ -557,7 +615,7 @@ std::unique_ptr<Widget> confirm_dialog(DialogContext& cx) {
     const json::Value q = query(*core, "confirm")["pending"];
     const bool pending = !q.is_null();
     Card c = make_card(pending ? w(q["title"]) : L"Confirm", 480);
-    f::text(*c.body, pending ? w(q["message"]) : L"", tok::TextPrimary, 13.5f)->wrap = true;
+    said_with_glyph(c, "Warning", tok::WarningForeground, pending ? w(q["message"]) : L"");
     auto answered = std::make_shared<bool>(false);
     auto answer = [pending, answered, core](bool yes) {
         if (!pending || *answered) return;
@@ -584,7 +642,7 @@ std::unique_ptr<Widget> notice_dialog(DialogContext& cx) {
     core::Core* core = &cx.main.core();
     const json::Value q = query(*core, "notice")["pending"];
     Card c = make_card(q.is_null() ? L"BertBrowser" : w(q["title"]), 460);
-    f::text(*c.body, q.is_null() ? L"" : w(q["message"]), tok::TextPrimary, 13.5f)->wrap = true;
+    said_with_glyph(c, "Info", tok::TextLink, q.is_null() ? L"" : w(q["message"]));
     if (!q.is_null()) {
         c.root->on_destroy = [core] {
             try {
@@ -603,29 +661,44 @@ std::unique_ptr<Widget> history_dialog(DialogContext& cx) {
     MainView& main = cx.main;
     auto expanded = std::make_shared<std::set<int64_t>>();
     std::shared_ptr<std::wstring> footer = std::make_shared<std::wstring>();
-    auto fill = [&main, expanded](LiveBody& body) {
+    auto clear_slot = std::make_shared<Button*>(nullptr);
+    auto fill = [&main, expanded, clear_slot](LiveBody& body) {
         core::Core* core = &main.core();
         const json::Value h = query(*core, "history");
         const json::Value& rows = h["rows"];
+        if (*clear_slot) (*clear_slot)->set_enabled(h["count"].i64() > 0);
         {
             bool can_undo = false, can_redo = false;
             for (size_t i = 0; i < rows.size(); ++i) (rows[i]["isDone"].boolean() ? can_undo : can_redo) = true;
             auto* head = f::row(body, 8);
+            auto* words = f::column(*head, 2);
+            words->flex = 1;
+            f::text(*words, L"This session's moves, renames, deletes, pastes, archive edits and syncs", tok::TextPrimary, 13.5f);
+            dim(*words, L"Undoing an older action undoes everything after it first, newest to oldest.")->wrap = true;
+            // Each button says what it would take back, as the title bar's do. Spec: ShellViewModel.UndoDescription.
+            auto caption = [core](const wchar_t* id) {
+                const json::Value s = try_model([&](BbOwnedStr* o) { return bb_command_state(core->app(), core::s(id), o); });
+                return s.is_null() ? std::wstring() : plain_caption(w(s["caption"]));
+            };
             auto* undo = f::button(*head, L"Undo", [core] {
                 uint64_t op = 0;
                 bb_undo_step(core->app(), 1, &op);
             }, 90);
             undo->name = "HistoryUndo";
+            undo->icon = icon_for("Icon.Undo");
+            undo->tooltip = caption(L"edit.undo");
             undo->set_enabled(can_undo && h["canStep"].boolean());
             auto* redo = f::button(*head, L"Redo", [core] {
                 uint64_t op = 0;
                 bb_undo_step(core->app(), -1, &op);
             }, 90);
             redo->name = "HistoryRedo";
+            redo->icon = icon_for("Icon.Redo");
+            redo->tooltip = caption(L"edit.redo");
             redo->set_enabled(can_redo && h["canStep"].boolean());
         }
         if (rows.size() == 0) {
-            f::note(body, L"Nothing has been done yet that can be taken back. Moves, renames, deletes and the like appear here.");
+            f::note(body, L"Nothing to undo yet. Moves, renames, deletes, merged pastes, archive edits and syncs appear here as you make them, and stay until BertBrowser closes.");
         } else {
             auto* scroll = body.emplace<ScrollViewer>();
             scroll->name = "HistoryRows";
@@ -642,12 +715,15 @@ std::unique_ptr<Widget> history_dialog(DialogContext& cx) {
                 auto* item = col->emplace<StackPanel>(Orientation::Vertical, 2.0f);
                 item->pad = 8;
                 item->name = "HistoryRow" + std::to_string(id);
+                // The next undo is what Ctrl+Z will take back, so it is the one row marked.
+                const bool next = r["isNextUndo"].boolean();
+                if (next) item->style.bg = tok::ListHoverBackground;
                 auto* line = f::row(*item, 8);
                 if (const IconData* ic = icon_for(r["icon"].str())) {
                     auto* icon = line->emplace<Icon>(ic, 16.0f);
                     icon->style.fg = done ? tok::TextPrimary : tok::TextMuted;
                 }
-                auto* title = f::text(*line, w(r["description"]), done ? tok::TextPrimary : tok::TextMuted, 13.0f, 600);
+                auto* title = f::text(*line, w(r["description"]), done ? tok::TextPrimary : tok::TextSecondary, 13.0f, next ? 600 : 400);
                 title->flex = 1;
                 const std::wstring badge = w(r["badge"]);
                 if (!badge.empty()) dim(*line, badge, r["problem"].str().empty() ? tok::TextSecondary : tok::WarningForeground);
@@ -695,7 +771,14 @@ std::unique_ptr<Widget> history_dialog(DialogContext& cx) {
                 if (!rows[i]["isDone"].boolean()) add_row(rows[i]);
             }
             if (any_undone) {
-                auto* marker = f::note(*col, L"Undone above — redo steps forward · In effect below — undo steps back");
+                auto gesture = [core](const wchar_t* id, const wchar_t* name) {
+                    BbOwnedStr g{};
+                    std::wstring text;
+                    if (bb_keymap_gesture(core->app(), core::s(id), &g) == BB_OK) text = core::take(g);
+                    return text.empty() ? std::wstring(name) : text;
+                };
+                auto* marker = f::note(*col, L"Undone above — " + gesture(L"edit.redo", L"Redo") + L" redoes · In effect below — " +
+                                                 gesture(L"edit.undo", L"Undo") + L" undoes");
                 marker->name = "HistoryCursor";
             }
             for (size_t i = 0; i < rows.size(); ++i) {
@@ -714,8 +797,12 @@ std::unique_ptr<Widget> history_dialog(DialogContext& cx) {
         bb_settings_page_open(main.core().app(), core::s(L"history"));
         main.sync_overlays();
     }, false, 150);
-    add_button(c, L"Clear history", [&main] { main.open_dialog(L"clear-undo"); }, false, 120)
-        ->set_enabled(query(*core, "history")["count"].i64() > 0);
+    // Enabled live: the body refreshes on every change, the buttons are the card's own.
+    Button* clear = add_button(c, L"Clear history…", [&main] { main.open_dialog(L"clear-undo"); }, false, 120);
+    clear->name = "HistoryClear";
+    clear->tooltip = L"Commit everything the history is holding. None of it can be undone afterwards.";
+    clear->set_enabled(query(*core, "history")["count"].i64() > 0);
+    *clear_slot = clear;  // the card outlives its body, so the body may reach it
     add_button(c, L"Close", cx.close, true);
     return std::move(c.root);
 }
@@ -731,6 +818,13 @@ void add_dialogs(std::map<std::wstring, DialogBuilder>& table) {
     table[L"delete"] = [](DialogContext& cx) { return delete_dialog(cx, false); };
     table[L"delete-permanently"] = [](DialogContext& cx) { return delete_dialog(cx, true); };
     table[L"notice"] = [](DialogContext& cx) { return notice_dialog(cx); };
+    table[L"message"] = [](DialogContext& cx) {
+        const auto [title, text] = cx.main.message();
+        Card c = make_card(title.empty() ? L"BertBrowser" : title, 460);
+        said_with_glyph(c, "Warning", tok::WarningForeground, text)->name = "MessageText";
+        add_button(c, L"OK", cx.close, true)->name = "MessageOk";
+        return std::unique_ptr<Widget>(std::move(c.root));
+    };
     table[L"undo-history"] = [](DialogContext& cx) { return history_dialog(cx); };
     table[L"rename"] = [](DialogContext& cx) { return rename_dialog(cx, false); };
     table[L"rename-advanced"] = [](DialogContext& cx) { return rename_dialog(cx, true); };

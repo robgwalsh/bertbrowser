@@ -258,6 +258,21 @@ void ColorPicker::set_rgb(uint32_t rgb) {
     set_hsv(c);
 }
 
+void ColorPicker::set_argb(uint32_t argb) {
+    alpha_ = static_cast<uint8_t>(argb >> 24);
+    set_rgb(argb & 0xFFFFFF);
+}
+
+std::optional<uint32_t> ColorPicker::parse_hex(std::wstring t) {
+    if (!t.empty() && t[0] == L'#') t.erase(0, 1);
+    if (t.size() != 6 && t.size() != 8) return std::nullopt;
+    for (wchar_t ch : t) {
+        if (!iswxdigit(ch)) return std::nullopt;
+    }
+    const uint32_t v = static_cast<uint32_t>(std::wcstoul(t.c_str(), nullptr, 16));
+    return t.size() == 6 ? 0xFF000000u | v : v;
+}
+
 void ColorPicker::set_hsv(Hsv c) {
     c.s = std::clamp(c.s, 0.0f, 1.0f);
     c.v = std::clamp(c.v, 0.0f, 1.0f);
@@ -267,17 +282,33 @@ void ColorPicker::set_hsv(Hsv c) {
 }
 
 Size ColorPicker::measure(Size) {
-    return fixed_or({2 * kPad + kSquareW + kGap + kStripW, 3 * kPad + kSquareH + 28.0f});
+    return fixed_or({2 * kPad + kSquareW + kGap + kStripW, 4 * kPad + kSquareH + kAlphaH + 28.0f});
 }
 
 Rect ColorPicker::square() const { return Rect::xywh(bounds.l + kPad, bounds.t + kPad, kSquareW, kSquareH); }
 Rect ColorPicker::strip() const { return Rect::xywh(bounds.l + kPad + kSquareW + kGap, bounds.t + kPad, kStripW, kSquareH); }
-Rect ColorPicker::swatch() const { return Rect::xywh(bounds.l + kPad, bounds.t + 2 * kPad + kSquareH, 44, 28); }
+Rect ColorPicker::alpha_strip() const {
+    return Rect::xywh(bounds.l + kPad, bounds.t + 2 * kPad + kSquareH, kSquareW + kGap + kStripW, kAlphaH);
+}
+Rect ColorPicker::swatch() const { return Rect::xywh(bounds.l + kPad, bounds.t + 3 * kPad + kSquareH + kAlphaH, 44, 28); }
 
 std::wstring ColorPicker::hex_text() const {
     wchar_t buf[16];
-    swprintf_s(buf, L"#%06X", rgb());
+    if (alpha_ == 255) swprintf_s(buf, L"#%06X", rgb());
+    else swprintf_s(buf, L"#%08X", argb());
     return buf;
+}
+
+// So a partly transparent colour reads as transparent. Spec: ColorPicker.xaml (Checkerboard).
+void ColorPicker::checker(PaintContext& pc, const Rect& r) const {
+    constexpr float kCell = 6.0f;
+    pc.fill(r, tok::PreviewCheckerLight);
+    for (float y = r.t; y < r.b; y += kCell) {
+        for (float x = r.l; x < r.r; x += kCell) {
+            const int parity = static_cast<int>((x - r.l) / kCell) + static_cast<int>((y - r.t) / kCell);
+            if (parity & 1) pc.fill(Rect{x, y, std::min(r.r, x + kCell), std::min(r.b, y + kCell)}, tok::PreviewCheckerDark);
+        }
+    }
 }
 
 void ColorPicker::paint(PaintContext& pc) {
@@ -324,11 +355,28 @@ void ColorPicker::paint(PaintContext& pc) {
         dc->DrawRectangle(D2D1::RectF(st.l - 2, hy - 3, st.r + 2, hy + 3), black.Get(), 3.0f);
         dc->DrawRectangle(D2D1::RectF(st.l - 2, hy - 3, st.r + 2, hy + 3), white.Get(), 1.5f);
     }
+    // The alpha strip: this colour from clear to opaque, over the checkerboard.
+    const Rect al = alpha_strip();
+    checker(pc, al);
+    {
+        const D2D1::ColorF solid(rgb());
+        if (auto a = gradient({{0.0f, D2D1::ColorF(solid.r, solid.g, solid.b, 0.0f)}, {1.0f, D2D1::ColorF(solid.r, solid.g, solid.b, 1.0f)}},
+                              D2D1::Point2F(al.l, 0), D2D1::Point2F(al.r, 0))) {
+            dc->FillRectangle(al.d2d(), a.Get());
+        }
+    }
+    pc.stroke(al, tok::BorderDefault);
+    if (white && black) {
+        const float ax = al.l + static_cast<float>(alpha_) / 255.0f * al.width();
+        dc->DrawRectangle(D2D1::RectF(ax - 2, al.t - 3, ax + 2, al.b + 3), black.Get(), 3.0f);
+        dc->DrawRectangle(D2D1::RectF(ax - 2, al.t - 3, ax + 2, al.b + 3), white.Get(), 1.5f);
+    }
     if (focused()) pc.stroke(bounds.deflate(1, 1, 1, 1), tok::BorderFocus);
 
     const Rect sw = swatch();
+    checker(pc, sw);
     ComPtr<ID2D1SolidColorBrush> cur;
-    dc->CreateSolidColorBrush(D2D1::ColorF(rgb()), &cur);
+    dc->CreateSolidColorBrush(D2D1::ColorF(rgb(), static_cast<float>(alpha_) / 255.0f), &cur);
     if (cur) dc->FillRectangle(sw.d2d(), cur.Get());
     pc.stroke(sw, tok::BorderDefault);
     pc.text(hex_text(), Rect{sw.r + 10, sw.t, sw.r + 110, sw.b}, style.font, tok::TextPrimary);
@@ -342,6 +390,9 @@ void ColorPicker::drag_to(Point p, bool dragging) {
     } else if (drag_ == Drag::Strip) {
         const Rect st = strip();
         hsv_.h = std::min(359.999f, std::clamp((p.y - st.t) / st.height(), 0.0f, 1.0f) * 360.0f);
+    } else if (drag_ == Drag::Alpha) {
+        const Rect al = alpha_strip();
+        alpha_ = static_cast<uint8_t>(std::lround(std::clamp((p.x - al.l) / al.width(), 0.0f, 1.0f) * 255.0f));
     } else {
         return;
     }
@@ -355,6 +406,8 @@ bool ColorPicker::on_mouse_down(const MouseEvent& e) {
         drag_ = Drag::Square;
     } else if (strip().inflate(2).contains(e.pt)) {
         drag_ = Drag::Strip;
+    } else if (alpha_strip().inflate(2).contains(e.pt)) {
+        drag_ = Drag::Alpha;
     } else {
         return false;
     }

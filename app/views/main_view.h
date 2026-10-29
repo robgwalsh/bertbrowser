@@ -40,6 +40,7 @@ namespace bb::views {
 
 constexpr UINT WM_BB_EVENT = WM_APP + 1;
 constexpr UINT WM_BB_BARS = WM_APP + 2;
+constexpr UINT WM_BB_TREE = WM_APP + 6;  // the folder tree's worker finished a read
 constexpr UINT WM_BB_DEFER = WM_APP + 30;
 
 class MainView;
@@ -61,11 +62,17 @@ struct SelectedRow {
 // The duplicate finder's last result and which copies are ticked for removal.
 // The duplicate finder's window: the core's model (`duplicates.model`) as last read, and the copies ticked here,
 // by position - so they go whenever the core says the groups were replaced (`version`).
+// A virtual key as a chord names it ("Esc", "Del", "F5", "A"); empty for one no chord uses.
+std::wstring chord_key_name(unsigned vk);
+
 struct DuplicatesState {
     bool has = false;
     json::Value result;
     std::set<std::pair<size_t, size_t>> ticked;  // group, file
     int64_t version = -1;
+    // Copies a confirmed removal is deleting: each leaves its group once it is really gone from disk, so one
+    // that could not be deleted stays listed. Settled as operations finish (`duplicates_settle_prune`).
+    std::vector<std::wstring> pending_prune;
 };
 
 // Rows and selection of one tab, for the details list. Cells come from the snapshot; selection is the
@@ -89,6 +96,7 @@ public:
     std::wstring row_path(size_t row) const;
     bool selected(size_t row) const override { return row < sel_.size() && sel_[row]; }
     void select(ui::SelectOp op, size_t first, size_t last) override;
+    void select_rows(const std::vector<size_t>& rows) override;
 
 private:
     core::Core& core_;
@@ -100,6 +108,21 @@ private:
     // an archive, whose paths only look real. Asked of the disk once per place.
     std::wstring checked_path_;
     bool real_paths_ = true;
+};
+
+// A search box with its two buttons inside it, at the right: save this search, and clear it. Both are
+// there only while there is something typed. Spec: DirectoryTabView.xaml (SearchBox, SearchClearButton).
+class SearchField : public ui::Edit {
+public:
+    SearchField(std::function<void()> clear, std::function<void()> save);
+    void arrange(ui::Rect r) override;
+    void sync_buttons();  // shown while the box has text
+    ui::Button* clear_button() const { return clear_; }
+    ui::Button* save_button() const { return save_; }
+
+private:
+    ui::Button* clear_ = nullptr;
+    ui::Button* save_ = nullptr;
 };
 
 // One tab: navigation row, path, search, the details list, the message over an empty folder.
@@ -115,8 +138,12 @@ public:
     bool tiles_mode() const { return tiles_on_; }
     ListAdapter& adapter() { return adapter_; }
     ui::Edit* search_box() const { return search_; }
-    ui::Edit* global_search_box() const { return gsearch_; }
+    ui::Edit* global_search_box() const;  // the title bar's, which acts on the active tab
 
+    // Esc in a search box: a search still running is stopped and keeps what it found; otherwise the box is
+    // cleared and the list takes the keyboard. Spec: DirectoryTabView.SearchBox_KeyDown.
+    void search_escape(bool global);
+    void clear_search(bool global);
     void reload_listing();  // a new snapshot (and its columns)
     void reload_state();    // path, history, search text, selection, sort, messages
     void reload_columns();  // the column set moved
@@ -161,6 +188,19 @@ private:
     void sync_view_mode(const BbTabState& st);
     void sync_side_pane(const BbTabState& st);
     void on_search_changed(bool global);
+    // Explorer-style type-to-select: a letter jumps to (and, repeated, cycles through) the names starting
+    // with it; letters typed in quick succession match a longer prefix. `typed` is everything typed inside
+    // the widget's window, this keystroke last. Spec: DirectoryTabView.FileList_TextInput.
+    void type_ahead(const std::wstring& typed);
+    void open_row(size_t row);
+    bool select_by_prefix(const std::wstring& prefix, size_t start);
+    std::wstring typeahead_prefix_;
+    uint64_t reveal_seq_ = 0;
+    ui::ProgressBar* activity_ = nullptr;
+    ui::TextBlock* notice_ = nullptr;
+    ui::Widget* notice_panel_ = nullptr;
+    void apply_reveal(const BbTabState& st);
+
     void open_context(ui::Point p, bool header, bool background = false);
     ui::Widget* active_view() const;
 
@@ -171,10 +211,11 @@ private:
     ui::StackPanel* nav_ = nullptr;
     ui::Button *back_ = nullptr, *forward_ = nullptr, *up_ = nullptr, *refresh_ = nullptr;
     ui::Button* side_buttons_[3] = {nullptr, nullptr, nullptr};
+    ui::Button* flat_button_ = nullptr;
     ui::Panel* path_bar_ = nullptr;
     BreadcrumbBar* crumbs_ = nullptr;
     PathEdit* path_ = nullptr;
-    ui::Edit *search_ = nullptr, *gsearch_ = nullptr;
+    SearchField* search_ = nullptr;
     ui::Widget* banner_panel_ = nullptr;
     ui::TextBlock* banner_ = nullptr;
     ui::Button* unlock_ = nullptr;
@@ -233,6 +274,8 @@ public:
     TabView* active_view() { return tab_view(active_tab_); }
     size_t pane_count() const { return pane_views_.size(); }
     size_t tab_count_in_active_pane() const;
+    TabStrip* active_strip() const;
+    StatusBar* status_bar() const { return status_; }
     std::vector<std::wstring> tab_titles_in_active_pane() const;
     std::vector<uint64_t> tab_ids_in_active_pane() const;
     std::vector<uint64_t> pane_ids() const;
@@ -274,6 +317,8 @@ public:
     void activate_tab(uint64_t tab);
     void close_tab(uint64_t tab);
     void activate_pane(uint64_t pane);
+    // A tab's right-click menu: Duplicate, Close others, Move to new pane, Close. Spec: FilePaneView.xaml.
+    ui::MenuItems tab_menu(uint64_t tab);
 
     // ---- menu bar and toolbars (the core's bars model drawn) ----
     ui::MenuBar* menu_bar() const { return menu_bar_; }
@@ -288,11 +333,13 @@ public:
     // bar has no such menu.
     ui::MenuItems build_main_menu(const std::wstring& name, bool* found = nullptr);
     MenuBuildEnv menu_env();
+    void wire_tab_strip(TabStrip& strip, uint64_t pane);
     // The flags the core wants beside a key: what overlay is up.
     uint32_t focus_flags();
     BbFocusKind focus_kind() const;
     // Carries out a command that is the host's to carry out. false when it wants a person (a dialog) and was not.
     bool host_command(const std::wstring& id);
+    bool dialog_key(const ui::KeyEvent& e);
     // What follows a command the core carried out (the keyboard back on the active list).
     void after_command(const std::wstring& id);
     // A context menu by kind (files, background, columns) as it would be built now; false for an unknown kind.
@@ -309,6 +356,7 @@ public:
     std::wstring transfer_text() const;
     // An open Transfers window refreshes itself through this; empty when none is open.
     std::function<void()> on_transfer_changed;
+    std::function<void()> on_sync_progress;  // the Sync dialog's live progress (its own slot: the Transfers window has the other)
     // The same for an open History window.
     std::function<void()> on_undo_changed;
     std::function<void()> on_delete_survey;  // the delete confirmation measured another item
@@ -339,6 +387,15 @@ public:
     void sync_overlays();
     // Opens a dialog by kind in the window's dialog layer (modal until closed).
     void open_dialog(const std::wstring& kind);
+    void refresh_tool(const std::wstring& kind);
+    void sync_devices(bool refresh);
+    void open_device(const std::wstring& path);
+    // A card that says something and has an OK: what a refused plan reports (C#'s MessageDialog), raised on
+    // the UI thread, unlike the notice seam a worker parks on.
+    void show_message(std::wstring title, std::wstring text);
+    std::pair<std::wstring, std::wstring> message() const { return message_; }
+    // A key in a tool window that is not Esc: true when the window's own bindings took it.
+    bool tool_window_key(const std::wstring& key, const ui::KeyEvent& e);
     // Gives the keyboard to the active tab's list (or its tiles). False when there is no tab.
     bool focus_file_list();
     // The delete confirmation over `paths` rather than the selection; `after` hears whether Delete was
@@ -348,6 +405,11 @@ public:
     // (empty: the tab's).
     void open_new_file(const std::wstring& extension, const std::wstring& label, const std::wstring& folder);
     std::pair<std::wstring, std::wstring> new_file_template() const { return new_file_template_; }
+    // The Save search dialog editing a saved search, and the rename of a saved workspace: the one edit for
+    // the sidebar's menu and the Settings page alike.
+    void edit_saved_search(const std::wstring& name);
+    void rename_workspace(const std::wstring& name);
+    const std::wstring& editing_saved() const { return editing_saved_; }
     // Opens (or rebuilds) a dialog about these items rather than the selection.
     void reopen_on(const std::wstring& kind, std::vector<std::wstring> paths);
     std::vector<std::wstring>& properties_paths() { return properties_paths_; }
@@ -356,6 +418,8 @@ public:
     // so a script can type into it and press its buttons (`dialog_widget`).
     void set_live_dialogs(bool on) { live_dialogs_ = on; }
     bool shows_dialogs() const { return !headless_dialogs_ || live_dialogs_; }
+    // A scripted run: nothing that reads or changes the machine itself (the registry, the scheduler).
+    bool scripted() const { return headless_dialogs_; }
     bool dialog_up() const { return dialog_open_; }
     const std::wstring& dialog_kind() const { return dialog_kind_; }
     ui::Widget* dialog_widget(std::string_view name);
@@ -367,6 +431,9 @@ public:
     void close_tool(const std::wstring& kind);
     // Re-reads the duplicate finder's model, and rebuilds its window if it is open.
     void sync_duplicates();
+    void refresh_index_windows();
+    void refresh_changes(bool force);
+    static constexpr UINT_PTR kChangesTimer = 0xBB01;
     // The Properties dialog's Details: the one path whose shell properties were last read, and what they were.
     std::pair<std::wstring, std::vector<std::pair<std::wstring, std::wstring>>>& properties_details() { return properties_details_; }
     void style_tool_window(ToolWindow& w);
@@ -392,6 +459,7 @@ public:
     // File, folder and drive icons, shared by every list and the folder tree.
     ShellIcons& shell_icons() { return *icons_; }
     size_t icons_pending() const { return icons_->pending(); }
+    size_t tree_pending() const;  // folder-tree reads still on a worker
     // A preview scheduled or being read in any tab (the harness waits for it to land).
     bool preview_pending() const;
     // Where tile thumbnails come from: the shell (the product) or a generator (the harness).
@@ -437,10 +505,13 @@ private:
     bool live_dialogs_ = false;
     std::pair<std::wstring, std::vector<std::pair<std::wstring, std::wstring>>> properties_details_;
     std::map<std::wstring, std::unique_ptr<ToolWindow>> tools_;  // by tool_key
+    std::string changes_signature_;  // what the What changed window last showed
     bool follow_windows_ = true;
     std::wstring dialog_folder_;
     std::vector<std::wstring> dialog_paths_;  // what the delete confirmation being built asks about
     std::vector<std::wstring> properties_paths_;  // what the Properties dialog up is about
+    std::wstring editing_saved_;                   // the saved search or workspace the dialog being built edits
+    std::pair<std::wstring, std::wstring> message_;  // title, text: the message card
     std::pair<std::wstring, std::wstring> new_file_template_;  // extension, label: the New file dialog being built
     std::function<void(bool)> after_delete_;
     // A run's clipboard (see set_headless_dialogs), and its change count, standing in for Windows'.
@@ -449,6 +520,7 @@ private:
     // A paste of cut files under way: the clipboard is emptied once it has moved them, as Explorer's is -
     // unless something else has been put on the clipboard meanwhile.
     uint64_t cut_paste_op_ = 0;
+    std::vector<std::wstring> cut_paste_paths_;  // what the cut paste was moving
     uint32_t cut_paste_seq_ = 0;
     uint32_t clipboard_seq() const;
     std::unique_ptr<ShellMenuSource> shell_source_;
@@ -468,6 +540,11 @@ private:
     json::Value index_state_;
     ThumbSource thumb_source_ = ThumbSource::Shell;
     bool dialog_open_ = false;
+    bool refreshing_tool_ = false;
+    std::string changes_stamp_;  // the change log as What changed last read it
+    int changes_ticks_ = 0;
+    std::string theme_editor_id_;  // the theme the open editor shows, so another one rebuilds it
+    ui::Widget* focus_before_dialog_ = nullptr;  // only ever compared, or used once found in the tree again  // refresh_tool: rebuild without taking the foreground
     bool questions_waiting_ = false;  // a question or notice arrived while a dialog it may not replace was up
     std::wstring dialog_kind_;
     std::unique_ptr<ui::MenuItems> floating_menu_;
@@ -483,6 +560,32 @@ private:
     std::unordered_map<uint64_t, TabView*> by_tab_;
     std::vector<PaneView*> pane_views_;
     uint64_t active_tab_ = 0, active_pane_ = 0;
+    bool index_was_building_ = false;
+    // The title bar's workspace and saved-search dropdowns, shown when Settings places them there.
+    ui::StackPanel* switchers_ = nullptr;
+    ui::Button* workspace_switcher_ = nullptr;
+    ui::Button* search_switcher_ = nullptr;
+    void sync_switchers();
+    void open_switcher(bool workspaces);
+    // The whole-PC search: one box in the title bar, the active tab's query. Spec: MainWindow.xaml (GlobalSearchField).
+    ui::StackPanel* title_search_group_ = nullptr;
+    SearchField* title_search_ = nullptr;
+    bool title_search_suppress_ = false;
+
+public:
+    SearchField* title_search() const { return title_search_; }
+    // Shows `text` in the title bar's box without it counting as typing.
+    void set_title_search_text(const std::wstring& text);
+    // The box follows the active tab: its query when that is a whole-PC one, else nothing.
+    void sync_title_search();
+
+private:
+
+public:
+    // The title bar switcher's dropdown, as it would open (the harness photographs it).
+    ui::MenuItems switcher_items(bool workspaces);
+
+private:
     std::wstring revealed_;
     bool revealing_ = false;
     size_t handled_ = 0;

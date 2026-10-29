@@ -84,6 +84,8 @@ pub(crate) struct TabData {
     pub is_flat_browse: bool,
     pub shows_content_matches: bool,
     pub is_search_running: bool,
+    /// A reload has started and its rows have not arrived yet: the activity bar under the nav row.
+    pub is_loading: bool,
     /// Bumped by every refresh; a job that finds it moved discards its result.
     pub generation: u64,
     pub search_gen: u64,
@@ -106,6 +108,10 @@ pub(crate) struct TabData {
     pub props_inflight: HashSet<(Arc<str>, String)>,
     /// Paths to select once the listing that contains them arrives.
     pub pending_selection: Vec<String>,
+    /// Bumped when a pending selection lands, with the first row it selected: the view scrolls that
+    /// row into view and puts its cursor there, once per bump.
+    pub reveal_seq: u64,
+    pub reveal_row: Option<usize>,
     /// The preview pane's mode (0 auto, 1 raw, 2 hex) and its two per-tab switches.
     pub preview_mode: u8,
     pub preview_wrap: bool,
@@ -149,6 +155,7 @@ impl TabData {
             is_flat_browse: false,
             shows_content_matches: false,
             is_search_running: false,
+            is_loading: false,
             generation: 0,
             search_gen: 0,
             cancel: CancelToken::new(),
@@ -161,6 +168,8 @@ impl TabData {
             props_pending: false,
             props_inflight: HashSet::new(),
             pending_selection: Vec::new(),
+            reveal_seq: 0,
+            reveal_row: None,
             preview_mode: 0,
             preview_wrap: false,
             preview_fit: false,
@@ -178,9 +187,9 @@ impl TabData {
             .iter()
             .filter_map(|p| bb_paths::PathKey::canonicalize(p).ok())
             .collect();
-        let found: Vec<u64> = self
-            .listing
-            .rows()
+        let rows = self.listing.rows();
+        let first = rows.iter().position(|r| wanted.contains(&*r.key));
+        let found: Vec<u64> = rows
             .iter()
             .filter(|r| wanted.contains(&*r.key))
             .map(|r| r.id)
@@ -189,6 +198,8 @@ impl TabData {
         if !found.is_empty() {
             self.selection = found.into_iter().collect();
             self.pending_selection.clear();
+            self.reveal_seq += 1;
+            self.reveal_row = first;
         }
     }
 

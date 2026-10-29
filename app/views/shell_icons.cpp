@@ -65,13 +65,21 @@ IWICImagingFactory* wic() {
 
 // The list's picture for a slot, `px` square, premultiplied.
 ui::ThumbPtr render(IImageList* list, int index, int overlay, uint32_t px) {
-    IWICImagingFactory* f = wic();
-    if (!list || !f || px == 0) return nullptr;
+    if (!list || px == 0) return nullptr;
     HICON icon = nullptr;
     if (FAILED(list->GetIcon(index, ILD_TRANSPARENT | INDEXTOOVERLAYMASK(overlay), &icon)) || !icon) return nullptr;
+    ui::ThumbPtr img = icon_picture(icon, px);
+    DestroyIcon(icon);
+    return img;
+}
+
+}  // namespace
+
+ui::ThumbPtr icon_picture(HICON icon, uint32_t px) {
+    IWICImagingFactory* f = wic();
+    if (!icon || !f || px == 0) return nullptr;
     ComPtr<IWICBitmap> bitmap;
     const HRESULT hr = f->CreateBitmapFromHICON(icon, &bitmap);
-    DestroyIcon(icon);
     if (FAILED(hr)) return nullptr;
     ComPtr<IWICFormatConverter> pbgra;
     if (FAILED(f->CreateFormatConverter(&pbgra)) ||
@@ -96,6 +104,8 @@ ui::ThumbPtr render(IImageList* list, int index, int overlay, uint32_t px) {
     if (FAILED(source->CopyPixels(nullptr, px * 4, static_cast<UINT>(img->bgra.size()), img->bgra.data()))) return nullptr;
     return img;
 }
+
+namespace {
 
 // How much of the square the picture covers, as the larger side of its opaque bounds. A type that ships no
 // 256-pixel picture comes out of the jumbo list as its 48 in a corner of an empty 256.
@@ -226,6 +236,18 @@ ui::ThumbPtr ShellIcons::drive(const std::wstring& root, uint32_t px) {
     }
     const Slot s = it->second.fixed ? own_slot(root, it->second.stock) : it->second.stock;
     return image(s, px);
+}
+
+ui::ThumbPtr ShellIcons::stock(int siid, uint32_t px) {
+    auto it = stock_.find(siid);
+    if (it == stock_.end()) {
+        Slot s;
+        SHSTOCKICONINFO info{};
+        info.cbSize = sizeof(info);
+        if (SUCCEEDED(SHGetStockIconInfo(static_cast<SHSTOCKICONID>(siid), SHGSI_SYSICONINDEX, &info))) s.index = info.iSysImageIndex;
+        it = stock_.emplace(siid, s).first;
+    }
+    return image(it->second, px);
 }
 
 void ShellIcons::work() {

@@ -22,7 +22,18 @@ const TEXT_BUDGET: i64 = 8 << 20;
 /// Rows of hex either side of the first difference.
 const HEX_CONTEXT_ROWS: usize = 24;
 
+/// What a worker needs to compare: the session as it stood when the comparison began.
+pub(crate) struct CompareJob {
+    pub(crate) generation: u64,
+    left: String,
+    right: String,
+    ignore_whitespace: bool,
+    ignore_case: bool,
+    forced_text: bool,
+}
+
 pub(crate) struct FileCompareSession {
+    generation: u64,
     left: String,
     right: String,
     ignore_whitespace: bool,
@@ -119,8 +130,18 @@ fn op_name(op: DiffOp) -> &'static str {
 }
 
 impl FileCompareSession {
+    /// Compared at once, on this thread: the unit tests' way in.
+    #[cfg(test)]
     pub fn new(left: &str, right: &str) -> FileCompareSession {
-        let mut s = FileCompareSession {
+        let mut s = FileCompareSession::pending(left, right);
+        s.compare();
+        s
+    }
+
+    /// A session with nothing compared yet: `begin` starts the comparison.
+    pub fn pending(left: &str, right: &str) -> FileCompareSession {
+        FileCompareSession {
+            generation: 0,
             left: left.to_string(),
             right: right.to_string(),
             ignore_whitespace: true,
@@ -129,16 +150,25 @@ impl FileCompareSession {
             model: Value::Null,
             hunks: Vec::new(),
             hunk_index: None,
-        };
-        s.compare();
-        s
+        }
     }
 
+    /// Takes the options; the caller begins the comparison they call for.
     pub fn set_options(&mut self, ignore_whitespace: bool, ignore_case: bool, force_text: bool) {
         self.ignore_whitespace = ignore_whitespace;
         self.ignore_case = ignore_case;
         self.forced_text = force_text;
-        self.compare();
+    }
+
+    /// Puts each file on the other side. Spec: FileCompareViewModel.Swap.
+    /// The caller begins the comparison again.
+    pub fn swap(&mut self) {
+        std::mem::swap(&mut self.left, &mut self.right);
+        self.hunk_index = None;
+        self.model["leftPath"] = json!(self.left);
+        self.model["rightPath"] = json!(self.right);
+        self.model["leftName"] = json!(name_of(&self.left));
+        self.model["rightName"] = json!(name_of(&self.right));
     }
 
     /// Moves to the next (`+1`) or previous (`-1`) difference; the model says which row to scroll to.
@@ -180,9 +210,12 @@ impl FileCompareSession {
         };
     }
 
-    fn compare(&mut self) {
+    /// The comparison itself: reads both files, so it runs on a worker. Spec:
+    /// FileCompareViewModel.CompareAsync.
+    pub(crate) fn compute(job: &CompareJob) -> (Value, Vec<usize>) {
+        let (left, right) = (job.left.as_str(), job.right.as_str());
         let comparison = FileContentComparer
-            .compare(&self.left, &self.right, None, &CancelToken::new())
+            .compare(left, right, None, &CancelToken::new())
             .unwrap_or(ContentComparison {
                 verdict: ContentVerdict::Unreadable,
                 first_difference_offset: None,
@@ -190,35 +223,33 @@ impl FileCompareSession {
                 right_bytes: 0,
             });
         let mut model = json!({
-            "leftPath": self.left, "rightPath": self.right,
-            "leftName": name_of(&self.left), "rightName": name_of(&self.right),
+            "leftPath": left, "rightPath": right,
+            "leftName": name_of(left), "rightName": name_of(right),
             "verdict": describe(&comparison),
             "identical": comparison.identical(),
             "banner": Value::Null,
             "mode": "text",
             "canForceText": false,
-            "ignoreWhitespace": self.ignore_whitespace,
-            "ignoreCase": self.ignore_case,
+            "ignoreWhitespace": job.ignore_whitespace,
+            "ignoreCase": job.ignore_case,
             "rows": [],
             "counter": "",
             "scrollTo": Value::Null,
         });
-        self.hunks.clear();
-        self.hunk_index = None;
+        let mut hunks: Vec<usize> = Vec::new();
 
         if comparison.verdict == ContentVerdict::Unreadable {
             model["banner"] =
                 json!("One of these files could not be read, so they have not been compared.");
-            self.model = model;
-            return;
+            return (model, hunks);
         }
 
-        let left = read_text(&self.left);
-        let right = read_text(&self.right);
+        let left = read_text(left);
+        let right = read_text(right);
         let mode = FileComparePlan::mode_for(
-            &FileCompareSide::new(name_of(&self.left), left.convincing),
-            &FileCompareSide::new(name_of(&self.right), right.convincing),
-            self.forced_text,
+            &FileCompareSide::new(name_of(&job.left), left.convincing),
+            &FileCompareSide::new(name_of(&job.right), right.convincing),
+            job.forced_text,
         );
 
         let mut rows: Vec<Value> = Vec::new();
@@ -229,9 +260,9 @@ impl FileCompareSession {
                 &l,
                 &r,
                 &DiffOptions {
-                    ignore_trailing_whitespace: self.ignore_whitespace,
+                    ignore_trailing_whitespace: job.ignore_whitespace,
                     ignore_all_whitespace: false,
-                    ignore_case: self.ignore_case,
+                    ignore_case: job.ignore_case,
                 },
             );
             for row in &diff.rows {
@@ -243,7 +274,7 @@ impl FileCompareSession {
                     "rt": if row.right_line > 0 { r[row.right_line - 1] } else { "" },
                 }));
             }
-            self.hunks = diff.hunks.iter().map(|h| h.first_row).collect();
+            hunks = diff.hunks.iter().map(|h| h.first_row).collect();
             let mut notes = Vec::new();
             if diff.budget_exceeded {
                 notes.push("These files are too different to align line by line; they are shown side by side as they are.".to_string());
@@ -259,7 +290,7 @@ impl FileCompareSession {
             }
         } else {
             model["mode"] = json!("binary");
-            model["canForceText"] = json!(!self.forced_text);
+            model["canForceText"] = json!(!job.forced_text);
             let start = comparison
                 .first_difference_offset
                 .map(|o| {
@@ -269,8 +300,8 @@ impl FileCompareSession {
                 })
                 .unwrap_or(0)
                 .max(0);
-            let l = dump(&self.left, start);
-            let r = dump(&self.right, start);
+            let l = dump(&job.left, start);
+            let r = dump(&job.right, start);
             for i in 0..l.len().max(r.len()) {
                 let same = i < l.len() && i < r.len() && l[i] == r[i];
                 rows.push(json!({
@@ -289,10 +320,61 @@ impl FileCompareSession {
             }
         }
         model["rows"] = Value::Array(rows);
-        model["hunkCount"] = json!(self.hunks.len());
-        model["canStep"] = json!(!self.hunks.is_empty());
+        model["hunkCount"] = json!(hunks.len());
+        model["canStep"] = json!(!hunks.is_empty());
+        (model, hunks)
+    }
+
+    #[cfg(test)]
+    fn compare(&mut self) {
+        let job = self.job();
+        let (model, hunks) = Self::compute(&job);
+        self.settle(model, hunks);
+    }
+
+    fn job(&self) -> CompareJob {
+        CompareJob {
+            generation: self.generation,
+            left: self.left.clone(),
+            right: self.right.clone(),
+            ignore_whitespace: self.ignore_whitespace,
+            ignore_case: self.ignore_case,
+            forced_text: self.forced_text,
+        }
+    }
+
+    fn settle(&mut self, model: Value, hunks: Vec<usize>) {
         self.model = model;
+        self.hunks = hunks;
+        self.hunk_index = None;
         self.update_counter();
+    }
+
+    /// Starts another comparison of the session as it now stands: the window keeps what it shows,
+    /// marked as comparing, until `apply` lands the answer. A later `begin` supersedes this one.
+    pub(crate) fn begin(&mut self) -> CompareJob {
+        self.generation += 1;
+        if self.model.is_null() {
+            self.model = json!({
+                "leftPath": self.left, "rightPath": self.right,
+                "leftName": name_of(&self.left), "rightName": name_of(&self.right),
+                "verdict": "Comparing\u{2026}", "identical": false, "banner": Value::Null,
+                "mode": "text", "canForceText": false,
+                "ignoreWhitespace": self.ignore_whitespace, "ignoreCase": self.ignore_case,
+                "rows": [], "counter": "", "scrollTo": Value::Null, "hunkCount": 0, "canStep": false,
+            });
+        }
+        self.model["comparing"] = json!(true);
+        self.job()
+    }
+
+    /// Lands a worker's answer; false when a later comparison superseded it.
+    pub(crate) fn apply(&mut self, generation: u64, model: Value, hunks: Vec<usize>) -> bool {
+        if generation != self.generation {
+            return false;
+        }
+        self.settle(model, hunks);
+        true
     }
 
     pub fn model(&self) -> &Value {

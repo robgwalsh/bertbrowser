@@ -213,10 +213,61 @@ impl Inner {
         Ok(())
     }
 
+    /// Ticks or unticks the sign-in task. The prompt and the scheduler take their time, so this runs
+    /// off the UI thread and the page re-reads the state when it is done; a change that did not happen
+    /// (a declined prompt included) leaves the box as the scheduler says and says why.
+    /// Spec: SettingsViewModel.OnStartIndexerAtLogonChanged.
+    pub(crate) fn index_autostart_set(self: &Arc<Self>, on: bool) {
+        self.schedule(move |inner| {
+            let ok = inner.seams.sign_in_task.set(on);
+            *lock(&inner.extra.autostart_warning) = if ok {
+                String::new()
+            } else if on {
+                "The sign-in task could not be created. Administrator rights are needed to add one."
+                    .into()
+            } else {
+                "The sign-in task could not be removed.".into()
+            };
+            inner.hub.model(Model::Index);
+        });
+    }
+
     pub(crate) fn index_json(&self) -> Value {
         let index = &self.seams.index;
         let banner = self.index_banner();
+        // A helper we cannot talk to, whether or not one is running. Spec: SettingsViewModel.ReadIndexerState.
+        let unreachable = index
+            .status_text()
+            .to_lowercase()
+            .contains("not responding");
+        let helper = match index.presence() {
+            IndexerPresence::Running if unreachable => "Running, but not responding.",
+            IndexerPresence::Running => "Running.",
+            IndexerPresence::NotRunning => "Not running.",
+            IndexerPresence::NotApplicable => "",
+        };
+        let task = self.seams.sign_in_task.state();
+        let warning = lock(&self.extra.autostart_warning).clone();
+        let task_note = if !warning.is_empty() {
+            warning
+        } else {
+            match task {
+                bb_core::mft::AutoStartState::Stale => {
+                    "The sign-in task points at an older installation. Tick this again to repair it.".into()
+                }
+                bb_core::mft::AutoStartState::Unknown => {
+                    "Whether a sign-in task exists could not be read.".into()
+                }
+                _ => String::new(),
+            }
+        };
         json!({
+            "helperText": helper,
+            "canStop": index.presence() == IndexerPresence::Running && !unreachable,
+            // An unreadable task shows as off, never on.
+            "autostart": task == bb_core::mft::AutoStartState::On,
+            "autostartCanChoose": self.seams.sign_in_task.can_choose(),
+            "autostartNote": task_note,
             "status": index.status_text(),
             "canRetry": index.can_retry(),
             "canStart": index.can_start(),

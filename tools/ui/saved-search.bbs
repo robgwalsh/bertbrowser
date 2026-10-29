@@ -67,5 +67,23 @@ assert-no-saved-search Markdown
 remove-saved Docs reports
 remove-saved Everywhere
 shot saved-sidebar-empty
+
+# --- in the title bar instead: dropdowns, the workspace one named after where the window last came from ---
+save-workspace Morning
+workspaces-placement titlebar
+saved-searches-placement titlebar
+assert-visible WorkspaceSwitcher
+assert-visible SavedSearchSwitcher
+assert-hidden WorkspacesList
+shot title-switchers TitleBarRoot
+menu workspace-switcher title-workspace-menu
+assert-menu-item Morning
+assert-menu-item Manage workspaces
+menu search-switcher title-search-menu
+assert-menu-item No saved searches yet
+workspaces-placement sidebar
+saved-searches-placement sidebar
+assert-hidden WorkspaceSwitcher
+remove-workspace Morning
 assert-not-launched
 state

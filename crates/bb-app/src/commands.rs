@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use bb_core::archives::ArchiveFormats;
 use bb_core::commands::{
-    CommandCatalog, CommandContext, FileVerb, FileVerbRules, FileVerbSnapshot, FocusState,
-    KeyChord, Keymap, KeymapRules,
+    CommandCatalog, CommandContext, FileVerb, FileVerbRules, FileVerbSnapshot, FileVerbState,
+    FocusState, KeyChord, Keymap, KeymapRules,
 };
 use bb_core::layout::SplitOrientation;
 use bb_core::transfer::TransferVerb;
@@ -136,6 +136,9 @@ pub struct CommandState {
     pub checked: bool,
     /// Words that depend on the moment ("Delete 3 items\u{2026}", "Stop comparing").
     pub caption: Option<String>,
+    /// A file verb the right-click menu leaves out altogether rather than greying (Extract on
+    /// something that is not an archive, Settle by content outside a comparison).
+    pub hidden: bool,
 }
 
 impl CommandState {
@@ -151,6 +154,7 @@ impl CommandState {
             "whyNot": self.why_not,
             "checked": self.checked,
             "caption": self.caption,
+            "hidden": self.hidden,
         })
     }
 }
@@ -498,6 +502,7 @@ impl Inner {
             why_not,
             checked: checked_in(ctx, id),
             caption: caption_in(ctx, id),
+            hidden: file_verb_of(id).is_some_and(|v| !self.verb_state(ctx, v).visible),
         })
     }
 
@@ -559,7 +564,7 @@ impl Inner {
         s
     }
 
-    fn verb_reason(&self, ctx: &Ctx, verb: FileVerb) -> Option<String> {
+    fn verb_state(&self, ctx: &Ctx, verb: FileVerb) -> FileVerbState {
         let clipboard = ctx.clipboard_has_files;
         let runnable = ctx.single_runnable;
         let has_files = move || clipboard;
@@ -567,7 +572,11 @@ impl Inner {
         let mut snapshot = self.verb_snapshot(ctx);
         snapshot.clipboard_has_files = Some(&has_files);
         snapshot.can_run_elevated = Some(&can_run);
-        let state = FileVerbRules::for_verb(verb, &snapshot);
+        FileVerbRules::for_verb(verb, &snapshot)
+    }
+
+    fn verb_reason(&self, ctx: &Ctx, verb: FileVerb) -> Option<String> {
+        let state = self.verb_state(ctx, verb);
         if state.enabled {
             None
         } else {
@@ -1347,6 +1356,35 @@ fn checked_in(ctx: &Ctx, id: &str) -> bool {
 }
 
 /// Words that depend on the moment.
+/// The file verb a command runs, for the commands whose caption and menu presence are the verb rule's.
+fn file_verb_of(id: &str) -> Option<FileVerb> {
+    Some(match id {
+        "file.open" => FileVerb::Open,
+        "file.run-as-admin" => FileVerb::RunAsAdmin,
+        "file.open-new-tab" => FileVerb::OpenInNewTab,
+        "file.open-terminal" => FileVerb::OpenInTerminal,
+        "file.open-vscode" => FileVerb::OpenInVSCode,
+        "file.rename" => FileVerb::Rename,
+        "file.delete" => FileVerb::Delete,
+        "file.properties" => FileVerb::Properties,
+        "file.compress" => FileVerb::Compress,
+        "file.extract-here" => FileVerb::ExtractHere,
+        "file.extract-to" => FileVerb::ExtractTo,
+        "file.unlock-archive" => FileVerb::UnlockArchive,
+        "file.checksum" => FileVerb::Checksum,
+        "file.verify-checksums" => FileVerb::VerifyChecksums,
+        "file.compare-files" => FileVerb::CompareFiles,
+        "file.settle-by-content" => FileVerb::SettleByContent,
+        "file.bookmark" => FileVerb::Bookmark,
+        "edit.cut" => FileVerb::Cut,
+        "edit.copy" => FileVerb::Copy,
+        "edit.paste" => FileVerb::Paste,
+        "edit.copy-path" => FileVerb::CopyPath,
+        "edit.copy-name" => FileVerb::CopyName,
+        _ => return None,
+    })
+}
+
 fn caption_in(ctx: &Ctx, id: &str) -> Option<String> {
     let snapshot = FileVerbSnapshot {
         comparing: ctx.comparing,
@@ -1360,32 +1398,12 @@ fn caption_in(ctx: &Ctx, id: &str) -> Option<String> {
             !ctx.path.is_empty(),
         )
     };
-    let verb = |v: FileVerb| Some(FileVerbRules::for_verb(v, &snapshot).header);
+    // Every file verb says what it would do now, in the words of the rule the right-click menu
+    // shows ("Delete 3 items..."). Spec: MainWindow.Commands Verb().
+    if let Some(v) = file_verb_of(id) {
+        return Some(FileVerbRules::for_verb(v, &snapshot).header);
+    }
     match id {
-        // Every file verb says what it would do now, in the words of the rule the right-click menu
-        // shows ("Delete 3 items..."). Spec: MainWindow.Commands Verb().
-        "file.open" => verb(FileVerb::Open),
-        "file.run-as-admin" => verb(FileVerb::RunAsAdmin),
-        "file.open-new-tab" => verb(FileVerb::OpenInNewTab),
-        "file.open-terminal" => verb(FileVerb::OpenInTerminal),
-        "file.open-vscode" => verb(FileVerb::OpenInVSCode),
-        "file.rename" => verb(FileVerb::Rename),
-        "file.delete" => verb(FileVerb::Delete),
-        "file.properties" => verb(FileVerb::Properties),
-        "file.compress" => verb(FileVerb::Compress),
-        "file.extract-here" => verb(FileVerb::ExtractHere),
-        "file.extract-to" => verb(FileVerb::ExtractTo),
-        "file.unlock-archive" => verb(FileVerb::UnlockArchive),
-        "file.checksum" => verb(FileVerb::Checksum),
-        "file.verify-checksums" => verb(FileVerb::VerifyChecksums),
-        "file.compare-files" => verb(FileVerb::CompareFiles),
-        "file.settle-by-content" => verb(FileVerb::SettleByContent),
-        "file.bookmark" => verb(FileVerb::Bookmark),
-        "edit.cut" => verb(FileVerb::Cut),
-        "edit.copy" => verb(FileVerb::Copy),
-        "edit.paste" => verb(FileVerb::Paste),
-        "edit.copy-path" => verb(FileVerb::CopyPath),
-        "edit.copy-name" => verb(FileVerb::CopyName),
         "edit.undo" => ctx.undo.clone(),
         "edit.redo" => ctx.redo.clone(),
         "tools.compare" => ctx.comparing.then(|| "Stop comparing".to_string()),

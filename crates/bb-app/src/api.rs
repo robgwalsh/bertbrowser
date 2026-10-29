@@ -49,6 +49,12 @@ pub struct TabInfo {
     pub preview_fit: bool,
     pub shows_content_matches: bool,
     pub is_search_running: bool,
+    pub is_loading: bool,
+    /// The listing failed because the archive needs a password (the banner offers Unlock).
+    pub is_archive_locked: bool,
+    /// Bumped when the core selected something the view should scroll to (`reveal_row`).
+    pub reveal_seq: u64,
+    pub reveal_row: Option<usize>,
 }
 
 impl App {
@@ -212,7 +218,16 @@ impl App {
             preview_fit: t.preview_fit,
             shows_content_matches: t.shows_content_matches,
             is_search_running: t.is_search_running,
+            is_loading: t.is_loading,
+            is_archive_locked: t.archive_locked,
+            reveal_seq: t.reveal_seq,
+            reveal_row: t.reveal_row,
         })
+    }
+
+    /// "3 items selected (1.2 MB)", or `None` with nothing selected.
+    pub fn selection_summary(&self, tab: TabId) -> AppResult<Option<String>> {
+        self.inner.selection_summary(tab)
     }
 
     pub fn breadcrumb(&self, tab: TabId) -> AppResult<Vec<Crumb>> {

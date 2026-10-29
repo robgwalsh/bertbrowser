@@ -69,6 +69,12 @@ Size TreeView::measure(Size) { return fixed_or({0, 0}); }
 void TreeView::arrange(Rect r) {
     bounds = r;
     layout_bar();
+    // A reveal asked for before there was a viewport to place it in (the first folder at startup).
+    if (pending_place_ && v_.viewport > 0) {
+        const auto [id, fraction] = *pending_place_;
+        pending_place_.reset();
+        place(id, fraction);
+    }
 }
 
 std::pair<size_t, size_t> TreeView::visible_range() const {
@@ -123,6 +129,10 @@ void TreeView::paint(PaintContext& pc) {
         const Entry& e = rows_[i];
         const bool sel = e.id == selected_;
         if (sel) pc.fill(rr, focused() ? tok::ListSelectedBackground : tok::ListSelectedInactiveBackground);
+        if (drop_id != 0 && e.id == drop_id) {
+            pc.fill(rr, tok::ListDropBackground);
+            pc.stroke(rr, tok::ListDropBorder, 2.0f);
+        }
         const Rect cv = chevron_rect(i);
         if (e.has_children) {
             const float cx = cv.l + 8.0f, cy = (cv.t + cv.b) / 2;
@@ -141,7 +151,18 @@ void TreeView::paint(PaintContext& pc) {
                          provider_->dimmed(e.id) ? 0.5f : 1.0f);
             text_l += 22.0f;
         }
-        pc.text(provider_->label(e.id), Rect{text_l, rr.t, rr.r, rr.b}, style.font,
+        // A size at the right edge, muted; the name gives way to it rather than running under it.
+        float text_r = rr.r - 4.0f;
+        const std::wstring detail = provider_->detail(e.id);
+        if (!detail.empty()) {
+            gfx::FontSpec detail_font = style.font;
+            detail_font.size = std::max(9.0f, style.font.size - 1.5f);
+            const float w = std::ceil(pc.res.text.measure(detail, detail_font).width);
+            const Rect dr{std::max(text_l + 40.0f, rr.r - 8.0f - w), rr.t, rr.r - 8.0f, rr.b};
+            pc.text(detail, dr, detail_font, sel ? tok::ListSelectedForeground : tok::TextMuted, gfx::TextAlign::Trailing);
+            text_r = dr.l - 6.0f;
+        }
+        pc.text(provider_->label(e.id), Rect{text_l, rr.t, text_r, rr.b}, style.font,
                 sel ? tok::ListSelectedForeground : style.fg);
         if (sel && focused()) pc.stroke(rr, tok::BorderFocus);
     }
@@ -187,6 +208,17 @@ void TreeView::select_row(size_t row) {
     if (on_select) on_select(selected_);
 }
 
+void TreeView::place(uint64_t id, float fraction) {
+    const size_t r = row_of(id);
+    if (r == npos) return;
+    if (v_.viewport <= 0) {
+        pending_place_ = std::make_pair(id, fraction);
+        return;
+    }
+    v_.set_offset(static_cast<float>(r) * row_height - v_.viewport * fraction);
+    invalidate();
+}
+
 void TreeView::select(uint64_t id) {
     const size_t r = row_of(id);
     if (r == npos) {
@@ -211,6 +243,10 @@ bool TreeView::on_mouse_down(const MouseEvent& e) {
     const Entry en = rows_[row];  // a copy: toggling rebuilds rows_
     if (e.button == MouseButton::Right) {
         if (on_context) on_context(en.id, e.pt);
+        return true;
+    }
+    if (e.button == MouseButton::Middle) {
+        if (on_middle) on_middle(en.id);
         return true;
     }
     if (e.button == MouseButton::Left && en.has_children && chevron_rect(row).contains(e.pt)) {

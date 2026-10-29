@@ -183,6 +183,10 @@ impl ChangesSession {
                             "renamedFrom": renamed_from,
                             "countText": if r.count > 1 { format!("\u{d7}{}", bb_core::format::thousands(i64::from(r.count))) } else { String::new() },
                             "when": relative_time(r.last_utc, now),
+                            "lastUtc": r.last_utc.0,
+                            "firstUtc": r.first_utc.0,
+                            "count": r.count,
+                            "oldPath": r.old_display_path,
                         })
                     })
                     .collect();
@@ -249,6 +253,23 @@ impl Inner {
     }
 
     /// The history switch's "Clear now".
+    /// What the live window polls instead of re-running its query: moves whenever a row is added or
+    /// folded, and with the recording switch. Spec: ChangeTimelineViewModel.OnTick.
+    pub(crate) fn change_log_stamp(&self) -> Value {
+        let stamp = ChangeLogRepository::new(self.db.clone()).stamp().ok();
+        let recording = crate::app::lock(&self.settings).record_file_changes;
+        json!({
+            "stamp": stamp.map(|s| format!("{}|{}", s.max_id, s.last_utc.map_or(0, |t| t.0))).unwrap_or_default(),
+            "recording": recording,
+        })
+    }
+
+    pub(crate) fn change_log_count(&self) -> i64 {
+        ChangeLogRepository::new(self.db.clone())
+            .count()
+            .unwrap_or(0)
+    }
+
     pub(crate) fn change_log_clear(&self) -> AppResult<()> {
         ChangeLogRepository::new(self.db.clone())
             .clear()

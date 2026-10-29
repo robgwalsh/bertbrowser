@@ -75,8 +75,10 @@ static void append_rows(const MenuBuildEnv& env, const std::vector<BarRow>& rows
             for (size_t i = 0; i < items.size(); ++i) {
                 const std::wstring id = core::wide(items[i]["id"].str());
                 const std::wstring name = core::wide(items[i]["name"].str());
-                MenuItem m = MenuItem::make(escape_caption(name));
+                // The detail (a workspace's shape, a saved search's query) rides where a gesture would.
+                MenuItem m = MenuItem::make(escape_caption(name), {}, core::wide(items[i]["detail"].str()));
                 m.icon = icon_for(r.icon);
+                m.checked = items[i]["checked"].boolean();
                 m.on_invoke = [env, list = r.id, id, name] {
                     if (env.pick) env.pick(list, id, name);
                 };
@@ -118,6 +120,11 @@ CommandToolbar::CommandToolbar(std::string which) : which_(std::move(which)) {
 }
 
 float CommandToolbar::item_width(const BarRow& r) const {
+    if (is_split(r)) {
+        BarRow face = r;
+        face.id.clear();
+        return item_width(face) + kChevron;
+    }
     if (r.kind == "separator") return kSep;
     if (r.kind == "list" || r.kind == "placeholder") return 40.0f;
     if (r.show_text) {
@@ -194,6 +201,11 @@ Rect CommandToolbar::item_rect(size_t i) const {
     return Rect{bounds.l + it.x, bounds.t + 2, bounds.l + it.x + it.w, bounds.b - 2};
 }
 
+Rect CommandToolbar::chevron_rect(size_t i) const {
+    const Rect rc = item_rect(i);
+    return Rect{rc.r - kChevron, rc.t, rc.r, rc.b};
+}
+
 Rect CommandToolbar::overflow_rect() const {
     const float x = visible_ == 0 ? kPadX : items_[visible_ - 1].x + items_[visible_ - 1].w;
     return Rect{bounds.l + x, bounds.t + 2, bounds.l + x + kOverflowW, bounds.b - 2};
@@ -224,11 +236,25 @@ void CommandToolbar::paint(PaintContext& pc) {
             continue;
         }
         const bool hot = hot_ == static_cast<int>(i), down = pressed_ == static_cast<int>(i);
-        if (r.enabled && (down || r.checked)) pc.fill(rc, tok::ToolbarPressedBackground);
-        else if (r.enabled && hot) pc.fill(rc, tok::ToolbarHoverBackground);
+        const bool split = is_split(r);
+        const Rect face = split ? Rect{rc.l, rc.t, rc.r - kChevron, rc.b} : rc;
+        if (split && r.enabled && (hot || down)) {
+            // The half under the pointer is the one lit, so it is plain which of the two a click is.
+            const bool on_chevron = down ? pressed_chevron_ : chevron_rect(i).contains(root() ? root()->pointer() : Point{});
+            pc.fill(on_chevron ? chevron_rect(i) : face, down ? tok::ToolbarPressedBackground : tok::ToolbarHoverBackground);
+        } else if (r.enabled && (down || r.checked)) {
+            pc.fill(rc, tok::ToolbarPressedBackground);
+        } else if (r.enabled && hot) {
+            pc.fill(rc, tok::ToolbarHoverBackground);
+        }
         const Token fg = !r.enabled ? tok::TextDisabled : r.checked ? tok::ToolbarCheckedForeground : tok::ToolbarForeground;
+        if (split) {
+            gfx::FontSpec small_font;
+            small_font.size = 9.0f;
+            pc.text(L"\u25BE", chevron_rect(i), small_font, fg, gfx::TextAlign::Center);
+        }
         const IconData* icon = icon_for(r.icon);
-        float x = rc.l + (r.show_text ? 8.0f : (rc.width() - kIcon) / 2);
+        float x = face.l + (r.show_text ? 8.0f : (face.width() - kIcon) / 2);
         if (icon) {
             Icon::draw(pc, *icon, Rect::xywh(x, rc.t + (rc.height() - kIcon) / 2, kIcon, kIcon), fg, icon_geo_[i], icon_gen_[i]);
             x += kIcon + 6.0f;
@@ -257,6 +283,8 @@ bool CommandToolbar::on_mouse_down(const MouseEvent& e) {
     }
     if (e.button != MouseButton::Left) return false;
     pressed_ = index_at(e.pt);
+    pressed_chevron_ = pressed_ >= 0 && is_split(items_[static_cast<size_t>(pressed_)].row) &&
+                       chevron_rect(static_cast<size_t>(pressed_)).contains(e.pt);
     invalidate();
     return pressed_ != -1;
 }
@@ -273,12 +301,18 @@ bool CommandToolbar::on_mouse_up(const MouseEvent& e) {
         return true;
     }
     const Item& it = items_[static_cast<size_t>(down)];
+    if (pressed_chevron_) {
+        pressed_chevron_ = false;
+        if (it.row.enabled && on_context) on_context(it.row, item_rect(static_cast<size_t>(down)));
+        return true;
+    }
     if (it.row.enabled && on_activate) on_activate(it.row, item_rect(static_cast<size_t>(down)));
     return true;
 }
 
 bool CommandToolbar::on_mouse_move(const MouseEvent& e) {
     const int at = index_at(e.pt);
+    if (at >= 0 && at == hot_ && is_split(items_[static_cast<size_t>(at)].row)) invalidate(item_rect(static_cast<size_t>(at)));
     if (at != hot_) {
         hot_ = at;
         if (at >= 0) {

@@ -249,3 +249,30 @@ fn a_request_with_arguments_reaches_the_harness_launcher_as_a_plain_launch() {
         probes.launches()
     );
 }
+
+/// The real enumeration of "This PC": whatever is plugged in, it answers within its deadline and lists
+/// only folders that are not the file system (never a drive or a known folder).
+#[test]
+fn the_real_portable_device_list_answers_in_time_and_lists_no_drive() {
+    let dir = unique_temp_path("bb-devices", "");
+    std::fs::create_dir_all(&dir).unwrap();
+    let seams = Seams::system(&dir);
+    let started = Instant::now();
+    let devices = seams.devices.list();
+    assert!(
+        started.elapsed() < Duration::from_secs(7),
+        "it took {:?}",
+        started.elapsed()
+    );
+    for d in &devices {
+        assert!(!d.name.is_empty());
+        let bytes = d.shell_path.as_bytes();
+        let drive_like = bytes.len() >= 2 && bytes[1] == b':';
+        assert!(
+            !drive_like,
+            "{} is a drive, not a device: {}",
+            d.name, d.shell_path
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

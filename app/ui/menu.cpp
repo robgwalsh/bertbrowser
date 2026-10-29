@@ -123,6 +123,11 @@ int MenuPanel::item_at(Point p) const {
 void MenuPanel::set_selected(int i) {
     if (i == selected) return;
     selected = i;
+    if (i >= 0 && static_cast<size_t>(i) < items_->size()) {
+        // The items belong to whoever opened the menu; only the panel's view of them is const.
+        auto& items = const_cast<MenuItems&>(*items_);
+        if (items[static_cast<size_t>(i)].on_hover) items[static_cast<size_t>(i)].on_hover(items, i);
+    }
     invalidate();
 }
 

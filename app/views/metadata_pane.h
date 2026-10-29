@@ -44,6 +44,8 @@ public:
     // Presses Apply (0), remove location (1), remove everything (2), remove cover (3). Returns the operation.
     uint64_t press(int action);
     uint64_t set_cover(const std::vector<uint8_t>& image);
+    void save_cover();
+    void say_about_cover(const std::wstring& why);
     // The row of the file in the list, or null.
     const json::Value* file(const std::wstring& file_name) const;
     const json::Value* detail(const std::wstring& label) const;
@@ -74,6 +76,7 @@ private:
     std::wstring shown_selection_;
 
     ui::TextBlock *title_ = nullptr, *summary_ = nullptr, *empty_ = nullptr;
+    ui::StackPanel* remove_box_ = nullptr;  // the removals: the location note and its two buttons
     ui::Button *apply_ = nullptr, *remove_location_ = nullptr, *remove_all_ = nullptr, *choose_cover_ = nullptr,
                *remove_cover_ = nullptr;
     ui::ScrollViewer* scroll_ = nullptr;

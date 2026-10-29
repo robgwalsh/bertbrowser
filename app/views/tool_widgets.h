@@ -2,6 +2,7 @@
 // preview, the duplicate finder, the disk-usage list), the two-sided line diff of the file compare, and
 // the treemap. Each paints what it is given; none knows about the core.
 #pragma once
+#include "ui/controls.h"
 #include "ui/scroll.h"
 #include "ui/widget.h"
 
@@ -29,6 +30,11 @@ struct TableRow {
     Token tint = gfx::kNoToken;  // a faint fill behind the row
     float bar = -1.0f;         // 0..1 draws a thin bar under the row; negative draws none (an unknown share)
     bool bar_slot = false;     // reserve the bar's strip even when there is none to draw
+    std::wstring tip;          // the tooltip while the pointer rests on the row
+    // The file's icon, drawn at the start of the list's `picture_column`; asked for at paint time because it
+    // may still be loading.
+    std::function<ThumbPtr(uint32_t px)> picture;
+    bool faded = false;  // the picture dimmed (a hidden file)
 };
 
 // Rows of text cells under a header; one selected; a scroll bar when it overflows.
@@ -51,8 +57,15 @@ public:
     // A row with a tick box in its first column: a click there, or Space, toggles it rather than activating
     // the row, which a double-click still does.
     std::function<void(int)> on_toggle;
+    // Ctrl/Shift-click and Ctrl+A pick more than one row; `picked()` is every one of them, in order.
+    bool multi = false;
+    int picture_column = -1;  // which column's cells start with the row's picture
+    std::vector<int> picked() const;
+    std::function<void()> on_copy;  // Ctrl+C
 
     void set_rows(std::vector<TableRow> r);
+    float scroll_offset() const { return v_.offset(); }
+    void preset_offset(float y) { v_.preset(y); }
     Size measure(Size avail) override;
     void arrange(Rect r) override;
     void paint(PaintContext& pc) override;
@@ -68,10 +81,25 @@ private:
     float body_top() const { return bounds.t + header_height(); }
     float row_step(const TableRow& r) const { return r.bar_slot || r.bar >= 0 ? row_height + 6.0f : row_height; }
     void layout_bar();
+    void select_only(int i);
+    void bring_into_view(int i);
     int row_at(Point p) const;
+    std::vector<char> extra_;  // rows picked besides `selected` (multi)
+    ImageCache images_;
+    int anchor_ = -1;          // where a Shift range starts
     std::vector<float> column_x(float total) const;
     ScrollBar v_{true};
 };
+
+// Where each list and scroller of a tree stands, in tree order: a rebuild of the same window or card lays
+// the same kinds out in the same order, so the n-th list takes the n-th list's place (and its selection,
+// where the rebuild chose none).
+struct ListPlaces {
+    std::vector<std::pair<float, int>> tables;  // offset, selected
+    std::vector<std::pair<float, float>> scrollers;
+};
+ListPlaces save_places(Widget& tree);
+void restore_places(Widget& tree, const ListPlaces& places);
 
 // One row of the diff: the line number and text on each side, and what happened between them.
 struct DiffLine {
@@ -102,7 +130,11 @@ public:
 private:
     void layout_bar();
     std::vector<DiffLine> lines_;
+    size_t longest_ = 0;  // characters in the longest line of either side; the font is monospaced
     ScrollBar v_{true};
+    // Both sides scroll sideways together, so a long line can be read across. Spec: FileCompareWindow.xaml
+    // (the diff's horizontal ScrollViewer).
+    ScrollBar h_{false};
 };
 
 struct TreemapTile {

@@ -10,6 +10,7 @@
 #include "views/ops_menus.h"
 #include "views/property_host.h"
 #include "views/shell_props.h"
+#include "views/tool_widgets.h"
 
 #include <dwmapi.h>
 #include <shobjidl.h>
@@ -147,6 +148,8 @@ private:
 
 }  // namespace
 
+std::wstring chord_key_name(unsigned vk) { return key_name(vk); }
+
 // ---- ListAdapter -------------------------------------------------------------------------------------
 
 void ListAdapter::reset(std::shared_ptr<core::Listing> l) {
@@ -223,6 +226,14 @@ std::wstring ListAdapter::row_path(size_t row) const {
     return listing_ && listing_->row(row, r) ? core::w(r.full_path) : std::wstring();
 }
 
+void ListAdapter::select_rows(const std::vector<size_t>& rows) {
+    std::vector<uint32_t> idx;
+    idx.reserve(rows.size());
+    for (const size_t r : rows) idx.push_back(static_cast<uint32_t>(r));
+    core_.select(tab_, BB_SELECT_REPLACE, idx);
+    reload_selection();
+}
+
 void ListAdapter::select(SelectOp op, size_t first, size_t last) {
     if (op == SelectOp::Clear) {
         core_.select(tab_, BB_SELECT_CLEAR, {});
@@ -251,16 +262,18 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     nav->name = "NavBar";
     nav->style.bg = tok::ToolbarBackground;
     nav_ = nav.get();
-    auto button = [&](const wchar_t* glyph, std::function<void()> fn) {
-        auto b = std::make_unique<Button>(glyph);
+    // Drawn outlines, as the other toolbar buttons are; the tooltips name the key. Spec: DirectoryTabView.xaml.
+    auto button = [&](const IconData& icon, std::function<void()> fn) {
+        auto b = std::make_unique<Button>();
+        b->icon = &icon;
         b->width = 34;
         b->on_click = std::move(fn);
         return nav_->add(std::move(b));
     };
-    back_ = button(L"←", [this, app] { bb_tab_back(app, tab_); });
-    forward_ = button(L"→", [this, app] { bb_tab_forward(app, tab_); });
-    up_ = button(L"↑", [this, app] { bb_tab_up(app, tab_); });
-    refresh_ = button(L"↻", [this, app] { bb_tab_refresh(app, tab_); });
+    back_ = button(icons::Back, [this, app] { bb_tab_back(app, tab_); });
+    forward_ = button(icons::Forward, [this, app] { bb_tab_forward(app, tab_); });
+    up_ = button(icons::Up, [this, app] { bb_tab_up(app, tab_); });
+    refresh_ = button(icons::Refresh, [this, app] { bb_tab_refresh(app, tab_); });
     back_->name = "BackButton";
     forward_->name = "ForwardButton";
     up_->name = "UpButton";
@@ -272,6 +285,11 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     crumbs_ = path_bar_->emplace<BreadcrumbBar>();
     crumbs_->name = "Breadcrumb";
     crumbs_->on_navigate = [this](const std::wstring& p) { core_.navigate(tab_, p); };
+    // An ancestor middle-clicked opens in a pane of its own to the right. Spec: DirectoryTabView.Breadcrumb_PreviewMouseDown.
+    crumbs_->on_middle = [app](const std::wstring& p) {
+        uint64_t pane = 0;
+        bb_pane_split(app, 0, BB_VERTICAL, core::s(p), &pane);
+    };
     crumbs_->on_edit = [this] { begin_path_edit(); };
     path_ = path_bar_->emplace<PathEdit>();
     path_->name = "PathBox";
@@ -287,16 +305,22 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     path_->on_cancel = [this] { end_path_edit(); };
     path_->on_blur = [this] { end_path_edit(); };
 
-    search_ = nav_->emplace<Edit>();
+    auto save = [this] { main_.execute_command(L"search.save"); };
+    search_ = nav_->emplace<SearchField>([this] { clear_search(false); }, save);
     search_->name = "SearchBox";
     search_->width = 170;
-    search_->placeholder = L"Search";
+    search_->placeholder = L"Search this folder";
     search_->on_changed = [this](const std::wstring&) { on_search_changed(false); };
-    gsearch_ = nav_->emplace<Edit>();
-    gsearch_->name = "GlobalSearchBox";
-    gsearch_->width = 170;
-    gsearch_->placeholder = L"Search this PC";
-    gsearch_->on_changed = [this](const std::wstring&) { on_search_changed(true); };
+    search_->on_cancel = [this] { search_escape(false); };
+    search_->clear_button()->name = "SearchClearButton";
+    search_->save_button()->name = "SaveSearchButton";
+    // Flat view, lit while it is on. It comes before the side pane's buttons because it is about the list.
+    // Spec: DirectoryTabView.xaml (FlatViewToggle).
+    flat_button_ = nav_->emplace<Button>();
+    flat_button_->name = "FlatViewToggle";
+    flat_button_->width = 34;
+    flat_button_->icon = &icons::FlatView;
+    flat_button_->on_click = [this] { main_.execute_command(L"view.flat"); };
     {
         // Three buttons choose what the right-hand pane shows: nothing, the preview, or the metadata.
         const char* names[3] = {"SidePaneNone", "SidePanePreview", "SidePaneMetadata"};
@@ -312,18 +336,49 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     }
     add(std::move(nav));
 
+    // Activity: a listing or a search on its way. A fixed 3px strip either way, so nothing below it moves
+    // when it comes and goes. Spec: DirectoryTabView.xaml (the activity indicator).
+    {
+        auto strip = std::make_unique<Panel>();
+        strip->name = "ActivityStrip";
+        strip->dock = Dock::Top;
+        strip->height = 3;
+        activity_ = strip->emplace<ProgressBar>();
+        activity_->name = "ActivityBar";
+        activity_->set_visible(false);
+        add(std::move(strip));
+    }
+    // Something true about the listing that it cannot say for itself (a flat view that stopped at its
+    // ceiling). Not an error: the error banner below is for those. Spec: DirectoryTabView.xaml (NoticeBanner).
+    {
+        auto notice = std::make_unique<StackPanel>(Orientation::Horizontal, 8.0f);
+        notice->name = "NoticeBanner";
+        notice->dock = Dock::Top;
+        notice->pad = 6;
+        notice->style.bg = tok::WarningBackground;
+        notice_ = notice->emplace<TextBlock>();
+        notice_->style.fg = tok::WarningForeground;
+        notice_->wrap = true;
+        notice_->flex = 1;
+        notice->set_visible(false);
+        notice_panel_ = add(std::move(notice));
+    }
+
     auto banner = std::make_unique<StackPanel>(Orientation::Horizontal, 8.0f);
     banner->pad = 4;
     banner->height = 28;
     banner->dock = Dock::Top;
     banner->name = "ErrorBanner";
-    banner->style.bg = tok::ErrorBackground;
+    // A locked archive is a listing state, so Unlock rides in this banner rather than a dialog of its
+    // own. Spec: DirectoryTabView.xaml (the error banner).
+    banner->style.bg = tok::WarningBackground;
     banner_ = banner->emplace<TextBlock>();
-    banner_->style.fg = tok::ErrorForeground;
+    banner_->style.fg = tok::WarningForeground;
+    banner_->vcenter = true;
     banner_->flex = 1;
-    unlock_ = banner->emplace<Button>(L"Enter password…");
+    unlock_ = banner->emplace<Button>(L"Unlock…");
     unlock_->name = "UnlockArchive";
-    unlock_->width = 150;
+    unlock_->width = 90;
     unlock_->set_visible(false);
     unlock_->on_click = [this] { main_.open_dialog(L"archive-password"); };
     banner->set_visible(false);
@@ -381,23 +436,93 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
         if (FileDrag* d = main_.file_drag()) d->start(tab_, b);
     };
     list_->on_context = [this](Point p, size_t row) { open_context(p, false, row == static_cast<size_t>(-1)); };
-    tiles_->on_activate = [this, app](size_t row) { bb_tab_open_item(app, tab_, static_cast<uint32_t>(row)); };
+    tiles_->on_activate = [this](size_t row) { open_row(row); };
+    // The tiles are the same rows as the list, and answer the same gestures the same way.
+    tiles_->on_context = [this](Point p, size_t row) { open_context(p, false, row == TileView::npos); };
+    tiles_->on_drag_start = [this](MouseButton b) {
+        if (FileDrag* d = main_.file_drag()) d->start(tab_, b);
+    };
 
     list_->on_sort = [this, app](int column, bool) {
         if (column < 0 || static_cast<size_t>(column) >= columns_.size()) return;
         bb_tab_set_sort(app, tab_, core::s(columns_[static_cast<size_t>(column)].id));
     };
-    list_->on_activate = [this, app](size_t row) { bb_tab_open_item(app, tab_, static_cast<uint32_t>(row)); };
-    list_->on_typeahead = [this](const std::wstring& prefix) {
-        const auto& l = adapter_.listing();
-        if (!l) return;
-        for (size_t i = 0; i < l->size(); ++i) {
-            if (core::iequals(l->name(i).substr(0, prefix.size()), prefix)) {
-                list_->select_row(i);
-                return;
-            }
+    // A header drag or a gripper is the person arranging this tab's columns: the order and the widths go to
+    // the core, which keeps them for the tab (and the session) and marks the tab as arranged by hand.
+    // Spec: DirectoryTabView (ColumnsChanged -> FileList.ColumnLayout).
+    list_->on_columns_changed = [this, app] {
+        std::wstring order;
+        std::vector<std::pair<std::wstring, float>> widths;
+        for (const Column& c : list_->columns()) {
+            if (c.id < 0 || static_cast<size_t>(c.id) >= columns_.size()) continue;
+            const core::ColumnInfo& info = columns_[static_cast<size_t>(c.id)];
+            order += (order.empty() ? L"" : L",") + info.id;
+            if (std::fabs(c.width - info.width) >= 0.5f) widths.push_back({info.id, c.width});
         }
+        bb_columns_do(app, tab_, core::s(L"order"), core::s(order));
+        for (const auto& [id, w] : widths) bb_columns_do(app, tab_, core::s(L"width"), core::s(id + L" " + std::to_wstring(static_cast<int>(std::lround(w)))));
     };
+    list_->on_activate = [this](size_t row) { open_row(row); };
+    // A middle-clicked folder opens in a pane of its own to the right; a file is left alone.
+    // Spec: DirectoryTabView.FileList_PreviewMouseDown (middle).
+    list_->on_middle = [this, app](size_t row) {
+        const auto listing = core_.listing(tab_);
+        BbRow r{};
+        if (!listing || !listing->row(static_cast<uint32_t>(row), r) || !(r.flags & BB_ROW_DIRECTORY)) return;
+        uint64_t pane = 0;
+        bb_pane_split(app, 0, BB_VERTICAL, core::s(core::w(r.full_path)), &pane);
+    };
+    list_->on_typeahead = [this](const std::wstring& typed) { type_ahead(typed); };
+    tiles_->on_typeahead = [this](const std::wstring& typed) { type_ahead(typed); };
+    tiles_->on_middle = list_->on_middle;
+}
+
+// A double click or Enter. Explorer's convention: with Ctrl+Shift held, opening a file runs it as
+// administrator - the row clicked, not the selection, which Ctrl+Shift has just range-extended.
+// Spec: DirectoryTabView.FileList_DoubleClick (RunAsAdminHeld).
+void TabView::open_row(size_t row) {
+    const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0, shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    const bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+    if (ctrl && shift && !alt) {
+        const auto listing = core_.listing(tab_);
+        BbRow r{};
+        if (listing && listing->row(static_cast<uint32_t>(row), r) && !(r.flags & BB_ROW_DIRECTORY)) {
+            core_.select(tab_, BB_SELECT_REPLACE, {static_cast<uint32_t>(row)});
+            adapter_.reload_selection();
+            main_.execute_command(L"file.run-as-admin");
+            return;
+        }
+    }
+    bb_tab_open_item(core_.app(), tab_, static_cast<uint32_t>(row));
+}
+
+void TabView::type_ahead(const std::wstring& typed) {
+    if (typed.empty()) return;
+    const std::wstring key(1, typed.back());
+    const size_t cursor = tiles_on_ ? tiles_->cursor() : list_->cursor();
+    // Extending the prefix: keep the row if it still matches, else search on from it.
+    if (typed.size() > 1 && !typeahead_prefix_.empty() &&
+        select_by_prefix(typeahead_prefix_ + key, cursor == ListView::npos ? 0 : cursor)) {
+        typeahead_prefix_ += key;
+        return;
+    }
+    // A fresh letter, or a broken prefix: a one-letter jump past the current row, so repeating it cycles.
+    if (select_by_prefix(key, cursor == ListView::npos ? 0 : cursor + 1)) typeahead_prefix_ = key;
+}
+
+bool TabView::select_by_prefix(const std::wstring& prefix, size_t start) {
+    const auto& l = adapter_.listing();
+    if (!l || l->size() == 0) return false;
+    const size_t n = l->size();
+    for (size_t k = 0; k < n; ++k) {
+        const size_t i = (start + k) % n;
+        if (core::iequals(l->name(i).substr(0, prefix.size()), prefix)) {
+            if (tiles_on_) tiles_->select_row(i);
+            else list_->select_row(i);
+            return true;
+        }
+    }
+    return false;
 }
 
 void TabView::sync_columns() {
@@ -428,12 +553,9 @@ TabView::~TabView() {
     if (preview_) preview_->set_active(false);
 }
 
-void TabView::arrange(Rect r) {
-    // A narrow pane gives up the whole-PC search box first, so the path never shrinks to nothing.
-    const bool narrow = r.width() < 700.0f;
-    if (gsearch_->flags.visible == narrow) gsearch_->set_visible(!narrow);
-    DockPanel::arrange(r);
-}
+void TabView::arrange(Rect r) { DockPanel::arrange(r); }
+
+Edit* TabView::global_search_box() const { return main_.title_search(); }
 
 void TabView::reload_columns() {
     sync_columns();
@@ -527,6 +649,7 @@ void TabView::sync_side_pane(const BbTabState& st) {
     side_mode_ = static_cast<int>(st.side_pane);
     side_pane_->set_visible(side_mode_ != 0);
     for (int i = 0; i < 3; ++i) side_buttons_[i]->primary = i == side_mode_;
+    flat_button_->primary = st.is_flat_browse;
 
     // Built the first time it is shown, not declared with the tab: most tabs never show one.
     if (side_mode_ == 1) ensure_preview();
@@ -568,15 +691,32 @@ void TabView::select_next_media() {
     reveal_row(static_cast<size_t>(row));
 }
 
+// "Back (Alt+Left)": what the button does and, when it has one, the key. Spec: Cmd.Tip.
+static std::wstring gesture_tip(BbApp* app, const std::wstring& text, const wchar_t* command, const std::wstring& after = {}) {
+    BbOwnedStr o{};
+    const std::wstring g = bb_keymap_gesture(app, core::s(command), &o) == BB_OK ? core::take(o) : std::wstring();
+    return text + (g.empty() ? std::wstring() : L" (" + g + L")") + after;
+}
+
 void TabView::refresh_tooltips() {
+    BbApp* app = core_.app();
+    back_->tooltip = gesture_tip(app, L"Back", L"nav.back");
+    forward_->tooltip = gesture_tip(app, L"Forward", L"nav.forward");
+    up_->tooltip = gesture_tip(app, L"Up", L"nav.up");
+    refresh_->tooltip = gesture_tip(app, L"Refresh", L"nav.refresh");
+    search_->tooltip = gesture_tip(app, L"Search this folder and everything under it", L"search.folder",
+                                   L". Filters: ext: size: dm: path: is: re: in: content:, plus OR and !");
     static const wchar_t* ids[3] = {L"view.side-none", L"view.preview", L"view.metadata"};
-    static const wchar_t* names[3] = {L"Hide the side pane", L"Preview pane", L"Metadata pane"};
+    static const wchar_t* names[3] = {L"No side pane", L"Preview pane", L"Metadata pane"};
     for (int i = 0; i < 3; ++i) {
         BbOwnedStr o{};
         std::wstring gesture;
         if (bb_keymap_gesture(core_.app(), core::s(ids[i]), &o) == BB_OK) gesture = core::take(o);
         side_buttons_[i]->tooltip = names[i] + (gesture.empty() ? std::wstring() : L" (" + gesture + L")");
     }
+    BbOwnedStr o{};
+    const std::wstring flat = bb_keymap_gesture(core_.app(), core::s(L"view.flat"), &o) == BB_OK ? core::take(o) : std::wstring();
+    flat_button_->tooltip = L"Flat view — everything under this folder" + (flat.empty() ? std::wstring() : L" (" + flat + L")");
 }
 
 void TabView::open_context(Point p, bool header, bool background) {
@@ -590,65 +730,38 @@ MenuItems TabView::build_files_menu(bool background) {
     return std::move(composed.items);
 }
 
+// The header strip's checklist: the built-ins in catalogue order, the curated properties by group, anything
+// else showing, then More columns, Set as default for new tabs and Reset. Spec: ColumnHeaderMenu.
 MenuItems TabView::build_column_menu() {
     BbApp* app = core_.app();
     const uint64_t tab = tab_;
-    const json::Value st = try_model([&](BbOwnedStr* o) { return bb_columns_state(app, tab, o); });
-    const json::Value cands = try_model([&](BbOwnedStr* o) { return bb_columns_candidates(app, tab, core::s(L""), o); });
-    std::vector<std::wstring> shown;
-    for (size_t i = 0; i < st["columns"].size(); ++i) {
-        if (!st["columns"][i]["injected"].boolean()) shown.push_back(core::wide(st["columns"][i]["id"].str()));
-    }
-    auto is_shown = [&](const std::wstring& id) {
-        for (const auto& s : shown) {
-            if (core::iequals(s, id)) return true;
-        }
-        return false;
+    const json::Value m = try_model([&](BbOwnedStr* o) { return bb_columns_header_menu(app, tab, o); });
+    auto entry = [app, tab](const json::Value& c) {
+        MenuItem item = MenuItem::make(escape_caption(core::wide(c["header"].str())));
+        item.checked = c["on"].boolean();
+        // Name cannot be turned off; disabled rather than absent, so the reason is visible.
+        item.enabled = !c["locked"].boolean();
+        const std::wstring id = core::wide(c["id"].str());
+        item.on_invoke = [app, tab, id, on = !item.checked] { bb_columns_do(app, tab, core::s(on ? L"add" : L"remove"), core::s(id)); };
+        return item;
     };
     MenuItems out;
-    auto entry = [&](const std::wstring& id, const std::wstring& header, bool locked) {
-        MenuItem m = MenuItem::make(escape_caption(header));
-        m.checked = is_shown(id);
-        m.enabled = !locked;
-        m.on_invoke = [app, tab, id, on = !m.checked] {
-            bb_columns_do(app, tab, core::s(on ? L"add" : L"remove"), core::s(id));
-        };
-        out.push_back(std::move(m));
-    };
-    entry(L"Name", L"Name", true);
-    entry(L"Size", L"Size", false);
-    entry(L"Type", L"Type", false);
-    entry(L"Modified", L"Modified", false);
-    std::vector<std::wstring> listed = {L"Name", L"Size", L"Type", L"Modified"};
-    for (size_t g = 0; g < cands["groups"].size(); ++g) {
-        const json::Value& items = cands["groups"][g]["items"];
-        for (size_t i = 0; i < items.size(); ++i) {
-            const std::wstring id = core::wide(items[i]["id"].str());
-            entry(id, core::wide(items[i]["header"].str()), false);
-            listed.push_back(id);
-        }
+    for (size_t i = 0; i < m["builtIns"].size(); ++i) out.push_back(entry(m["builtIns"][i]));
+    out.push_back(MenuItem::separator());
+    for (size_t g = 0; g < m["groups"].size(); ++g) {
+        MenuItem group = MenuItem::make(escape_caption(core::wide(m["groups"][g]["title"].str())));
+        const json::Value& items = m["groups"][g]["items"];
+        for (size_t i = 0; i < items.size(); ++i) group.sub.push_back(entry(items[i]));
+        out.push_back(std::move(group));
     }
-    // A property added through the picker is showing but is on neither list: without a row here there
-    // would be no way to turn it off again.
-    bool any_extra = false;
-    for (const auto& id : shown) {
-        bool known = false;
-        for (const auto& l : listed) known = known || core::iequals(l, id);
-        if (known) continue;
-        if (!any_extra) {
-            out.push_back(MenuItem::separator());
-            any_extra = true;
-        }
-        std::wstring header = id;
-        for (size_t i = 0; i < st["columns"].size(); ++i) {
-            if (core::iequals(core::wide(st["columns"][i]["id"].str()), id)) header = core::wide(st["columns"][i]["header"].str());
-        }
-        entry(id, header, false);
+    if (m["extra"].size() > 0) {
+        out.push_back(MenuItem::separator());
+        for (size_t i = 0; i < m["extra"].size(); ++i) out.push_back(entry(m["extra"][i]));
     }
     out.push_back(MenuItem::separator());
-    out.push_back(MenuItem::make(L"More columns…", [this] { main_.open_dialog(L"columns"); }));
+    out.push_back(MenuItem::make(L"More columns\u2026", [this] { main_.open_dialog(L"columns"); }));
+    out.push_back(MenuItem::make(L"Set as default for new tabs", [app, tab] { bb_columns_do(app, tab, core::s(L"default"), core::s(L"")); }));
     out.push_back(MenuItem::make(L"Reset to default", [app, tab] { bb_columns_do(app, tab, core::s(L"reset"), core::s(L"")); }));
-    out.push_back(MenuItem::make(L"Use for new tabs", [app, tab] { bb_columns_do(app, tab, core::s(L"default"), core::s(L"")); }));
     return out;
 }
 
@@ -660,6 +773,26 @@ void TabView::reload_listing() {
     const bool none = adapter_.row_count() == 0;
     std::wstring message = none ? core_.tab_text(tab_, BB_TEXT_EMPTY) : std::wstring();
     empty_->set_message(std::move(message));
+    try {
+        apply_reveal(core_.tab_state(tab_));
+    } catch (const core::CoreError&) {
+    }
+}
+
+// Something the core selected for the person (a renamed or new item landing) is brought into view with the
+// cursor on it, once - kept until the listing it is a row of has reached this view, since the two events can
+// arrive either way round. Spec: DirectoryTabView (ScrollIntoView after SelectPaths).
+void TabView::apply_reveal(const BbTabState& st) {
+    if (st.reveal_seq == reveal_seq_) return;
+    const auto& listing = adapter_.listing();
+    if (st.reveal_row < 0) {
+        reveal_seq_ = st.reveal_seq;
+    } else if (listing && listing->version() == st.version && static_cast<size_t>(st.reveal_row) < listing->size()) {
+        reveal_seq_ = st.reveal_seq;
+        const size_t row = static_cast<size_t>(st.reveal_row);
+        if (tiles_on_) tiles_->reveal_cursor(row);
+        else list_->reveal_cursor(row);
+    }
 }
 
 void TabView::reload_state() {
@@ -683,21 +816,30 @@ void TabView::reload_state() {
         main_.tab_navigated(tab_, path);
     }
 
-    // The box that holds the active search shows it; typing in the other one is left alone.
-    if (!search_->focused() && !gsearch_->focused()) {
+    // The box that holds the active search shows it; typing in the other one is left alone. The whole-PC
+    // box is the title bar's and belongs to whichever tab is active.
+    SearchField* gbox = main_.active_tab() == tab_ ? main_.title_search() : nullptr;
+    if (!search_->focused() && !(gbox && gbox->focused())) {
         const std::wstring text = core_.tab_text(tab_, BB_TEXT_SEARCH);
-        Edit* active = st.is_global_search ? gsearch_ : search_;
-        Edit* other = st.is_global_search ? search_ : gsearch_;
         suppress_ = true;
-        if (active->text() != text) active->set_text(text);
-        if (!other->text().empty()) other->set_text(L"");
+        const std::wstring local = st.is_global_search ? std::wstring() : text;
+        if (search_->text() != local) search_->set_text(local);
         suppress_ = false;
+        if (gbox) main_.set_title_search_text(st.is_global_search ? text : std::wstring());
     }
+    search_->sync_buttons();
 
     const std::wstring error = core_.tab_text(tab_, BB_TEXT_ERROR);
     banner_->set_text(error);
     banner_panel_->set_visible(!error.empty());
-    unlock_->set_visible(!error.empty() && core::icontains(error, L"password"));
+    const std::wstring notice = core_.tab_text(tab_, BB_TEXT_NOTICE);
+    if (notice_->text() != notice) notice_->set_text(notice);
+    notice_panel_->set_visible(!notice.empty());
+    // Indeterminate only while shown: its animation timer runs for as long as it is.
+    const bool busy = st.is_loading || st.is_search_running;
+    activity_->set_indeterminate(busy);
+    activity_->set_visible(busy);
+    unlock_->set_visible(!error.empty() && st.is_archive_locked);
 
     adapter_.reload_selection();
     const std::wstring sort = core_.tab_text(tab_, BB_TEXT_SORT_BY);
@@ -707,23 +849,80 @@ void TabView::reload_state() {
     sync_view_mode(st);
     sync_side_pane(st);
     refresh_tooltips();
+    apply_reveal(st);
     list_->invalidate();
     tiles_->invalidate();
 }
 
 void TabView::on_search_changed(bool global) {
+    if (global) return;  // the title bar's box, which MainView drives
+    search_->sync_buttons();
     if (suppress_) return;
-    Edit* box = global ? gsearch_ : search_;
-    bb_tab_set_search(core_.app(), tab_, core::s(box->text()), global);
+    bb_tab_set_search(core_.app(), tab_, core::s(search_->text()), false);
+}
+
+void TabView::search_escape(bool global) {
+    if (core_.tab_state(tab_).is_search_running) {
+        main_.execute_command(L"search.stop");
+        return;
+    }
+    clear_search(global);
+}
+
+void TabView::clear_search(bool global) {
+    try {
+        type_search(L"", global);
+    } catch (const core::CoreError&) {
+    }
+    main_.focus_file_list();
+}
+
+SearchField::SearchField(std::function<void()> clear, std::function<void()> save) : Edit(false) {
+    auto make = [this](const IconData& icon, const wchar_t* tip, std::function<void()> click) {
+        auto* b = emplace<Button>();
+        b->icon = &icon;
+        b->tooltip = tip;
+        b->style.bg = tok::InputBackground;
+        b->style.border = tok::InputBackground;
+        b->style.fg = tok::TextSecondary;
+        b->flags.tab_stop = false;
+        b->flags.focusable = false;
+        b->on_click = std::move(click);
+        b->set_visible(false);
+        return b;
+    };
+    save_ = make(icons::Save, L"Save this search\u2026", std::move(save));
+    clear_ = make(icons::Dismiss, L"Clear search (Esc)", std::move(clear));
+}
+
+void SearchField::sync_buttons() {
+    const bool shown = !text().empty();
+    if (clear_->flags.visible == shown) return;
+    clear_->set_visible(shown);
+    save_->set_visible(shown);
+    inset_right = shown ? 44.0f : 0.0f;
+    arrange(bounds);
+    invalidate();
+}
+
+void SearchField::arrange(Rect r) {
+    Edit::arrange(r);
+    const float size = std::min(22.0f, r.height() - 4);
+    const float t = r.t + (r.height() - size) / 2;
+    clear_->arrange(Rect::xywh(r.r - 2 - size, t, size, size));
+    save_->arrange(Rect::xywh(r.r - 2 - 2 * size, t, size, size));
 }
 
 void TabView::type_search(const std::wstring& text, bool global) {
-    Edit* box = global ? gsearch_ : search_;
-    Edit* other = global ? search_ : gsearch_;
     suppress_ = true;
-    box->set_text(text);
-    if (!text.empty()) other->set_text(L"");
+    if (global) {
+        if (!text.empty()) search_->set_text(L"");
+    } else {
+        search_->set_text(text);
+    }
     suppress_ = false;
+    search_->sync_buttons();
+    if (main_.active_tab() == tab_ && (global || !text.empty())) main_.set_title_search_text(global ? text : std::wstring());
     core::check(bb_tab_set_search(core_.app(), tab_, core::s(text), global), "search");
 }
 
@@ -776,6 +975,92 @@ MainView::MainView(core::Core& core, platform::Window& window)
     title_toolbar_->style.bg = gfx::kNoToken;
     title_toolbar_->nc_hit = HTCLIENT;
     title_->middle = title_toolbar_;
+    {
+        // Workspaces and saved searches, when Settings puts them in the title bar rather than the sidebar.
+        // Spec: MainWindow.xaml (WorkspaceSwitcher, SavedSearchSwitcher).
+        switchers_ = title_->emplace<StackPanel>(Orientation::Horizontal, 6.0f);
+        switchers_->name = "TitleSwitchers";
+        switchers_->nc_hit = HTCLIENT;
+        auto make = [this](const char* id, const IconData& icon, const wchar_t* tip, bool workspaces) {
+            auto* b = switchers_->emplace<Button>();
+            b->name = id;
+            b->icon = &icon;
+            b->tooltip = tip;
+            b->height = 26;
+            // The same well as the whole-PC search beside it, so the two read as one family. Spec: HeaderDropdownButton.
+            b->style.bg = tok::WindowBackground;
+            b->style.border = tok::BorderSubtle;
+            b->flags.tab_stop = false;
+            b->nc_hit = HTCLIENT;
+            b->on_click = [this, workspaces] { open_switcher(workspaces); };
+            return b;
+        };
+        workspace_switcher_ = make("WorkspaceSwitcher", icons::SplitRight, L"Switch workspace", true);
+        search_switcher_ = make("SavedSearchSwitcher", icons::Search, L"Run a saved search", false);
+        switchers_->set_visible(false);
+        title_->after = switchers_;
+    }
+    {
+        // The command palette beside the whole-PC search: both are "find it by typing", one for commands and
+        // one for files. Centred on the bar. Spec: MainWindow.xaml (TitleBarSearchGroup).
+        title_search_group_ = title_->emplace<StackPanel>(Orientation::Horizontal, 4.0f);
+        title_search_group_->name = "TitleBarSearchGroup";
+        title_search_group_->nc_hit = HTCLIENT;
+        auto* palette = title_search_group_->emplace<Button>();
+        palette->name = "PaletteButton";
+        palette->icon = &icons::Palette;
+        palette->width = 30;
+        palette->height = 26;
+        palette->style.bg = tok::TitleBarBackground;
+        palette->style.border = tok::TitleBarBackground;
+        palette->style.fg = tok::TitleBarForeground;
+        palette->flags.tab_stop = false;
+        palette->flags.focusable = false;  // the palette hands the keyboard back to what had it
+        palette->nc_hit = HTCLIENT;
+        palette->on_click = [this] { execute_command(L"app.palette"); };
+        title_search_ = title_search_group_->emplace<SearchField>(
+            [this] {
+                if (TabView* tv = active_view()) tv->clear_search(true);
+            },
+            [this] { execute_command(L"search.save"); });
+        title_search_->name = "GlobalSearchBox";
+        title_search_->width = 300;
+        title_search_->height = 26;
+        // A well in the title bar: the window's own colour inside a faint edge. Spec: HeaderFieldBorder.
+        title_search_->style.bg = tok::WindowBackground;
+        title_search_->style.border = tok::BorderSubtle;
+        for (Button* b : {title_search_->clear_button(), title_search_->save_button()}) {
+            b->style.bg = tok::WindowBackground;
+            b->style.border = tok::WindowBackground;
+        }
+        title_search_->placeholder = L"Search this PC";
+        title_search_->nc_hit = HTCLIENT;
+        title_search_->clear_button()->name = "GlobalSearchClearButton";
+        title_search_->save_button()->name = "GlobalSaveSearchButton";
+        title_search_->on_changed = [this](const std::wstring& text) {
+            title_search_->sync_buttons();
+            if (title_search_suppress_ || !active_tab_) return;
+            bb_tab_set_search(core_.app(), active_tab_, core::s(text), true);
+        };
+        title_search_->on_cancel = [this] {
+            if (TabView* tv = active_view()) tv->search_escape(true);
+        };
+        // The syntax reference, to the right of the field it explains. Spec: MainWindow.xaml (SearchSyntaxButton).
+        auto* syntax = title_search_group_->emplace<Button>();
+        syntax->name = "SearchSyntaxButton";
+        syntax->icon = &icons::Properties;
+        syntax->tooltip = L"What you can type here";
+        syntax->width = 30;
+        syntax->height = 26;
+        syntax->style.bg = tok::TitleBarBackground;
+        syntax->style.border = tok::TitleBarBackground;
+        syntax->style.fg = tok::TitleBarForeground;
+        syntax->flags.tab_stop = false;
+        syntax->nc_hit = HTCLIENT;
+        syntax->on_click = [this] { execute_command(L"search.syntax"); };
+        title_->center = title_search_group_;
+        refresh_tooltips();  // and again whenever a key is rebound
+    }
     browser_ = root->emplace<Panel>();
     browser_->name = "BrowserRoot";
     browser_->dock = Dock::Fill;
@@ -785,34 +1070,15 @@ MainView::MainView(core::Core& core, platform::Window& window)
     rows_panel_->name = "ToolbarRows";
     rows_panel_->dock = Dock::Top;
     rows_panel_->set_visible(false);
-    {
-        // The offer to start the search index helper: shown until answered, "not now" lasts the session.
-        auto* banner = browser_dock->emplace<StackPanel>(Orientation::Horizontal, 10.0f);
-        banner->name = "IndexerBanner";
-        banner->dock = Dock::Top;
-        banner->height = 36;
-        banner->pad = 6;
-        banner->style.bg = tok::WarningBackground;
-        banner->set_visible(false);
-        indexer_banner_ = banner;
-        indexer_text_ = banner->emplace<TextBlock>();
-        indexer_text_->style.fg = tok::WarningForeground;
-        indexer_text_->flex = 1;
-        auto* start = banner->emplace<Button>(L"Start");
-        start->name = "IndexerStart";
-        start->width = 90;
-        start->on_click = [this] { bb_index_do(core_.app(), core::s(L"start")); };
-        auto* dismiss = banner->emplace<Button>(L"Not now");
-        dismiss->name = "IndexerDismiss";
-        dismiss->width = 90;
-        dismiss->on_click = [this] { bb_index_do(core_.app(), core::s(L"dismiss-banner")); };
-    }
-    browser_dock->add(make_compare_banner(*this));
     status_ = browser_dock->emplace<StatusBar>();
     status_->name = "StatusBar";
     status_->dock = Dock::Bottom;
     status_->on_right_click = [this] {
         if (index_state_["canRetry"].boolean()) bb_index_do(core_.app(), core::s(L"retry"));
+    };
+    status_->on_undo_click = [this] { execute_command(L"edit.undo-history"); };
+    status_->on_scale = [this](double scale) {
+        if (active_tab_) bb_tab_set_thumbnail_scale(core_.app(), active_tab_, scale);
     };
     {
         // What a copy or move is doing: the headline, a bar, and the numbers. Above the status line.
@@ -854,6 +1120,40 @@ MainView::MainView(core::Core& core, platform::Window& window)
         details->width = 90;
         details->on_click = [this] { open_dialog(L"transfer"); };
     }
+    {
+        // The offer to start the search index helper, above the status bar and the transfer strip:
+        // shown until answered, Dismiss lasts the session. A neutral surface rather than a warning,
+        // on purpose: nothing is wrong, search falls back to a crawl, and this is an offer. Spec:
+        // MainWindow.xaml (IndexerBanner).
+        auto* banner = browser_dock->emplace<StackPanel>(Orientation::Vertical, 0.0f);
+        banner->name = "IndexerBanner";
+        banner->dock = Dock::Bottom;
+        banner->set_visible(false);
+        indexer_banner_ = banner;
+        auto* rule = banner->emplace<Widget>();
+        rule->height = 1;
+        rule->style.bg = tok::BorderSubtle;
+        auto* row = banner->emplace<StackPanel>(Orientation::Horizontal, 12.0f);
+        row->pad = 7;
+        row->style.bg = tok::SurfaceRaised;
+        auto* glyph = row->emplace<Icon>(&icons::Indexing, 14.0f);
+        glyph->style.fg = tok::TextSecondary;
+        indexer_text_ = row->emplace<TextBlock>();
+        indexer_text_->style.fg = tok::TextSecondary;
+        indexer_text_->wrap = true;
+        indexer_text_->vcenter = true;
+        indexer_text_->flex = 1;
+        auto* start = row->emplace<Button>(L"Start indexer");
+        start->name = "IndexerStart";
+        start->icon = &icons::Shield;  // a UAC prompt, as everywhere else that asks for administrator rights
+        start->tooltip = L"Ask for administrator rights so drives can be indexed";
+        start->on_click = [this] { bb_index_do(core_.app(), core::s(L"start")); };
+        auto* dismiss = row->emplace<Button>(L"Dismiss");
+        dismiss->name = "IndexerDismiss";
+        dismiss->link = true;
+        dismiss->tooltip = L"Hide this until the next time BertBrowser starts";
+        dismiss->on_click = [this] { bb_index_do(core_.app(), core::s(L"dismiss-banner")); };
+    }
     main_split_ = browser_dock->emplace<Splitter>(Orientation::Horizontal);
     main_split_->dock = Dock::Fill;
     main_split_->name = "MainSplitter";
@@ -862,22 +1162,105 @@ MainView::MainView(core::Core& core, platform::Window& window)
     sidebar_column->name = "SidebarColumn";
     sidebar_ = sidebar_column->emplace<SavedSidebar>(*this, core_);
     sidebar_->dock = Dock::Bottom;
+    {
+        // DRIVES, under the same kind of header the other sections have, with Collapse all beside it.
+        // Spec: MainWindow.xaml (the folder tree's header), FolderTreeViewModel.CollapseAll.
+        auto* head = sidebar_column->emplace<StackPanel>(Orientation::Horizontal, 4.0f);
+        head->name = "FolderTreeHeader";
+        head->dock = Dock::Top;
+        head->pad = 4;
+        head->height = 28;
+        head->style.bg = tok::SurfaceBackground;
+        auto* title = head->emplace<TextBlock>(L"DRIVES");
+        title->style.fg = tok::TextMuted;
+        title->style.font.size = 11.5f;
+        title->style.font.weight = 600;
+        title->vcenter = true;
+        title->flex = 1;
+        auto* collapse = head->emplace<Button>();
+        collapse->name = "CollapseFolderTree";
+        collapse->icon = &icons::CollapseAll;
+        collapse->tooltip = L"Collapse all";
+        collapse->width = 22;
+        collapse->height = 20;
+        collapse->style.bg = tok::SurfaceBackground;
+        collapse->style.border = tok::SurfaceBackground;
+        collapse->flags.tab_stop = false;
+        collapse->on_click = [this] {
+            // Every drive and folder folded up; what was loaded stays, so opening one again costs no rescan.
+            if (!tree_ || !tree_provider_) return;
+            for (const uint64_t id : tree_provider_->loaded_ids()) {
+                if (tree_->is_expanded(id)) tree_->collapse(id);
+            }
+        };
+    }
     tree_ = sidebar_column->emplace<TreeView>();
     tree_->dock = Dock::Fill;
     tree_->name = "FolderTree";
+    // Sizes beside folders come from the core's cache (one lookup per batch, never a scan); drives say
+    // the space they use. Spec: FolderTreeViewModel (SizeText).
+    // A worker's read of a folder lands on this thread through the window. Only a post: see on_worker_done.
+    tree_provider_->on_worker_done = [hwnd = window_.hwnd()] { PostMessageW(hwnd, WM_BB_TREE, 0, 0); };
+    tree_provider_->size_source = [this](const std::vector<std::wstring>& paths) {
+        std::string list = "[";
+        for (size_t i = 0; i < paths.size(); ++i) list += (i ? "," : "") + ops::q(paths[i]);
+        list += "]";
+        const json::Value sizes = try_model([&](BbOwnedStr* o) { return bb_tree_sizes(core_.app(), core::s(core::wide(list)), o); });
+        std::vector<std::wstring> out;
+        for (size_t i = 0; i < sizes.size(); ++i) out.push_back(core::wide(sizes[i].str()));
+        return out;
+    };
+    tree_provider_->format_bytes = [](int64_t bytes) {
+        BbOwnedStr o{};
+        return bb_byte_size(bytes, &o) == BB_OK ? core::take(o) : std::wstring();
+    };
     tree_->set_provider(tree_provider_.get());
     sync_tree_hidden();
     // A program's or special folder's own icon came back from the shell: repaint whatever shows it.
-    icons_->on_ready = [this] { window_.root().invalidate_all(); };
-    pane_host_ = main_split_->emplace<Panel>();
+    icons_->on_ready = [this] {
+        window_.root().invalidate_all();
+        for (auto& kv : tools_) kv.second->window().root().invalidate_all();
+    };
+    // The panes, with the compare banner above them and not above the sidebar: a comparison is one
+    // thing spanning two panes. Spec: MainWindow.xaml (PaneHostSite).
+    auto* pane_column = main_split_->emplace<DockPanel>();
+    pane_column->name = "PaneColumn";
+    pane_column->add(make_compare_banner(*this));
+    pane_host_ = pane_column->emplace<Panel>();
     pane_host_->name = "PaneHostSite";
+    pane_host_->dock = Dock::Fill;
 
+    // A folder middle-clicked opens in a pane to the right; a drive as the "middle-click a drive" setting says
+    // (a new panel, or a new tab). Spec: MainWindow.FolderTreeItem_PreviewMiddleClick, ShellViewModel.OpenDrive.
+    tree_->on_middle = [this](uint64_t id) {
+        const std::wstring path = tree_provider_->path_of(id);
+        if (path.empty()) return;
+        if (tree_provider_->is_device(id)) {
+            open_device(path);
+            return;
+        }
+        BbApp* app = core_.app();
+        BbOwnedStr o{};
+        const bool panel = bb_settings_get(app, core::s(L"drivesOpenTarget"), &o) == BB_OK && core::take(o).find(L"NewPanel") != std::wstring::npos;
+        if (path.size() <= 3 && !panel) {
+            uint64_t tab = 0;
+            bb_tab_open(app, 0, core::s(path), true, &tab);
+        } else {
+            uint64_t pane = 0;
+            bb_pane_split(app, 0, BB_VERTICAL, core::s(path), &pane);
+        }
+    };
     tree_->on_context = [this](uint64_t id, Point at) {
         const std::wstring path = tree_provider_->path_of(id);
         if (!path.empty()) open_tree_menu(path, at);
     };
+    // A device is no path to browse: a double-click (or a middle-click) opens it in Explorer, and selecting it
+    // navigates nowhere. Spec: MainWindow.FolderTree_DoubleClick, ShellViewModel.MiddleClickDriveOrDevice.
+    tree_->on_activate = [this](uint64_t id) {
+        if (tree_provider_->is_device(id)) open_device(tree_provider_->path_of(id));
+    };
     tree_->on_select = [this](uint64_t id) {
-        if (revealing_ || !active_tab_) return;
+        if (revealing_ || !active_tab_ || tree_provider_->is_device(id)) return;
         const std::wstring path = tree_provider_->path_of(id);
         if (!path.empty()) {
             try {
@@ -894,9 +1277,27 @@ MainView::MainView(core::Core& core, platform::Window& window)
     palette_->name = "PaletteLayer";
     dialogs_ = browser_->emplace<DialogLayer>();
     dialogs_->name = "DialogLayer";
+    // The search syntax card is a reference sheet: any click puts it away. Spec: SearchSyntaxDialog.
+    dialogs_->on_click = [this] {
+        if (dialog_open_ && dialog_kind_ == L"search-syntax") defer([this] { close_dialog(); });
+    };
+    window_.on_timer = [this](UINT_PTR id) {
+        if (id == kChangesTimer) refresh_changes(false);
+    };
+    // Tab stays inside whatever lies over the folders: a dialog card, else the Settings page.
+    window_.root().tab_scope = [this]() -> Widget* {
+        if (dialog_open_ && dialogs_) return dialogs_;
+        if (settings_ && settings_->is_open()) return settings_;
+        return nullptr;
+    };
     dialogs_->on_closed = [this] {
         dialog_open_ = false;
         dialog_kind_.clear();
+        // The keyboard goes back where it was, if that is still there.
+        if (window_.root().contains(focus_before_dialog_) && !dialogs_->holds(window_.root().focused())) {
+            window_.root().set_focus(focus_before_dialog_);
+        }
+        focus_before_dialog_ = nullptr;
         bb_ui_set_dialog_open(core_.app(), false);
         if (questions_waiting_) {
             questions_waiting_ = false;
@@ -928,10 +1329,14 @@ MainView::MainView(core::Core& core, platform::Window& window)
     push_clipboard_flag();
     window_.root().on_preview_key = [this](const KeyEvent& e) { return on_preview_key(e); };
     bb_app_set_event_sink(core_.app(), &MainView::sink, this);
+    // After the sink, so the event that says the read landed cannot arrive before anyone listens.
+    sync_devices(false);  // starts reading the portable devices; their rows join the drives when it lands
 }
 
 MainView::~MainView() {
     // The tool windows' trees call into the core as they go, so they close while it is still alive.
+    KillTimer(window_.hwnd(), kChangesTimer);
+    window_.on_timer = nullptr;
     tools_.clear();
     RemoveClipboardFormatListener(window_.hwnd());
     window_.on_clipboard_changed = nullptr;
@@ -966,6 +1371,10 @@ bool MainView::on_window_message(UINT msg, WPARAM wp, LPARAM lp) {
     }
     if (msg == WM_BB_ICONS) {
         icons_->drain();
+        return true;
+    }
+    if (msg == WM_BB_TREE) {
+        if (tree_provider_ && tree_provider_->drain() && tree_) tree_->refresh();
         return true;
     }
     if (msg == WM_BB_THUMBS) {
@@ -1030,12 +1439,19 @@ void MainView::handle(const BbEvent& e) {
             const std::wstring key = core::w(e.text);
             if (core::icontains(key, L"theme")) apply_theme();
             if (key == L"showHiddenItems") sync_tree_hidden();
+            // The page redraws only what moved (its signature), so this is cheap; it is how an import that
+            // finished off the UI thread, or a problem with a list just typed, reaches the page.
+            if (settings_ && settings_->is_open()) settings_->sync();
             break;
         }
         case BB_EVT_OP_FINISHED:
-            // A cut is one-shot once something has moved; a paste that failed leaves it to try elsewhere.
+            // A cut is one-shot once something has moved, even if not everything did; a paste that moved
+            // nothing leaves it to try elsewhere. Spec: ShellViewModel (Completed.Count > 0).
             if (cut_paste_op_ && e.id == cut_paste_op_) {
-                if (e.a && clipboard_seq() == cut_paste_seq_) {
+                const bool moved = e.a != 0 || std::any_of(cut_paste_paths_.begin(), cut_paste_paths_.end(), [](const std::wstring& p) {
+                                       return GetFileAttributesW(p.c_str()) == INVALID_FILE_ATTRIBUTES;
+                                   });
+                if (moved && clipboard_seq() == cut_paste_seq_) {
                     if (headless_dialogs_) {
                         run_clipboard_.reset();
                         ++run_clipboard_seq_;
@@ -1051,6 +1467,7 @@ void MainView::handle(const BbEvent& e) {
             if (tree_ && tree_provider_ && tree_provider_->reload_where([this](uint64_t id) { return tree_->is_expanded(id); })) {
                 tree_->refresh();
             }
+            duplicates_settle_prune(*this);
             [[fallthrough]];
         case BB_EVT_UNDO_CHANGED:
         case BB_EVT_BUSY_CHANGED:
@@ -1074,7 +1491,11 @@ void MainView::handle(const BbEvent& e) {
             if (e.a == 18) sync_questions(L"notice");
             if (e.a == 19 && on_delete_survey) on_delete_survey();
             if (e.a == 20) sync_duplicates();
-            if (e.a == 21 && tool_window(L"checksum")) open_dialog(L"checksum-show");
+            if (e.a == 9) refresh_index_windows();
+            if (e.a == 21) refresh_tool(L"checksum-show");
+            if (e.a == 22) refresh_tool(L"disk-usage-show");
+            if (e.a == 23) refresh_tool(L"compare-files-show");
+            if (e.a == 24) sync_devices(false);
             if (e.a == 13) {
                 for (auto& kv : by_tab_) {
                     if (kv.second->metadata()) kv.second->metadata()->refresh();
@@ -1134,6 +1555,15 @@ void MainView::apply_theme() {
                              rgb(gfx::tok::TitleBarForeground));
     window_.root().invalidate_all();
     for (auto& kv : tools_) style_tool_window(*kv.second);
+    // A different theme (picked in Settings, or Windows switching at sunset) is a different editor; an
+    // override typed into it is the same one and must not rebuild it under a drag.
+    // Spec: ThemeEditorWindow.WatchThemeChanges.
+    if (tool_window(L"theme-editor")) {
+        const std::string id = try_model([&](BbOwnedStr* o) { return bb_theme_state(core_.app(), o); })["id"].str();
+        if (id != theme_editor_id_) defer([this] { refresh_tool(L"theme-editor"); });  // which records the new id
+    } else {
+        theme_editor_id_.clear();
+    }
 }
 
 TabView* MainView::tab_view(uint64_t tab) {
@@ -1146,6 +1576,13 @@ size_t MainView::tab_count_in_active_pane() const {
         if (pv->pane() == active_pane_) return pv->strip->tabs().size();
     }
     return 0;
+}
+
+TabStrip* MainView::active_strip() const {
+    for (const PaneView* pv : pane_views_) {
+        if (pv->pane() == active_pane_) return pv->strip;
+    }
+    return nullptr;
 }
 
 std::vector<std::wstring> MainView::tab_titles_in_active_pane() const {
@@ -1189,9 +1626,13 @@ void MainView::reveal_in_tree(const std::wstring& path) {
     revealed_ = path;
     const std::vector<uint64_t> chain = tree_provider_->chain_to(path);
     if (chain.empty()) return;
+    // A folder clicked in the tree stays where it was clicked; anything else lands 40% of the way down, with
+    // its ancestors above it in view. Spec: MainWindow.ScrollTreeChainIntoView.
+    const bool anchored = tree_->selected_id() == chain.back();
     revealing_ = true;
     for (size_t i = 0; i + 1 < chain.size(); ++i) tree_->expand(chain[i]);
     tree_->select(chain.back());
+    if (!anchored) tree_->place(chain.back(), 0.4f);
     revealing_ = false;
 }
 
@@ -1214,6 +1655,60 @@ void MainView::activate_tab(uint64_t tab) { bb_tab_activate(core_.app(), tab); }
 void MainView::close_tab(uint64_t tab) { bb_tab_close(core_.app(), tab); }
 void MainView::activate_pane(uint64_t pane) { bb_pane_activate(core_.app(), pane); }
 
+// The strip's buttons and its menu act on the pane they sit in, so that pane is made active first.
+void MainView::wire_tab_strip(TabStrip& strip, uint64_t pane) {
+    BbApp* app = core_.app();
+    strip.on_move = [app](uint64_t tab, uint32_t index) { bb_tab_move(app, tab, index); };
+    strip.on_new_tab = [this, pane] {
+        activate_pane(pane);
+        execute_command(L"tab.new");
+    };
+    strip.on_split = [this, pane](bool right) {
+        activate_pane(pane);
+        execute_command(right ? L"pane.split-right" : L"pane.split-below");
+    };
+    strip.on_context = [this](uint64_t tab, Point at) { show_context_menu(tab_menu(tab), at); };
+    auto tip = [app](const wchar_t* text, const wchar_t* command) {
+        BbOwnedStr o{};
+        const std::wstring g = bb_keymap_gesture(app, core::s(command), &o) == BB_OK ? core::take(o) : std::wstring();
+        return g.empty() ? std::wstring(text) : std::wstring(text) + L" (" + g + L")";
+    };
+    strip.new_tab_button()->tooltip = tip(L"New tab here", L"tab.new");
+    strip.split_right_button()->tooltip = tip(L"Split pane to the right", L"pane.split-right");
+    strip.split_below_button()->tooltip = tip(L"Split pane below", L"pane.split-below");
+}
+
+MenuItems MainView::tab_menu(uint64_t tab) {
+    // The commands act on the active tab, so the one right-clicked becomes it.
+    activate_tab(tab);
+    std::vector<BarRow> rows;
+    const std::pair<const char*, const wchar_t*> items[] = {{"tab.duplicate", L"&Duplicate tab"},
+                                                            {"tab.close-others", L"Close &other tabs"},
+                                                            {"tab.move-to-new-pane", L"&Move to new pane"},
+                                                            {"-", nullptr},
+                                                            {"tab.close", L"&Close tab"}};
+    for (const auto& [id, caption] : items) {
+        BarRow r;
+        if (std::string(id) == "-") {
+            r.kind = "separator";
+            rows.push_back(std::move(r));
+            continue;
+        }
+        const json::Value st = try_model([&](BbOwnedStr* o) { return bb_command_state(core_.app(), core::s(core::wide(id)), o); });
+        if (st.is_null()) continue;
+        r.kind = "command";
+        r.id = id;
+        r.icon = st["icon"].str();
+        r.name = core::wide(st["name"].str());
+        r.caption = caption;
+        r.gesture = core::wide(st["gesture"].str());
+        r.enabled = st["whyNot"].is_null();
+        r.reason = core::wide(st["whyNot"].str());
+        rows.push_back(std::move(r));
+    }
+    return build_menu_items(menu_env(), rows);
+}
+
 BbFocusKind MainView::focus_kind() const {
     Widget* f = window_.root().focused();
     if (const auto* edit = dynamic_cast<Edit*>(f)) return edit->read_only ? BB_FOCUS_TEXT_READ_ONLY : BB_FOCUS_TEXT_EDITABLE;
@@ -1233,7 +1728,65 @@ uint32_t MainView::focus_flags() {
     return flags;
 }
 
+namespace {
+
+Button* find_button(Widget& w, bool Button::*flag) {
+    if (auto* b = dynamic_cast<Button*>(&w); b && b->*flag && b->flags.enabled && b->shown()) return b;
+    for (const auto& c : w.children()) {
+        if (Button* found = find_button(*c, flag)) return found;
+    }
+    return nullptr;
+}
+
+// The card's default button: the one marked default, else the accent-filled one, when it can be pressed.
+Button* primary_button(Widget& w) {
+    if (Button* b = find_button(w, &Button::is_default)) return b;
+    return find_button(w, &Button::primary);
+}
+
+// What has the keyboard when a card opens: its first field (with whatever selection the card gave it),
+// else its default button. Spec: each dialog's Loaded handler.
+Widget* first_focus(Widget& w) {
+    if (!w.shown() || !w.flags.enabled) return nullptr;
+    if (auto* e = dynamic_cast<Edit*>(&w); e && e->flags.focusable && !e->read_only) return e;
+    for (const auto& c : w.children()) {
+        if (Widget* found = first_focus(*c)) return found;
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+// A dialog's keys, as a WPF dialog's IsCancel and IsDefault buttons had them: Esc closes it (closing is
+// "no" wherever a question is waiting), Enter presses the default button unless the keyboard is in
+// something that takes Enter itself. The search syntax card closes on any key. Spec: ThemedWindow.
+bool MainView::dialog_key(const KeyEvent& e) {
+    if (!dialog_open_ || !dialogs_ || (popup_ && popup_->menu_open())) return false;
+    const bool plain = !e.mods.ctrl && !e.mods.alt && !e.mods.shift;
+    const bool modifier = e.vk == VK_SHIFT || e.vk == VK_CONTROL || e.vk == VK_MENU || e.vk == VK_LWIN || e.vk == VK_RWIN;
+    if (dialog_kind_ == L"search-syntax" && !modifier) {
+        close_dialog();
+        return true;
+    }
+    if (e.vk == VK_ESCAPE && plain) {
+        close_dialog();
+        return true;
+    }
+    if (e.vk == VK_RETURN && plain) {
+        Widget* focused = window_.root().focused();
+        if (auto* edit = dynamic_cast<Edit*>(focused); edit && (edit->multiline || edit->on_commit)) return false;
+        if (dynamic_cast<Button*>(focused)) return false;
+        if (focused && dynamic_cast<forms::ItemList*>(focused) && static_cast<forms::ItemList*>(focused)->on_activate) return false;
+        if (Button* b = primary_button(*dialogs_)) {
+            if (b->on_click) b->on_click();
+            return true;
+        }
+    }
+    return false;
+}
+
 bool MainView::on_preview_key(const KeyEvent& e) {
+    if (dialog_key(e)) return true;
     if (menu_bar_ && menu_bar_->preview_key(e)) return true;
     if (palette_ && palette_->preview_key(e)) return true;
     const std::wstring key = key_name(e.vk);
@@ -1435,6 +1988,7 @@ bool MainView::paste(bool shortcut) {
     if (!shortcut && clip->cut && op) {
         cut_paste_op_ = op;
         cut_paste_seq_ = clipboard_seq();
+        cut_paste_paths_ = clip->paths;
     }
     return true;
 }
@@ -1482,6 +2036,48 @@ void MainView::open_duplicates(const std::wstring& folder) {
     open_dialog(L"duplicates");
 }
 
+// The index moved (a volume finished, the helper started or stopped): the windows whose answer comes from it
+// ask again. Duplicates scans again only when its answer was not believable yet; a finished scan is not
+// thrown away for an index that was already enough. Spec: DiskUsageViewModel / ChangeTimelineViewModel /
+// DuplicatesViewModel .OnIndexRefreshed and .OnStatusChanged.
+void MainView::refresh_index_windows() {
+    refresh_tool(L"disk-usage-at");
+    if (tool_window(L"changes")) refresh_changes(true);
+    if (tool_window(L"duplicates")) {
+        const json::Value& m = duplicates_.result;
+        if (m["hasScanned"].boolean() && !m["scanning"].boolean() && m["availability"].str() != "Ready") {
+            const std::string root = m["root"].is_null() ? "null" : json_quote(core::wide(m["root"].str()));
+            try_tool_call(*this, "duplicates.scan", "{\"root\":" + root + "}");
+        } else {
+            sync_duplicates();
+        }
+    }
+}
+
+// What changed slides with the clock ("in the last hour"), so its window reads the log again every two
+// seconds while it is open - and is rebuilt only when what it would show is different, so a list somebody
+// is reading does not jump under them. Spec: ChangeTimelineWindow (its DispatcherTimer).
+void MainView::refresh_changes(bool force) {
+    if (!tool_window(L"changes")) return;
+    // The clock tick asks the log's stamp, which is cheap; the query runs when that moved, when recording was
+    // switched, or every thirty seconds so "2 min ago" keeps up. Spec: ChangeTimelineViewModel.OnTick.
+    {
+        const json::Value st = try_tool_call(*this, "changes.stamp");
+        const std::string stamp = st["stamp"].str() + (st["recording"].boolean() ? "|on" : "|off");
+        if (!force && stamp == changes_stamp_ && ++changes_ticks_ < 15) return;
+        changes_stamp_ = stamp;
+    }
+    changes_ticks_ = 0;
+    std::wstring error;
+    const json::Value m = try_tool_call(*this, "changes.model", "", &error);
+    if (m.is_null()) return;
+    std::string sig = m["summary"].str() + "|" + m["markText"].str() + "|" + m["message"].str() + "|" + std::to_string(m["rows"].size());
+    for (size_t i = 0; i < m["rows"].size() && i < 64; ++i) sig += "|" + m["rows"][i]["path"].str() + m["rows"][i]["when"].str();
+    if (!force && sig == changes_signature_) return;
+    changes_signature_ = sig;
+    refresh_tool(L"changes-show");
+}
+
 void MainView::sync_duplicates() {
     std::wstring error;
     json::Value m = try_tool_call(*this, "duplicates.model", "", &error);
@@ -1491,7 +2087,7 @@ void MainView::sync_duplicates() {
     duplicates_.version = version;
     duplicates_.result = std::move(m);
     duplicates_.has = true;
-    if (tool_window(L"duplicates")) open_dialog(L"duplicates");
+    refresh_tool(L"duplicates");
 }
 
 // "Copy as path" quotes every path, as Explorer's does, one per line; a name is bare text. A scripted run
@@ -1583,7 +2179,8 @@ void MainView::pick_list_item(const std::string& list_id, const std::wstring& id
         } else if (list_id == "saved-searches") {
             core::check(bb_saved_do(app, active_tab_, core::s(L"run-search"), core::s(name)), "run-search");
         } else if (list_id == "command-bars") {
-            core::check(bb_bars_do(app, core::s(L"apply"), core::s(name)), "apply");
+            // Asks first when the arrangement in force is saved under no name. Spec: MainWindow.CommandBars (ConfirmDiscardCommandBars).
+            core::check(bb_barpage_do(app, core::s(L"apply-saved"), core::s(name)), "apply");
         }
     } catch (const core::CoreError&) {
     }
@@ -1659,6 +2256,87 @@ void MainView::sync_row_toolbars(const json::Value& state) {
     }
 }
 
+void MainView::set_title_search_text(const std::wstring& text) {
+    if (!title_search_ || title_search_->text() == text) return;
+    title_search_suppress_ = true;
+    title_search_->set_text(text);
+    title_search_suppress_ = false;
+    title_search_->sync_buttons();
+}
+
+void MainView::sync_title_search() {
+    if (!title_search_ || !active_tab_ || title_search_->focused()) return;
+    try {
+        const BbTabState st = core_.tab_state(active_tab_);
+        set_title_search_text(st.is_global_search ? core_.tab_text(active_tab_, BB_TEXT_SEARCH) : std::wstring());
+    } catch (const core::CoreError&) {
+    }
+}
+
+void MainView::sync_switchers() {
+    if (!switchers_) return;
+    const json::Value st = try_model([&](BbOwnedStr* o) { return bb_saved_state(core_.app(), o); });
+    if (st.is_null()) return;
+    const bool spaces = st["workspacesPlacement"].str() == "titlebar";
+    const bool searches = st["savedSearchesPlacement"].str() == "titlebar";
+    // Named after the workspace the window last came from, or plain "Workspaces" before there is one.
+    const std::wstring current = core::wide(st["currentWorkspace"].str());
+    const std::wstring label = (current.empty() ? std::wstring(L"Workspaces") : current) + L"  \u25BE";
+    if (workspace_switcher_->text != label) {
+        workspace_switcher_->text = label;
+        workspace_switcher_->request_layout();
+    }
+    search_switcher_->text = L"Saved searches  \u25BE";
+    workspace_switcher_->set_visible(spaces);
+    search_switcher_->set_visible(searches);
+    if (switchers_->flags.visible != (spaces || searches)) {
+        switchers_->set_visible(spaces || searches);
+        title_->request_layout();
+    }
+    title_->arrange(title_->bounds);
+    title_->invalidate();
+}
+
+// The dropdown: every workspace (or saved search), then Save and Manage. Spec: MainWindow.SavedWorkspaces
+// BuildWorkspaceMenuItems, MainWindow.SavedSearches BuildSavedSearchMenuItems.
+void MainView::open_switcher(bool workspaces) {
+    floating_menu_ = std::make_unique<MenuItems>(switcher_items(workspaces));
+    MenuOpen o;
+    o.anchor = (workspaces ? workspace_switcher_ : search_switcher_)->bounds;
+    popup_->open_menu(*floating_menu_, o);
+}
+
+MenuItems MainView::switcher_items(bool workspaces) {
+    BarRow list;
+    list.kind = "list";
+    list.id = workspaces ? "workspaces" : "saved-searches";
+    MenuItems items = build_menu_items(menu_env(), {list});
+    if (items.empty()) {
+        MenuItem none = MenuItem::make(workspaces ? L"No saved workspaces yet" : L"No saved searches yet");
+        none.enabled = false;
+        items.push_back(std::move(none));
+    }
+    items.push_back(MenuItem::separator());
+    BbApp* app = core_.app();
+    if (workspaces) {
+        MenuItem save = MenuItem::make(L"&Save current layout\u2026", [this] { execute_command(L"app.save-workspace"); });
+        save.icon = &icons::Save;
+        items.push_back(std::move(save));
+    } else {
+        // Only with something to save: a greyed entry says why nothing would happen.
+        MenuItem save = MenuItem::make(L"&Save current search\u2026", [this] { execute_command(L"search.save"); });
+        save.icon = &icons::Save;
+        save.enabled = active_tab_ && !core_.tab_text(active_tab_, BB_TEXT_SEARCH).empty();
+        items.push_back(std::move(save));
+    }
+    MenuItem manage = MenuItem::make(workspaces ? L"&Manage workspaces\u2026" : L"&Manage saved searches\u2026", [app, workspaces] {
+        bb_settings_page_open(app, core::s(workspaces ? L"workspaces" : L"saved-searches"));
+    });
+    manage.icon = &icons::Settings;
+    items.push_back(std::move(manage));
+    return items;
+}
+
 void MainView::open_toolbar_list(const BarRow& row, Rect anchor) {
     BarRow list = row;
     list.kind = "list";
@@ -1703,6 +2381,14 @@ void MainView::supply_properties(uint64_t tab) {
 void MainView::sync_index() {
     index_state_ = try_model([&](BbOwnedStr* o) { return bb_index_state(core_.app(), o); });
     if (index_state_.is_null()) return;
+    // A volume that has just finished indexing is when folder sizes first exist: the tree fills them in
+    // without being collapsed and opened again. Spec: FolderTreeViewModel.RefreshSizesAsync.
+    const bool building = index_state_["building"].boolean();
+    if (index_was_building_ && !building && tree_ && tree_provider_) {
+        tree_provider_->refresh_sizes();
+        tree_->invalidate();
+    }
+    index_was_building_ = building;
     const json::Value& b = index_state_["banner"];
     indexer_banner_->set_visible(b["show"].boolean());
     indexer_text_->set_text(core::wide(b["message"].str()));
@@ -1734,6 +2420,7 @@ void MainView::sync_overlays() {
     if (settings_) settings_->sync();
     if (palette_) palette_->sync();
     if (sidebar_) sidebar_->sync();
+    sync_switchers();
 }
 
 namespace {
@@ -1751,7 +2438,7 @@ std::wstring tool_key(const std::wstring& kind) {
 }  // namespace
 
 bool MainView::is_tool_window(const std::wstring& kind) {
-    static const wchar_t* const kinds[] = {L"disk-usage",   L"disk-usage-at", L"duplicates", L"changes",      L"checksum",
+    static const wchar_t* const kinds[] = {L"disk-usage",   L"disk-usage-at", L"disk-usage-show", L"duplicates", L"changes",      L"checksum",
                                            L"checksum-verify", L"checksum-show", L"compare-files", L"compare-files-show",
                                            L"changes-show", L"undo-history", L"transfer",
                                            L"theme-editor"};
@@ -1766,7 +2453,14 @@ ToolWindow* MainView::tool_window(const std::wstring& kind) {
     return it == tools_.end() ? nullptr : it->second.get();
 }
 
-void MainView::close_tool(const std::wstring& kind) { tools_.erase(tool_key(kind)); }
+void MainView::close_tool(const std::wstring& kind) {
+    const std::wstring key = tool_key(kind);
+    if (key == L"changes") {
+        KillTimer(window_.hwnd(), kChangesTimer);
+        changes_signature_.clear();
+    }
+    tools_.erase(key);
+}
 
 std::vector<std::wstring> MainView::open_tool_windows() const {
     std::vector<std::wstring> out;
@@ -1786,22 +2480,69 @@ void MainView::style_tool_window(ToolWindow& w) {
     w.apply_theme(luma < 128, rgb(gfx::tok::TitleBarBorder), rgb(gfx::tok::TitleBarBackground), rgb(gfx::tok::TitleBarForeground));
 }
 
+// Compare files steps through the differences with F3 / Shift+F3 and Alt+Down / Alt+Up. Spec:
+// FileCompareWindow.xaml (InputBindings).
+bool MainView::tool_window_key(const std::wstring& key, const KeyEvent& e) {
+    if (key != L"compare-files" || e.mods.ctrl) return false;
+    int dir = 0;
+    if (e.vk == VK_F3 && !e.mods.alt) dir = e.mods.shift ? -1 : 1;
+    else if (e.mods.alt && !e.mods.shift && (e.vk == VK_DOWN || e.vk == VK_UP)) dir = e.vk == VK_DOWN ? 1 : -1;
+    if (!dir) return false;
+    try_tool_call(*this, "filecompare.step", "{\"direction\":" + std::to_string(dir) + "}");
+    defer([this] { open_dialog(L"compare-files-show"); });
+    return true;
+}
+
+void MainView::show_message(std::wstring title, std::wstring text) {
+    message_ = {std::move(title), std::move(text)};
+    defer([this] { open_dialog(L"message"); });
+}
+
+// Rebuilds a tool window that is already open, from something other than the person (progress, the index,
+// a timer): the same as opening it again, minus taking the foreground.
+void MainView::refresh_tool(const std::wstring& kind) {
+    if (!tool_window(tool_key(kind))) return;
+    refreshing_tool_ = true;
+    open_dialog(kind);
+    refreshing_tool_ = false;
+}
+
 void MainView::open_dialog(const std::wstring& kind) {
     if (!shows_dialogs() || !dialog_exists(kind)) return;
     if (is_tool_window(kind)) {
         const std::wstring key = tool_key(kind);
         auto card = build_dialog(kind, DialogContext{*this, [this, key] { defer([this, key] { close_tool(key); }); }});
         if (!card) return;
+        if (key == L"theme-editor") theme_editor_id_ = try_model([&](BbOwnedStr* o) { return bb_theme_state(core_.app(), o); })["id"].str();
         if (ToolWindow* open = tool_window(key)) {
             open->replace(std::move(card));
-            open->focus();
+            // Brought forward when somebody asked for it; a refresh behind their back never activates it.
+            if (!refreshing_tool_) open->focus();
             return;
         }
         auto w = std::make_unique<ToolWindow>(*this, key, std::move(card));
         ToolWindow* raw = w.get();
         tools_[key] = std::move(w);
         raw->show();
+        if (key == L"changes") SetTimer(window_.hwnd(), kChangesTimer, 2000, nullptr);
         return;
+    }
+    // A card rebuilt as itself (a tick in the sync preview, the live run) keeps its lists' places and what
+    // had the keyboard; anything else starts fresh.
+    auto base = [](std::wstring k) {
+        for (const wchar_t* suffix : {L"-edit", L"-live"}) {
+            const size_t n = wcslen(suffix);
+            if (k.size() > n && k.compare(k.size() - n, n, suffix) == 0) k.resize(k.size() - n);
+        }
+        return k;
+    };
+    const bool again = dialog_open_ && base(dialog_kind_) == base(kind);
+    tools::ListPlaces places;
+    std::string focused_name;
+    Widget* kept_focus = focus_before_dialog_;
+    if (again) {
+        places = tools::save_places(*dialogs_);
+        if (Widget* f = window_.root().focused(); f && dialogs_->holds(f)) focused_name = f->name;
     }
     close_dialog();
     auto card = build_dialog(kind, DialogContext{*this, [this] { close_dialog(); }});
@@ -1809,7 +2550,15 @@ void MainView::open_dialog(const std::wstring& kind) {
     dialog_open_ = true;
     dialog_kind_ = kind;
     bb_ui_set_dialog_open(core_.app(), true);
+    Widget* before = window_.root().focused();
+    if (again) focus_before_dialog_ = kept_focus;
+    else if (!dialogs_->holds(before)) focus_before_dialog_ = before;
     dialogs_->show(std::move(card));
+    if (again) tools::restore_places(*dialogs_, places);
+    Widget* named = focused_name.empty() ? nullptr : dialogs_->find(focused_name);
+    if (named) window_.root().set_focus(named);
+    else if (Widget* f = first_focus(*dialogs_)) window_.root().set_focus(f);
+    else if (Button* b = primary_button(*dialogs_)) window_.root().set_focus(b);
 }
 
 void MainView::open_new_file(const std::wstring& extension, const std::wstring& label, const std::wstring& folder) {
@@ -1818,6 +2567,18 @@ void MainView::open_new_file(const std::wstring& extension, const std::wstring& 
     open_dialog(L"new-file");
     dialog_folder_.clear();
     new_file_template_ = {};
+}
+
+void MainView::edit_saved_search(const std::wstring& name) {
+    editing_saved_ = name;
+    open_dialog(L"saved-search");
+    editing_saved_.clear();
+}
+
+void MainView::rename_workspace(const std::wstring& name) {
+    editing_saved_ = name;
+    open_dialog(L"rename-workspace");
+    editing_saved_.clear();
 }
 
 void MainView::reopen_on(const std::wstring& kind, std::vector<std::wstring> paths) {
@@ -1898,6 +2659,7 @@ void MainView::sync_transfer() {
     transfer_cancel_->set_enabled(queue_["canCancel"].boolean());
     browser_->request_layout();
     if (on_transfer_changed) on_transfer_changed();
+    if (on_sync_progress) on_sync_progress();
     // The queue window goes when there is nothing left to show in it. Spec: MainWindow (TransferProgress null).
     if (!active && tool_window(L"transfer")) defer([this] { close_tool(L"transfer"); });
 }
@@ -1995,8 +2757,33 @@ void MainView::set_thumbnail_source(ThumbSource s) {
     for (auto& kv : by_tab_) kv.second->set_thumbnail_source(s);
 }
 
+// The portable devices under "This PC", read off the UI thread the first time they are asked for (and again on
+// `refresh`). Spec: FolderTreeViewModel (LoadDevicesAsync).
+void MainView::sync_devices(bool refresh) {
+    if (!tree_provider_) return;
+    const json::Value m = try_tool_call(*this, "devices.list", refresh ? "{\"refresh\":true}" : "{}");
+    if (!m["loaded"].boolean()) return;
+    std::vector<std::pair<std::wstring, std::wstring>> devices;
+    for (size_t i = 0; i < m["devices"].size(); ++i) {
+        devices.push_back({core::wide(m["devices"][i]["name"].str()), core::wide(m["devices"][i]["path"].str())});
+    }
+    if (tree_provider_->set_devices(devices) && tree_) tree_->refresh();
+}
+
+void MainView::open_device(const std::wstring& path) {
+    const json::Value r = try_tool_call(*this, "devices.open", "{\"path\":" + json_quote(path) + "}");
+    if (!r["ok"].boolean() && !r["error"].is_null()) bb_status_set(core_.app(), core::s(core::wide(r["error"].str())));
+}
+
+size_t MainView::tree_pending() const { return tree_provider_ ? tree_provider_->pending() : 0; }
+
 void MainView::refresh_tooltips() {
     for (auto& kv : by_tab_) kv.second->refresh_tooltips();
+    BbApp* app = core_.app();
+    if (Widget* palette = title_search_group_ ? title_search_group_->find("PaletteButton") : nullptr) {
+        palette->tooltip = gesture_tip(app, L"Command palette \u2014 find any command by name", L"app.palette");
+    }
+    if (title_search_) title_search_->tooltip = gesture_tip(app, L"Search every indexed drive", L"search.pc");
 }
 
 void MainView::refresh_status() {
@@ -2004,6 +2791,11 @@ void MainView::refresh_status() {
     std::wstring right = core::wide(index_state_["status"].str());
     if (!right.empty() && index_state_["canRetry"].boolean()) right += L"  —  retry";
     status_->set_text(core_.tab_text(active_tab_, BB_TEXT_STATUS), right);
+    // Undo's caption is what it would undo, and there is one only while there is something to undo.
+    const json::Value undo = try_model([&](BbOwnedStr* o) { return bb_command_state(core_.app(), core::s(L"edit.undo"), o); });
+    status_->set_extras(undo.is_null() ? std::wstring() : core::wide(undo["caption"].str()),
+                        core_.tab_text(active_tab_, BB_TEXT_SELECTION));
+    status_->set_scale(core_.tab_state(active_tab_).thumbnail_scale);
 }
 
 void MainView::sync_layout() {
@@ -2022,13 +2814,15 @@ void MainView::sync_layout() {
         std::vector<TabEntry> entries;
         for (size_t i = 0; i < p["tabs"].size(); ++i) {
             const uint64_t id = static_cast<uint64_t>(p["tabs"][i].i64());
-            entries.push_back({id, core_.tab_text(id, BB_TEXT_TITLE), id == static_cast<uint64_t>(p["activeTab"].i64(-1))});
+            entries.push_back({id, core_.tab_text(id, BB_TEXT_TITLE), id == static_cast<uint64_t>(p["activeTab"].i64(-1)),
+                               core_.tab_text(id, BB_TEXT_PATH)});
         }
         pv->strip->set_tabs(std::move(entries), pv->pane() == active_pane_);
     }
     if (active_tab_) {
         reveal_in_tree(core_.tab_text(active_tab_, BB_TEXT_PATH));
     }
+    sync_title_search();
     refresh_status();
 }
 
@@ -2071,6 +2865,7 @@ std::unique_ptr<Widget> MainView::build_node(const json::Value& node, const json
         pv->strip->name = "TabHost";
         pv->strip->on_activate = [this](uint64_t t) { activate_tab(t); };
         pv->strip->on_close = [this](uint64_t t) { close_tab(t); };
+        wire_tab_strip(*pv->strip, id);
         const json::Value& p = pane_state(panes, id);
         if (!p["activeTab"].is_null()) {
             const uint64_t tab = static_cast<uint64_t>(p["activeTab"].i64());

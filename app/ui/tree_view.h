@@ -5,6 +5,7 @@
 #include "ui/controls.h"
 #include "ui/scroll.h"
 
+#include <optional>
 #include <unordered_set>
 
 namespace bb::ui {
@@ -21,6 +22,8 @@ public:
     virtual ThumbPtr icon(uint64_t /*node*/, uint32_t /*px*/) const { return nullptr; }
     // Draws the icon faded (a hidden folder, as Explorer does).
     virtual bool dimmed(uint64_t /*node*/) const { return false; }
+    // Muted text at the right edge of the row (a folder's size), or empty for none.
+    virtual std::wstring detail(uint64_t /*node*/) const { return {}; }
 };
 
 class TreeView : public Widget {
@@ -31,7 +34,9 @@ public:
     float row_height = 22.0f;
     float indent = 16.0f;
 
+    uint64_t drop_id = 0;  // the folder a drag is hovering over (outlined); 0 for none
     std::function<void(uint64_t id)> on_select;
+    std::function<void(uint64_t id)> on_middle;  // a middle click on a row; does not select it
     std::function<void(uint64_t id, bool expanded)> on_toggle;  // load children here, then refresh()
     std::function<void(uint64_t id)> on_activate;
     // A right click on a row. It does not select the row: selecting is navigating, and a menu is not.
@@ -46,6 +51,8 @@ public:
     void toggle(uint64_t id);
     uint64_t selected_id() const { return selected_; }
     void select(uint64_t id);  // selects; scrolls to it if its row is visible in the flattened list
+    // Scrolls so `id`'s row sits `fraction` of the way down the viewport (a reveal puts it at 0.4).
+    void place(uint64_t id, float fraction);
 
     size_t visible_count() const { return rows_.size(); }  // rows in the flattened list, not on screen
     std::pair<size_t, size_t> visible_range() const;       // [first, last) on screen
@@ -68,6 +75,7 @@ public:
     void on_focus(bool) override { invalidate(); }
 
 private:
+    std::optional<std::pair<uint64_t, float>> pending_place_;
     struct Entry {
         uint64_t id;
         int depth;

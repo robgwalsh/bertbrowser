@@ -8,6 +8,7 @@ namespace {
 constexpr float kCellPad = 8.0f;
 constexpr float kGrip = 4.0f;       // half-width of the resize hot zone at a column's right edge
 constexpr float kDragStart = 4.0f;  // movement before a header press becomes a reorder
+constexpr int kMarqueeTimer = 0x4D51;
 }  // namespace
 
 ListView::ListView() : v_(true), h_(false) {
@@ -164,10 +165,12 @@ void ListView::paint(PaintContext& pc) {
                 pc.fill(rr, focused() ? tok::ListSelectedBackground : tok::ListSelectedInactiveBackground);
             } else if (const Token tint = provider_->row_tint(row); tint != kNoToken) {
                 pc.fill(rr, tint);
+            } else if (row == hot_row_) {
+                pc.fill(rr, tok::ListHoverBackground);
             }
             if (row == drop_row) {
-                pc.fill(rr, tok::ListSelectedInactiveBackground);
-                pc.stroke(rr, tok::AccentBackground, 2.0f);
+                pc.fill(rr, tok::ListDropBackground);
+                pc.stroke(rr, tok::ListDropBorder, 2.0f);
             }
             if (row == cursor_ && focused()) {
                 pc.stroke(rr, tok::BorderFocus);
@@ -284,6 +287,13 @@ void ListView::set_scroll_y(float y) {
     if (before != v_.offset()) invalidate();
 }
 
+void ListView::reveal_cursor(size_t row) {
+    if (row >= count()) return;
+    anchor_ = cursor_ = row;
+    scroll_to_row(row);
+    invalidate();
+}
+
 void ListView::select_row(size_t row) {
     if (!provider_ || row >= count()) return;
     provider_->select(SelectOp::Replace, row, row);
@@ -311,7 +321,12 @@ void ListView::move_cursor(size_t row, const Mods& m) {
 // ---- mouse -----------------------------------------------------------------------------------------
 
 bool ListView::on_mouse_down(const MouseEvent& e) {
-    if (e.button == MouseButton::Middle) return false;
+    if (e.button == MouseButton::Middle) {
+        const size_t row = (show_header && header_rect().contains(e.pt)) ? npos : row_at(e.pt);
+        if (row == npos || !on_middle) return false;
+        on_middle(row);
+        return true;
+    }
     if (e.button == MouseButton::Left && (v_.mouse_down(e.pt) || h_.mouse_down(e.pt))) {
         bar_drag_ = true;
         root()->capture(this);
@@ -383,14 +398,23 @@ bool ListView::on_mouse_down(const MouseEvent& e) {
         return true;
     }
     if (e.button != MouseButton::Left) return true;
-    // Empty space: a marquee.
+    // Empty space: a marquee. Ctrl or Shift keeps what was selected and adds the band to it.
+    // Spec: MarqueeSelector (additive, SyncSelection, the 50 ms auto-scroll).
     marquee_ = true;
-    marquee_add_ = e.mods.ctrl;
+    marquee_add_ = e.mods.ctrl || e.mods.shift;
     marquee_origin_ = {e.pt.x - (body_.l - h_.offset()), e.pt.y - (body_.t - v_.offset())};
     marquee_first_ = marquee_last_ = npos;
     marquee_rect_ = Rect{e.pt.x, e.pt.y, e.pt.x, e.pt.y};
-    if (!marquee_add_) provider_->select(SelectOp::Clear, 0, 0);
+    marquee_before_.clear();
+    if (marquee_add_) {
+        for (size_t i = 0, n = count(); i < n; ++i) {
+            if (provider_->selected(i)) marquee_before_.push_back(i);
+        }
+    } else {
+        provider_->select(SelectOp::Clear, 0, 0);
+    }
     root()->capture(this);
+    root()->start_timer(this, kMarqueeTimer, 50);
     invalidate();
     return true;
 }
@@ -410,10 +434,20 @@ void ListView::update_marquee(Point p) {
     if (a != marquee_first_ || b != marquee_last_) {
         marquee_first_ = a;
         marquee_last_ = b;
-        if (a == npos) {
-            if (!marquee_add_) provider_->select(SelectOp::Clear, 0, 0);
+        if (marquee_add_) {
+            // What was selected before, and the band: a row swept and then unswept goes back to how it was.
+            std::vector<size_t> rows = marquee_before_;
+            if (a != npos) {
+                for (size_t i = a; i <= b; ++i) rows.push_back(i);
+                anchor_ = cursor_ = a;
+            }
+            std::sort(rows.begin(), rows.end());
+            rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+            provider_->select_rows(rows);  // one bulk call
+        } else if (a == npos) {
+            provider_->select(SelectOp::Clear, 0, 0);
         } else {
-            provider_->select(marquee_add_ ? SelectOp::Add : SelectOp::Replace, a, b);  // one bulk call
+            provider_->select(SelectOp::Replace, a, b);  // one bulk call
             anchor_ = cursor_ = a;
         }
     }
@@ -462,15 +496,40 @@ bool ListView::on_mouse_move(const MouseEvent& e) {
         return true;
     }
     if (marquee_) {
-        if (e.pt.y < body_.t) {
-            set_scroll_y(v_.offset() - row_height);
-        } else if (e.pt.y > body_.b) {
-            set_scroll_y(v_.offset() + row_height);
-        }
         update_marquee(e.pt);
         return true;
     }
+    // The row under the pointer is lit, as a list row is.
+    const size_t hot = provider_ && body_.contains(e.pt) ? row_at(e.pt) : npos;
+    if (hot != hot_row_) {
+        if (hot_row_ != npos && hot_row_ < count()) invalidate(row_rect(hot_row_));
+        hot_row_ = hot;
+        if (hot != npos) invalidate(row_rect(hot));
+    }
     return false;
+}
+
+void ListView::on_mouse_leave() {
+    if (hot_row_ == npos) return;
+    if (hot_row_ < count()) invalidate(row_rect(hot_row_));
+    hot_row_ = npos;
+}
+
+// While the band is held near or past an edge the list scrolls on its own, faster the further out the
+// pointer is, and the band follows. Spec: MarqueeSelector.AutoScroll.
+void ListView::on_timer(int id) {
+    if (id != kMarqueeTimer) return;
+    if (!marquee_ || !root()) {
+        if (root()) root()->stop_timer(this, kMarqueeTimer);
+        return;
+    }
+    const Point p = root()->pointer();
+    constexpr float kMargin = 20.0f;
+    const float over = p.y < body_.t + kMargin ? p.y - (body_.t + kMargin) : p.y > body_.b - kMargin ? p.y - (body_.b - kMargin) : 0.0f;
+    if (over == 0.0f) return;
+    const float lines = std::clamp(std::floor(std::fabs(over) / 12.0f), 1.0f, 6.0f);
+    set_scroll_y(v_.offset() + (over < 0 ? -lines : lines) * row_height);
+    update_marquee(p);
 }
 
 bool ListView::on_mouse_up(const MouseEvent& e) {
@@ -526,6 +585,8 @@ bool ListView::on_mouse_up(const MouseEvent& e) {
     }
     if (marquee_) {
         marquee_ = false;
+        marquee_before_.clear();
+        root()->stop_timer(this, kMarqueeTimer);
         handled = true;
     }
     if (handled) invalidate();

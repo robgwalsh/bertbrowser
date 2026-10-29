@@ -427,7 +427,10 @@ private:
     struct Site {
         std::wstring destination;
         ListView* list = nullptr;
+        TileView* tiles = nullptr;  // in the thumbnail view the folder is a tile, not a list row
         size_t row = ListView::npos;
+        TreeView* tree = nullptr;   // a folder in the tree, outlined while the drag is over it
+        uint64_t tree_id = 0;
     };
 
     // Where a drop at this point would land: a folder row, else the folder on show (not a search result).
@@ -444,21 +447,33 @@ private:
                 if (row == TreeView::npos) return std::nullopt;
                 const std::wstring path = main.folder_tree().path_of(tree->id_at_row(row));
                 if (path.empty()) return std::nullopt;
-                return Site{path, nullptr, ListView::npos};
+                Site site{path, nullptr, nullptr, ListView::npos};
+                site.tree = tree;
+                site.tree_id = tree->id_at_row(row);
+                return site;
             }
             if (auto* tab = dynamic_cast<TabView*>(w)) {
                 ListView* list = tab->list();
+                TileView* tiles = tab->tiles();
                 Site site;
-                site.list = list;
-                if (list && list->shown() && list->bounds.contains(p)) {
-                    const size_t row = list->row_at(p);
-                    BbRow r{};
-                    auto listing = tab->adapter().listing();
-                    if (row != ListView::npos && listing && listing->row(row, r) && (r.flags & BB_ROW_DIRECTORY)) {
-                        site.destination = core::w(r.full_path);
-                        site.row = row;
-                        return site;
-                    }
+                size_t row = ListView::npos;
+                if (tab->tiles_mode() && tiles && tiles->shown() && tiles->bounds.contains(p)) {
+                    site.tiles = tiles;
+                    row = tiles->row_at(p);
+                } else if (list && list->shown() && list->bounds.contains(p)) {
+                    site.list = list;
+                    row = list->row_at(p);
+                } else {
+                    // Only the list (or its tiles) takes a drop: the nav row, the breadcrumb and the side
+                    // pane are not places to put files. Spec: FileDragDropController (list.AllowDrop).
+                    return std::nullopt;
+                }
+                BbRow r{};
+                auto listing = tab->adapter().listing();
+                if (row != ListView::npos && listing && listing->row(row, r) && (r.flags & BB_ROW_DIRECTORY)) {
+                    site.destination = core::w(r.full_path);
+                    site.row = row;
+                    return site;
                 }
                 const BbTabState st = main.core().tab_state(tab->tab());
                 if (st.is_flattened && !st.is_flat_view) return std::nullopt;  // a search result has no "here"
@@ -489,21 +504,48 @@ private:
     }
 
     void highlight(const Site& site) {
-        if (site.list == lit_list_ && site.row == lit_row_) return;
+        if (site.list == lit_list_ && site.tiles == lit_tiles_ && site.row == lit_row_ && site.tree == lit_tree_ &&
+            site.tree_id == lit_tree_id_) {
+            return;
+        }
         clear_highlight();
-        if (site.list && site.row != ListView::npos) {
+        if (site.tree && site.tree_id) {
+            site.tree->drop_id = site.tree_id;
+            site.tree->invalidate();
+            lit_tree_ = site.tree;
+            lit_tree_id_ = site.tree_id;
+            return;
+        }
+        if (site.row == ListView::npos) return;
+        if (site.list) {
             site.list->drop_row = site.row;
             site.list->invalidate();
-            lit_list_ = site.list;
-            lit_row_ = site.row;
         }
+        if (site.tiles) {
+            site.tiles->drop_row = site.row;
+            site.tiles->invalidate();
+        }
+        lit_list_ = site.list;
+        lit_tiles_ = site.tiles;
+        lit_row_ = site.row;
     }
     void clear_highlight() {
         if (lit_list_) {
             lit_list_->drop_row = ListView::npos;
             lit_list_->invalidate();
         }
+        if (lit_tiles_) {
+            lit_tiles_->drop_row = TileView::npos;
+            lit_tiles_->invalidate();
+        }
+        if (lit_tree_) {
+            lit_tree_->drop_id = 0;
+            lit_tree_->invalidate();
+        }
+        lit_tree_ = nullptr;
+        lit_tree_id_ = 0;
         lit_list_ = nullptr;
+        lit_tiles_ = nullptr;
         lit_row_ = ListView::npos;
     }
 
@@ -514,6 +556,9 @@ private:
     std::string cached_verb_;
     bool cached_allowed_ = false;
     ListView* lit_list_ = nullptr;
+    TileView* lit_tiles_ = nullptr;
+    TreeView* lit_tree_ = nullptr;
+    uint64_t lit_tree_id_ = 0;
     size_t lit_row_ = ListView::npos;
 };
 

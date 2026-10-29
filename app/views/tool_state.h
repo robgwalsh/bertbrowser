@@ -54,5 +54,7 @@ std::vector<std::wstring> duplicates_ticked_paths(MainView& main);
 bool duplicates_remove(MainView& main, uint64_t* op);
 // The window's Remove ticked: the delete confirmation over the same copies, then back to the finder.
 void duplicates_ask_remove(MainView& main);
+// An operation finished: the copies a removal was deleting that are now gone leave their groups.
+void duplicates_settle_prune(MainView& main);
 
 }  // namespace bb::views

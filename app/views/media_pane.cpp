@@ -257,6 +257,22 @@ void MediaPane::seek_changed(double value, bool dragging) {
     }
 }
 
+// A click on the picture: once toggles playback (or starts it from the poster), twice toggles full screen.
+// A double click therefore pauses and resumes on its way, which is what every player does.
+// Spec: PreviewPane.VideoArea_MouseDown.
+bool MediaPane::on_mouse_down(const MouseEvent& e) {
+    if (e.button != MouseButton::Left || !screen_ || !screen_->bounds.contains(e.pt)) return false;
+    if (root()) root()->set_focus(this);
+    if (e.clicks >= 2) {
+        if (started_ && is_video_) set_full_screen(!full_);
+    } else if (!started_) {
+        play();
+    } else {
+        toggle_play();
+    }
+    return true;
+}
+
 void MediaPane::set_full_screen(bool on) {
     if (on == full_ || !root() || !parent()) return;
     if (on) {

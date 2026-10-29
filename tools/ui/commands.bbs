@@ -24,6 +24,26 @@ run select.folders
 assert-selected 3
 run select.none
 
+# Type-ahead: a letter jumps to a name, letters in quick succession extend it, a letter repeated cycles.
+focus FileListView
+window-type re
+assert-selection report.md
+sleep 800
+window-type p
+assert-selection Pictures
+window-type p
+assert-selection photo.jpg
+run select.none
+
+# A band over empty space selects what it sweeps; with Shift or Ctrl it adds to what was selected.
+select notes.txt
+widget-drag FileListView 300 400 300 170
+assert-selection photo.jpg | report.md
+select notes.txt
+widget-drag FileListView 300 400 300 170 shift
+assert-selection notes.txt | photo.jpg | report.md
+run select.none
+
 # The chords are the list's, and Ctrl+A stays the text box's while somebody types.
 assert-key Ctrl+A list select.all
 assert-key Ctrl+A text none
@@ -74,6 +94,23 @@ assert-exists budget.xlsx
 dialog-press DeleteConfirm
 live-dialogs off
 assert-missing budget.xlsx
+
+# A dialog's keys, through the window: Esc closes it (closing a confirmation is "no"), Enter presses
+# its default button, and the search syntax card goes on any key.
+live-dialogs on
+select notes.txt
+window-key Del
+assert-dialog delete
+window-key Esc
+assert-dialog none
+assert-exists notes.txt
+run search.syntax
+window-key A
+assert-dialog none
+run app.about
+window-key Enter
+assert-dialog none
+live-dialogs off
 
 # --- View ---
 
@@ -153,6 +190,25 @@ assert-tabs 1
 closepane
 assert-panes 1
 
+# A middle click opens a folder in a pane of its own to the right, from the list or the tree; a file is
+# left alone.
+go .
+middle-click notes.txt
+assert-panes 1
+middle-click Documents
+assert-panes 2
+assert-path Documents
+closepane
+assert-panes 1
+hidden on
+settle 300
+tree-middle Pictures
+assert-panes 2
+assert-path Pictures
+closepane
+assert-panes 1
+hidden off
+
 # --- Go ---
 
 go Documents
@@ -183,5 +239,22 @@ assert-command tab.move-left unavailable first tab
 run tab.move-right
 run tab.close-right
 assert-tabs 2
+
+# The strip's own "+", its right-click menu (about the tab right-clicked, which becomes the active one)
+# and its split buttons.
+press NewTabButton
+assert-tabs 3
+tab 1
+menu tab
+assert-menu-order Duplicate tab | Close other tabs | Move to new pane | - | Close tab
+menu-run Close other tabs
+assert-tabs 1
+menu tab
+menu-run Duplicate tab
+assert-tabs 2
+press SplitRightButton
+assert-panes 2
+closepane
+assert-panes 1
 
 assert-not-launched

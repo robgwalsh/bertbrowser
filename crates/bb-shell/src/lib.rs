@@ -16,6 +16,7 @@ pub mod launcher;
 pub mod pipe;
 pub mod registry;
 pub mod run_as;
+pub mod shell_new;
 pub mod single_instance;
 pub mod startup_trace;
 pub mod updates;

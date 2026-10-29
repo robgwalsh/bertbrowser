@@ -412,8 +412,21 @@ impl Inner {
         let (plan, hint) = match &rule {
             Some(rule) => {
                 if RenameTemplate::uses_tags(&rule.template) {
+                    let mut cache = lock(&self.extra.tools.rename_tags);
+                    if cache.len() > 4096 {
+                        cache.clear();
+                    }
                     for s in &mut sources {
-                        s.tags = Some(crate::metadata_pane::tags_of(&s.path, s.is_directory));
+                        let hit = cache
+                            .get(&s.path)
+                            .filter(|(when, _)| *when == s.modified)
+                            .map(|(_, tags)| tags.clone());
+                        let tags = hit.unwrap_or_else(|| {
+                            let read = crate::metadata_pane::tags_of(&s.path, s.is_directory);
+                            cache.insert(s.path.clone(), (s.modified, read.clone()));
+                            read
+                        });
+                        s.tags = Some(tags);
                     }
                 }
                 let hint = RenameTemplate::parse(rule.template.trim()).ok().and_then(|segments| {
@@ -503,6 +516,7 @@ impl Inner {
                           else { format!("{} only", BuiltInMenuItems::places_text(i.places)) },
             })).collect::<Vec<_>>(),
             "layout": layout,
+            "defaultLayout": MenuLayoutRules::default_layout(),
             "hiddenBuiltIns": hidden_built,
             "hiddenShell": settings.hidden_shell_extensions,
             "showShellExtensions": settings.show_shell_extensions,
@@ -1043,8 +1057,21 @@ impl App {
                 let a = parse(arg)?;
                 let archive = text(&a["archive"]).to_string();
                 let dir = text(&a["entryDir"]);
+                // Files only, and always a copy: folders are refused rather than walked - a tree would be
+                // an entry per file and a name rule per entry, which is what Compress is for.
+                // Spec: DropPipeline.DropIntoArchiveAsync.
+                let files: Vec<String> = strings(&a["sources"])
+                    .into_iter()
+                    .filter(|s| std::path::Path::new(s).is_file())
+                    .collect();
+                if files.is_empty() {
+                    inner.set_active_status(
+                        "Only files can be added to an archive. Use Compress to make a new one.",
+                    );
+                    return Ok(json!({ "op": 0 }).to_string());
+                }
                 let mut edits = Vec::new();
-                for s in strings(&a["sources"]) {
+                for s in files {
                     let name = file_name(s.trim_end_matches('\\')).to_string();
                     let entry = if dir.is_empty() {
                         name

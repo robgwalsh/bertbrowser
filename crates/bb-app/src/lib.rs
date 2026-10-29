@@ -35,6 +35,7 @@ mod ops_ui;
 mod palette;
 mod panes_api;
 mod pool;
+mod portable_devices;
 mod preview;
 mod properties;
 mod requests;

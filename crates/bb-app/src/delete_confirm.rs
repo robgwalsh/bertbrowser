@@ -204,7 +204,7 @@ impl Inner {
             .deletions
             .iter()
             .map(
-                |d| json!({ "name": d.name(), "location": d.parent_path(), "path": d.source_path }),
+                |d| json!({ "name": d.name(), "location": d.parent_path(), "path": d.source_path, "isDirectory": d.is_directory }),
             )
             .collect();
 

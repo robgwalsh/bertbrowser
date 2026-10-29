@@ -480,6 +480,14 @@ impl Inner {
         Ok(id)
     }
 
+    /// Writes the theme on screen, overrides and all, as a theme file someone else can import.
+    /// Spec: ThemeService.TryExport.
+    pub(crate) fn theme_export(&self, path: &str) -> AppResult<()> {
+        let text =
+            bb_core::theming::ThemeJson::serialize_resolved(&lock(&self.extra.theme).resolved());
+        std::fs::write(path, text).map_err(|e| AppError::Invalid(e.to_string()))
+    }
+
     pub(crate) fn theme_delete(&self, id: &str) -> AppResult<()> {
         if ThemeCatalog::find(id).is_some() {
             return Err(AppError::Invalid(
@@ -596,7 +604,24 @@ impl Inner {
         let slot = |id: &Option<String>, fallback: &str| {
             id.clone().unwrap_or_else(|| fallback.to_string())
         };
+        let light = slot(
+            &settings.light_theme_id,
+            SystemThemeRules::default_light_theme_id(),
+        );
+        let dark = slot(
+            &settings.dark_theme_id,
+            SystemThemeRules::default_dark_theme_id(),
+        );
+        // Each slot offers the themes of its own kind, plus whatever it holds now (a hand-edited file).
+        let choices = |is_dark: bool, held: &str| {
+            SystemThemeRules::slot_choices(&st.available, is_dark, Some(held))
+                .iter()
+                .map(|t| t.id.clone())
+                .collect::<Vec<_>>()
+        };
         json!({
+            "lightChoices": choices(false, &light),
+            "darkChoices": choices(true, &dark),
             "id": st.definition_id,
             "name": resolved.name,
             "isDark": resolved.is_dark,

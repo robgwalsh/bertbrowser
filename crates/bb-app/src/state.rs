@@ -43,6 +43,13 @@ pub(crate) struct Extra {
     pub ops: crate::ops_ui::OpsUi,
     /// The delete the confirmation is asking about, and its survey.
     pub delete: crate::delete_confirm::DeleteConfirm,
+    /// Why the sign-in task did not change the last time it was asked to.
+    pub autostart_warning: Mutex<String>,
+    /// The New items page's "Import from Windows": whether one is reading, and what the last one said.
+    pub new_types_import: Mutex<(bool, String)>,
+    /// The workspace the window last came from (saved as, or switched to): what the title bar's switcher
+    /// is called. Spec: ShellViewModel.CurrentWorkspaceName.
+    pub current_workspace: Mutex<Option<String>>,
     /// The History window's last model, answered while an undo walk holds the history.
     pub history_cache: Mutex<serde_json::Value>,
 }
@@ -72,6 +79,9 @@ impl Extra {
             tools: Default::default(),
             ops,
             delete: Default::default(),
+            autostart_warning: Mutex::default(),
+            new_types_import: Mutex::default(),
+            current_workspace: Mutex::default(),
             history_cache: Mutex::new(serde_json::json!({ "rows": [], "count": 0 })),
         }
     }

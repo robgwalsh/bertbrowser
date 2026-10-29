@@ -101,6 +101,58 @@ pub unsafe extern "C" fn bb_new_item(
     })
 }
 
+/// Bytes in words, the way every size in the app is written ("1.4 MB", three decimals from GB up).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_byte_size(bytes: i64, out_text: *mut BbOwnedStr) -> BbStatus {
+    guard(|| unsafe { put(out_text, &bb_core::format::byte_size(bytes)) })
+}
+
+/// The size text the folder tree shows beside each of `paths_json` (a JSON array of folder paths), as a
+/// JSON array in the same order: "1.2 GB", "1.2 GB *" (part unreadable), or "" when the cache has no
+/// size for it - blank, never zero. One indexed lookup; no folder is scanned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_tree_sizes(
+    app: *mut BbApp,
+    paths_json: BbStr,
+    out_json: *mut BbOwnedStr,
+) -> BbStatus {
+    guard(|| {
+        let app = unsafe { app_of(app)? };
+        let paths: Vec<String> = serde_json::from_str(&text_of(paths_json))
+            .map_err(|e| bb_app::AppError::Invalid(format!("not a JSON list of paths: {e}")))?;
+        let sizes = app.app.tree_sizes(&paths);
+        unsafe {
+            put(
+                out_json,
+                &serde_json::to_string(&sizes).unwrap_or_else(|_| "[]".into()),
+            )
+        }
+    })
+}
+
+/// The New items page: `{types: [{label, extension, templatePath, enabled}], importing, status}`, the
+/// switched-off types included.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_new_types_state(
+    app: *mut BbApp,
+    out_json: *mut BbOwnedStr,
+) -> BbStatus {
+    guard(|| {
+        let app = unsafe { app_of(app)? };
+        unsafe { put(out_json, &app.app.new_types_state_json()) }
+    })
+}
+
+/// Adds the types Windows offers to the list (read off the UI thread); `SettingsChanged("newFileTypes")`
+/// follows when it is done.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_new_types_import(app: *mut BbApp) -> BbStatus {
+    guard(|| {
+        unsafe { app_of(app)? }.app.new_types_import();
+        Ok(())
+    })
+}
+
 /// The file types the New submenu offers, as JSON `[{label, extension, templatePath}]`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_new_file_types(app: *mut BbApp, out_json: *mut BbOwnedStr) -> BbStatus {
@@ -509,6 +561,48 @@ pub unsafe extern "C" fn bb_columns_do(
     })
 }
 
+/// The column header's right-click checklist: `{builtIns:[{id, header, on, locked}], groups:[{title,
+/// items:[...]}], extra:[...]}`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_columns_header_menu(
+    app: *mut BbApp,
+    tab: u64,
+    out_json: *mut BbOwnedStr,
+) -> BbStatus {
+    guard(|| {
+        let app = unsafe { app_of(app)? };
+        unsafe { put(out_json, &app.app.columns_header_menu_json(TabId(tab))?) }
+    })
+}
+
+/// The Columns page: the default set new tabs start from, `{columns:[{id, header, width, removable}]}`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_columns_defaults(
+    app: *mut BbApp,
+    out_json: *mut BbOwnedStr,
+) -> BbStatus {
+    guard(|| {
+        let app = unsafe { app_of(app)? };
+        unsafe { put(out_json, &app.app.columns_defaults_json()) }
+    })
+}
+
+/// One edit of that default set: `add <id>`, `remove <id>`, `move <id> <index>`, `width <id> <dips>`,
+/// `reset`. Saved at once; every tab that never arranged its own columns follows.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_columns_defaults_do(
+    app: *mut BbApp,
+    verb: BbStr,
+    arg: BbStr,
+) -> BbStatus {
+    guard(|| {
+        Ok(unsafe { app_of(app)? }
+            .app
+            .columns_defaults_do(&text_of(verb), &text_of(arg))?)
+    })
+}
+
+/// Tab 0 asks about the default set the Columns page edits.
 /// What the Add column popup offers for `search`: `{loading, full, groups:[{title, items:[{id,
 /// header, detail}]}]}`.
 #[unsafe(no_mangle)]
@@ -804,7 +898,7 @@ pub unsafe extern "C" fn bb_theme_set_system_appearance(
 
 /// One verb: `select <id>`, `follow on|off`, `slot light|dark <id>`, `override <token> <#hex>`,
 /// `clear-override <token>`, `persist`, `revert`, `reset-all`, `save-as <name>`, `import <path>`,
-/// `delete <id>`. `save-as` and `import` answer the new theme's id in `out_result`.
+/// `delete <id>`, `export <path>`. `save-as` and `import` answer the new theme's id in `out_result`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_theme_do(
     app: *mut BbApp,

@@ -48,10 +48,15 @@ public:
     void close();
     bool is_open() const { return card_ != nullptr; }
     std::function<void()> on_closed;
+    // A click that nothing in the card took (on the scrim, or on the card's own background).
+    std::function<void()> on_click;
 
     ui::Size measure(ui::Size avail) override { return avail; }
     void arrange(ui::Rect r) override;
-    bool on_mouse_down(const ui::MouseEvent&) override { return true; }
+    bool on_mouse_down(const ui::MouseEvent&) override {
+        if (on_click) on_click();
+        return true;
+    }
     bool on_wheel(ui::Point, int, ui::Mods) override { return true; }
 
 private:

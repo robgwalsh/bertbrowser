@@ -184,6 +184,15 @@ behavior - this table only says where.
   `Model::Confirm`/`Notice`, the `confirm`/`notice` dialogs). Ask from a worker thread only: a
   question on the UI thread could never be answered, and `UiPrompts` refuses it. An undo walk can park
   on an elevation offer while holding the history, so what the UI thread reads of it is `try_lock`.
+  An owned tool window always stands above the main window, so a card asked from one (Duplicates'
+  delete confirmation) hides that window while it is up.
+- **Rebuilding a widget tree from inside one of its own handlers frees the handler's widget.** Activating
+  a tab rebuilds every pane (strip and all), so the tab strip activates on *release*, after a drag has
+  had its chance; Settings pages rebuild through `main_.defer`, never from a button's `on_click`.
+- **One whole-PC search box, in the title bar** (`MainView::title_search_`), and it is the *active*
+  tab's query; each tab's own box is folder-local. A tab only touches the title box while it is active.
+- **An indeterminate `ProgressBar` animates for as long as it is indeterminate, shown or not** (its
+  timer starts on paint). Hide one by turning indeterminate off too, or a 33 ms timer runs for ever.
 
 ## Cross-cutting gotchas
 

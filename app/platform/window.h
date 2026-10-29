@@ -10,6 +10,7 @@
 #include "ui/widget.h"
 
 #include <functional>
+#include <stdexcept>
 #include <memory>
 #include <string>
 
@@ -71,6 +72,12 @@ public:
     // Application messages (WM_APP..0xBFFF), seen before anything else; true = handled. How the core's
     // events reach the UI thread: its sink PostMessages here and this handler drains them.
     std::function<bool(UINT msg, WPARAM wp, LPARAM lp)> on_message;
+    // WM_TIMER for any timer the host set with SetTimer on this window (the animation tick is the window's own).
+    std::function<void(UINT_PTR id)> on_timer;
+    // What becomes of an exception a handler let out (a refused plan thrown from a button): unwinding
+    // through user32's frames is undefined, so with this set the message is caught here and handed over.
+    // Unset (the harness), it propagates as before and the run fails loudly.
+    static inline std::function<void(const std::exception& e)> on_unhandled;
 
 private:
     static void register_class();

@@ -4,6 +4,7 @@
 #include "ui/layout.h"
 #include "views/chrome.h"
 #include "views/main_view.h"
+#include "views/tool_widgets.h"
 
 #include <windows.h>
 
@@ -14,6 +15,7 @@ namespace bb::views {
 
 using namespace bb::ui;
 namespace tok = gfx::tok;
+namespace tw = tools;
 
 namespace {
 
@@ -53,7 +55,7 @@ ToolWindow::ToolWindow(MainView& main, std::wstring kind, std::unique_ptr<Widget
     // Esc closes it, as it closes a dialog; every other key is the window's own (the folders' shortcuts
     // belong to the main window, which is one click away).
     window_->root().on_preview_key = [this](const KeyEvent& e) {
-        if (e.vk != VK_ESCAPE || e.mods.ctrl || e.mods.alt || e.mods.shift) return false;
+        if (e.vk != VK_ESCAPE || e.mods.ctrl || e.mods.alt || e.mods.shift) return main_.tool_window_key(kind_, e);
         if (window_->on_close) window_->on_close();
         return true;
     };
@@ -109,10 +111,13 @@ void ToolWindow::fit() {
 }
 
 void ToolWindow::replace(std::unique_ptr<Widget> card) {
-    // Keep what had the keyboard, by name, so a rebuild after a tick does not throw focus away.
+    // Keep what had the keyboard, by name, and where every list was scrolled to, so a rebuild after a tick
+    // or a refresh does not throw either away.
     std::string focused;
     if (Widget* f = window_->root().focused()) focused = f->name;
+    const tw::ListPlaces places = card_ ? tw::save_places(*card_) : tw::ListPlaces{};
     window_->root().set_focus(nullptr);
+    tw::restore_places(*card, places);
     install(std::move(card));
     if (!focused.empty()) {
         if (Widget* again = window_->root().find(focused)) window_->root().set_focus(again);

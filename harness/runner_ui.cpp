@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cwctype>
+#include <filesystem>
 #include <fstream>
 
 #include "views/command_ui.h"
@@ -410,12 +411,178 @@ void Runner::install_ui() {
             items = s_.view().build_main_menu(name, &found);
             if (!found) throw FormatError("The menu bar has no '" + to_utf8(name) + "' menu.");
             file = L"menu-main-" + lower(name) + (shot_name.empty() ? L"" : L"-" + shot_name);
+        } else if (k == L"workspace-switcher" || k == L"search-switcher") {
+            items = s_.view().switcher_items(k == L"workspace-switcher");
+        } else if (k == L"tab") {
+            items = s_.view().tab_menu(s_.view().active_tab());
+            s_.settle();
         } else if (!s_.view().build_named_menu(k, &items)) {
             throw FormatError("'" + to_utf8(kind) + "' is not a menu. Try: main <Menu>, columns, files, background.");
         }
         if (file.empty()) file = tail.empty() ? L"menu-" + k : tail;
         ui_->last_menu = std::move(items);
         shot_menu(ui_->last_menu, file);
+    };
+    // Clicks an entry of the last menu photographed, by its text, as choosing it would.
+    verbs_[L"menu-run"] = [this](const std::wstring& r) {
+        const std::wstring text = require(r, "menu-run");
+        std::function<const ui::MenuItem*(const ui::MenuItems&)> find = [&](const ui::MenuItems& items) -> const ui::MenuItem* {
+            for (const ui::MenuItem& m : items) {
+                if (m.is_separator) continue;
+                if (m.is_submenu()) {
+                    if (const ui::MenuItem* hit = find(m.sub)) return hit;
+                } else if (core::iequals(ui::parse_menu_label(m.text).display, text)) {
+                    return &m;
+                }
+            }
+            return nullptr;
+        };
+        const ui::MenuItem* item = find(ui_->last_menu);
+        if (!item) throw AssertionError("The last menu has no '" + to_utf8(text) + "'.");
+        if (!item->enabled) throw AssertionError("'" + to_utf8(text) + "' is disabled in the last menu.");
+        const auto invoke = item->on_invoke;
+        if (invoke) invoke();
+        s_.settle();
+    };
+    // assert-status-bar undo|selection <text>|none -- the undo link or the selection summary, by substring.
+    verbs_[L"assert-status-bar"] = [this](const std::wstring& r) {
+        const auto [part, want] = split_first(require(r, "assert-status-bar"));
+        s_.settle();
+        views::StatusBar* bar = s_.view().status_bar();
+        const std::wstring p = lower(part);
+        if (p != L"undo" && p != L"selection") throw FormatError("assert-status-bar wants undo or selection.");
+        const std::wstring actual = p == L"undo" ? bar->undo_text() : bar->selection_text();
+        const bool ok = lower(want) == L"none" ? actual.empty() : !actual.empty() && core::icontains(actual, want);
+        if (!ok) throw AssertionError("expected the status bar's " + to_utf8(p) + " to be '" + to_utf8(want) + "', it is '" + to_utf8(actual) + "'.");
+    };
+    // widget-drag <name> <x1> <y1> <x2> <y2> [ctrl|shift] -- a left press, a move and a release on the named
+    // widget, at offsets (DIPs) from its top-left corner, through its own mouse handlers: a marquee, a slider.
+    verbs_[L"widget-drag"] = [this](const std::wstring& r) {
+        const auto [name, tail] = split_first(require(r, "widget-drag"));
+        auto nums = core::split(tail, L' ');
+        ui::Mods mods;
+        if (nums.size() == 5) {
+            const std::wstring m = lower(nums.back());
+            if (m == L"ctrl") mods.ctrl = true;
+            else if (m == L"shift") mods.shift = true;
+            else throw FormatError("widget-drag: '" + to_utf8(nums.back()) + "' is not ctrl or shift.");
+            nums.pop_back();
+        }
+        if (nums.size() != 4) throw FormatError("widget-drag wants <name> <x1> <y1> <x2> <y2> [ctrl|shift].");
+        ui::Widget* w = s_.view().find_named(to_utf8(name));
+        if (!w) throw FormatError("There is no element named '" + to_utf8(name) + "' in the window.");
+        auto at = [&](size_t i) { return static_cast<float>(number(nums[i], "widget-drag")); };
+        ui::MouseEvent e;
+        e.mods = mods;
+        e.pt = {w->bounds.l + at(0), w->bounds.t + at(1)};
+        w->on_mouse_down(e);
+        e.pt = {w->bounds.l + (at(0) + at(2)) / 2, w->bounds.t + (at(1) + at(3)) / 2};
+        w->on_mouse_move(e);
+        e.pt = {w->bounds.l + at(2), w->bounds.t + at(3)};
+        w->on_mouse_move(e);
+        w->on_mouse_up(e);
+        s_.settle();
+    };
+    // Types characters into whatever has the keyboard, as WM_CHAR messages the window receives.
+    verbs_[L"window-type"] = [this](const std::wstring& r) {
+        const std::wstring text = require(r, "window-type");
+        const HWND hwnd = s_.view().window().hwnd();
+        for (const wchar_t c : text) PostMessageW(hwnd, WM_CHAR, c, 0);
+        s_.settle();
+    };
+    // assert-selection a | b -- exactly these names are selected, in list order.
+    verbs_[L"assert-selection"] = [this](const std::wstring& r) {
+        const auto wanted = bar_split(require(r, "assert-selection"));
+        std::vector<std::wstring> actual;
+        for (const auto& p : s_.core().selection_paths(tab())) actual.push_back(std::filesystem::path(p).filename().wstring());
+        bool same = wanted.size() == actual.size();
+        for (size_t i = 0; same && i < actual.size(); ++i) same = core::iequals(wanted[i], actual[i]);
+        if (!same) throw AssertionError("expected the selection to be [" + join(wanted, ", ") + "], it is [" + join(actual, ", ") + "].");
+    };
+    // assert-cursor <name> -- the active view's cursor is on that row, and the row is scrolled into view.
+    verbs_[L"assert-cursor"] = [this](const std::wstring& r) {
+        const std::wstring want = require(r, "assert-cursor");
+        s_.settle();
+        views::TabView* tv = s_.view().active_view();
+        const bool tiles = tv->tiles_mode();
+        const size_t cursor = tiles ? tv->tiles()->cursor() : tv->list()->cursor();
+        const auto listing = s_.core().listing(tab());
+        const std::wstring name = cursor == ui::ListView::npos || !listing ? std::wstring(L"(none)") : listing->name(cursor);
+        if (!core::iequals(name, want)) throw AssertionError("expected the cursor on '" + to_utf8(want) + "', it is on '" + to_utf8(name) + "'.");
+        bool shown;
+        if (tiles) {
+            const auto [first, last] = tv->tiles()->realized();
+            shown = cursor >= first && cursor < last;
+        } else {
+            const ui::ListView* l = tv->list();
+            const float top = static_cast<float>(cursor) * l->row_height;
+            shown = top >= l->scroll_y() && top + l->row_height <= l->scroll_y() + l->bounds.height();
+        }
+        if (!shown) throw AssertionError("the cursor is on '" + to_utf8(want) + "', but that row is scrolled out of view.");
+    };
+    // field-type <Name> <text> -- replaces the text of a named box in the window (not a dialog), as typing would.
+    verbs_[L"field-type"] = [this](const std::wstring& r) {
+        const auto [name, text] = split_first(require(r, "field-type"));
+        auto* e = dynamic_cast<ui::Edit*>(s_.view().find_named(to_utf8(name)));
+        if (!e) throw FormatError("There is no text box named '" + to_utf8(name) + "' in the window.");
+        if (!e->flags.enabled) throw AssertionError("'" + to_utf8(name) + "' is disabled.");
+        e->set_text(text);
+        if (e->on_changed) e->on_changed(text);
+        s_.settle();
+    };
+    // list-pick <ListName> <text> -- selects the first row of a named list in the window whose text contains
+    // <text>, as a click on it would.
+    verbs_[L"list-pick"] = [this](const std::wstring& r) {
+        const auto [name, text] = split_first(require(r, "list-pick"));
+        auto* list = dynamic_cast<views::forms::ItemList*>(s_.view().find_named(to_utf8(name)));
+        if (!list) throw FormatError("There is no list named '" + to_utf8(name) + "' in the window.");
+        for (size_t i = 0; i < list->entries.size(); ++i) {
+            if (core::icontains(list->entries[i].text, text)) {
+                list->select(static_cast<int>(i), true);
+                s_.settle();
+                return;
+            }
+        }
+        std::vector<std::wstring> rows;
+        for (const auto& e : list->entries) rows.push_back(e.text);
+        throw AssertionError("'" + to_utf8(name) + "' has no row with '" + to_utf8(text) + "'. Rows: " + join(rows, " | "));
+    };
+    // Gives the keyboard to an element by its name, as a click into it would.
+    verbs_[L"focus"] = [this](const std::wstring& r) {
+        const std::wstring name = require(r, "focus");
+        ui::Widget* w = s_.view().find_named(to_utf8(name));
+        if (!w) throw FormatError("There is no element named '" + to_utf8(name) + "' in the window.");
+        s_.view().window().root().set_focus(w);
+        s_.settle();
+    };
+    // Presses a button by its element name, as a click would.
+    verbs_[L"press"] = [this](const std::wstring& r) {
+        const std::wstring name = require(r, "press");
+        auto* b = dynamic_cast<ui::Button*>(s_.view().find_named(to_utf8(name)));
+        if (!b) throw FormatError("There is no button named '" + to_utf8(name) + "' in the window.");
+        if (!b->flags.enabled) throw AssertionError("'" + to_utf8(name) + "' is disabled.");
+        b->click();
+        s_.settle();
+    };
+    // Drags tab <from> along the active pane's strip and lets go over tab <to> (1-based), through the
+    // strip's own mouse handling: press, a move past the threshold, release.
+    verbs_[L"tab-drag"] = [this](const std::wstring& r) {
+        const auto parts = core::split(require(r, "tab-drag"), L' ');
+        if (parts.size() != 2) throw FormatError("tab-drag takes two tab numbers: tab-drag <from> <to>.");
+        const int from = number(parts[0], "tab-drag"), to = number(parts[1], "tab-drag");
+        views::TabStrip* strip = s_.view().active_strip();
+        const int n = strip ? static_cast<int>(strip->tabs().size()) : 0;
+        if (from < 1 || from > n || to < 1 || to > n) throw AssertionError("tab-drag: this pane has " + std::to_string(n) + " tab(s).");
+        const ui::Rect a = strip->tab_rect(static_cast<size_t>(from - 1));
+        const ui::Rect b = strip->tab_rect(static_cast<size_t>(to - 1));
+        ui::MouseEvent e;
+        e.pt = {a.l + 12, (a.t + a.b) / 2};
+        strip->on_mouse_down(e);
+        // Past the middle of the target, on the side that puts the tab where the target was.
+        e.pt = {to > from ? b.r - 4 : b.l + 4, e.pt.y};
+        strip->on_mouse_move(e);
+        strip->on_mouse_up(e);
+        s_.settle();
     };
     verbs_[L"assert-menu-order"] = [this](const std::wstring& r) {
         const auto wanted = bar_split(require(r, "assert-menu-order"));
@@ -527,6 +694,33 @@ void Runner::install_ui() {
         const std::string result = res["result"].str();
         if (result == "unavailable") say("UNAVAILABLE " + cmd + " - " + res["reason"].str());
         else if (result == "ui" && !s_.view().host_command(core::wide(cmd))) say("WOULD-RUN " + cmd);
+        s_.settle();
+    };
+    // window-key <chord> -- posts the key to the window, as the keyboard would: down and up, with its
+    // modifiers held. Unlike `key` it goes through the window's own handling first (a dialog's Esc and
+    // Enter, a focused box), not straight to the dispatcher.
+    verbs_[L"window-key"] = [this](const std::wstring& r) {
+        uint32_t mods = 0;
+        std::wstring key;
+        if (!parse_chord(require(r, "window-key"), &mods, &key)) throw FormatError("'" + to_utf8(r) + "' is not a key chord.");
+        unsigned vk = 0;
+        for (unsigned v = 1; v < 256 && !vk; ++v) {
+            if (bb::views::chord_key_name(v) == key) vk = v;
+        }
+        if (!vk) throw FormatError("'" + to_utf8(key) + "' is not a key the window knows.");
+        const HWND hwnd = s_.view().window().hwnd();
+        const std::vector<unsigned> held = [&] {
+            std::vector<unsigned> h;
+            if (mods & 1) h.push_back(VK_CONTROL);
+            if (mods & 2) h.push_back(VK_MENU);
+            if (mods & 4) h.push_back(VK_SHIFT);
+            return h;
+        }();
+        for (const unsigned m : held) PostMessageW(hwnd, m == VK_MENU ? WM_SYSKEYDOWN : WM_KEYDOWN, m, 0);
+        PostMessageW(hwnd, (mods & 2) ? WM_SYSKEYDOWN : WM_KEYDOWN, vk, 0);
+        PostMessageW(hwnd, (mods & 2) ? WM_SYSKEYUP : WM_KEYUP, vk, 0xC0000000);
+        for (auto it = held.rbegin(); it != held.rend(); ++it) PostMessageW(hwnd, *it == VK_MENU ? WM_SYSKEYUP : WM_KEYUP, *it, 0xC0000000);
+        s_.pump();
         s_.settle();
     };
     verbs_[L"assert-key"] = [this](const std::wstring& r) {
@@ -957,6 +1151,54 @@ void Runner::install_ui() {
         s_.settle();
         s_.view().active_view()->reload_columns();
     };
+    // What the header itself does when a column is dragged or a gripper let go: the list's own columns
+    // change and it says so, and the view hands that to the core. `columns move|width` skips the view.
+    auto header_edit = [this](const std::wstring& id, const std::function<void(std::vector<ui::Column>&, size_t)>& edit) {
+        views::TabView* tv = s_.view().active_view();
+        const auto ids = tv->column_ids();
+        std::vector<ui::Column> cols = tv->list()->columns();
+        size_t at = cols.size();
+        for (size_t i = 0; i < cols.size(); ++i) {
+            const size_t k = static_cast<size_t>(cols[i].id);
+            if (k < ids.size() && core::iequals(ids[k], id)) at = i;
+        }
+        if (at == cols.size()) throw AssertionError("the header has no '" + to_utf8(id) + "' column.");
+        edit(cols, at);
+        tv->list()->set_columns(cols);
+        if (tv->list()->on_columns_changed) tv->list()->on_columns_changed();
+        s_.settle();
+        tv->reload_columns();
+    };
+    verbs_[L"header-drag"] = [this, header_edit](const std::wstring& r) {
+        const auto [id, tail] = split_first(require(r, "header-drag"));
+        const size_t to = static_cast<size_t>(std::max(0, number(tail, "header-drag")));
+        header_edit(id, [to](std::vector<ui::Column>& cols, size_t at) {
+            const ui::Column c = cols[at];
+            cols.erase(cols.begin() + static_cast<std::ptrdiff_t>(at));
+            cols.insert(cols.begin() + static_cast<std::ptrdiff_t>(std::min(to, cols.size())), c);
+        });
+    };
+    verbs_[L"header-resize"] = [this, header_edit](const std::wstring& r) {
+        const auto [id, tail] = split_first(require(r, "header-resize"));
+        const float w = static_cast<float>(number(tail, "header-resize"));
+        header_edit(id, [w](std::vector<ui::Column>& cols, size_t at) { cols[at].width = w; });
+    };
+    verbs_[L"assert-column-width"] = [this](const std::wstring& r) {
+        const auto [id, tail] = split_first(require(r, "assert-column-width"));
+        const int wanted = number(tail, "assert-column-width");
+        views::TabView* tv = s_.view().active_view();
+        tv->reload_columns();
+        const auto ids = tv->column_ids();
+        for (const ui::Column& c : tv->list()->columns()) {
+            const size_t k = static_cast<size_t>(c.id);
+            if (k >= ids.size() || !core::iequals(ids[k], id)) continue;
+            if (std::abs(static_cast<int>(std::lround(c.width)) - wanted) > 1) {
+                throw AssertionError("the '" + to_utf8(id) + "' column is " + std::to_string(std::lround(c.width)) + " wide, not " + std::to_string(wanted) + ".");
+            }
+            return;
+        }
+        throw AssertionError("there is no '" + to_utf8(id) + "' column.");
+    };
     verbs_[L"assert-columns"] = [this](const std::wstring& r) {
         s_.view().active_view()->reload_columns();
         std::vector<std::wstring> wanted;
@@ -1284,11 +1526,18 @@ void Runner::install_ui() {
         s_.settle(250);
         // Checksums read off the thread: building the window starts the run, and the photograph is of
         // what it arrives at.
-        if (k == L"checksum" || k == L"checksum-verify") {
+        // Disk usage reads its folder off the thread too.
+        const bool checksum = k == L"checksum" || k == L"checksum-verify";
+        const bool disk = k == L"disk-usage" || k == L"disk-usage-at";
+        const bool files = k == L"compare-files";
+        if (checksum || disk || files) {
             s_.view().render_dialog(k);
             s_.settle(250);
         }
-        auto bitmap = s_.view().render_dialog(k == L"checksum" || k == L"checksum-verify" ? std::wstring(L"checksum-show") : k);
+        auto bitmap = s_.view().render_dialog(checksum ? std::wstring(L"checksum-show")
+                                              : disk   ? std::wstring(L"disk-usage-show")
+                                              : files  ? std::wstring(L"compare-files-show")
+                                                       : k);
         if (!bitmap) throw AssertionError("the " + to_utf8(k) + " dialog could not be rendered.");
         write_shot(*bitmap, name.empty() ? L"dialog-" + k : name);
     };

@@ -1,10 +1,13 @@
 #include "views/tool_dialogs.h"
 
+#include "views/dialogs.h"
 #include "views/file_pickers.h"
 #include "views/forms.h"
 #include "views/main_view.h"
 #include "views/model.h"
+#include "views/ops_card.h"
 #include "views/tool_state.h"
+#include "views/tool_window.h"
 #include "views/tool_widgets.h"
 
 #include <windows.h>
@@ -81,6 +84,14 @@ std::wstring parent_of(const std::wstring& path) {
 std::wstring bb_file_name(const std::wstring& path) {
     const size_t cut = path.find_last_of(L"\\/");
     return cut == std::wstring::npos ? path : path.substr(cut + 1);
+}
+
+// The shell's icon for a row's file, as the folder list shows it. Spec: the tool windows' FileIcon columns.
+std::function<ThumbPtr(uint32_t)> file_picture(MainView& main, const std::wstring& path, bool directory) {
+    ShellIcons* icons = &main.shell_icons();
+    return [icons, path, directory](uint32_t px) {
+        return icons->file(path, directory, directory ? FILE_ATTRIBUTE_DIRECTORY : 0, px);
+    };
 }
 
 std::unique_ptr<Panel> refusal(DialogContext& cx, const std::wstring& title, const std::wstring& why) {
@@ -163,7 +174,9 @@ std::unique_ptr<Panel> checksum_card(DialogContext& cx, const json::Value& m) {
         }, 80)->name = "ChecksumStop";
         auto* bar = c.body->emplace<ProgressBar>();
         bar->height = 6;
-        bar->set_value(p["fraction"].num());
+        // Negative: no byte total yet, so the bar only says that something is happening.
+        if (p["fraction"].num() < 0) bar->set_indeterminate(true);
+        else bar->set_value(p["fraction"].num());
     }
     if (!m["stopped"].is_null()) f::text(*c.body, W(m["stopped"]), tok::WarningForeground, 13.0f)->name = "ChecksumStopped";
 
@@ -203,8 +216,9 @@ std::unique_ptr<Panel> checksum_card(DialogContext& cx, const json::Value& m) {
         const json::Value& row = m["rows"][i];
         auto* block = f::column(*list, 2);
         block->name = "ChecksumRow:" + row["name"].str();
-        auto* head = f::row(*block, 12);
-        f::text(*head, W(row["name"]), tok::TextPrimary, 14.0f, 600);
+        auto* head = f::row(*block, 8);
+        head->emplace<f::Picture>(file_picture(cx.main, W(row["path"]), false))->width = 16;
+        f::text(*head, W(row["name"]), tok::TextPrimary, 14.0f, 600)->vcenter = true;
         if (!row["verifyState"].is_null()) {
             f::text(*head, verify_words(row["verifyState"].str()), verify_colour(row["verifyState"].str()), 13.0f, 600);
         }
@@ -241,7 +255,12 @@ std::unique_ptr<Panel> checksum_card(DialogContext& cx, const json::Value& m) {
     for (size_t i = 0; i < m["rows"].size(); ++i) {
         const json::Value& row = m["rows"][i];
         if (folder.empty()) folder = parent_of(W(row["path"]));
-        for (size_t d = 0; d < row["digests"].size(); ++d) all += W(row["digests"][d]["digest"]) + L"  " + W(row["name"]) + L"\n";
+        // Lowercase whatever the algorithm shows, as Copy all always has. Spec: ChecksumViewModel.CopyAll.
+        for (size_t d = 0; d < row["digests"].size(); ++d) {
+            std::wstring digest = W(row["digests"][d]["digest"]);
+            for (wchar_t& ch : digest) ch = static_cast<wchar_t>(towlower(ch));
+            all += digest + L"  " + W(row["name"]) + L"\n";
+        }
     }
     std::wstring extension;
     for (size_t i = 0; i < m["algorithms"].size(); ++i) {
@@ -251,7 +270,8 @@ std::unique_ptr<Panel> checksum_card(DialogContext& cx, const json::Value& m) {
             break;
         }
     }
-    if (!verify) {
+    {
+        // In Verify too: what was read can be saved, and read again. Spec: ChecksumWindow.xaml.
         // Windows' Save as, starting beside the files with the first ticked algorithm's extension, rather
         // than writing a fixed name over whatever is there. Spec: ChecksumWindow.Save_Click.
         std::vector<std::pair<std::wstring, std::wstring>> filters;
@@ -350,12 +370,26 @@ std::unique_ptr<Panel> checksum_show(DialogContext& cx) {
 
 std::unique_ptr<Panel> compare_files_card(DialogContext& cx, const json::Value& m) {
     Card c = make_card(L"Compare files", 1000);
-    auto* names = f::row(*c.body, 0);
+    auto* names = f::row(*c.body, 10);
     auto* l = f::text(*names, W(m["leftName"]), tok::TextPrimary, 14.0f, 600);
+    l->name = "CompareLeftName";
+    l->tooltip = W(m["leftPath"]);
+    l->vcenter = true;
     l->flex = 1;
+    auto* swap = f::button(*names, L"Swap", [cx] {
+        try_tool_call(cx.main, "filecompare.swap");
+        cx.main.defer([main = &cx.main] { main->open_dialog(L"compare-files-show"); });
+    }, 70);
+    swap->name = "CompareSwap";
+    swap->tooltip = L"Put each file on the other side.";
     auto* r = f::text(*names, W(m["rightName"]), tok::TextPrimary, 14.0f, 600);
+    r->name = "CompareRightName";
+    r->tooltip = W(m["rightPath"]);
+    r->vcenter = true;
     r->flex = 1;
-    auto* verdict = f::text(*c.body, W(m["verdict"]), m["identical"].boolean() ? tok::TextLink : tok::TextSecondary, 13.5f);
+    // Said while the files are being read, over whatever the last comparison showed. Spec: FileCompareWindow.xaml.
+    const std::wstring said = m["comparing"].boolean() ? std::wstring(L"Comparing…") : W(m["verdict"]);
+    auto* verdict = f::text(*c.body, said, m["identical"].boolean() ? tok::TextLink : tok::TextSecondary, 13.5f);
     verdict->name = "CompareFilesVerdict";
     if (!m["banner"].is_null()) f::text(*c.body, W(m["banner"]), tok::WarningForeground, 12.5f)->wrap = true;
 
@@ -441,7 +475,7 @@ std::vector<tw::TreemapCell> treemap_cells(MainView& main, const std::vector<dou
     return out;
 }
 
-std::unique_ptr<Panel> disk_usage_card(DialogContext& cx, const json::Value& m) {
+std::unique_ptr<Panel> disk_usage_card(DialogContext& cx, const json::Value& m, bool loading) {
     Card c = make_card(L"Disk usage", 900);
     // Everything that can come and go on a load sits in a slot that is always there, so drilling into a
     // folder never moves the rest of the window: the progress strip, the footnote and the banner.
@@ -463,8 +497,14 @@ std::unique_ptr<Panel> disk_usage_card(DialogContext& cx, const json::Value& m) 
     where->vcenter = true;
     f::button(*head, L"Refresh", [open_at, root] { open_at(root); }, 76);
 
+    // Indeterminate while a folder is being read; the slot stays when it is not.
     auto* progress = c.body->emplace<Panel>();
-    progress->height = 2;
+    progress->height = 3;
+    if (loading) {
+        auto* bar = progress->emplace<ProgressBar>();
+        bar->name = "DiskUsageLoading";
+        bar->set_indeterminate(true);
+    }
 
     auto* cols = f::row(*c.body, 12);
     cols->flex = 1;
@@ -527,6 +567,7 @@ std::unique_ptr<Panel> disk_usage_card(DialogContext& cx, const json::Value& m) 
     list->flex = 1;
     list->show_header = false;
     list->columns = {{L"Name", 0, true, false, false}, {L"Size", 110, false, true, false}};
+    list->picture_column = 0;
     std::vector<tw::TableRow> rows;
     std::vector<std::wstring> row_paths;
     std::vector<bool> row_dirs;
@@ -534,6 +575,7 @@ std::unique_ptr<Panel> disk_usage_card(DialogContext& cx, const json::Value& m) 
         const json::Value& ch = children[i];
         tw::TableRow row;
         row.cells = {W(ch["name"]), W(ch["sizeText"])};
+        if (!ch["synthetic"].boolean()) row.picture = file_picture(cx.main, W(ch["path"]), ch["isDirectory"].boolean());
         // The bar is the measurement made visible, so an unmeasured row gets none: an empty bar is the
         // honest picture of a share nobody has established.
         row.bar = ch["unknown"].boolean() ? -1.0f : static_cast<float>(ch["fraction"].num());
@@ -566,12 +608,14 @@ std::unique_ptr<Panel> disk_usage_card(DialogContext& cx, const json::Value& m) 
     files->flex = 1;
     files->show_header = false;
     files->columns = {{L"Name", 0, true, false, false}, {L"Folder", 0, true, false, false}, {L"Size", 84, false, true, false}};
+    files->picture_column = 0;
     std::vector<tw::TableRow> frows;
     std::vector<std::wstring> fpaths;
     for (size_t i = 0; i < m["largest"].size(); ++i) {
         const json::Value& fl = m["largest"][i];
         tw::TableRow row;
         row.cells = {W(fl["name"]), W(fl["relativePath"]), W(fl["sizeText"])};
+        row.picture = file_picture(cx.main, W(fl["path"]), false);
         frows.push_back(std::move(row));
         fpaths.push_back(W(fl["path"]));
     }
@@ -602,11 +646,29 @@ std::unique_ptr<Panel> disk_usage_card(DialogContext& cx, const json::Value& m) 
     return std::move(c.root);
 }
 
+// The window from where the read stands: the folder being read says so until its answer arrives (the last
+// answer stays on show meanwhile, under a moving bar).
+std::unique_ptr<Panel> disk_usage_from(DialogContext& cx, const json::Value& st) {
+    const bool loading = st["loading"].boolean();
+    if (!st["model"].is_null()) return disk_usage_card(cx, st["model"], loading);
+    if (!loading) return refusal(cx, L"Disk usage", st["error"].is_null() ? L"Nothing to show." : W(st["error"]));
+    Card c = make_card(L"Disk usage", 900);
+    c.body->height = 470;
+    f::text(*c.body, W(st["path"]), tok::TextPrimary, 14.0f);
+    auto* bar = c.body->emplace<ProgressBar>();
+    bar->name = "DiskUsageLoading";
+    bar->height = 3;
+    bar->set_indeterminate(true);
+    f::note(*c.body, L"Reading the folder\u2026");
+    add_button(c, L"Close", cx.close, true);
+    return std::move(c.root);
+}
+
 std::unique_ptr<Panel> disk_usage_for(DialogContext& cx, const std::wstring& root) {
     std::wstring error;
-    const json::Value m = try_tool_call(cx.main, "diskusage.model", "{\"path\":" + json_quote(root) + "}", &error);
-    if (m.is_null()) return refusal(cx, L"Disk usage", error);
-    return disk_usage_card(cx, m);
+    const json::Value st = try_tool_call(cx.main, "diskusage.load", "{\"path\":" + json_quote(root) + "}", &error);
+    if (st.is_null()) return refusal(cx, L"Disk usage", error);
+    return disk_usage_from(cx, st);
 }
 
 // ---- the change timeline ---------------------------------------------------------------------------------
@@ -689,6 +751,11 @@ std::unique_ptr<Panel> changes_card(DialogContext& cx, const json::Value& m) {
         if (!r["renamedFrom"].str().empty()) name += L"   (" + W(r["renamedFrom"]) + L")";
         if (!r["countText"].str().empty()) name += L"   " + W(r["countText"]);
         row.cells = {W(r["kind"]), name, W(r["folder"]), W(r["when"])};
+        // First and last time, and how often, for a row that folds several. Spec: ChangeEventViewModel.WhenToolTip.
+        const std::wstring last = format_file_time(r["lastUtc"].i64());
+        row.tip = r["count"].i64() > 1 ? L"First " + format_file_time(r["firstUtc"].i64()) + L", last " + last + L" \u2014 " +
+                                             W(r["countText"]).substr(1) + L" times"
+                                       : last;
         row.tint = change_colour(r["kind"].str());
         row.muted = r["deleted"].boolean();
         rows.push_back(std::move(row));
@@ -711,15 +778,28 @@ std::unique_ptr<Panel> changes_card(DialogContext& cx, const json::Value& m) {
         try_tool_call(*main_view, "reveal", "{\"path\":" + json_quote(target) + ",\"isDirectory\":" + (dir ? "true" : "false") + "}");
     };
     f::text(*c.body, W(m["summary"]), tok::TextSecondary, 13.0f)->name = "ChangesSummary";
-    // The selected row as text: what changed, the path and when.
+    // The picked rows as text, one tab-separated line each, so they paste into a spreadsheet as columns:
+    // what changed, the path, when (local), how often, and for a rename where from.
+    // Spec: ChangeTimelineWindow.Copy, ChangeEventViewModel.CopyLine.
     Widget* anchor = c.root.get();
-    add_button(c, L"Copy", [main_view, table, list, anchor] {
-        if (table->selected < 0 || static_cast<size_t>(table->selected) >= list.size()) return;
-        const json::Value& r = list[static_cast<size_t>(table->selected)];
-        const std::wstring text = W(r["kind"]) + L"\t" + W(r["path"]) + L"\t" + W(r["when"]);
+    table->multi = true;
+    auto copy = [main_view, table, list, anchor] {
+        std::wstring text;
+        int n = 0;
+        for (int i : table->picked()) {
+            if (static_cast<size_t>(i) >= list.size()) continue;
+            const json::Value& r = list[static_cast<size_t>(i)];
+            std::wstring line = W(r["kind"]) + L"\t" + W(r["path"]) + L"\t" + format_file_time(r["lastUtc"].i64());
+            if (r["count"].i64() > 1) line += L"\t" + W(r["countText"]);
+            if (!r["oldPath"].is_null() && r["kind"].str() == "Renamed") line += L"\tfrom " + W(r["oldPath"]);
+            text += (n++ ? L"\r\n" : L"") + line;
+        }
+        if (text.empty()) return;
         if (anchor->root()) anchor->root()->clipboard.write(text);
-        bb_status_set(main_view->core().app(), core::s(L"Copied the change"));
-    })->name = "ChangesCopy";
+        bb_status_set(main_view->core().app(), core::s(n == 1 ? std::wstring(L"Copied the change") : L"Copied " + std::to_wstring(n) + L" changes"));
+    };
+    table->on_copy = copy;
+    add_button(c, L"Copy", copy)->name = "ChangesCopy";
     add_button(c, L"Close", cx.close, true);
     return std::move(c.root);
 }
@@ -869,6 +949,7 @@ std::unique_ptr<Panel> duplicates_card(DialogContext& cx) {
                       {L"Folder", 0, true, false, false},
                       {L"Modified", 140, false, false, false},
                       {L"Size", 90, false, true, false}};
+    table->picture_column = 1;
     std::vector<tw::TableRow> rows;
     std::vector<std::pair<size_t, size_t>> index;  // per row: group, file (file == npos for a heading)
     for (size_t g = 0; g < groups.size(); ++g) {
@@ -885,8 +966,23 @@ std::unique_ptr<Panel> duplicates_card(DialogContext& cx) {
             const bool on = d.ticked.count({g, i}) > 0;
             tw::TableRow row;
             std::wstring folder = file["dir"].str().empty() ? std::wstring(L"(this folder)") : W(file["dir"]);
-            if (file["hardlinks"].size() > 0) folder += L"  (also hard-linked elsewhere)";
+            // Spec: DuplicateGroupViewModel.HardlinkNote.
+            const size_t links = file["hardlinks"].size();
+            if (links == 1) folder += L"  ·  Also linked as " + W(file["hardlinks"][0]);
+            else if (links > 1) folder += L"  ·  Also linked under " + std::to_wstring(links) + L" other names";
             row.cells = {on ? L"\u2611" : L"\u2610", W(file["name"]), folder, format_file_time(file["modified"].i64()), format_bytes(file["sizeBytes"].i64())};
+            row.picture = file_picture(cx.main, W(file["path"]), false);
+            row.faded = file["hidden"].boolean();
+            // The last copy a group has left cannot be ticked; the row says so rather than the box springing
+            // back. Spec: DuplicateGroupViewModel.CanTick.
+            if (!on) {
+                size_t ticked_here = 0;
+                for (const auto& t : d.ticked) ticked_here += t.first == g ? 1 : 0;
+                if (ticked_here + 1 >= n) {
+                    row.cells[0] = L"‒";
+                    row.tip = L"One copy always stays — untick another first.";
+                }
+            }
             row.muted = !on;
             rows.push_back(std::move(row));
             index.push_back({g, i});
@@ -963,7 +1059,14 @@ std::unique_ptr<Panel> sync_card(DialogContext& cx, bool running) {
     const json::Value& p = v.preview;
     ToolsUi& ui = tools_ui(cx.main);
     Card c = make_card(L"Sync", 780);
-    f::text(*c.body, L"Make the right side match the left.", tok::TextPrimary, 14.0f);
+    // Named by the two folders' own names, the full paths beneath. Spec: SyncPreviewDialog (HeadingText).
+    auto short_name = [](const std::wstring& path) {
+        std::wstring p = path;
+        while (p.size() > 3 && (p.back() == L'\\' || p.back() == L'/')) p.pop_back();
+        const std::wstring name = bb_file_name(p);
+        return name.empty() ? path : name;
+    };
+    f::text(*c.body, L"Make " + short_name(W(p["right"])) + L" match " + short_name(W(p["left"])), tok::TextPrimary, 15.0f)->wrap = true;
     f::text(*c.body, L"Left   " + W(p["left"]), tok::TextSecondary, 12.5f)->name = "SyncLeft";
     f::text(*c.body, L"Right  " + W(p["right"]), tok::TextSecondary, 12.5f)->name = "SyncRight";
     f::text(*c.body, W(p["summary"]), tok::TextSecondary, 13.0f)->name = "SyncSummary";
@@ -986,13 +1089,15 @@ std::unique_ptr<Panel> sync_card(DialogContext& cx, bool running) {
     table->empty_text = L"Nothing to sync.";
     table->set_rows(std::move(rows));
     if (!running) {
-        table->on_activate = [cx, keys](int i) {
+        // The box takes one click (or Space), as a checkbox does; a double-click on the row does too.
+        table->on_toggle = [cx, keys](int i) {
             if (i < 0 || static_cast<size_t>(i) >= keys.size()) return;
             ToolsUi& st = tools_ui(cx.main);
             st.sync_touched = true;
             if (!st.sync_unticked.erase(keys[static_cast<size_t>(i)])) st.sync_unticked.insert(keys[static_cast<size_t>(i)]);
-            cx.main.open_dialog(L"sync-preview-edit");
+            cx.main.defer([main = &cx.main] { main->open_dialog(L"sync-preview-edit"); });
         };
+        table->on_activate = table->on_toggle;
     }
 
     if (!p["caveat"].is_null()) f::text(*c.body, W(p["caveat"]), tok::WarningForeground, 13.0f)->wrap = true;
@@ -1004,6 +1109,31 @@ std::unique_ptr<Panel> sync_card(DialogContext& cx, bool running) {
     deletes->set_enabled(!running);
     f::note(*c.body, L"Undo puts the whole sync back, and they go to the Recycle Bin on any volume that has one.");
 
+    const json::Value queue = try_model([&](BbOwnedStr* o) { return bb_ops_query(cx.main.core().app(), core::s(L"queue"), core::s(L""), o); });
+    if (running && queue["active"].boolean()) {
+        // The sync under way, live from the queue: what it is doing, how far through, and the way out. The
+        // dialog goes once the run is done. Spec: SyncPreviewDialog.xaml (ProgressRow).
+        MainView* main = &cx.main;
+        auto progress = std::make_unique<ops::LiveBody>(cx.main, &MainView::on_sync_progress, [main, close = cx.close](ops::LiveBody& b) {
+            const json::Value q = try_model([&](BbOwnedStr* o) { return bb_ops_query(main->core().app(), core::s(L"queue"), core::s(L""), o); });
+            if (!q["active"].boolean()) {
+                main->defer([close] { close(); });
+                return;
+            }
+            const json::Value& v = q["view"];
+            f::text(b, W(v["headline"]), tok::TextPrimary, 13.5f);
+            auto* bar = b.emplace<ProgressBar>();
+            bar->height = 6;
+            bar->set_indeterminate(v["indeterminate"].boolean());
+            if (!v["indeterminate"].boolean()) bar->set_value(v["fraction"].num());
+            f::text(b, W(v["detail"]), tok::TextSecondary, 12.0f);
+        });
+        progress->name = "SyncProgress";
+        c.body->add(std::move(progress));
+        auto* cancel = add_button(c, L"Cancel", [main] { ops::run(main->core(), "cancel-running"); });
+        cancel->tooltip = L"Stop the sync. What has already been copied stays, and undo still puts it back.";
+        return std::move(c.root);
+    }
     if (running) {
         // The run, reported where the list of what is being synced is; it replaces the buttons rather than
         // sitting beside them, since offering Sync again next to a running one invites pressing it. Posed on
@@ -1027,11 +1157,13 @@ std::unique_ptr<Panel> sync_card(DialogContext& cx, bool running) {
         for (size_t i = 0; i < ticked.size(); ++i) list += (i ? "," : "") + json_quote(core::wide(ticked[i]));
         list += "]";
         try_tool_call(cx.main, "compare.sync", std::string("{\"withDeletes\":") + (st.sync_with_deletes ? "true" : "false") + ",\"ticked\":" + list + "}");
-        cx.close();
+        // The dialog stays, showing the run, until it is done. Spec: SyncPreviewDialog (IsRunning).
+        cx.main.defer([main = &cx.main] { main->open_dialog(L"sync-preview-live"); });
     }, true, 110);
     sync->name = "SyncRun";
     sync->set_enabled(p["canRun"].boolean());
-    add_button(c, L"Cancel", cx.close);
+    // Cancel is the default: a stray Enter backs out of a write that can delete. Spec: SyncPreviewDialog.xaml.
+    add_button(c, L"Cancel", cx.close)->is_default = true;
     return std::move(c.root);
 }
 
@@ -1060,12 +1192,14 @@ const std::map<std::wstring, Builder>& builders() {
              return disk_usage_for(cx, cx.main.core().tab_text(cx.main.active_tab(), BB_TEXT_PATH));
          }},
         {L"disk-usage-at", [](DialogContext& cx) { return disk_usage_for(cx, tools_ui(cx.main).disk_root); }},
+        {L"disk-usage-show", [](DialogContext& cx) { return disk_usage_from(cx, try_tool_call(cx.main, "diskusage.state")); }},
         {L"changes", changes_start},
         {L"changes-show", changes_show},
         {L"duplicates", duplicates_card},
         {L"sync-preview", [](DialogContext& cx) { return sync_fresh(cx, false); }},
         {L"sync-preview-edit", [](DialogContext& cx) { return sync_card(cx, false); }},
         {L"sync-preview-running", [](DialogContext& cx) { return sync_fresh(cx, true); }},
+        {L"sync-preview-live", [](DialogContext& cx) { return sync_card(cx, true); }},
     };
     return table;
 }
@@ -1108,10 +1242,19 @@ bool duplicates_remove(MainView& main, uint64_t* op) {
     std::vector<BbStr> views;
     for (const auto& p : paths) views.push_back(core::s(p));
     uint64_t id = 0;
+    main.duplicates().pending_prune = paths;
     core::check(bb_op_delete(main.core().app(), views.data(), static_cast<uint32_t>(views.size()), BB_DELETE_RECYCLE, &id), "duplicates-remove");
     if (op) *op = id;
-    duplicates_prune(main, paths);
     return true;
+}
+
+void duplicates_settle_prune(MainView& main) {
+    std::vector<std::wstring>& pending = main.duplicates().pending_prune;
+    if (pending.empty()) return;
+    std::vector<std::wstring> gone, still;
+    for (const auto& p : pending) (GetFileAttributesW(p.c_str()) == INVALID_FILE_ATTRIBUTES ? gone : still).push_back(p);
+    pending = std::move(still);
+    if (!gone.empty()) duplicates_prune(main, gone);
 }
 
 // Remove ticked: the ordinary delete confirmation over the copies the rule allows, and back to this window
@@ -1122,9 +1265,16 @@ void duplicates_ask_remove(MainView& main) {
         bb_status_set(main.core().app(), core::s(L"One copy of every file always stays - untick one in each group to remove the rest."));
         return;
     }
+    // The confirmation is the main window's, and an owned window always stands above its owner: the
+    // Duplicates window steps out of the way while it is asked, and comes back after.
+    if (ToolWindow* tw = main.tool_window(L"duplicates"); tw && !tw->window().options().parked) ShowWindow(tw->window().hwnd(), SW_HIDE);
     main.ask_delete(paths, [&main, paths](bool confirmed) {
-        if (confirmed) duplicates_prune(main, paths);
-        main.defer([&main] { main.open_dialog(L"duplicates"); });
+        // Pruned as the delete finishes, by what really went: a copy that could not be deleted stays listed.
+        if (confirmed) main.duplicates().pending_prune = paths;
+        main.defer([&main] {
+            if (ToolWindow* tw = main.tool_window(L"duplicates"); tw && !tw->window().options().parked) ShowWindow(tw->window().hwnd(), SW_SHOW);
+            main.open_dialog(L"duplicates");
+        });
     });
 }
 

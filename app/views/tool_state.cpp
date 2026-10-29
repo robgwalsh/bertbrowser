@@ -82,8 +82,8 @@ bool tool_host_command(MainView& main, const std::wstring& id) {
         }
         std::vector<BbStr> views;
         for (const auto& p : paths) views.push_back(core::s(p));
-        uint32_t identical = 0;
-        if (!views.empty()) bb_compare_settle(main.core().app(), views.data(), static_cast<uint32_t>(views.size()), &identical);
+        // The bytes are read on a worker; the rows re-paint when the verdicts are in.
+        if (!views.empty()) bb_compare_settle_start(main.core().app(), views.data(), static_cast<uint32_t>(views.size()));
     } else {
         return false;
     }

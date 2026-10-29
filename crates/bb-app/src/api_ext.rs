@@ -102,6 +102,39 @@ impl App {
     }
 
     /// The file types the New submenu offers: `[{label, extension, templatePath}]`.
+    /// The size the folder tree shows beside each folder, from `dir_size_cache` (one indexed lookup,
+    /// never a scan): "1.2 GB", "1.2 GB *" when part of it could not be read, empty when unknown,
+    /// never zero for a folder nobody measured. In the order asked. Spec: FolderTreeViewModel.HydrateSizesAsync.
+    pub fn tree_sizes(&self, paths: &[String]) -> Vec<String> {
+        let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
+        let Ok(cache) = self.inner.dir_sizes.get_many(&refs) else {
+            return vec![String::new(); paths.len()];
+        };
+        paths
+            .iter()
+            .map(|p| {
+                bb_paths::PathKey::canonicalize(p)
+                    .ok()
+                    .and_then(|k| cache.get(&k))
+                    .map(|r| {
+                        bb_core::format::byte_size(r.size_bytes)
+                            + if r.incomplete { " *" } else { "" }
+                    })
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
+    /// The New items page's model (`Inner::new_types_state`).
+    pub fn new_types_state_json(&self) -> String {
+        text(&self.inner.new_types_state())
+    }
+
+    /// "Import from Windows": answers at once; the page hears `SettingsChanged("newFileTypes")`.
+    pub fn new_types_import(&self) {
+        self.inner.new_types_import();
+    }
+
     pub fn new_file_types_json(&self) -> String {
         text(&Value::Array(
             self.inner
@@ -412,6 +445,21 @@ impl App {
             }
             other => Err(AppError::Invalid(format!("unknown columns verb '{other}'"))),
         }
+    }
+
+    /// The header strip's checklist (`Inner::columns_header_menu_json`).
+    pub fn columns_header_menu_json(&self, tab: TabId) -> AppResult<String> {
+        self.inner.columns_header_menu_json(tab).map(|v| text(&v))
+    }
+
+    /// The Columns page's default set (`Inner::columns_defaults_json`).
+    pub fn columns_defaults_json(&self) -> String {
+        text(&self.inner.columns_defaults_json())
+    }
+
+    /// One edit of the default set new tabs start from: `add`, `remove`, `move`, `width`, `reset`.
+    pub fn columns_defaults_do(&self, verb: &str, arg: &str) -> AppResult<()> {
+        self.inner.columns_defaults_do(verb, arg)
     }
 
     /// What the Add column popup offers for `search`.
@@ -798,7 +846,7 @@ impl App {
 
     /// One verb: `select <id>`, `follow on|off`, `slot light|dark <id>`, `override <token> <#hex>`,
     /// `clear-override <token>`, `persist`, `revert`, `reset-all`, `save-as <name>`, `import <path>`,
-    /// `delete <id>`. `save-as` and `import` answer the new id.
+    /// `delete <id>`, `export <path>`. `save-as` and `import` answer the new id.
     pub fn theme_do(&self, verb: &str, arg: &str) -> AppResult<String> {
         let i = &self.inner;
         match verb {
@@ -823,6 +871,7 @@ impl App {
             "save-as" => return i.theme_save_as(arg),
             "import" => return i.theme_import(arg),
             "delete" => i.theme_delete(arg)?,
+            "export" => i.theme_export(arg)?,
             other => return Err(AppError::Invalid(format!("unknown theme verb '{other}'"))),
         }
         Ok(String::new())
@@ -843,6 +892,16 @@ impl App {
                 Ok(())
             }
             "start" => self.inner.index_start(),
+            // A helper with a session hangs up and exits; one that is not answering cannot be reached.
+            "stop" => {
+                self.inner.seams.index.stop();
+                self.inner.hub.model(crate::events::Model::Index);
+                Ok(())
+            }
+            "autostart-on" | "autostart-off" => {
+                self.inner.index_autostart_set(verb == "autostart-on");
+                Ok(())
+            }
             "retry" => self.inner.index_retry(),
             other => Err(AppError::Invalid(format!("unknown index verb '{other}'"))),
         }

@@ -3,10 +3,12 @@
 // membership: saving writes the layout, the two hidden lists and each command's "show in menu" from it, so no
 // arrangement can un-hide anything on its own. Spec: SettingsViewModel.ContextMenu.cs, SettingsView.xaml.
 #include "views/main_view.h"
+#include "views/file_pickers.h"
 #include "views/ops.h"
 #include "views/settings_view.h"
 
 #include <algorithm>
+#include <map>
 #include <set>
 
 namespace bb::views {
@@ -144,6 +146,43 @@ Model read_model(MainView& main) {
     return m;
 }
 
+// One command as the settings file spells it, with what the editor changed laid over it.
+struct CommandFields {
+    std::string id;
+    std::wstring name, command, arguments;
+    bool show_in_menu = true, files = true, folders = false, elevated = false;
+};
+
+CommandFields command_of(const json::Value& c) {
+    return {c["id"].str(),
+            core::wide(c["name"].str()),
+            core::wide(c["command"].str()),
+            core::wide(c["arguments"].str()),
+            c["showInMenu"].boolean(),
+            c["appliesToFiles"].boolean(),
+            c["appliesToDirectories"].boolean(),
+            c["runElevated"].boolean()};
+}
+
+std::string command_json(const CommandFields& c) {
+    return "{" + (c.id.empty() ? std::string() : "\"id\":" + ops::q(core::wide(c.id)) + ",") + "\"name\":" + ops::q(c.name) +
+           ",\"command\":" + ops::q(c.command) + ",\"arguments\":" + ops::q(c.arguments) + ",\"showInMenu\":" + (c.show_in_menu ? "true" : "false") +
+           ",\"appliesToFiles\":" + (c.files ? "true" : "false") + ",\"appliesToDirectories\":" + (c.folders ? "true" : "false") +
+           ",\"runElevated\":" + (c.elevated ? "true" : "false") + "}";
+}
+
+std::string commands_json(const std::vector<CommandFields>& all) {
+    std::string out = "[";
+    for (size_t i = 0; i < all.size(); ++i) out += (i ? "," : "") + command_json(all[i]);
+    return out + "]";
+}
+
+std::vector<CommandFields> commands_of(const json::Value& page) {
+    std::vector<CommandFields> out;
+    for (size_t i = 0; i < page["commands"].size(); ++i) out.push_back(command_of(page["commands"][i]));
+    return out;
+}
+
 std::string array_of(const std::vector<std::string>& items) {
     std::string out = "[";
     for (size_t i = 0; i < items.size(); ++i) out += (i ? "," : "") + ops::q(core::wide(items[i]));
@@ -177,19 +216,14 @@ static void apply_rows(SettingsView& view, MainView& main, const Model& m, const
     set("hiddenBuiltInMenuItems", array_of(hidden_built));
     set("hiddenShellExtensions", array_of(hidden_shell));
     // Each command's own switch follows its row.
-    std::string cmds = "[";
+    std::vector<CommandFields> cmds = commands_of(m.page);
     bool changed = false;
-    for (size_t i = 0; i < m.page["commands"].size(); ++i) {
-        const json::Value& c = m.page["commands"][i];
-        const bool in_menu = has_row(rows, "cmd:" + c["id"].str());
-        changed = changed || in_menu != c["showInMenu"].boolean();
-        cmds += std::string(i ? "," : "") + "{\"id\":" + ops::q(core::wide(c["id"].str())) + ",\"name\":" + ops::q(core::wide(c["name"].str())) +
-                ",\"command\":" + ops::q(core::wide(c["command"].str())) + ",\"arguments\":" + ops::q(core::wide(c["arguments"].str())) +
-                ",\"showInMenu\":" + (in_menu ? "true" : "false") + ",\"appliesToFiles\":" + (c["appliesToFiles"].boolean() ? "true" : "false") +
-                ",\"appliesToDirectories\":" + (c["appliesToDirectories"].boolean() ? "true" : "false") +
-                ",\"runElevated\":" + (c["runElevated"].boolean() ? "true" : "false") + "}";
+    for (CommandFields& c : cmds) {
+        const bool in_menu = has_row(rows, "cmd:" + c.id);
+        changed = changed || in_menu != c.show_in_menu;
+        c.show_in_menu = in_menu;
     }
-    if (changed) set("customCommands", cmds + "]");
+    if (changed) set("customCommands", commands_json(cmds));
 }
 
 void SettingsView::open_new_command() {
@@ -239,7 +273,17 @@ void SettingsView::page_context_menu(Widget& p) {
     }
     if (menu_selected_ >= static_cast<int>(entries.size())) menu_selected_ = -1;
     list->set_entries(std::move(entries), menu_selected_);
-    list->on_select = [this](int i) { menu_selected_ = i; };
+    // Selecting one of your commands opens its editor below, as selecting it on the right does.
+    list->on_select = [this, model](int i) {
+        menu_selected_ = i;
+        const bool command = i >= 0 && static_cast<size_t>(i) < model->rows.size() && model->rows[static_cast<size_t>(i)].token.rfind("cmd:", 0) == 0;
+        const std::string id = command ? model->rows[static_cast<size_t>(i)].token.substr(4) : std::string();
+        if (id != command_editing_ && (command || !command_editing_.empty())) {
+            command_editing_ = id;
+            command_editor_ = false;
+            main_.defer([this] { rebuild_if_changed(true); });
+        }
+    };
 
     auto commit = [this, model, &main](std::vector<Row> rows, int select) {
         menu_selected_ = select;
@@ -278,6 +322,42 @@ void SettingsView::page_context_menu(Widget& p) {
         commit(std::move(rows), static_cast<int>(at));
     })->name = "MenuAddSeparator";
     f::button(*tools2, L"New command\u2026", [this] { open_new_command(); })->name = "MenuNewCommand";
+    // The app's entries back in their original order and all on the menu; your commands and other programs'
+    // entries keep whether they are on it and go back to where unplaced entries land. Spec: ResetMenu.
+    auto* reset = f::button(*tools2, L"Reset", [this, model, commit] {
+        std::vector<Row> rows;
+        std::map<std::string, const json::Value*> built_ins;
+        for (size_t i = 0; i < model->page["builtIns"].size(); ++i) built_ins[upper(model->page["builtIns"][i]["token"].str())] = &model->page["builtIns"][i];
+        for (size_t i = 0; i < model->page["defaultLayout"].size(); ++i) {
+            const std::string token = model->page["defaultLayout"][i].str();
+            if (token == "-") {
+                Row sep;
+                sep.token = token;
+                rows.push_back(sep);
+            } else if (upper(token) == "@MORE") {
+                Row more;
+                more.token = token;
+                more.name = L"New entries from other programs appear here";
+                rows.push_back(more);
+            } else if (const auto it = built_ins.find(upper(token)); it != built_ins.end()) {
+                rows.push_back(row_for_built_in(*it->second));
+            }
+        }
+        std::vector<Row> kept;
+        for (const Row& r : model->rows) {
+            if (!r.separator() && !r.more() && r.token.rfind("app:", 0) != 0) kept.push_back(r);
+        }
+        if (!kept.empty()) {
+            size_t at = more_index(rows);
+            Row sep;
+            sep.token = "-";
+            rows.insert(rows.begin() + static_cast<std::ptrdiff_t>(at++), sep);
+            for (Row& r : kept) rows.insert(rows.begin() + static_cast<std::ptrdiff_t>(at++), std::move(r));
+        }
+        commit(std::move(rows), -1);
+    });
+    reset->name = "MenuReset";
+    reset->tooltip = L"BertBrowser's entries back in their original order, all on the menu";
 
     if (dragging_pose_) {
         // The line a drag leaves between two rows, placed rather than dragged.
@@ -328,6 +408,15 @@ void SettingsView::page_context_menu(Widget& p) {
         }
     }
     choices->set_entries(std::move(ce));
+    choices->on_select = [this, tokens](int i) {
+        if (i < 0 || static_cast<size_t>(i) >= tokens.size()) return;
+        const std::string& token = tokens[static_cast<size_t>(i)];
+        const std::string id = token.rfind("cmd:", 0) == 0 ? token.substr(4) : std::string();
+        if (id.empty() || id == command_editing_) return;
+        command_editing_ = id;
+        command_editor_ = false;
+        main_.defer([this] { rebuild_if_changed(true); });
+    };
     choices->on_activate = [this, model, commit, tokens](int i) {
         if (i < 0 || static_cast<size_t>(i) >= tokens.size() || tokens[static_cast<size_t>(i)].empty()) return;
         const std::string& token = tokens[static_cast<size_t>(i)];
@@ -346,6 +435,78 @@ void SettingsView::page_context_menu(Widget& p) {
         commit(std::move(rows), static_cast<int>(at));
     };
     f::note(*right, L"Double-click to add or take out. The list on the left is the order of both right-click menus.");
+
+    // -- one of your commands, edited where it is: every change is written at once (a command missing a
+    // field keeps the whole list unwritten, and the strip says why). Spec: SettingsView.xaml (CommandEditor).
+    auto all = std::make_shared<std::vector<CommandFields>>(commands_of(model->page));
+    const auto editing = std::find_if(all->begin(), all->end(), [this](const CommandFields& c) { return c.id == command_editing_; });
+    if (!command_editor_ && !command_editing_.empty() && editing != all->end()) {
+        const size_t index = static_cast<size_t>(editing - all->begin());
+        BbApp* app = main.core().app();
+        auto write = [all, app] { bb_settings_set(app, core::s(L"customCommands"), core::s(core::wide(commands_json(*all)))); };
+        f::gap(p, 6);
+        f::text(p, L"Your command", tok::TextSecondary, 14.0f, 600);
+        auto* card = p.emplace<StackPanel>(Orientation::Vertical, 8.0f);
+        card->name = "CommandEditor";
+        card->pad = 12;
+        card->style.bg = tok::SurfaceRaised;
+        card->style.border = tok::BorderSubtle;
+        const CommandFields& c = (*all)[index];
+        auto field = [&](const wchar_t* label, const std::wstring& value, const char* id, std::function<void(CommandFields&, const std::wstring&)> apply) {
+            auto* r = f::row(*card);
+            f::row_label(*r, label, 130);
+            auto* e = f::field(*r, value, 360, [all, index, write, apply](const std::wstring& t) {
+                apply((*all)[index], t);
+                write();
+            });
+            e->name = id;
+            e->automation_id = id;
+            return r;
+        };
+        field(L"Name", c.name, "CommandName", [](CommandFields& f2, const std::wstring& t) { f2.name = t; });
+        auto* program = field(L"Program", c.command, "CommandProgram", [](CommandFields& f2, const std::wstring& t) { f2.command = t; });
+        auto* browse = f::button(*program, L"\u2026", [this, all, index, write] {
+            PickPath pick;
+            pick.title = L"Choose a program";
+            pick.filters = {{L"Programs", L"*.exe;*.cmd;*.bat;*.com"}, {L"All files", L"*.*"}};
+            if (const auto chosen = pick_open_file(main_.window().hwnd(), pick)) {
+                (*all)[index].command = *chosen;
+                write();
+                main_.defer([this] { rebuild_if_changed(true); });
+            }
+        }, 32);
+        browse->tooltip = L"Browse for a program";
+        browse->set_enabled(!main.scripted());
+        auto* args = field(L"Arguments", c.arguments, "CommandArguments", [](CommandFields& f2, const std::wstring& t) { f2.arguments = t; });
+        args->tooltip = L"{path} = full path, {name} = file name, {dir} = parent directory";
+        auto* switches = f::row(*card, 16);
+        f::check(*switches, L"Show for files", c.files, [all, index, write](bool v) {
+            (*all)[index].files = v;
+            write();
+        });
+        f::check(*switches, L"Show for folders", c.folders, [all, index, write](bool v) {
+            (*all)[index].folders = v;
+            write();
+        });
+        auto* admin = f::check(*card, L"Run as administrator", c.elevated, [all, index, write](bool v) {
+            (*all)[index].elevated = v;
+            write();
+        });
+        admin->tooltip = L"Windows asks for confirmation each time this command runs.";
+        auto* buttons = f::row(*card);
+        f::button(*buttons, L"Delete", [this, all, index, write] {
+            // Off the menu and out of settings. Spec: DeleteCustomCommand.
+            all->erase(all->begin() + static_cast<std::ptrdiff_t>(index));
+            write();
+            command_editing_.clear();
+            menu_selected_ = -1;
+            main_.defer([this] { rebuild_if_changed(true); });
+        })->name = "CommandDelete";
+        f::button(*buttons, L"Done", [this] {
+            command_editing_.clear();
+            main_.defer([this] { rebuild_if_changed(true); });
+        })->name = "CommandDone";
+    }
 
     // -- a command of your own
     if (command_editor_) {

@@ -45,6 +45,19 @@ struct ListEntry {
     uint32_t swatch = 0;     // 0xAARRGGBB
 };
 
+// A shell picture on its own, asked for at paint time (it may still be loading).
+class Picture : public Widget {
+public:
+    explicit Picture(std::function<ThumbPtr(uint32_t px)> source, float size = 16.0f) : source(std::move(source)), size(size) {}
+    std::function<ThumbPtr(uint32_t px)> source;
+    float size;
+    Size measure(Size) override { return fixed_or({size, size}); }
+    void paint(PaintContext& pc) override;
+
+private:
+    ImageCache images_;
+};
+
 // A scrolling list of rows with one selected. Rows have a fixed height, so painting asks for the visible ones.
 class ItemList : public Widget {
 public:
@@ -60,6 +73,8 @@ public:
     std::function<void(int)> on_select;    // a click or a key moved the selection
     std::function<void(int)> on_activate;  // a double click or Enter
     std::function<void(int, Point)> on_context;  // a right click on a row, which does not select it
+    std::function<void(int)> on_middle;          // a middle click on a row, which does not select it
+    std::function<bool(unsigned vk)> on_key;     // a key the list's own handling has not taken yet; true = handled
 
     void set_entries(std::vector<ListEntry> e, int select = -1);
     // One row's words or swatch changed: repainted where it is, the selection and scroll left alone.

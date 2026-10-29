@@ -99,6 +99,18 @@ fn custom_command_problem(value: &Value) -> Option<String> {
         if command.trim().is_empty() {
             return Some(format!("'{name}' needs a program to run."));
         }
+        // A command offered for neither could never be in a menu. Spec: SettingsViewModel.CommandProblem.
+        let files = item
+            .get("appliesToFiles")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let folders = item
+            .get("appliesToDirectories")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if !files && !folders {
+            return Some(format!("'{name}' must apply to files, folders, or both."));
+        }
     }
     None
 }

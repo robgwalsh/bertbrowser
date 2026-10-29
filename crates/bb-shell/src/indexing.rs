@@ -101,6 +101,95 @@ impl IndexHostLauncher for ElevatedIndexHostLauncher {
     }
 }
 
+/// Whether the index helper starts at sign-in: read from the scheduler's own task file, changed by the
+/// helper itself with an administrator token (`--register-autostart` / `--unregister-autostart`) - one
+/// elevation prompt per change, which is the user's gesture in front of installing something that runs
+/// elevated at every sign-in. Spec: Services/Indexing/IndexAutoStartService.
+pub struct IndexAutoStart {
+    helper_path: String,
+}
+
+impl Default for IndexAutoStart {
+    fn default() -> Self {
+        IndexAutoStart {
+            helper_path: beside_this_executable(INDEXER_EXECUTABLE),
+        }
+    }
+}
+
+impl IndexAutoStart {
+    pub fn can_elevate(&self) -> bool {
+        elevated_process::can_elevate()
+    }
+
+    /// What the scheduler holds. An unreadable task is `Unknown`, which the page shows as off.
+    pub fn state(&self) -> bb_core::mft::AutoStartState {
+        let windows = std::env::var("SystemRoot")
+            .or_else(|_| std::env::var("WINDIR"))
+            .unwrap_or_else(|_| "C:\\Windows".into());
+        let path = std::path::Path::new(&windows)
+            .join("System32")
+            .join("Tasks")
+            .join(bb_core::mft::IndexerAutoStartTask::TASK_NAME);
+        if !path.exists() {
+            return bb_core::mft::AutoStartState::Off;
+        }
+        match std::fs::read(&path) {
+            // Task files are UTF-16 with a BOM; anything else is read as UTF-8.
+            Ok(bytes) => {
+                let text = if bytes.starts_with(&[0xFF, 0xFE]) {
+                    let units: Vec<u16> = bytes[2..]
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|c| u16::from_le_bytes(*c))
+                        .collect();
+                    String::from_utf16_lossy(&units)
+                } else {
+                    String::from_utf8_lossy(&bytes).into_owned()
+                };
+                bb_core::mft::IndexerAutoStartTask::state_from_task_xml(
+                    Some(&text),
+                    &self.helper_path,
+                )
+            }
+            Err(_) => bb_core::mft::AutoStartState::Unknown,
+        }
+    }
+
+    /// Registers or removes the task, and answers whether the scheduler now says so - verified, not
+    /// taken on trust from a process having started. Blocks for up to half a minute: off the UI thread.
+    pub fn set(&self, on: bool) -> bool {
+        if !std::path::Path::new(&self.helper_path).is_file() {
+            return false;
+        }
+        // The user's real data directory, never an overridden one (`IndexerAutoStartTask::build_xml`).
+        let profile = bb_core::fs::KnownFolders::profile()
+            .or_else(|| std::env::var("USERPROFILE").ok())
+            .unwrap_or_default();
+        let data_dir = format!("{}\\.bertbrowser", profile.trim_end_matches('\\'));
+        let verb = if on {
+            "--register-autostart"
+        } else {
+            "--unregister-autostart"
+        };
+        let arguments = format!("{verb} --data-dir \"{data_dir}\"");
+        match elevated_process::start_elevated(&self.helper_path, &arguments) {
+            Ok((handle, _)) => handle.wait(Duration::from_secs(30)),
+            Err(_) => return false,
+        };
+        let state = self.state();
+        if on {
+            matches!(
+                state,
+                bb_core::mft::AutoStartState::On | bb_core::mft::AutoStartState::Stale
+            )
+        } else {
+            state == bb_core::mft::AutoStartState::Off
+        }
+    }
+}
+
 /// One session's view of the shared pipe: closing it hangs up on this helper and leaves the
 /// endpoint listening for the next.
 struct PipeIndexStream(PipeSession);

@@ -136,6 +136,7 @@ impl TabData {
     /// Replaces the listing with `rows`, giving each a stable id. Selection survives only where
     /// asked, and only for rows that are still there.
     pub(crate) fn install(&mut self, mut rows: Vec<Row>, keep_selection: bool) {
+        self.is_loading = false;
         for row in rows.iter_mut() {
             row.id = intern(self, &row.key);
             // What the host already read for this file survives the reload, unless the file has been
@@ -318,6 +319,7 @@ impl Inner {
                 return;
             }
             t.generation += 1;
+            t.is_loading = true;
             t.cancel.cancel();
             t.cancel = CancelToken::new();
             t.search_stop.cancel();
@@ -338,6 +340,7 @@ impl Inner {
             Kind::Search => self.schedule(move |inner| inner.run_search(tab, generation, token)),
             Kind::Flat => self.schedule(move |inner| inner.run_flat(tab, generation, token)),
         }
+        self.hub.emit(AppEvent::TabChanged { tab });
         self.update_busy();
     }
 
@@ -1115,6 +1118,38 @@ impl Inner {
         drop(t);
         self.hub.emit(AppEvent::TabChanged { tab });
         Ok(())
+    }
+
+    /// "3 items selected (1.2 MB)" for the status bar, or `None` with nothing selected. A folder's size
+    /// counts only when it is already known, so the total never waits on a scan.
+    /// Spec: DirectoryTabView.UpdateSelectionSummary.
+    pub(crate) fn selection_summary(&self, tab: TabId) -> AppResult<Option<String>> {
+        let cell = self.tab(tab)?;
+        let t = lock(&cell);
+        if t.selection.is_empty() {
+            return Ok(None);
+        }
+        let (count, bytes) = t
+            .listing
+            .rows()
+            .iter()
+            .filter(|r| t.selection.contains(&r.id))
+            .fold((0i64, 0i64), |(n, b), r| {
+                (n + 1, b + r.size.unwrap_or(0).max(0))
+            });
+        if count == 0 {
+            return Ok(None);
+        }
+        let noun = if count == 1 { "item" } else { "items" };
+        let counted = bb_core::format::thousands(count);
+        Ok(Some(if bytes > 0 {
+            format!(
+                "{counted} {noun} selected ({})",
+                bb_core::format::byte_size(bytes)
+            )
+        } else {
+            format!("{counted} {noun} selected")
+        }))
     }
 
     /// "Select by pattern" (`select`) and "deselect by pattern": what `pattern` picks out of the

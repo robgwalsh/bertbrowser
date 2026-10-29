@@ -57,10 +57,29 @@ private:
     void page_search_index(ui::Widget& p);
     void page_history(ui::Widget& p);
     void page_new_items(ui::Widget& p);
+    // The New items page edits its own copy of the list, written back whole on every change, so typing in
+    // the editor never rebuilds the page under the caret. Read from the core on arrival and after an import.
+    struct NewType {
+        std::wstring label, extension, template_path;
+        bool enabled = true;
+    };
+    void load_new_types();
+    void write_new_types();
+    void refresh_new_type_row(int i);
+    std::vector<NewType> new_types_;
+    int new_type_selected_ = -1;
+    bool new_types_loaded_ = false;
+    bool new_types_importing_ = false;  // this page asked for an import that has not been read back yet
+    ui::Widget* new_type_list_ = nullptr;
     void page_columns(ui::Widget& p);
+    int column_selected_ = 0;
     void page_saved(ui::Widget& p, bool workspaces);
     void page_context_menu(ui::Widget& p);
     void page_bars(ui::Widget& p);
+    // The bars page's two inline name boxes: Save as (a new name) and Rename (a saved one's).
+    enum class BarNaming { None, SaveAs, Rename };
+    BarNaming bar_naming_ = BarNaming::None;
+    std::wstring bar_name_text_;
     void page_keys(ui::Widget& p);
 
     // settings values
@@ -70,20 +89,32 @@ private:
     void set_text(const char* key, const std::wstring& v, bool null_if_empty = false);
     void number_row(ui::Widget& p, const wchar_t* label, const char* key, const wchar_t* unit = L"");
     void bool_row(ui::Widget& p, const wchar_t* label, const char* key);
+    // A setting with a fixed list of values, as the original's combos and sliders had: a value off the list
+    // (a hand-edited file) is shown as itself rather than rewritten. `choices` are label and JSON value.
+    void choice_row(ui::Widget& p, const wchar_t* label, const char* key, std::vector<std::pair<std::wstring, std::string>> choices,
+                    const char* when_unset = nullptr);
+    // What a hint calls a command: its shortcut, or its name when it has none.
+    std::wstring gesture_or(const wchar_t* command, const wchar_t* fallback);
 
     MainView& main_;
     core::Core& core_;
     bool open_ = false;
     std::string page_;
     std::string signature_;
+    std::wstring folder_handler_warning_;  // why the last change to the folder handler did not happen
     bool dragging_pose_ = false;
     int menu_selected_ = -1;
     bool command_editor_ = false;
+    std::string command_editing_;  // the id of the user's command whose editor is open, or empty
     ui::Widget* card_ = nullptr;
     ui::StackPanel* nav_ = nullptr;
     ui::ScrollViewer* scroll_ = nullptr;
     ui::StackPanel* body_ = nullptr;
+    // The strip over the page: why a list is not being saved (the core's), or why the last value was refused.
+    ui::StackPanel* problem_strip_ = nullptr;
     ui::TextBlock* problem_ = nullptr;
+    std::wstring refused_;
+    void show_problem(const std::wstring& core_problem);
     json::Value pages_;
     // the editors' last models (for the harness and the keys page)
     json::Value bars_model_, keys_model_;

@@ -42,7 +42,26 @@ struct RenameState {
     f::ItemList* preview_list = nullptr;
     StackPanel* options = nullptr;
     Button *toggle = nullptr, *rename = nullptr;
+    Widget* debounce = nullptr;
 };
+
+// Fires `fire` once, `ms` after the last kick: typing into a big selection re-plans when the typing
+// pauses, not on every key. Spec: RenameDialog (its 200 ms DispatcherTimer).
+class Debounce : public Widget {
+public:
+    std::function<void()> fire;
+    void kick(unsigned ms) {
+        if (root()) root()->start_timer(this, 1, ms);
+    }
+    void on_timer(int id) override {
+        root()->stop_timer(this, id);
+        if (fire) fire();
+    }
+    Size measure(Size) override { return {0, 0}; }
+};
+
+// Below this many items a plan is quick enough to follow every key (and a scripted run sees it at once).
+constexpr size_t kDebounceAbove = 200;
 
 bool numeric(const std::wstring& t) {
     if (t.empty()) return false;
@@ -120,6 +139,24 @@ void replan(RenameState& st) {
     st.root->request_layout();
 }
 
+void replan_soon(RenameState& st) {
+    if (st.paths.size() > kDebounceAbove && st.debounce) static_cast<Debounce*>(st.debounce)->kick(200);
+    else replan(st);
+}
+
+// The keyboard in the name box with the base name of one item selected, the whole box otherwise; again
+// whenever the options open or close. Spec: RenameDialog.PlaceCaret.
+void place_caret(RenameState& st) {
+    if (st.name->root()) st.name->root()->set_focus(st.name);
+    const std::wstring& n = st.name->text();
+    if (st.expanded || st.paths.size() != 1) {
+        st.name->select(0, n.size());
+    } else {
+        const size_t dot = n.find_last_of(L'.');
+        st.name->select(0, dot == std::wstring::npos || dot == 0 ? n.size() : dot);
+    }
+}
+
 void set_expanded(RenameState& st, bool expanded) {
     if (st.expanded == expanded) return;
     st.expanded = expanded;
@@ -151,6 +188,7 @@ void set_expanded(RenameState& st, bool expanded) {
     }
     st.loading = false;
     replan(st);
+    place_caret(st);
     st.root->request_layout();
 }
 
@@ -179,7 +217,11 @@ std::unique_ptr<Widget> rename_dialog(DialogContext& cx, bool expanded) {
 
     st->prompt = f::text(*c.body, L"", tok::TextPrimary, 14.0f);
     st->prompt->wrap = true;
-    st->name = f::field(*c.body, st->suggestion, -1, [st](const std::wstring&) { replan(*st); });
+    auto* debounce = c.body->emplace<Debounce>();
+    debounce->set_visible(false);  // takes no room; its timer still fires
+    debounce->fire = [st] { replan(*st); };
+    st->debounce = debounce;
+    st->name = f::field(*c.body, st->suggestion, -1, [st](const std::wstring&) { replan_soon(*st); });
     st->name->width = -1;
     st->name->name = "RenameName";
     st->toggle = f::button(*c.body, L"More options", [st] { set_expanded(*st, !st->expanded); }, 130);
@@ -187,7 +229,7 @@ std::unique_ptr<Widget> rename_dialog(DialogContext& cx, bool expanded) {
 
     st->options = c.body->emplace<StackPanel>(Orientation::Vertical, 8.0f);
     st->options->name = "RenameOptionsPanel";
-    auto changed = [st](const std::wstring&) { replan(*st); };
+    auto changed = [st](const std::wstring&) { replan_soon(*st); };
     auto fr = f::row(*st->options, 8);
     f::row_label(*fr, L"Find", 110);
     st->find = f::field(*fr, L"", 200, changed);
@@ -278,14 +320,7 @@ std::unique_ptr<Widget> rename_dialog(DialogContext& cx, bool expanded) {
     set_prompt(*st);
     if (expanded || remembered) set_expanded(*st, true);
     else replan(*st);
-    // The caret: the base name of one item is selected, the whole box otherwise.
-    if (st->expanded || st->paths.size() != 1) {
-        st->name->select(0, st->name->text().size());
-    } else {
-        const std::wstring& n = st->name->text();
-        const size_t dot = n.find_last_of(L'.');
-        st->name->select(0, dot == std::wstring::npos || dot == 0 ? n.size() : dot);
-    }
+    place_caret(*st);
     return std::move(c.root);
 }
 
@@ -322,7 +357,7 @@ std::unique_ptr<Widget> compress_dialog(DialogContext& cx) {
     auto* format = f::combo(*c.body, labels, 0, 200, nullptr);
     format->name = "CompressFormat";
     f::text(*c.body, L"Compression", tok::TextSecondary, 13.0f);
-    auto* level = f::radios(*c.body, {L"Fastest", L"Normal", L"Smallest"}, 1, nullptr);
+    auto* level = f::radios(*c.body, {L"Store (no compression)", L"Normal", L"Maximum"}, 1, nullptr);
     level->name = "CompressLevel";
     f::text(*c.body, L"Where", tok::TextSecondary, 13.0f);
     auto* r = f::row(*c.body);
@@ -373,9 +408,16 @@ std::unique_ptr<Widget> compress_dialog(DialogContext& cx) {
         if (!ok->flags.enabled) return;
         const json::Value& f_ = formats[static_cast<size_t>(std::max(0, format->selected()))];
         static const char* levels[] = {"store", "normal", "maximum"};
-        run(main.core(), "compress",
-            "{\"sources\":" + qa(sources) + ",\"target\":" + q(*target) + ",\"format\":" + q(w(f_["label"])) +
-                ",\"level\":\"" + levels[std::max(0, level->selected())] + "\"}");
+        // A plan the core refuses is said in a message, not lost. Spec: DirectoryTabView.CompressAsync.
+        try {
+            run(main.core(), "compress",
+                "{\"sources\":" + qa(sources) + ",\"target\":" + q(*target) + ",\"format\":" + q(w(f_["label"])) +
+                    ",\"level\":\"" + levels[std::max(0, level->selected())] + "\"}");
+        } catch (const std::exception& e) {
+            main.show_message(L"Compress", core::message_of(e));  // deferred, so before close() frees this handler
+            close();
+            return;
+        }
         close();
     };
     name->on_commit = [ok] {
@@ -464,7 +506,14 @@ std::unique_ptr<Widget> extract_dialog(DialogContext& cx) {
         // The executor makes the folder as it writes, so a refused plan leaves nothing behind.
         std::wstring target = dest->text();
         while (target.size() > 3 && (target.back() == L' ' || target.back() == L'\\')) target.pop_back();
-        run_extract(main, subject, target, conflict->selected() == 1);
+        // Spec: DirectoryTabView.ExtractAsync (a refused plan is a warning message).
+        try {
+            run_extract(main, subject, target, conflict->selected() == 1);
+        } catch (const std::exception& e) {
+            main.show_message(L"Extract", core::message_of(e));  // deferred, so before close() frees this handler
+            close();
+            return;
+        }
         close();
     };
     return std::move(c.root);

@@ -24,7 +24,7 @@ use serde_json::{Value, json};
 
 use crate::app::{Inner, TabData, lock};
 use crate::events::{AppEvent, Model};
-use crate::ids::{AppResult, TabId};
+use crate::ids::{AppError, AppResult, TabId};
 use crate::rows::{CELL_COLUMNS, Listing, Row, RowProps, cell_index};
 
 /// One answered cell.
@@ -254,6 +254,57 @@ impl Inner {
         Ok(())
     }
 
+    /// The Columns page: the default set a new tab starts from, `{columns: [{id, header, width,
+    /// removable}]}`. Name is first and cannot be removed. Spec: SettingsViewModel (Columns).
+    pub(crate) fn columns_defaults_json(&self) -> Value {
+        let saved = lock(&self.settings).file_list_columns.clone();
+        let layout = ColumnLayoutRules::normalize(saved.as_deref());
+        json!({
+            "columns": layout.iter().filter_map(|c| {
+                let spec = bb_core::columns::ColumnCatalog::try_get(&c.id)?;
+                Some(json!({
+                    "id": c.id,
+                    "header": spec.header,
+                    "width": ColumnLayoutRules::sane_width(c.width, spec.default_width),
+                    "removable": !c.id.eq_ignore_ascii_case(bb_core::columns::ColumnCatalog::NAME),
+                }))
+            }).collect::<Vec<_>>(),
+        })
+    }
+
+    /// One edit of the default set: `add <id>`, `remove <id>`, `move <id> <index>`, `width <id> <dips>`,
+    /// `reset`. Through the same rules the header menu and a header drag use, so Name stays first
+    /// whichever way it is asked for. Saved at once; tabs that never arranged their own follow.
+    pub(crate) fn columns_defaults_do(&self, verb: &str, arg: &str) -> AppResult<()> {
+        let saved = lock(&self.settings).file_list_columns.clone();
+        let current = saved.as_deref();
+        let mut parts = arg.split_whitespace();
+        let next = match verb {
+            "add" => ColumnLayoutRules::toggle(current, arg.trim(), true),
+            "remove" => ColumnLayoutRules::toggle(current, arg.trim(), false),
+            "move" => {
+                let id = parts.next().unwrap_or("");
+                let at = parts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
+                ColumnLayoutRules::move_to(current, id, at)
+            }
+            "width" => {
+                let id = parts.next().unwrap_or("");
+                let width = parts
+                    .next()
+                    .and_then(|n| n.parse().ok())
+                    .ok_or_else(|| AppError::Invalid("width takes '<id> <dips>'".into()))?;
+                ColumnLayoutRules::set_width(current, id, width)
+            }
+            "reset" => bb_core::columns::ColumnCatalog::defaults(),
+            other => return Err(AppError::Invalid(format!("unknown columns verb '{other}'"))),
+        };
+        lock(&self.settings).file_list_columns = Some(next);
+        self.save_settings_now()?;
+        self.columns_default_changed();
+        self.hub.model(Model::Columns);
+        Ok(())
+    }
+
     /// The saved default moved (the button above, or the Columns page): every tab that has not
     /// arranged its own takes it. A re-layout, not a reload.
     pub(crate) fn columns_default_changed(&self) {
@@ -274,9 +325,53 @@ impl Inner {
         }
     }
 
-    /// What the Add column popup offers.
+    /// The header strip's checklist: `{builtIns: [{id, header, on, locked}], groups: [{title, items: [...]}],
+    /// extra: [...]}` - every built-in in catalogue order (not Folder or Match, which are not choices),
+    /// the curated properties by group, then anything showing that neither names (a property added
+    /// through the picker, whose tick here is its only way back off). Spec: ColumnHeaderMenu.Rebuild.
+    pub(crate) fn columns_header_menu_json(&self, tab: TabId) -> AppResult<Value> {
+        use bb_core::columns::ColumnCatalog;
+        let current = ColumnLayoutRules::normalize(self.tab_layout(tab)?.as_deref());
+        let on = |id: &str| current.iter().any(|c| c.id.eq_ignore_ascii_case(id));
+        let row = |id: &str, header: &str| json!({ "id": id, "header": header, "on": on(id), "locked": id.eq_ignore_ascii_case(ColumnCatalog::NAME) });
+        let built_ins: Vec<Value> = ColumnCatalog::built_ins()
+            .iter()
+            .filter(|s| !ColumnCatalog::is_injected(&s.id))
+            .map(|s| row(&s.id, &s.header))
+            .collect();
+        let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
+        for spec in ColumnCatalog::curated() {
+            match groups.iter_mut().find(|(g, _)| *g == spec.group) {
+                Some((_, items)) => items.push(row(&spec.id, &spec.header)),
+                None => groups.push((spec.group.clone(), vec![row(&spec.id, &spec.header)])),
+            }
+        }
+        let named = |id: &str| {
+            ColumnCatalog::built_ins()
+                .iter()
+                .chain(ColumnCatalog::curated())
+                .any(|s| s.id.eq_ignore_ascii_case(id))
+        };
+        let extra: Vec<Value> = current
+            .iter()
+            .filter(|c| !named(&c.id))
+            .filter_map(|c| ColumnCatalog::try_get(&c.id))
+            .map(|s| row(&s.id, &s.header))
+            .collect();
+        Ok(json!({
+            "builtIns": built_ins,
+            "groups": groups.into_iter().map(|(title, items)| json!({ "title": title, "items": items })).collect::<Vec<_>>(),
+            "extra": extra,
+        }))
+    }
+
+    /// What the Add column popup offers; tab 0 asks about the default set (the Columns page).
     pub(crate) fn columns_candidates_json(&self, tab: TabId, search: &str) -> AppResult<Value> {
-        let layout = self.tab_layout(tab)?;
+        let layout = if tab.0 == 0 {
+            lock(&self.settings).file_list_columns.clone()
+        } else {
+            self.tab_layout(tab)?
+        };
         let (machine, loaded) = lock(&self.extra.machine_props).clone();
         let candidates = ColumnCandidates::build(layout.as_deref(), &machine, search, loaded);
         Ok(json!({

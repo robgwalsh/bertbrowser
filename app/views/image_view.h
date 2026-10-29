@@ -32,6 +32,7 @@ public:
 
     // False for a thumbnail-sized cover that only sits there: no wheel zoom, no pan, no double-click.
     bool interactive = true;
+    bool checkerboard = true;  // the chequerboard under a picture with transparency (off for an icon)
 
     std::function<void()> on_toggle_playing;  // Space, when the picture is animated
     std::function<void()> on_fit_changed;

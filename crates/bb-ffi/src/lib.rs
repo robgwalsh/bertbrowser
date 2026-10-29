@@ -844,6 +844,10 @@ pub struct BbTabState {
     pub sort_descending: bool,
     pub shows_content_matches: bool,
     pub is_search_running: bool,
+    /// A reload has started and its rows have not arrived yet.
+    pub is_loading: bool,
+    /// The error is a locked archive: the banner offers Unlock.
+    pub is_archive_locked: bool,
     pub has_error: bool,
     /// 0 none, 1 preview, 2 metadata.
     pub side_pane: u32,
@@ -852,6 +856,10 @@ pub struct BbTabState {
     pub preview_mode: u32,
     pub preview_wrap: bool,
     pub preview_fit: bool,
+    /// Bumped when the core selected rows the view should bring into view (a renamed or new item
+    /// landing); `reveal_row` is the first of them, or -1.
+    pub reveal_seq: u64,
+    pub reveal_row: i64,
 }
 
 #[unsafe(no_mangle)]
@@ -880,12 +888,16 @@ pub unsafe extern "C" fn bb_tab_state(
             sort_descending: i.sort_desc,
             shows_content_matches: i.shows_content_matches,
             is_search_running: i.is_search_running,
+            is_loading: i.is_loading,
+            is_archive_locked: i.is_archive_locked,
             has_error: i.error.is_some(),
             side_pane: u32::from(i.side_pane),
             thumbnail_scale: i.thumbnail_scale,
             preview_mode: u32::from(i.preview_mode),
             preview_wrap: i.preview_wrap,
             preview_fit: i.preview_fit,
+            reveal_seq: i.reveal_seq,
+            reveal_row: i.reveal_row.map_or(-1, |r| r as i64),
         };
         Ok(())
     })
@@ -908,6 +920,8 @@ pub enum BbTabText {
     BB_TEXT_SEARCH = 6,
     /// The id of the column the list is sorted by.
     BB_TEXT_SORT_BY = 7,
+    /// "3 items selected (1.2 MB)"; none with nothing selected.
+    BB_TEXT_SELECTION = 8,
 }
 
 #[unsafe(no_mangle)]
@@ -920,6 +934,11 @@ pub unsafe extern "C" fn bb_tab_text(
     guard(|| {
         let app = unsafe { app_of(app)? };
         let out_text = unsafe { out(out_text, "out_text")? };
+        if which == BbTabText::BB_TEXT_SELECTION {
+            let summary = app.app.selection_summary(TabId(tab))?;
+            *out_text = summary.map_or_else(BbOwnedStr::none, |v| BbOwnedStr::from_str(&v));
+            return Ok(());
+        }
         let i = app.app.tab_info(TabId(tab))?;
         let value: Option<String> = match which {
             BbTabText::BB_TEXT_PATH => Some(i.path),
@@ -930,6 +949,7 @@ pub unsafe extern "C" fn bb_tab_text(
             BbTabText::BB_TEXT_NOTICE => i.notice,
             BbTabText::BB_TEXT_SEARCH => Some(i.search_text),
             BbTabText::BB_TEXT_SORT_BY => Some(i.sort_by),
+            BbTabText::BB_TEXT_SELECTION => None,
         };
         *out_text = value.map_or_else(BbOwnedStr::none, |v| BbOwnedStr::from_str(&v));
         Ok(())

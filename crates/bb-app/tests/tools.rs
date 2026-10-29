@@ -28,6 +28,15 @@ fn call(f: &Fixture, verb: &str, args: Value) -> Value {
         let model = f.app.tools("checksum.model", "{}").unwrap();
         return serde_json::from_str(&model).unwrap();
     }
+    // So does comparing two files.
+    if matches!(
+        verb,
+        "filecompare.open" | "filecompare.options" | "filecompare.swap"
+    ) {
+        f.settle();
+        let model = f.app.tools("filecompare.model", "{}").unwrap();
+        return serde_json::from_str(&model).unwrap();
+    }
     serde_json::from_str(&text).unwrap()
 }
 
@@ -243,6 +252,33 @@ fn a_pair_of_text_files_is_diffed_and_a_pair_of_binaries_is_dumped() {
 }
 
 // ---- disk usage ---------------------------------------------------------------------------------------
+
+#[test]
+fn disk_usage_reads_its_folder_off_the_ui_thread_and_a_later_read_wins() {
+    let f = Fixture::new();
+    let root = f.root.to_string_lossy().to_string();
+    let docs = f.root.join("Documents").to_string_lossy().to_string();
+    let first = call(&f, "diskusage.load", json!({ "path": root }));
+    assert_eq!(
+        root, first["path"],
+        "the folder asked for is the one being read"
+    );
+    call(&f, "diskusage.load", json!({ "path": docs }));
+    f.settle();
+    let st = call(&f, "diskusage.state", json!({}));
+    assert!(!st["loading"].as_bool().unwrap());
+    assert_eq!(docs, st["path"]);
+    assert_eq!(docs, st["model"]["root"], "the superseded read never lands");
+    assert!(
+        !call_err(
+            &f,
+            "diskusage.load",
+            json!({ "path": f.root.join("nope").to_string_lossy() })
+        )
+        .is_empty(),
+        "a folder that is not there is refused, not read"
+    );
+}
 
 #[test]
 fn a_folder_nobody_measured_reads_not_measured_and_gets_no_share() {
@@ -758,4 +794,90 @@ fn a_duplicate_scan_runs_off_the_ui_thread_and_never_lets_every_copy_go() {
     assert!(after["groups"].as_array().unwrap().is_empty());
     let last = call(&f, "duplicates.removable", json!({ "paths": paths[2..] }));
     assert!(last["paths"].as_array().unwrap().is_empty());
+}
+
+// ---- editing what is saved ----
+
+#[test]
+fn a_saved_search_is_edited_under_a_new_name_and_a_workspace_renamed() {
+    let f = Fixture::new();
+    let save = |name: &str, query: &str, previous: Option<&str>| {
+        call(
+            &f,
+            "search.save",
+            json!({ "name": name, "query": query, "scope": "current", "previous": previous }),
+        )
+    };
+    save("Reports", "report", None);
+    save("Notes", "notes", None);
+    let seed = call(&f, "search.edit-seed", json!({ "name": "Reports" }));
+    assert_eq!("report", seed["query"]);
+    // An edit may keep its own name, but not take another's.
+    let mine = call(
+        &f,
+        "search.save-check",
+        json!({ "name": "Reports", "query": "report", "scope": "current", "previous": "Reports" }),
+    );
+    assert!(mine["problem"].is_null(), "{mine}");
+    assert_eq!(false, mine["replacing"]);
+    let theirs = call(
+        &f,
+        "search.save-check",
+        json!({ "name": "Notes", "query": "report", "scope": "current", "previous": "Reports" }),
+    );
+    assert!(theirs["problem"].is_string(), "{theirs}");
+    save("Markdown", "*.md", Some("Reports"));
+    let saved: Value = serde_json::from_str(&f.app.saved_json()).unwrap();
+    let names: Vec<String> = saved["searches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        names.contains(&"Markdown".to_string()) && !names.contains(&"Reports".to_string()),
+        "{names:?}"
+    );
+
+    f.app.saved_do(None, "save-workspace", "Desk").unwrap();
+    f.app.saved_do(None, "save-workspace", "Laptop").unwrap();
+    let taken = call(
+        &f,
+        "workspace.rename-check",
+        json!({ "old": "Desk", "name": "Laptop" }),
+    );
+    assert!(taken["problem"].is_string());
+    let fine = call(
+        &f,
+        "workspace.rename-check",
+        json!({ "old": "Desk", "name": "desk" }),
+    );
+    assert!(fine["problem"].is_null(), "{fine}");
+}
+
+// ---- portable devices ---------------------------------------------------------------------------------
+
+#[test]
+fn portable_devices_are_read_off_the_thread_and_open_in_explorer() {
+    let f = Fixture::new();
+    let first = call(&f, "devices.list", json!({}));
+    assert!(
+        !first["loaded"].as_bool().unwrap() || first["devices"].as_array().unwrap().len() == 1,
+        "the first ask starts the read rather than waiting on it"
+    );
+    f.settle();
+    let m = call(&f, "devices.list", json!({}));
+    assert!(m["loaded"].as_bool().unwrap());
+    assert_eq!("Pixel 8", m["devices"][0]["name"]);
+    let path = m["devices"][0]["path"].as_str().unwrap().to_string();
+    call(&f, "devices.open", json!({ "path": path }));
+    let launched = f.probes.launches();
+    assert_eq!(1, launched.len());
+    assert!(
+        launched[0]
+            .0
+            .to_ascii_lowercase()
+            .ends_with("\\explorer.exe"),
+        "{launched:?}"
+    );
 }

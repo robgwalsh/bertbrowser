@@ -59,7 +59,31 @@ assert-count 800
 assert-realized under 200
 shot 07-tiles-large
 
+# --- The tiles answer the list's gestures: a band over empty space selects what it sweeps, and
+#     typing jumps to a name. ---
+
+thumbnails 0.5
+list-scroll 0
+run select.none
+widget-drag FileTileView 2 2 300 150
+shot 08-tiles-marquee
+assert-status-bar selection items selected
+focus FileTileView
+window-type clip0005
+assert-selection clip0005.mp4
+
 thumbnails 0
 assert-count 800
+
+# A rename lands where its new name sorts, which here is the far end: the list follows it there and the
+# cursor is on it, so the next arrow key moves from the renamed file.
+flat off
+go Many/Batch07
+list-scroll 0
+select clip0701.mp4
+rename zzz-renamed.mp4
+assert-selection zzz-renamed.mp4
+assert-cursor zzz-renamed.mp4
+shot 09-renamed-revealed
 assert-not-launched
 state

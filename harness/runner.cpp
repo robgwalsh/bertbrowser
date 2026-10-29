@@ -528,6 +528,47 @@ void Runner::install() {
         s_.core().navigate(tab(), provider.path_of(chain.back()));
         s_.settle(200);
     };
+    // A middle click on a row of the list (by name) or of the tree (by path): what the widget's own
+    // middle-button handler does, without a mouse.
+    verbs_[L"middle-click"] = [this](const std::wstring& r) {
+        const size_t index = row_index(require(r, "middle-click"));
+        bb::views::TabView* tv = s_.view().active_view();
+        if (!tv || !tv->list()->on_middle) throw std::runtime_error("middle-click: the list has no middle-click handler");
+        tv->list()->on_middle(index);
+        s_.settle(200);
+    };
+    verbs_[L"tree-middle"] = [this](const std::wstring& r) {
+        const fs::path path = sandbox_.resolve(require(r, "tree-middle"));
+        auto& provider = s_.view().folder_tree();
+        const auto chain = provider.chain_to(path.wstring());
+        if (chain.empty() || _wcsicmp(provider.path_of(chain.back()).c_str(), path.c_str()) != 0) {
+            throw AssertionError("The tree has no row for '" + narrow(path.wstring()) + "' showing; navigate there or to its parent first.");
+        }
+        auto* tv = s_.view().tree_view();
+        if (!tv->on_middle) throw std::runtime_error("tree-middle: the tree has no middle-click handler");
+        tv->on_middle(chain.back());
+        s_.settle(200);
+    };
+    // tree-device <name> -- double-clicks the portable device row of that name (the run's canned one is
+    // "Pixel 8"): Explorer is asked for it through the launcher, which a run refuses and counts.
+    verbs_[L"tree-device"] = [this](const std::wstring& r) {
+        const std::wstring name = require(r, "tree-device");
+        s_.settle(200);
+        auto& provider = s_.view().folder_tree();
+        std::wstring have;
+        for (size_t i = 0; i < provider.child_count(0); ++i) {
+            const uint64_t id = provider.child_id(0, i);
+            if (!provider.is_device(id)) continue;
+            have += (have.empty() ? L"" : L", ") + provider.label(id);
+            if (_wcsicmp(provider.label(id).c_str(), name.c_str()) != 0) continue;
+            auto* tv = s_.view().tree_view();
+            if (!tv->on_activate) throw std::runtime_error("tree-device: the tree has no double-click handler");
+            tv->on_activate(id);
+            s_.settle(200);
+            return;
+        }
+        throw AssertionError("The tree lists no device named '" + narrow(name) + "'." + (have.empty() ? std::string(" It lists none.") : " It lists: " + narrow(have)));
+    };
     verbs_[L"tree-expand"] = [this](const std::wstring& r) {
         std::wstring arg = require(r, "tree-expand");
         bool expand = true;
@@ -756,6 +797,12 @@ void Runner::install_asserts() {
     };
     verbs_[L"assert-visible"] = [visibility](const std::wstring& r) { visibility(r, true); };
     verbs_[L"assert-hidden"] = [visibility](const std::wstring& r) { visibility(r, false); };
+    // assert-launches <n> -- how many programs the run has tried to start (every one refused).
+    verbs_[L"assert-launches"] = [this](const std::wstring& r) {
+        const int expected = number(require(r, "assert-launches"), "assert-launches");
+        const int64_t n = bb::json::parse(s_.core().state_json())["launches"].i64();
+        if (n != expected) throw AssertionError("expected " + std::to_string(expected) + " launch(es), the run tried " + std::to_string(n) + ".");
+    };
     verbs_[L"assert-not-launched"] = [this](const std::wstring&) {
         const bb::json::Value st = bb::json::parse(s_.core().state_json());
         const int64_t n = st["launches"].i64();

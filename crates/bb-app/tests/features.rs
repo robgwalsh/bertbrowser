@@ -119,6 +119,44 @@ fn a_new_file_takes_the_template_of_its_type() {
     assert!(f.root.join("letter.txt").is_file());
 }
 
+#[test]
+fn importing_from_windows_adds_only_the_types_that_are_missing() {
+    let f = Fixture::new();
+    let before = json(&f.app.new_types_state_json())["types"]
+        .as_array()
+        .unwrap()
+        .len();
+    let finished = |f: &Fixture| {
+        let st = json(&f.app.new_types_state_json());
+        (!st["importing"].as_bool().unwrap()).then_some(st)
+    };
+    // The run's catalog offers .txt (already listed), .rtf and .bmp.
+    f.app.new_types_import();
+    assert!(eventually(5000, || finished(&f).is_some()));
+    let st = finished(&f).unwrap();
+    let extensions: Vec<&str> = st["types"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["extension"].as_str().unwrap())
+        .collect();
+    assert_eq!(before + 2, extensions.len(), "{extensions:?}");
+    assert_eq!(&[".rtf", ".bmp"], &extensions[before..]);
+    assert!(st["status"].as_str().unwrap().contains("Added 2"));
+    // A second import finds nothing new and leaves the list alone.
+    f.app.new_types_import();
+    assert!(eventually(5000, || finished(&f).is_some_and(|s| {
+        s["status"].as_str().unwrap().contains("Nothing new")
+    })));
+    assert_eq!(
+        before + 2,
+        json(&f.app.new_types_state_json())["types"]
+            .as_array()
+            .unwrap()
+            .len()
+    );
+}
+
 // ---- the session ----
 
 #[test]
@@ -1178,6 +1216,12 @@ fn the_toolbar_editor_walks_menus_and_edits_in_place() {
             .unwrap()
             .len()
     );
+    // Changes saved under no name: Reset asks first, and this run's answer is no.
+    f.app.barpage_do("reset", "").unwrap();
+    f.settle();
+    assert_eq!(false, json(&f.app.bars_state_json())["isDefault"]);
+    // Once they are kept under a name there is nothing to lose, and it happens at once.
+    f.app.bars_do("save", "Mine").unwrap();
     f.app.barpage_do("reset", "").unwrap();
     assert_eq!(true, json(&f.app.bars_state_json())["isDefault"]);
 }
@@ -1191,6 +1235,30 @@ fn column_ids(f: &Fixture) -> Vec<String> {
         .iter()
         .map(|c| c["id"].as_str().unwrap().to_string())
         .collect()
+}
+
+#[test]
+fn the_columns_page_edits_the_default_set_that_new_tabs_start_from() {
+    let f = Fixture::new();
+    let defaults = |f: &Fixture| -> Vec<String> {
+        json(&f.app.columns_defaults_json())["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(vec!["Name", "Size", "Type", "Modified"], defaults(&f));
+    f.app.columns_defaults_do("add", "Created").unwrap();
+    f.app.columns_defaults_do("remove", "Type").unwrap();
+    // Name stays first whatever is asked, and cannot be taken off.
+    f.app.columns_defaults_do("move", "Created 0").unwrap();
+    f.app.columns_defaults_do("remove", "Name").unwrap();
+    assert_eq!(vec!["Name", "Created", "Size", "Modified"], defaults(&f));
+    // The tab never arranged its own, so it follows.
+    assert_eq!(vec!["Name", "Created", "Size", "Modified"], column_ids(&f));
+    f.app.columns_defaults_do("reset", "").unwrap();
+    assert_eq!(vec!["Name", "Size", "Type", "Modified"], defaults(&f));
 }
 
 #[test]
@@ -1624,6 +1692,36 @@ fn services_write_at_once_not_on_the_debounce() {
         std::fs::read_to_string(f.data.join("settings.json"))
             .unwrap()
             .contains("Ctrl+K")
+    );
+}
+
+#[test]
+fn a_command_for_neither_files_nor_folders_is_held_unwritten() {
+    let f = Fixture::with(|c| c.settings_debounce_ms = 0);
+    f.app.settings_open("context-menu").unwrap();
+    f.app
+        .settings_set(
+            "customCommands",
+            r#"[{"id":"a","name":"Diff","command":"diff.exe","appliesToFiles":false,"appliesToDirectories":false}]"#,
+        )
+        .unwrap();
+    assert_eq!("[]", f.app.settings_get("customCommands").unwrap());
+    assert!(
+        f.app
+            .state_json()
+            .contains("must apply to files, folders, or both")
+    );
+    f.app
+        .settings_set(
+            "customCommands",
+            r#"[{"id":"a","name":"Diff","command":"diff.exe","appliesToFiles":false,"appliesToDirectories":true}]"#,
+        )
+        .unwrap();
+    assert!(
+        f.app
+            .settings_get("customCommands")
+            .unwrap()
+            .contains("Diff")
     );
 }
 

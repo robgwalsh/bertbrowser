@@ -25,6 +25,11 @@ public:
     virtual std::wstring cell_text(size_t row, int column_id) const = 0;
     virtual bool selected(size_t row) const = 0;
     virtual void select(SelectOp op, size_t first, size_t last) = 0;
+    // Exactly these rows selected, in one call (an additive marquee: what was selected before, and the band).
+    virtual void select_rows(const std::vector<size_t>& rows) {
+        select(SelectOp::Clear, 0, 0);
+        for (const size_t r : rows) select(SelectOp::Add, r, r);
+    }
     // A picture drawn before the first column's text (the file's own icon), `px` pixels square; `faded` draws it
     // at half strength (a hidden file). Null falls back to `row_icon`.
     virtual ThumbPtr row_image(size_t /*row*/, uint32_t /*px*/, bool* /*faded*/) const { return nullptr; }
@@ -57,6 +62,7 @@ public:
     // Hooks.
     std::function<void(int column_id, bool ascending)> on_sort;
     std::function<void(size_t row)> on_activate;       // Enter, double click
+    std::function<void(size_t row)> on_middle;         // a middle click on a row; does not select it
     std::function<void()> on_columns_changed;          // resize or reorder finished
     std::function<void(const std::wstring&)> on_typeahead;  // the prefix typed so far; call select_row
     std::function<void(Point)> on_header_menu;               // a right click on the header strip
@@ -77,6 +83,7 @@ public:
 
     size_t cursor() const { return cursor_; }
     void select_row(size_t row);  // cursor + selection + scroll into view
+    void reveal_cursor(size_t row);  // cursor + scroll into view; the selection is left alone
     void scroll_to_row(size_t row);
     void set_scroll_y(float y);
     float scroll_y() const { return v_.offset(); }
@@ -101,6 +108,8 @@ public:
     bool on_wheel(Point p, int delta, Mods m) override;
     bool on_key_down(const KeyEvent& e) override;
     bool on_char(wchar_t c) override;
+    void on_mouse_leave() override;
+    void on_timer(int id) override;
     void on_focus(bool) override { invalidate(); }
     Cursor cursor_at(Point p) const override;
 
@@ -143,6 +152,8 @@ private:
     Point marquee_origin_;  // in content coordinates
     Rect marquee_rect_;     // window DIPs, for painting
     size_t marquee_first_ = npos, marquee_last_ = npos;
+    std::vector<size_t> marquee_before_;  // an additive band keeps what was selected when it began
+    size_t hot_row_ = npos;  // the row under the pointer
     std::wstring typed_;
     uint64_t typed_at_ = 0;
     struct IconCache {

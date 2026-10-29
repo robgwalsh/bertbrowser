@@ -23,34 +23,98 @@ SavedSidebar::SavedSidebar(MainView& main, core::Core& core) : StackPanel(Orient
         list->flags.tab_stop = false;
     };
     make(search_title_, search_list_, "SavedSearchesList");
-    make(space_title_, space_list_, "WorkspacesList");
+    // WORKSPACES, with "+" beside it: saving the panes as they are is what the section is for.
+    space_head_ = emplace<StackPanel>(Orientation::Horizontal, 4.0f);
+    space_title_ = f::text(*space_head_, L"", tok::TextMuted, 11.5f, 600);
+    space_title_->name = "WorkspacesListTitle";
+    space_title_->flex = 1;
+    space_add_ = f::button(*space_head_, L"+", [this] { main_.execute_command(L"app.save-workspace"); }, 24);
+    space_add_->name = "SaveWorkspaceButton";
+    space_add_->tooltip = L"Save the current panes and tabs as a workspace";
+    space_add_->height = 20;
+    space_list_ = emplace<f::ItemList>();
+    space_list_->name = "WorkspacesList";
+    space_list_->row_height = 24;
+    space_list_->style.bg = gfx::kNoToken;
+    space_list_->style.border = gfx::kNoToken;
+    space_list_->flags.tab_stop = false;
     make(bookmark_title_, bookmark_list_, "BookmarksList");
     bookmark_title_->set_text(L"BOOKMARKS");
     bookmark_list_->on_select = [this](int i) {
         if (i >= 0 && static_cast<size_t>(i) < bookmark_paths_.size()) open_bookmark(L"here", bookmark_paths_[static_cast<size_t>(i)]);
     };
     bookmark_list_->on_context = [this](int i, Point at) { bookmark_menu(i, at); };
-    search_list_->on_activate = [this](int i) {
-        if (i >= 0 && static_cast<size_t>(i) < searches_.size()) main_.pick_list_item("saved-searches", L"", searches_[static_cast<size_t>(i)]);
+    // Middle-click opens a bookmarked folder in a pane of its own, to the right. Spec: MainWindow (bookmark row).
+    bookmark_list_->on_middle = [this](int i) {
+        if (i >= 0 && static_cast<size_t>(i) < bookmark_paths_.size()) open_bookmark(L"pane-right", bookmark_paths_[static_cast<size_t>(i)]);
     };
+    // A click runs it once; the second click of a double-click is a second click, as the original's mouse-up was.
     search_list_->on_select = [this](int i) {
-        if (i >= 0 && static_cast<size_t>(i) < searches_.size()) main_.pick_list_item("saved-searches", L"", searches_[static_cast<size_t>(i)]);
+        if (i >= 0 && static_cast<size_t>(i) < searches_.size()) run_search(searches_[static_cast<size_t>(i)], false);
     };
+    search_list_->on_middle = [this](int i) {
+        if (i >= 0 && static_cast<size_t>(i) < searches_.size()) run_search(searches_[static_cast<size_t>(i)], true);
+    };
+    search_list_->on_context = [this](int i, Point at) { search_menu(i, at); };
     space_list_->on_select = [this](int i) {
         if (i >= 0 && static_cast<size_t>(i) < workspaces_.size()) main_.pick_list_item("workspaces", L"", workspaces_[static_cast<size_t>(i)]);
     };
+    space_list_->on_context = [this](int i, Point at) { workspace_menu(i, at); };
+}
+
+void SavedSidebar::run_search(const std::wstring& search, bool new_tab) {
+    bb_saved_do(core_.app(), 0, core::s(new_tab ? L"run-search-new-tab" : L"run-search"), core::s(search));
+}
+
+// Run, Run in new tab, Edit..., Delete. Spec: MainWindow.SavedSearches.
+void SavedSidebar::search_menu(int row, Point at) {
+    if (row < 0 || static_cast<size_t>(row) >= searches_.size()) return;
+    const std::wstring item = searches_[static_cast<size_t>(row)];
+    MenuItems items;
+    MenuItem run = MenuItem::make(L"&Run", [this, item] { run_search(item, false); });
+    run.icon = &icons::Search;
+    items.push_back(std::move(run));
+    MenuItem tab = MenuItem::make(L"Run in new &tab", [this, item] { run_search(item, true); });
+    tab.icon = &icons::OpenInNewTab;
+    items.push_back(std::move(tab));
+    items.push_back(MenuItem::separator());
+    MainView* main = &main_;
+    items.push_back(MenuItem::make(L"&Edit\u2026", [main, item] { main->edit_saved_search(item); }));
+    BbApp* app = core_.app();
+    MenuItem remove = MenuItem::make(L"&Delete", [app, item] { bb_saved_do(app, 0, core::s(L"remove-search"), core::s(item)); });
+    remove.icon = &icons::Delete;
+    items.push_back(std::move(remove));
+    main_.show_context_menu(std::move(items), at);
+}
+
+// Switch to, Rename..., Delete. Spec: MainWindow.SavedWorkspaces.
+void SavedSidebar::workspace_menu(int row, Point at) {
+    if (row < 0 || static_cast<size_t>(row) >= workspaces_.size()) return;
+    const std::wstring item = workspaces_[static_cast<size_t>(row)];
+    MenuItems items;
+    MainView* main = &main_;
+    items.push_back(MenuItem::make(L"&Switch to", [main, item] { main->pick_list_item("workspaces", L"", item); }));
+    items.push_back(MenuItem::separator());
+    items.push_back(MenuItem::make(L"Re&name\u2026", [main, item] { main->rename_workspace(item); }));
+    BbApp* app = core_.app();
+    MenuItem remove = MenuItem::make(L"&Delete", [app, item] { bb_saved_do(app, 0, core::s(L"remove-workspace"), core::s(item)); });
+    remove.icon = &icons::Delete;
+    items.push_back(std::move(remove));
+    main_.show_context_menu(std::move(items), at);
 }
 
 void SavedSidebar::fill(f::ItemList& list, TextBlock& title, const std::vector<std::wstring>& names, const wchar_t* heading,
-                        const wchar_t* empty, bool shown) {
+                        const wchar_t* empty, bool shown, const std::vector<std::wstring>& details) {
     title.set_visible(shown);
     list.set_visible(shown);
+    if (&title == space_title_ && space_head_) space_head_->set_visible(shown);
     if (!shown) return;
     title.set_text(heading);
     std::vector<f::ListEntry> entries;
-    for (const auto& n : names) {
+    for (size_t i = 0; i < names.size(); ++i) {
         f::ListEntry e;
-        e.text = n;
+        e.text = names[i];
+        if (i < details.size()) e.detail = details[i];
         entries.push_back(std::move(e));
     }
     if (entries.empty()) {
@@ -59,7 +123,8 @@ void SavedSidebar::fill(f::ItemList& list, TextBlock& title, const std::vector<s
         e.muted = true;
         entries.push_back(std::move(e));
     }
-    list.height = 24.0f * static_cast<float>(entries.size()) + 2;
+    // Up to about eight rows, then it scrolls: a long list must not squeeze the drives out.
+    list.height = std::min(200.0f, 24.0f * static_cast<float>(entries.size()) + 2);
     list.set_entries(std::move(entries));
 }
 
@@ -85,7 +150,7 @@ void SavedSidebar::fill_bookmarks(const json::Value& rows) {
     }
     if (entries.empty()) {
         f::ListEntry e;
-        e.text = L"No bookmarks";
+        e.text = L"Right-click a file or folder to bookmark it.";
         e.muted = true;
         entries.push_back(std::move(e));
     }
@@ -129,10 +194,12 @@ void SavedSidebar::sync() {
     if (st.is_null()) return;
     searches_.clear();
     workspaces_.clear();
+    std::vector<std::wstring> scopes;
     std::string sig = st["savedSearchesPlacement"].str() + "|" + st["workspacesPlacement"].str();
     for (size_t i = 0; i < st["searches"].size(); ++i) {
         searches_.push_back(core::wide(st["searches"][i]["name"].str()));
-        sig += "/" + st["searches"][i]["name"].str();
+        scopes.push_back(core::wide(st["searches"][i]["scopeText"].str()));
+        sig += "/" + st["searches"][i]["name"].str() + "=" + st["searches"][i]["scopeText"].str();
     }
     sig += "|";
     for (size_t i = 0; i < st["workspaces"].size(); ++i) {
@@ -146,8 +213,10 @@ void SavedSidebar::sync() {
     }
     if (sig == signature_) return;
     signature_ = sig;
-    fill(*search_list_, *search_title_, searches_, L"SAVED SEARCHES", L"No saved searches", st["savedSearchesPlacement"].str() == "sidebar");
-    fill(*space_list_, *space_title_, workspaces_, L"WORKSPACES", L"No saved workspaces", st["workspacesPlacement"].str() == "sidebar");
+    fill(*search_list_, *search_title_, searches_, L"SAVED SEARCHES", L"Save a search from the search box to keep it here.",
+         st["savedSearchesPlacement"].str() == "sidebar", scopes);
+    fill(*space_list_, *space_title_, workspaces_, L"WORKSPACES", L"Save the current panes and tabs here, to switch back to them by name.",
+         st["workspacesPlacement"].str() == "sidebar");
     fill_bookmarks(st["bookmarks"]);
     request_layout();
 }

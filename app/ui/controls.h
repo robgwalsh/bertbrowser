@@ -86,6 +86,10 @@ public:
     std::wstring text;
     const IconData* icon = nullptr;
     bool primary = false;  // the accent-filled one
+    bool link = false;     // drawn as link text: no fill, no border, underlined under the pointer
+    // What Enter presses in a dialog, when it is not the primary one: a destructive prompt keeps its
+    // accent on the action and its default on Cancel, so a stray Enter backs out.
+    bool is_default = false;
     std::function<void()> on_click;
     bool pressed() const { return pressed_; }
     void click();  // as if clicked
@@ -98,9 +102,10 @@ public:
     void on_mouse_leave() override { invalidate(); }
     bool on_key_down(const KeyEvent& e) override;
     void on_focus(bool) override { invalidate(); }
-    Cursor cursor_at(Point) const override { return Cursor::Arrow; }
+    Cursor cursor_at(Point) const override { return link && flags.enabled ? Cursor::Hand : Cursor::Arrow; }
 
 private:
+    void paint_link(PaintContext& pc);
     bool pressed_ = false;
     ComPtr<ID2D1PathGeometry> icon_geo_;
     uint32_t icon_gen_ = 0;
@@ -115,6 +120,8 @@ public:
     // Neither on nor off: a selection whose items disagree. Drawn as a dash; a click settles it on.
     bool indeterminate() const { return indeterminate_; }
     void set_indeterminate(bool v);
+    // A click goes cleared -> checked -> mixed -> cleared, so "leave them as they are" can be chosen again.
+    bool three_state = false;
     std::function<void(bool)> on_toggle;
 
     Size measure(Size avail) override;

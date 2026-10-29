@@ -92,6 +92,14 @@ impl App {
     /// Settles the verdict of each path (that both sides hold, as a file) by reading both and comparing
     /// the bytes; identical ones become "same", nothing else moves. Returns how many were identical.
     /// Blocking.
+    /// As `compare_settle`, on a worker: the files are read off the window's thread, and the rows
+    /// re-paint through `Model::Compare` when it is done. Spec: CompareSessionViewModel.SettleByContentAsync.
+    pub fn compare_settle_start(&self, paths: Vec<String>) {
+        self.inner.schedule(move |inner| {
+            let _ = inner.compare_settle(&paths);
+        });
+    }
+
     pub fn compare_settle(&self, paths: &[String]) -> AppResult<usize> {
         self.inner.compare_settle(paths)
     }

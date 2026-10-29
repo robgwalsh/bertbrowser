@@ -25,6 +25,15 @@ fn scope_name(scope: SavedSearchScope) -> &'static str {
     }
 }
 
+/// What a saved search's menu row says beside its name. Spec: SavedSearchViewModel.ScopeColumnText.
+pub(crate) fn scope_column_text(scope: SavedSearchScope) -> &'static str {
+    match scope {
+        SavedSearchScope::CurrentFolder => "Current folder",
+        SavedSearchScope::Folder => "Pinned folder",
+        SavedSearchScope::ThisPc => "This PC",
+    }
+}
+
 fn scope_text(search: &SavedSearch) -> String {
     match search.scope {
         SavedSearchScope::CurrentFolder => "Current folder".to_string(),
@@ -222,6 +231,7 @@ impl Inner {
         let layout = self.capture_layout();
         repo.save(&SavedWorkspace::new(name.trim(), layout))
             .map_err(Self::db_err)?;
+        *lock(&self.extra.current_workspace) = Some(name.trim().to_string());
         self.saved_changed();
         Ok(())
     }
@@ -244,8 +254,15 @@ impl Inner {
         let _ = self
             .workspaces_repo()
             .mark_used(&workspace.name, FileTime::now());
+        *lock(&self.extra.current_workspace) = Some(workspace.name.clone());
         self.saved_changed();
         Ok(())
+    }
+
+    pub(crate) fn workspace_rename_problem(&self, old: &str, new: &str) -> Option<String> {
+        SavedWorkspaceRules::validate(new, |n| {
+            !n.eq_ignore_ascii_case(old) && self.workspaces_repo().exists(n).unwrap_or(false)
+        })
     }
 
     pub(crate) fn workspace_rename(&self, old: &str, new: &str) -> AppResult<()> {
@@ -261,12 +278,30 @@ impl Inner {
         if !renamed {
             return Err(AppError::Invalid(format!("no saved workspace '{old}'")));
         }
+        {
+            let mut current = lock(&self.extra.current_workspace);
+            if current
+                .as_deref()
+                .is_some_and(|c| c.eq_ignore_ascii_case(old))
+            {
+                *current = Some(new.trim().to_string());
+            }
+        }
         self.saved_changed();
         Ok(())
     }
 
     pub(crate) fn workspace_remove(&self, name: &str) -> AppResult<()> {
         self.workspaces_repo().remove(name).map_err(Self::db_err)?;
+        {
+            let mut current = lock(&self.extra.current_workspace);
+            if current
+                .as_deref()
+                .is_some_and(|c| c.eq_ignore_ascii_case(name))
+            {
+                *current = None;
+            }
+        }
         self.saved_changed();
         Ok(())
     }
@@ -300,6 +335,7 @@ impl Inner {
             "bookmarks": self.bookmark_rows(),
             "workspacesPlacement": wp,
             "savedSearchesPlacement": sp,
+            "currentWorkspace": *lock(&self.extra.current_workspace),
         })
     }
 }

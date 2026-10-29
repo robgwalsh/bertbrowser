@@ -108,9 +108,11 @@ std::vector<DWRITE_HIT_TEST_METRICS> Edit::range_metrics(size_t start, size_t le
 
 void Edit::paint(PaintContext& pc) {
     ensure_layout();
-    pc.fill(bounds, style.bg);
-    pc.stroke(bounds, focused() ? tok::BorderFocus : (style.border != kNoToken ? style.border : tok::InputBorder));
-    const Rect inner = bounds.deflate(kPadX, 1, kPadX, 1);
+    if (!plain) {
+        pc.fill(bounds, style.bg);
+        pc.stroke(bounds, focused() ? tok::BorderFocus : (style.border != kNoToken ? style.border : tok::InputBorder));
+    }
+    const Rect inner = bounds.deflate(kPadX, 1, kPadX + inset_right, 1);
     pc.clip(inner.intersect(pc.dirty));
     const Point o = origin();
     if (display_text().empty() && !placeholder.empty()) {

@@ -72,7 +72,16 @@ public:
     int retain_extra_rows = 0;     // rows of tiles kept beyond the realized ones
     float dpi_scale = 1.0f;        // device pixels per DIP, for the size asked of the provider
 
+    static constexpr unsigned kTypeAheadMs = 700;
+
+    // The list's gestures, the same way round: a right press on the selection keeps it, a press on the
+    // selection may be the start of a drag, empty space is a marquee, and typing jumps to a name.
     std::function<void(size_t row)> on_activate;
+    std::function<void(size_t row)> on_middle;
+    std::function<void(Point, size_t row)> on_context;       // npos: on empty space
+    std::function<void(MouseButton)> on_drag_start;
+    std::function<void(const std::wstring&)> on_typeahead;  // the prefix typed so far; call select_row
+    size_t drop_row = npos;  // the folder tile a drag is hovering over (outlined)
 
     void set_provider(RowProvider* p);
     void set_thumbnails(ThumbnailProvider* t);
@@ -80,6 +89,7 @@ public:
 
     size_t cursor() const { return cursor_; }
     void select_row(size_t row);   // cursor + selection + scroll into view
+    void reveal_cursor(size_t row);  // cursor + scroll into view; the selection is left alone
     void scroll_to_row(size_t row);
     void set_scroll_y(float y);
     float scroll_y() const { return v_.offset(); }
@@ -108,7 +118,9 @@ public:
     bool on_mouse_up(const MouseEvent& e) override;
     bool on_wheel(Point p, int delta, Mods m) override;
     bool on_key_down(const KeyEvent& e) override;
+    bool on_char(wchar_t c) override;
     void on_focus(bool) override { invalidate(); }
+    void on_modal_cancel() override;
 
 private:
     struct Entry {
@@ -121,6 +133,7 @@ private:
     void layout_bar();
     void update_requests();   // trim to the realized rows, then ask for what is missing, up to the gate
     void move_cursor(size_t row, const Mods& m);
+    void update_marquee(Point p);
     size_t count() const { return provider_ ? provider_->row_count() : 0; }
 
     RowProvider* provider_ = nullptr;
@@ -131,6 +144,21 @@ private:
     size_t painted_ = 0;
     bool bar_drag_ = false;
     bool updating_ = false;
+    // A press that may become a drag; until it moves far enough it is a click.
+    bool drag_armed_ = false;
+    Point drag_origin_;
+    MouseButton drag_button_ = MouseButton::Left;
+    size_t deferred_row_ = npos;  // the narrowing a plain click on the selection applies on release
+    bool context_pending_ = false;
+    Point context_point_;
+    size_t context_row_ = npos;
+    // The rubber band, in content coordinates (scrolling applied when drawn).
+    bool marquee_ = false, marquee_add_ = false;
+    Point marquee_origin_;
+    Rect marquee_rect_;
+    std::vector<size_t> marquee_before_;
+    std::wstring typed_;
+    uint64_t typed_at_ = 0;
     std::unordered_map<uint64_t, Entry> cache_;
     static constexpr float kPlaceholderIcon = 32.0f;  // the file's icon, until its picture arrives
     ImageCache images_;

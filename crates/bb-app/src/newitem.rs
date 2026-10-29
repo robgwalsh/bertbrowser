@@ -14,6 +14,67 @@ use crate::app::{Inner, lock};
 use crate::ids::{AppError, AppResult, OpId, TabId};
 
 impl Inner {
+    /// The New items page: every type in menu order, the ones switched off included, and the state of
+    /// "Import from Windows". `{types: [{label, extension, templatePath, enabled}], importing, status}`.
+    pub(crate) fn new_types_state(&self) -> Value {
+        let types: Vec<Value> = lock(&self.settings)
+            .new_file_types
+            .clone()
+            .unwrap_or_else(NewFileTemplate::defaults)
+            .iter()
+            .map(|t| {
+                json!({ "label": t.label, "extension": t.extension, "templatePath": t.template_path, "enabled": t.enabled })
+            })
+            .collect();
+        let (importing, status) = lock(&self.extra.new_types_import).clone();
+        json!({ "types": types, "importing": importing, "status": status })
+    }
+
+    /// Adds the types Windows offers that the list does not have yet, at its end; what is there keeps
+    /// its place and its settings. Off the UI thread: the registry walk takes a while.
+    /// Spec: SettingsViewModel.ImportFromWindowsAsync.
+    pub(crate) fn new_types_import(self: &Arc<Self>) {
+        {
+            let mut state = lock(&self.extra.new_types_import);
+            if state.0 {
+                return;
+            }
+            *state = (true, String::new());
+        }
+        self.hub.emit(crate::events::AppEvent::SettingsChanged {
+            key: "newFileTypes".into(),
+        });
+        self.schedule(|inner| {
+            let discovered = inner.seams.shell_new.read();
+            let existing = lock(&inner.settings)
+                .new_file_types
+                .clone()
+                .unwrap_or_else(NewFileTemplate::defaults);
+            let merged = bb_core::newitem::ShellNewImport::merge(&existing, &discovered);
+            let added = merged.len() - existing.len();
+            let mut status = if added == 0 {
+                "Nothing new \u{2014} every type Windows offers is already listed.".to_string()
+            } else {
+                format!(
+                    "Added {} type(s) from Windows.",
+                    bb_core::format::thousands(added as i64)
+                )
+            };
+            if added > 0 {
+                let written = serde_json::to_string(&merged)
+                    .map_err(|e| AppError::Invalid(e.to_string()))
+                    .and_then(|text| inner.settings_set("newFileTypes", &text));
+                if let Err(e) = written {
+                    status = format!("Could not add them: {e}");
+                }
+            }
+            *lock(&inner.extra.new_types_import) = (false, status);
+            inner.hub.emit(crate::events::AppEvent::SettingsChanged {
+                key: "newFileTypes".into(),
+            });
+        });
+    }
+
     /// The file types the New submenu offers, in menu order.
     pub(crate) fn new_file_types(&self) -> Vec<NewFileTemplate> {
         lock(&self.settings)

@@ -25,6 +25,9 @@ struct MenuItem {
     bool marked = false;  // drawn as hovered without being the selection (the undo list's "back to here")
     int id = 0;
     std::function<void()> on_invoke;
+    // The selection landed on this item (pointer or keys): may restyle the level it is in, which its
+    // owner keeps alive while the menu is open (the undo list marks everything back to here).
+    std::function<void(MenuItems& level, int index)> on_hover;
     MenuItems sub;  // non-empty = a submenu
 
     bool is_submenu() const { return !sub.empty(); }

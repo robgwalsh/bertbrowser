@@ -52,6 +52,12 @@ pub enum Model {
     Duplicates = 20,
     /// The checksum window's reading moved or finished (`tools("checksum.model")`).
     Checksum = 21,
+    /// Disk usage started or finished reading a folder (`tools("diskusage.state")`).
+    DiskUsage = 22,
+    /// Compare files started or finished comparing (`tools("filecompare.model")`).
+    FileCompare = 23,
+    /// The portable devices under "This PC" were read (`tools("devices.list")`).
+    Devices = 24,
 }
 
 #[derive(Clone, Debug, PartialEq)]

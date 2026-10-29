@@ -201,6 +201,17 @@ settings command-bars
 shot 07-saved-list
 dialog saved-command-bars
 
+# Save as and Rename on the page itself: a name box in place of a dialog.
+press BarSaveAs
+field-type BarSaveName Evening
+press BarSaveCommit
+assert-bars Evening
+press BarRenameSaved
+field-type BarSaveName Night
+press BarSaveCommit
+assert-bars Night
+shot 07b-saved-renamed
+
 command-bars reset
 assert-bars default
 settings close

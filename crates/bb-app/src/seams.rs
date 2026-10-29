@@ -150,6 +150,100 @@ pub trait ElevationLauncher: Send + Sync {
     fn offer(&self, what: &str) -> bool;
 }
 
+/// The index helper's sign-in task. The product reads the scheduler and changes it through the elevated
+/// helper; the harness answers "off" and changes nothing, so no run can install a task.
+pub trait SignInTask: Send + Sync {
+    fn state(&self) -> bb_core::mft::AutoStartState;
+    fn can_choose(&self) -> bool;
+    /// Blocks; true when the scheduler now says what was asked.
+    fn set(&self, on: bool) -> bool;
+}
+
+struct NoSignInTask;
+
+impl SignInTask for NoSignInTask {
+    fn state(&self) -> bb_core::mft::AutoStartState {
+        bb_core::mft::AutoStartState::Off
+    }
+    fn can_choose(&self) -> bool {
+        false
+    }
+    fn set(&self, _: bool) -> bool {
+        false
+    }
+}
+
+struct SystemSignInTask(bb_shell::indexing::IndexAutoStart);
+
+impl SignInTask for SystemSignInTask {
+    fn state(&self) -> bb_core::mft::AutoStartState {
+        self.0.state()
+    }
+    fn can_choose(&self) -> bool {
+        self.0.can_elevate()
+    }
+    fn set(&self, on: bool) -> bool {
+        self.0.set(on)
+    }
+}
+
+/// The new-file types Windows offers (its ShellNew registration). The product walks the registry; the
+/// harness answers a fixed list, so a script does not photograph whatever the machine has installed.
+/// Spec: IShellNewCatalog.
+pub trait ShellNewCatalog: Send + Sync {
+    /// Blocks: the real one walks all of `HKEY_CLASSES_ROOT`.
+    fn read(&self) -> Vec<bb_core::newitem::NewFileTemplate>;
+}
+
+/// The list a scripted run imports.
+struct CannedShellNew;
+
+impl ShellNewCatalog for CannedShellNew {
+    fn read(&self) -> Vec<bb_core::newitem::NewFileTemplate> {
+        use bb_core::newitem::NewFileTemplate;
+        vec![
+            NewFileTemplate::new("Text Document", ".txt"),
+            NewFileTemplate::new("Rich Text Document", ".rtf"),
+            NewFileTemplate::new("Bitmap image", ".bmp"),
+        ]
+    }
+}
+
+struct SystemShellNew(std::path::PathBuf);
+
+impl ShellNewCatalog for SystemShellNew {
+    fn read(&self) -> Vec<bb_core::newitem::NewFileTemplate> {
+        bb_shell::shell_new::read_templates(&self.0)
+    }
+}
+
+/// A phone, camera or media player under "This PC". Its contents are a shell namespace, not a path,
+/// so it is opened in Explorer. Spec: Interop/PortableDevice.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PortableDevice {
+    pub name: String,
+    /// The shell's parsing name ("::{20D04FE0-...}\\?\usb#..."), what Explorer is handed.
+    pub shell_path: String,
+}
+
+/// Spec: Interop/PortableDevices.Enumerate.
+pub trait PortableDeviceSource: Send + Sync {
+    /// Blocks: a waking device can take seconds (the real one gives up after five).
+    fn list(&self) -> Vec<PortableDevice>;
+}
+
+/// One phone, so a scripted run shows the row without looking at whatever is plugged in.
+struct CannedDevices;
+
+impl PortableDeviceSource for CannedDevices {
+    fn list(&self) -> Vec<PortableDevice> {
+        vec![PortableDevice {
+            name: "Pixel 8".into(),
+            shell_path: "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\\\\?\\usb#vid_18d1&pid_4ee1#canned#{6ac27878-a6fa-4155-ba85-f98f491d4f33}".into(),
+        }]
+    }
+}
+
 /// A yes/no question with a confirm button label.
 pub trait UserConfirm: Send + Sync {
     fn ask(&self, message: &str, title: &str, confirm_label: &str) -> bool;
@@ -203,6 +297,9 @@ pub struct Seams {
     pub conflicts: Arc<dyn AppConflictPrompt>,
     pub appearance: Arc<dyn SystemAppearanceSource>,
     pub index: Arc<dyn MftIndex>,
+    pub sign_in_task: Arc<dyn SignInTask>,
+    pub shell_new: Arc<dyn ShellNewCatalog>,
+    pub devices: Arc<dyn PortableDeviceSource>,
     /// Runs a retry the user agreed to with administrator rights.
     pub elevated: ElevatedRunner,
 }
@@ -219,6 +316,9 @@ impl Seams {
             conflicts: probes.clone(),
             appearance: probes.clone(),
             index: Arc::new(NullMftIndex),
+            sign_in_task: Arc::new(NoSignInTask),
+            shell_new: Arc::new(CannedShellNew),
+            devices: Arc::new(CannedDevices),
             elevated: Arc::new(NoElevation),
         };
         (seams, probes)
@@ -238,7 +338,14 @@ impl Seams {
     pub fn system(data_dir: &std::path::Path) -> Seams {
         let mut seams = Seams::unattended();
         seams.launcher = Arc::new(SystemProcessLauncher::new());
+        seams.sign_in_task = Arc::new(SystemSignInTask(
+            bb_shell::indexing::IndexAutoStart::default(),
+        ));
         seams.elevated = Arc::new(bb_shell::SystemElevation::new());
+        seams.shell_new = Arc::new(SystemShellNew(
+            data_dir.join(bb_core::settings::AppPaths::TEMPLATES_DIR_NAME),
+        ));
+        seams.devices = Arc::new(crate::portable_devices::ShellPortableDevices);
         seams.index = Arc::new(bb_shell::indexing::real_index_client(
             &data_dir.to_string_lossy(),
         ));

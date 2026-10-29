@@ -117,6 +117,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                 // The first thing the window draws is the content having been rendered.
                 window.on_first_paint = [] { mark(L"contentRendered"); };
                 views::MainView view(core, window);
+                // A handler that throws says why in the status bar instead of taking the window with it.
+                platform::Window::on_unhandled = [app](const std::exception& e) {
+                    bb_status_set(app, core::s(core::message_of(e)));
+                };
                 try {
                     // The folder the command line named, else the user's profile.
                     const BbStr named = bb_launch_start_path(launch);

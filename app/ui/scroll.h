@@ -19,6 +19,8 @@ public:
 
     float offset() const { return offset_; }
     void set_offset(float o) { offset_ = std::clamp(o, 0.0f, max_offset()); }
+    // Before the first arrange, which clamps it to the extent then known (a rebuilt tree keeping its place).
+    void preset(float o) { offset_ = std::max(0.0f, o); }
     float max_offset() const { return std::max(0.0f, extent - viewport); }
     bool needed() const { return extent > viewport + 0.5f; }
     Rect thumb() const;
@@ -48,6 +50,10 @@ public:
     Rect viewport() const { return viewport_; }
     void scroll_to(float x, float y);
     void scroll_by(float dx, float dy) { scroll_to(offset_x() + dx, offset_y() + dy); }
+    void preset_offset(float x, float y) {
+        h_.preset(x);
+        v_.preset(y);
+    }
 
     ScrollViewer() : v_(true), h_(false) {}
     Size measure(Size avail) override;

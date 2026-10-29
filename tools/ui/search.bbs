@@ -101,5 +101,29 @@ assert-not-flattened
 assert-error
 assert-count 8
 
+# The box's own buttons are there only while something is typed: save it under a name, or clear it.
+assert-hidden SearchClearButton
+search report
+assert-visible SearchClearButton
+shot 05-search-buttons SearchBox
+live-dialogs on
+press SaveSearchButton
+assert-dialog saved-search
+window-key Esc
+settle 200
+assert-dialog none
+live-dialogs off
+press SearchClearButton
+assert-not-flattened
+assert-hidden SearchClearButton
+
+# Esc in the box clears it and hands the keyboard back to the list.
+search report
+focus SearchBox
+window-key Esc
+settle 300
+assert-not-flattened
+assert-count 8
+
 assert-not-launched
 state

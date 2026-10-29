@@ -1,4 +1,6 @@
 #include "views/dialogs.h"
+#include "views/shell_icons.h"
+#include "views/image_view.h"
 
 #include "gfx/icons.gen.h"
 #include "ui/pickers.h"
@@ -118,11 +120,25 @@ using Builder = std::unique_ptr<Panel> (*)(DialogContext&);
 
 std::unique_ptr<Panel> about(DialogContext& cx) {
     Card c = make_card(L"About BertBrowser", 420);
-    auto* name = f::text(*c.body, L"BertBrowser", tok::TextPrimary, 22.0f, 600);
-    (void)name;
-    f::text(*c.body, L"Version " + core::w(bb_version()), tok::TextSecondary);
+    // The app's own icon beside the name, from the exe's resources (a harness build has none, and shows none).
+    auto* head = f::row(*c.body, 16);
+    if (HICON icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, 96, 96, LR_DEFAULTCOLOR))) {
+        auto* logo = head->emplace<ImageView>();
+        logo->name = "AboutLogo";
+        logo->interactive = false;
+        logo->checkerboard = false;
+        logo->width = 48;
+        logo->height = 48;
+        logo->style.bg = gfx::kNoToken;
+        logo->set_image(icon_picture(icon, 96));
+        DestroyIcon(icon);
+    }
+    auto* words = f::column(*head, 4);
+    words->flex = 1;
+    f::text(*words, L"BertBrowser", tok::TextPrimary, 22.0f, 600);
+    f::text(*words, L"Version " + core::w(bb_version()), tok::TextSecondary)->name = "AboutVersion";
     // Which update feed this copy follows. Spec: Views/AboutDialog.
-    f::text(*c.body, bb_is_unstable() ? L"Unstable channel" : L"Stable channel", tok::TextSecondary)->name = "AboutChannel";
+    f::text(*words, bb_is_unstable() ? L"Unstable channel" : L"Stable channel", tok::TextSecondary)->name = "AboutChannel";
     f::note(*c.body, L"A file browser for Windows with a global search that reads the NTFS master file table and folder sizes that are measured once and remembered.");
     add_button(c, L"Close", cx.close, true);
     return std::move(c.root);
@@ -157,7 +173,12 @@ std::unique_ptr<Panel> new_item(DialogContext& cx, bool file) {
     add_button(c, L"Cancel", cx.close);
     auto typed = [edit, file, ext = ext] {
         std::wstring t = edit->text();
-        if (file && !ext.empty() && t.find(L'.') == std::wstring::npos) t += ext;
+        // Only a name with no extension of its own gets the type's: "notes." has none. Spec:
+        // NewItemDialog (Path.GetExtension(typed).Length > 0).
+        const size_t dot = t.find_last_of(L'.');
+        const size_t slash = t.find_last_of(L"\\/");
+        const bool has_extension = dot != std::wstring::npos && dot + 1 < t.size() && (slash == std::wstring::npos || dot > slash);
+        if (file && !ext.empty() && !has_extension) t += ext;
         return t;
     };
     auto replan = [app, tab, dir, file, typed, where, problem, create] {
@@ -185,82 +206,15 @@ std::unique_ptr<Panel> new_item(DialogContext& cx, bool file) {
     return std::move(c.root);
 }
 
-std::unique_ptr<Panel> rename_dialog(DialogContext& cx) {
-    Card c = make_card(L"Rename", 460);
-    const auto rows = cx.main.selected_rows();
-    const bool many = rows.size() > 1;
-    std::wstring text = rows.empty() ? L"" : rows[0].name;
-    if (many) {
-        const size_t dot = text.find_last_of(L'.');
-        text = dot == std::wstring::npos || dot == 0 ? text : text.substr(0, dot);
-    }
-    auto* edit = labelled_edit(*c.body, many ? L"New name for all of them" : L"New name", text);
-    edit->name = "RenameName";
-    if (!rows.empty() && !many) {
-        const size_t dot = text.find_last_of(L'.');
-        edit->select(0, dot == std::wstring::npos || dot == 0 ? text.size() : dot);
-    }
-    f::note(*c.body, many ? std::to_wstring(rows.size()) + L" items are numbered: each keeps its own extension, so \"Holiday\" gives \"Holiday 1.txt\", \"Holiday 2.md\"."
-                          : L"The extension stays unless you change it.");
-    add_button(c, L"Rename", [cx, edit] {
-        std::vector<std::wstring> paths;
-        for (const auto& r : cx.main.selected_rows()) paths.push_back(r.path);
-        std::vector<BbStr> views;
-        for (const auto& p : paths) views.push_back(core::s(p));
-        uint64_t op = 0;
-        bb_op_rename(cx.main.core().app(), views.data(), static_cast<uint32_t>(views.size()), core::s(edit->text()), &op);
-        cx.close();
-    }, true);
-    add_button(c, L"Advanced\u2026", [cx] {
-        cx.close();
-        cx.main.open_dialog(L"rename-advanced");
-    });
-    add_button(c, L"Cancel", cx.close);
-    return std::move(c.root);
-}
-
-std::unique_ptr<Panel> rename_advanced(DialogContext& cx) {
-    Card c = make_card(L"Rename (advanced)", 560);
-    const auto rows = cx.main.selected_rows();
-    labelled_edit(*c.body, L"Find", L"IMG_", L"Text to find in each name");
-    labelled_edit(*c.body, L"Replace with", L"Holiday", L"What to put there instead");
-    labelled_edit(*c.body, L"Template", L"{base} {n:000}{ext}", L"{base} {n} {ext} {date:yyyy-MM-dd}");
-    auto* opts = f::row(*c.body, 16);
-    f::check(*opts, L"Regular expression", false, nullptr);
-    f::check(*opts, L"Match case", false, nullptr);
-    auto* nums = f::row(*c.body, 8);
-    f::text(*nums, L"Number from", tok::TextSecondary, 13.0f);
-    f::field(*nums, L"1", 60, nullptr);
-    f::text(*nums, L"by", tok::TextSecondary, 13.0f);
-    f::field(*nums, L"1", 60, nullptr);
-    f::text(*nums, L"Apply to", tok::TextSecondary, 13.0f);
-    f::combo(*nums, {L"Name only", L"Name and extension", L"Extension only"}, 0, 170, nullptr);
-    f::text(*c.body, L"Preview", tok::TextSecondary, 13.0f);
-    auto* list = c.body->emplace<f::ItemList>();
-    list->height = 120;
-    std::vector<f::ListEntry> entries;
-    int n = 1;
-    for (const auto& r : rows) {
-        f::ListEntry e;
-        e.text = r.name;
-        const size_t dot = r.name.find_last_of(L'.');
-        e.detail = L"\u2192  Holiday " + std::to_wstring(n++) + (dot == std::wstring::npos ? L"" : r.name.substr(dot));
-        entries.push_back(std::move(e));
-    }
-    list->set_entries(std::move(entries));
-    add_button(c, L"Rename", cx.close, true);
-    add_button(c, L"Cancel", cx.close);
-    return std::move(c.root);
-}
-
 // Add a column: the catalogue's columns and every property this machine reports, searched as it is typed. A
 // column taken leaves the list at once, and Enter in the box adds the first match, so search-Enter-type-again
 // is one session. Spec: Views/ColumnAddPanel.
-std::unique_ptr<Panel> columns_dialog(DialogContext& cx) {
-    Card c = make_card(L"Add a column", 520);
+// `defaults` is the Columns page's: the set new tabs start from rather than this tab's.
+std::unique_ptr<Panel> columns_dialog(DialogContext& cx, bool defaults) {
+    Card c = make_card(defaults ? L"Add a column to new tabs" : L"Add a column", 520);
     cx.main.ensure_machine_properties();
     BbApp* app = cx.main.core().app();
-    const uint64_t tab = cx.main.active_tab();
+    const uint64_t tab = defaults ? 0 : cx.main.active_tab();
     auto* search = f::field(*c.body, L"", -1, nullptr, L"Search columns and properties");
     search->width = -1;
     search->name = "ColumnSearch";
@@ -299,7 +253,8 @@ std::unique_ptr<Panel> columns_dialog(DialogContext& cx) {
     };
     auto add = [app, tab, ids, refill](int i) {
         if (i < 0 || static_cast<size_t>(i) >= ids->size() || (*ids)[static_cast<size_t>(i)].empty()) return;
-        bb_columns_do(app, tab, core::s(L"add"), core::s((*ids)[static_cast<size_t>(i)]));
+        if (tab == 0) bb_columns_defaults_do(app, core::s(L"add"), core::s((*ids)[static_cast<size_t>(i)]));
+        else bb_columns_do(app, tab, core::s(L"add"), core::s((*ids)[static_cast<size_t>(i)]));
         refill();  // the column just taken leaves the list
     };
     search->on_changed = [refill](const std::wstring&) { refill(); };
@@ -357,29 +312,53 @@ std::unique_ptr<Panel> properties(DialogContext& cx) {
         add_button(c, L"Close", cx.close, true);
         return std::move(c.root);
     }
+    // Values are read-only text boxes, so a path can be selected and copied. Spec: PropertiesDialog.xaml
+    // (PropValue).
+    auto value_box = [](Widget& parent, const std::wstring& value, bool multiline) {
+        auto* e = parent.emplace<Edit>(multiline);
+        e->plain = true;
+        e->read_only = true;
+        e->set_text(value);
+        e->select(0, 0);
+        if (!multiline) e->height = 22;  // a line of text, not a box
+        return e;
+    };
     auto line = [&](Widget& parent, const wchar_t* label, const std::wstring& value) {
         if (value.empty()) return;
-        // A long value (a path, a list of names) goes under its label, where it has the width to wrap.
-        if (value.size() > 52 || value.find(L'\n') != std::wstring::npos) {
-            f::text(parent, label, tok::TextSecondary, 13.0f);
-            f::text(parent, value)->wrap = true;
-            return;
-        }
         auto* r = f::row(parent, 8);
         f::row_label(*r, label, 110)->style.fg = tok::TextSecondary;
-        f::text(*r, value)->flex = 1;
+        value_box(*r, value, false)->flex = 1;
     };
     auto when = [](const json::Value& v) { return v.is_null() ? std::wstring() : format_file_time(v.i64()); };
     const bool single = m["single"].boolean();
+    if (single) {
+        // The item's own icon beside its name. Spec: PropertiesDialog.xaml (the header), PropertiesViewModel.Icon.
+        const std::wstring path = paths.front();
+        const DWORD attrs = GetFileAttributesW(path.c_str());
+        const bool dir = attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        ShellIcons* shell = &cx.main.shell_icons();
+        auto* head = f::row(*c.body, 10);
+        head->emplace<f::Picture>([shell, path, dir](uint32_t px) {
+            return path.size() == 3 ? shell->drive(path, px) : shell->file(path, dir, dir ? FILE_ATTRIBUTE_DIRECTORY : 0, px);
+        }, 32.0f)->width = 32;
+        auto* title = f::text(*head, core::wide(m["name"].str()), tok::TextPrimary, 15.0f, 600);
+        title->vcenter = true;
+        title->flex = 1;
+    }
     line(*c.body, L"Name", core::wide(m["name"].str()));
     line(*c.body, L"Type", core::wide(m["typeName"].str()));
     line(*c.body, single ? L"Location" : L"Where", core::wide(m["location"].str()));
     if (!single) {
+        // Every name, in a box that scrolls past six or so. Spec: PropertiesDialog.xaml (Selected items).
         std::wstring names;
-        const size_t shown = std::min<size_t>(m["itemNames"].size(), 8);
-        for (size_t i = 0; i < shown; ++i) names += (i ? L"\n" : L"") + core::wide(m["itemNames"][i].str());
-        if (m["itemNames"].size() > shown) names += L"\n\u2026and " + std::to_wstring(m["itemNames"].size() - shown) + L" more";
-        line(*c.body, L"Items", names);
+        for (size_t i = 0; i < m["itemNames"].size(); ++i) names += (i ? L"\n" : L"") + core::wide(m["itemNames"][i].str());
+        if (!names.empty()) {
+            f::text(*c.body, L"Selected items", tok::TextSecondary, 13.0f);
+            auto* box = value_box(*c.body, names, true);
+            box->name = "PropertiesItemNames";
+            box->plain = false;
+            box->height = std::min(120.0f, 10.0f + 20.0f * static_cast<float>(m["itemNames"].size()));
+        }
     }
     line(*c.body, L"Size", m["size"].is_null() ? L"" : core::wide(m["size"].str()));
     if (single) {
@@ -419,6 +398,10 @@ std::unique_ptr<Panel> properties(DialogContext& cx) {
     hid->name = "PropertiesHidden";
     set_box(hid, m["hidden"]);
     f::note(*c.body, core::wide(m["attributesHint"].str()));
+    if (!single) {
+        ro->three_state = hid->three_state = true;
+        f::note(*c.body, L"A filled box means the selected items differ; click it through to a checked or cleared state to apply that to all of them.")->wrap = true;
+    }
     auto* problem = f::text(*c.body, m["error"].is_null() ? L"" : core::wide(m["error"].str()), tok::ErrorForeground, 13.0f);
     problem->name = "PropertiesError";
     problem->wrap = true;
@@ -463,12 +446,13 @@ std::unique_ptr<Panel> properties(DialogContext& cx) {
         apply->set_enabled(differs(*want_ro, start_ro) || differs(*want_hidden, start_hidden));
         apply->invalidate();
     };
-    ro->on_toggle = [want_ro, refresh](bool on) {
-        *want_ro = on;
+    // Back to mixed is back to leaving them alone.
+    ro->on_toggle = [want_ro, refresh, ro](bool on) {
+        *want_ro = ro->indeterminate() ? std::nullopt : std::optional<bool>(on);
         refresh();
     };
-    hid->on_toggle = [want_hidden, refresh](bool on) {
-        *want_hidden = on;
+    hid->on_toggle = [want_hidden, refresh, hid](bool on) {
+        *want_hidden = hid->indeterminate() ? std::nullopt : std::optional<bool>(on);
         refresh();
     };
     apply->on_click = [main, paths, want_ro, want_hidden] {
@@ -489,7 +473,7 @@ std::unique_ptr<Panel> properties(DialogContext& cx) {
 // is judged against. Changes are overrides on the theme until kept (Keep) or saved as a theme of the user's own;
 // the built-ins are never edited. Spec: Views/ThemeEditorWindow, ViewModels/AppearanceViewModel.
 std::unique_ptr<Panel> theme_editor(DialogContext& cx) {
-    Card c = make_card(L"Customise colours", 780);
+    Card c = make_card(L"Customise colours", 830);
     MainView* main = &cx.main;
     BbApp* app = cx.main.core().app();
     ToolsUi& ui = tools_ui(cx.main);
@@ -623,7 +607,7 @@ std::unique_ptr<Panel> theme_editor(DialogContext& cx) {
         hex->set_enabled(any);
         reset_one->set_enabled(any && shown->overridden[key]);
         if (any) {
-            picker->set_rgb(shown->argb[key] & 0xFFFFFF);
+            picker->set_argb(shown->argb[key]);
             hex->set_text(picker->hex_text());
         }
         which->invalidate();
@@ -636,8 +620,7 @@ std::unique_ptr<Panel> theme_editor(DialogContext& cx) {
         const std::string key = tools_ui(*main).theme_token;
         if (key.empty()) return;
         if (!theme_do(L"override", core::wide(key) + L" " + text).first) return;
-        const uint32_t rgb = static_cast<uint32_t>(std::wcstoul(text.c_str() + (text[0] == L'#' ? 1 : 0), nullptr, 16));
-        shown->argb[key] = 0xFF000000u | (rgb & 0xFFFFFF);
+        shown->argb[key] = ColorPicker::parse_hex(text).value_or(0xFF000000u);
         shown->overridden[key] = true;
         reset_one->set_enabled(true);
         if (*revert_slot) (*revert_slot)->set_enabled(true);
@@ -653,14 +636,21 @@ std::unique_ptr<Panel> theme_editor(DialogContext& cx) {
         hex->set_text(picker->hex_text());
         set_colour(picker->hex_text());
     };
-    hex->on_commit = [hex, picker, set_colour] {
-        std::wstring t = hex->text();
-        if (!t.empty() && t[0] != L'#') t = L"#" + t;
-        if (t.size() != 7) return;
-        const uint32_t rgb = static_cast<uint32_t>(std::wcstoul(t.c_str() + 1, nullptr, 16));
-        picker->set_rgb(rgb);
-        set_colour(t);
+    // Applied as it is typed, once it is a colour; anything else is marked rather than ignored.
+    // Spec: ColorPicker.HexBox_TextChanged.
+    hex->tooltip = L"#RRGGBB or #AARRGGBB";
+    auto from_hex = [hex, picker, set_colour](bool commit) {
+        const std::wstring t = hex->text();
+        const auto v = ColorPicker::parse_hex(t);
+        hex->style.border = v || t.empty() ? kNoToken : tok::ErrorBorder;
+        hex->invalidate();
+        if (!v) return;
+        if (picker->argb() == *v && !commit) return;
+        picker->set_argb(*v);
+        set_colour(picker->hex_text());
     };
+    hex->on_changed = [from_hex](const std::wstring&) { from_hex(false); };
+    hex->on_commit = [from_hex] { from_hex(true); };
     reset_one->on_click = [main, theme_do] {
         const std::string key = tools_ui(*main).theme_token;
         if (key.empty()) return;
@@ -702,6 +692,18 @@ std::unique_ptr<Panel> theme_editor(DialogContext& cx) {
         const auto [ok, said] = theme_do(L"import", *path);
         say_and_rebuild(ok ? L"Imported the theme." : said);
     })->name = "ThemeImport";
+    add_button(c, L"Export…", [main, th, theme_do, say_and_rebuild, owner] {
+        if (!main->shows_dialogs()) return;
+        PickPath pick;
+        pick.title = L"Export the current theme";
+        pick.file_name = core::wide(th["name"].str()) + L".json";
+        pick.default_ext = L"json";
+        pick.filters = {{L"Theme files (*.json)", L"*.json"}};
+        const auto path = pick_save_file(owner(), pick);
+        if (!path) return;
+        const auto [ok, said] = theme_do(L"export", *path);
+        say_and_rebuild(ok ? L"Theme exported." : said);
+    })->name = "ThemeExport";
     add_button(c, L"Save as\u2026", [main, theme_do, say_and_rebuild, owner] {
         if (!main->shows_dialogs()) return;
         // The file name doubles as the theme's name, which saves asking for it twice.
@@ -741,11 +743,11 @@ std::unique_ptr<Panel> theme_editor(DialogContext& cx) {
 
 
 std::unique_ptr<Panel> search_syntax(DialogContext& cx) {
+    // Sized to what it says rather than a box that scrolls: a reference card is read whole. Spec:
+    // SearchSyntaxDialog.xaml (SizeToContent).
     Card c = make_card(L"Search syntax", 640);
     const json::Value sections = try_model([&](BbOwnedStr* o) { return bb_search_syntax_help(o); });
-    auto* scroll = c.body->emplace<ScrollViewer>();
-    scroll->height = 420;
-    auto* col = scroll->emplace<StackPanel>(Orientation::Vertical, 4.0f);
+    auto* col = c.body->emplace<StackPanel>(Orientation::Vertical, 4.0f);
     for (size_t s = 0; s < sections.size(); ++s) {
         f::text(*col, core::wide(sections[s]["title"].str()), tok::TextPrimary, 14.0f, 600);
         const std::wstring blurb = core::wide(sections[s]["blurb"].str());
@@ -760,55 +762,12 @@ std::unique_ptr<Panel> search_syntax(DialogContext& cx) {
         }
         f::gap(*col, 6);
     }
-    add_button(c, L"Close", cx.close, true);
-    return std::move(c.root);
-}
-
-std::unique_ptr<Panel> compress(DialogContext& cx) {
-    Card c = make_card(L"Compress", 480);
-    const auto rows = cx.main.selected_rows();
-    f::text(*c.body, rows.empty() ? L"The whole folder" : join_names(rows, 4), tok::TextSecondary, 13.0f)->wrap = true;
-    labelled_edit(*c.body, L"Archive name", rows.size() == 1 ? rows[0].name + L".zip" : L"Archive.zip");
-    f::text(*c.body, L"Format", tok::TextSecondary, 13.0f);
-    f::combo(*c.body, {L"Zip", L"7z", L"Tar", L"Tar.gz"}, 0, 200, nullptr);
-    f::text(*c.body, L"Compression", tok::TextSecondary, 13.0f);
-    f::radios(*c.body, {L"Fastest", L"Normal", L"Smallest"}, 1, nullptr);
-    f::text(*c.body, L"Where", tok::TextSecondary, 13.0f);
-    auto* r = f::row(*c.body);
-    auto* dest = f::field(*r, L"", 330, nullptr);
-    dest->set_text(rows.empty() ? cx.main.core().tab_text(cx.main.active_tab(), BB_TEXT_PATH) : parent_dir(rows[0].path));
-    f::button(*r, L"Browse\u2026", nullptr);
-    add_button(c, L"Compress", cx.close, true);
-    add_button(c, L"Cancel", cx.close);
-    return std::move(c.root);
-}
-
-std::unique_ptr<Panel> extract(DialogContext& cx) {
-    Card c = make_card(L"Extract", 480);
-    const auto rows = cx.main.selected_rows();
-    f::text(*c.body, rows.empty() ? L"The archive" : rows[0].name, tok::TextSecondary, 13.0f);
-    f::text(*c.body, L"Extract to", tok::TextSecondary, 13.0f);
-    f::radios(*c.body, {L"A folder named after the archive", L"This folder"}, 0, nullptr);
-    f::text(*c.body, L"Destination", tok::TextSecondary, 13.0f);
-    auto* r = f::row(*c.body);
-    auto* dest = f::field(*r, L"", 330, nullptr);
-    dest->set_text(rows.empty() ? cx.main.core().tab_text(cx.main.active_tab(), BB_TEXT_PATH) : parent_dir(rows[0].path));
-    f::button(*r, L"Browse\u2026", nullptr);
-    f::text(*c.body, L"If a file is already there", tok::TextSecondary, 13.0f);
-    f::combo(*c.body, {L"Ask me each time", L"Skip it", L"Replace it", L"Keep both"}, 0, 240, nullptr);
-    add_button(c, L"Extract", cx.close, true);
-    add_button(c, L"Cancel", cx.close);
-    return std::move(c.root);
-}
-
-std::unique_ptr<Panel> archive_password(DialogContext& cx) {
-    Card c = make_card(L"This archive is protected", 440);
-    f::note(*c.body, L"Enter the password to open it. It is kept for this session only.");
-    auto* e = labelled_edit(*c.body, L"Password", L"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022");
-    e->select(0, 0);
-    f::check(*c.body, L"Show the password", false, nullptr);
-    add_button(c, L"Unlock", cx.close, true);
-    add_button(c, L"Cancel", cx.close);
+    // The hint takes the place of a Close button: with any key or click closing it, a button would be the
+    // least likely way anyone shuts it.
+    auto* hint = f::text(*c.body, L"Click anywhere or press any key to close", tok::TextMuted, 11.0f);
+    hint->name = "SearchSyntaxHint";
+    c.buttons->set_visible(false);
+    (void)cx;
     return std::move(c.root);
 }
 
@@ -846,16 +805,20 @@ std::unique_ptr<Panel> elevation(DialogContext& cx) {
 // tab is when it is run, pinned to this folder, or the whole PC. Checked as it is typed; a name already saved
 // is replaced, and the button says so. Spec: Views/SavedSearchDialog.
 std::unique_ptr<Panel> saved_search(DialogContext& cx) {
-    Card c = make_card(L"Save search", 480);
+    // Editing one already saved: its own values, its name may stay as it is but may not take another's.
+    const std::wstring editing = cx.main.editing_saved();
+    Card c = make_card(editing.empty() ? L"Save search" : L"Edit saved search", 480);
     MainView* main = &cx.main;
-    const json::Value seed = try_tool_call(cx.main, "search.save-seed");
+    const json::Value seed = editing.empty() ? try_tool_call(cx.main, "search.save-seed")
+                                             : try_tool_call(cx.main, "search.edit-seed", "{\"name\":" + json_quote(editing) + "}");
     auto* name = labelled_edit(*c.body, L"Name", core::wide(seed["name"].str()));
     name->name = "SavedSearchName";
     auto* query = labelled_edit(*c.body, L"Search for", core::wide(seed["query"].str()));
     query->name = "SavedSearchQuery";
+    query->tooltip = L"Filters: ext: size: dm: path: is: re: in: content:, plus OR and !";
     const std::wstring folder = seed["folder"].is_null() ? std::wstring() : core::wide(seed["folder"].str());
     f::text(*c.body, L"Where it runs", tok::TextSecondary, 13.0f);
-    const int start = seed["scope"].str() == "pc" ? 2 : 0;
+    const int start = seed["scope"].str() == "pc" ? 2 : seed["scope"].str() == "folder" && !seed["folder"].is_null() ? 1 : 0;
     auto* rg = f::radios(*c.body, {L"Wherever I am when I run it", L"Only in " + (folder.empty() ? std::wstring(L"(no folder to pin)") : folder), L"Everywhere on this PC"}, start, nullptr);
     rg->name = "SavedSearchScope";
     auto* problem = f::text(*c.body, L"", tok::ErrorForeground, 13.0f);
@@ -864,11 +827,12 @@ std::unique_ptr<Panel> saved_search(DialogContext& cx) {
     Button* save = add_button(c, L"Save", nullptr, true);
     save->name = "SavedSearchSave";
     add_button(c, L"Cancel", cx.close);
-    auto args = [name, query, rg, folder] {
+    auto args = [name, query, rg, folder, editing] {
         const wchar_t* scope[] = {L"current", L"folder", L"pc"};
         const int at = rg->selected() < 0 ? 0 : rg->selected();
         return "{\"name\":" + json_quote(name->text()) + ",\"query\":" + json_quote(query->text()) + ",\"scope\":" + json_quote(scope[at]) +
-               ",\"folder\":" + (folder.empty() ? std::string("null") : json_quote(folder)) + "}";
+               ",\"folder\":" + (folder.empty() ? std::string("null") : json_quote(folder)) +
+               ",\"previous\":" + (editing.empty() ? std::string("null") : json_quote(editing)) + "}";
     };
     auto check = [main, args, problem, save, rg, folder] {
         // Pinning needs a folder; with none, the choice falls back to "wherever I am".
@@ -897,6 +861,41 @@ std::unique_ptr<Panel> saved_search(DialogContext& cx) {
     return std::move(c.root);
 }
 
+// Renaming a saved workspace: one name, checked as it is typed; it may keep its own name but not take another's.
+// Spec: Views/SavedWorkspaceDialog (editingName).
+std::unique_ptr<Panel> rename_workspace(DialogContext& cx) {
+    const std::wstring old = cx.main.editing_saved();
+    Card c = make_card(L"Rename workspace", 460);
+    MainView* main = &cx.main;
+    auto* edit = labelled_edit(*c.body, L"Name", old);
+    edit->name = "RenameWorkspaceName";
+    edit->select(0, old.size());
+    auto* note = f::text(*c.body, L"", tok::ErrorForeground, 13.0f);
+    note->name = "RenameWorkspaceProblem";
+    note->wrap = true;
+    Button* ok = add_button(c, L"Rename", nullptr, true);
+    ok->name = "RenameWorkspaceOk";
+    add_button(c, L"Cancel", cx.close);
+    auto check = [main, old, edit, note, ok] {
+        const json::Value r = try_tool_call(*main, "workspace.rename-check", "{\"old\":" + json_quote(old) + ",\"name\":" + json_quote(edit->text()) + "}");
+        note->set_text(r["problem"].is_null() ? L"" : core::wide(r["problem"].str()));
+        ok->set_enabled(r["problem"].is_null());
+        note->invalidate();
+        ok->invalidate();
+    };
+    check();
+    edit->on_changed = [check](const std::wstring&) { check(); };
+    ok->on_click = [main, old, edit, ok, close = cx.close] {
+        if (!ok->flags.enabled) return;
+        if (bb_saved_do(main->core().app(), 0, core::s(L"rename-workspace"), core::s(old + L" to " + edit->text())) != BB_OK) return;
+        close();
+    };
+    edit->on_commit = [ok] {
+        if (ok->on_click) ok->on_click();
+    };
+    return std::move(c.root);
+}
+
 // Select / deselect by pattern: the search box's language, judged against the rows on screen, with the
 // count said as it is typed so the answer is known before anything is selected. Spec: Views/SelectPatternDialog.
 std::unique_ptr<Panel> select_pattern(DialogContext& cx, bool select) {
@@ -909,7 +908,7 @@ std::unique_ptr<Panel> select_pattern(DialogContext& cx, bool select) {
     auto* result = f::text(*c.body, L"", tok::TextSecondary, 13.0f);
     result->name = "SelectPatternResult";
     result->wrap = true;
-    f::note(*c.body, L"The search box's language: * matches any run of characters, ? matches one.");
+    f::note(*c.body, L"The search box's own language: *.jpg \u00b7 ext:png;gif \u00b7 size:>1mb \u00b7 dm:today \u00b7 is:folder \u00b7 re:^IMG_\\d+ \u00b7 and OR, ! and brackets.")->wrap = true;
     Button* ok = add_button(c, select ? L"Select" : L"Deselect", nullptr, true);
     ok->name = "SelectPatternOk";
     add_button(c, L"Cancel", cx.close)->name = "SelectPatternCancel";
@@ -1016,17 +1015,14 @@ const std::map<std::wstring, Builder>& builders() {
         {L"about", about},
         {L"new-folder", [](DialogContext& cx) { return new_item(cx, false); }},
         {L"new-file", [](DialogContext& cx) { return new_item(cx, true); }},
-        {L"rename", rename_dialog},
-        {L"rename-advanced", rename_advanced},
-        {L"columns", columns_dialog},
+        {L"columns", [](DialogContext& cx) { return columns_dialog(cx, false); }},
+        {L"default-columns", [](DialogContext& cx) { return columns_dialog(cx, true); }},
         {L"properties", properties},
         {L"theme-editor", theme_editor},
         {L"search-syntax", search_syntax},
-        {L"compress", compress},
-        {L"extract", extract},
-        {L"archive-password", archive_password},
         {L"elevation", elevation},
         {L"saved-search", saved_search},
+        {L"rename-workspace", rename_workspace},
         {L"select-pattern", [](DialogContext& cx) { return select_pattern(cx, true); }},
         {L"deselect-pattern", [](DialogContext& cx) { return select_pattern(cx, false); }},
         {L"flat-large", flat_large},

@@ -532,6 +532,20 @@ pub unsafe extern "C" fn bb_metadata_picture(
 
 // ---- comparing two panes ----
 
+/// `bb_compare_settle` off the UI thread: answers at once; the rows re-paint when it is done.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_compare_settle_start(
+    app: *mut BbApp,
+    paths: *const BbStr,
+    n: u32,
+) -> BbStatus {
+    guard(|| {
+        let app = unsafe { app_of(app)? };
+        app.app.compare_settle_start(unsafe { strings(paths, n) });
+        Ok(())
+    })
+}
+
 /// Reads both sides of each path and settles its verdict to "same" where the bytes are identical;
 /// nothing else moves. `out_identical` is how many were. Blocking: call it from a worker.
 #[unsafe(no_mangle)]

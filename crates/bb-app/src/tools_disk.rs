@@ -75,7 +75,56 @@ fn argb(c: bb_core::theming::ThemeColor) -> u32 {
     u32::from(c.a) << 24 | u32::from(c.r) << 16 | u32::from(c.g) << 8 | u32::from(c.b)
 }
 
+/// The folder disk usage is reading or last read. `seq` tells a superseded read from the current one.
+#[derive(Default)]
+pub(crate) struct DiskLoad {
+    seq: u64,
+    path: String,
+    loading: bool,
+    model: Option<Value>,
+    error: Option<String>,
+}
+
 impl Inner {
+    /// Reads `path` on a worker; what was shown stays until the new answer arrives. Spec:
+    /// DiskUsageViewModel.LoadAsync (superseding, IsLoading).
+    pub(crate) fn disk_usage_load(self: &Arc<Self>, path: String) {
+        let seq = {
+            let mut d = crate::app::lock(&self.extra.tools.disk);
+            d.seq += 1;
+            d.path.clone_from(&path);
+            d.loading = true;
+            d.seq
+        };
+        self.hub.model(crate::events::Model::DiskUsage);
+        self.schedule(move |inner| {
+            let result = inner.disk_usage_model(&path);
+            {
+                let mut d = crate::app::lock(&inner.extra.tools.disk);
+                if d.seq != seq {
+                    return;
+                }
+                d.loading = false;
+                match result {
+                    Ok(m) => {
+                        d.model = Some(m);
+                        d.error = None;
+                    }
+                    Err(e) => {
+                        d.model = None;
+                        d.error = Some(e.to_string());
+                    }
+                }
+            }
+            inner.hub.model(crate::events::Model::DiskUsage);
+        });
+    }
+
+    pub(crate) fn disk_usage_state(&self) -> Value {
+        let d = crate::app::lock(&self.extra.tools.disk);
+        json!({ "path": d.path, "loading": d.loading, "model": d.model, "error": d.error })
+    }
+
     /// `{root, rootDisplay, canGoUp, total, unknownChildCount, availability, message, canRetry,
     /// children:[{name, path, isDirectory, size, sizeText, unknown, fraction, synthetic}],
     /// largest:[{name, relativePath, path, sizeText}], largestEmpty, fills, label}` for `root`

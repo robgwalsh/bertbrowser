@@ -1,4 +1,5 @@
 #include "views/metadata_pane.h"
+#include "views/file_pickers.h"
 
 #include "gfx/icons.gen.h"
 #include "views/pane_images.h"
@@ -63,16 +64,6 @@ MetadataPane::MetadataPane(core::Core& core, uint64_t tab) : core_(core), tab_(t
         } catch (const core::CoreError&) {
         }
     };
-    remove_all_ = buttons->emplace<Button>(L"Remove all");
-    remove_all_->name = "MetadataRemoveAll";
-    remove_all_->height = 28;
-    remove_all_->tooltip = L"Take out everything that describes the file rather than being it";
-    remove_all_->on_click = [this] {
-        try {
-            press(2);
-        } catch (const core::CoreError&) {
-        }
-    };
 
     scroll_ = emplace<ScrollViewer>();
     scroll_->dock = Dock::Fill;
@@ -82,27 +73,46 @@ MetadataPane::MetadataPane(core::Core& core, uint64_t tab) : core_(core), tab_(t
     empty_ = column_->emplace<TextBlock>(L"Select a file to see and change what it says about itself.");
     empty_->wrap = true;
     empty_->style.fg = tok::TextMuted;
-    files_ = column_->emplace<StackPanel>(Orientation::Vertical, 2.0f);
-    files_->name = "MetadataFiles";
-    cover_box_ = column_->emplace<StackPanel>(Orientation::Vertical, 4.0f);
-    cover_box_->name = "MetadataCover";
+    // Top to bottom as the C# pane has it: what nobody can type, the fields, the cover, the two removals,
+    // then the selection. Spec: MetadataPane.xaml.
+    details_ = column_->emplace<StackPanel>(Orientation::Vertical, 3.0f);
+    details_->name = "MetadataDetails";
     fields_ = column_->emplace<StackPanel>(Orientation::Vertical, 8.0f);
     fields_->name = "MetadataFields";
-    location_note_ = column_->emplace<TextBlock>();
+    cover_box_ = column_->emplace<StackPanel>(Orientation::Vertical, 4.0f);
+    cover_box_->name = "MetadataCover";
+    // Removing: buttons that act at once, each a whole request on its own and one undo away from never
+    // having happened.
+    remove_box_ = column_->emplace<StackPanel>(Orientation::Vertical, 6.0f);
+    remove_box_->name = "MetadataRemove";
+    location_note_ = remove_box_->emplace<TextBlock>();
+    location_note_->name = "MetadataLocationNote";
     location_note_->wrap = true;
     location_note_->style.font.size = 11.0f;
     location_note_->style.fg = tok::TextSecondary;
-    remove_location_ = column_->emplace<Button>(L"Remove location");
+    auto* removals = remove_box_->emplace<StackPanel>(Orientation::Horizontal, 6.0f);
+    remove_location_ = removals->emplace<Button>(L"Remove location");
     remove_location_->name = "MetadataRemoveLocation";
     remove_location_->height = 28;
+    remove_location_->tooltip = L"Take the GPS position out of these pictures and leave everything else.";
     remove_location_->on_click = [this] {
         try {
             press(1);
         } catch (const core::CoreError&) {
         }
     };
-    details_ = column_->emplace<StackPanel>(Orientation::Vertical, 3.0f);
-    details_->name = "MetadataDetails";
+    remove_all_ = removals->emplace<Button>(L"Remove all metadata");
+    remove_all_->name = "MetadataRemoveAll";
+    remove_all_->height = 28;
+    remove_all_->tooltip = L"Take out everything that describes these files. A picture keeps its rotation and colour profile.";
+    remove_all_->on_click = [this] {
+        try {
+            press(2);
+        } catch (const core::CoreError&) {
+        }
+    };
+    files_ = column_->emplace<StackPanel>(Orientation::Vertical, 2.0f);
+    files_->name = "MetadataFiles";
 }
 
 void MetadataPane::set_active(bool active) {
@@ -188,6 +198,11 @@ void MetadataPane::rebuild() {
         choose_cover_->name = "MetadataChooseCover";
         choose_cover_->height = 26;
         choose_cover_->on_click = [this] { choose_cover(); };
+        auto* save = row->emplace<Button>(L"Save as\u2026");
+        save->name = "MetadataSaveCover";
+        save->height = 26;
+        save->set_enabled(m["hasPicture"].boolean());
+        save->on_click = [this] { save_cover(); };
         remove_cover_ = row->emplace<Button>(L"Remove");
         remove_cover_->name = "MetadataRemoveCover";
         remove_cover_->height = 26;
@@ -274,13 +289,12 @@ void MetadataPane::update() {
     title_->set_text(core::wide(m["title"].str()));
     summary_->set_text(core::wide(m["summary"].str()));
     apply_->set_enabled(m["canApply"].boolean());
+    remove_box_->set_visible(m["canRemove"].boolean());
     remove_all_->set_enabled(m["canRemoveAll"].boolean());
-    remove_all_->set_visible(m["canRemove"].boolean());
-    const bool located = m["located"].i64() > 0;
-    remove_location_->set_visible(located);
     remove_location_->set_enabled(m["canRemoveLocation"].boolean());
-    location_note_->set_visible(located);
-    location_note_->set_text(core::wide(m["locationNote"].str()));
+    const std::wstring note = core::wide(m["locationNote"].str());
+    location_note_->set_text(note);
+    location_note_->set_visible(!note.empty());
     if (remove_cover_) remove_cover_->set_enabled(m["canRemovePicture"].boolean());
 
     suppress_ = true;
@@ -350,21 +364,61 @@ uint64_t MetadataPane::set_cover(const std::vector<uint8_t>& image) {
     return op;
 }
 
+// The picker is the view's job; embedding what it picked is the core's. A cover is embedded whole in every
+// selected file, so one of tens of megabytes was chosen by mistake. Spec: MetadataPane.ChoosePicture_Click.
 void MetadataPane::choose_cover() {
-    wchar_t file[MAX_PATH] = {};
-    OPENFILENAMEW ofn{};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.lpstrFilter = L"Pictures\0*.jpg;*.jpeg;*.png;*.webp;*.bmp;*.gif\0All files\0*.*\0";
-    ofn.lpstrFile = file;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-    if (!GetOpenFileNameW(&ofn)) return;
+    PickPath pick;
+    pick.title = L"Choose a cover picture";
+    pick.filters = {{L"Pictures", L"*.jpg;*.jpeg;*.png"}, {L"All files", L"*.*"}};
+    const auto chosen = pick_open_file(GetActiveWindow(), pick);
+    if (!chosen) return;
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (GetFileAttributesExW(chosen->c_str(), GetFileExInfoStandard, &data) &&
+        ((static_cast<uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow) > (16ull << 20)) {
+        say_about_cover(L"That picture is larger than 16 MB, which is too large to embed as a cover.");
+        return;
+    }
     std::vector<uint8_t> bytes;
-    if (!read_whole_file(file, 32ull << 20, bytes)) return;
+    if (!read_whole_file(*chosen, 16ull << 20, bytes)) {
+        say_about_cover(L"The picture could not be read.");
+        return;
+    }
     try {
         set_cover(bytes);
-    } catch (const core::CoreError&) {
+    } catch (const core::CoreError& e) {
+        say_about_cover(core::wide(e.what()));
     }
+}
+
+// Writes the cover out as a file of its own, named for what the bytes are (the picture's business, not the
+// song's). Spec: MetadataPane.SavePicture_Click.
+void MetadataPane::save_cover() {
+    size_t length = 0;
+    bb_metadata_picture(core_.app(), tab_, nullptr, 0, &length);
+    if (!length) return;
+    std::vector<uint8_t> bytes(length);
+    if (bb_metadata_picture(core_.app(), tab_, bytes.data(), bytes.size(), &length) != BB_OK) return;
+    const bool png = bytes.size() >= 4 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47;
+    PickPath pick;
+    pick.title = L"Save cover picture";
+    pick.file_name = png ? L"cover.png" : L"cover.jpg";
+    pick.default_ext = png ? L"png" : L"jpg";
+    pick.filters = {png ? std::pair<std::wstring, std::wstring>{L"PNG picture", L"*.png"} : std::pair<std::wstring, std::wstring>{L"JPEG picture", L"*.jpg"}};
+    const auto target = pick_save_file(GetActiveWindow(), pick);
+    if (!target) return;
+    HANDLE h = CreateFileW(target->c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    DWORD written = 0;
+    const bool ok = h != INVALID_HANDLE_VALUE && WriteFile(h, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) && written == bytes.size();
+    if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+    if (!ok) say_about_cover(L"The picture could not be saved.");
+}
+
+// Why the last cover action did nothing, under the picture until the pane is read again.
+void MetadataPane::say_about_cover(const std::wstring& why) {
+    if (!cover_note_) return;
+    cover_note_->set_text(why);
+    cover_note_->style.fg = tok::ErrorForeground;
+    cover_note_->invalidate();
 }
 
 const json::Value* MetadataPane::file(const std::wstring& file_name) const {

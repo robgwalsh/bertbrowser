@@ -137,6 +137,7 @@ go <path>                   navigate the active tab (relative paths resolve in t
 up | back | forward | refresh
 enter <name>                open a folder row, as double-click does
 tree-click <path>           click a folder in the sidebar tree (it must be showing already)
+tree-device <name>          double-click a portable device row (the run lists one, "Pixel 8"): asks Explorer
 tree-expand <path> [on|off] toggle a row's chevron without selecting it (default on) — unlike
                             tree-click this doesn't navigate, so it won't promote/collapse siblings;
                             the only way to get two drive/device roots expanded at once
@@ -391,6 +392,26 @@ assert-window <kind>|none   which tool windows are open. disk-usage, duplicates,
                             folders stay live behind them. Open one with `live-dialogs on` + `run`
 window-shot <kind> [name]   PNG of an open tool window, caption and all
 window-close <kind>         closes a tool window as its close button would
+window-key <chord>          posts the key to the window (down and up, modifiers held), so it meets the
+                            window's own handling first - a dialog's Esc/Enter, a focused box - where
+                            `key` goes straight to the dispatcher
+window-type <text>          posts WM_CHAR per character to whatever has the keyboard (type-ahead)
+focus <Name>                gives the keyboard to a named element (FileListView, SearchBox, ...)
+press <Name>                clicks a named button anywhere in the window (NewTabButton, SearchClearButton,
+                            FlatViewToggle, NewTypeAdd, ColumnReset, BarSaveAs, MenuReset, ...)
+field-type <Name> <text>    replaces the text of a named box in the window (not a dialog), firing on_changed
+list-pick <Name> <text>     selects the first row of a named list in the window whose text contains this
+widget-drag <Name> x1 y1 x2 y2 [ctrl|shift]  press, move, release on a named widget at offsets from its
+                            corner, through its own handlers (a marquee on FileListView / FileTileView)
+middle-click <row>          the list's middle-click on a row by name; tree-middle <path> the tree's
+tab-drag <from> <to>        drags a tab along the active pane's strip (1-based), as the mouse would
+header-drag <id> <index>    a header drag of a column; header-resize <id> <dips> a gripper let go;
+                            assert-column-width <id> <dips>
+menu tab | workspace-switcher | search-switcher   photographs the tab's right-click menu / a title-bar dropdown;
+                            menu-run <text> then clicks an entry of the last menu photographed
+assert-selection a | b      exactly these names are selected; assert-cursor <name> the cursor is on it
+                            and it is scrolled into view
+assert-status-bar undo|selection <text>|none   the status bar's undo link or selection summary
                             (changes is the "What changed" window: with a run's default settings
                             it shows the recording-off banner — the state every fresh install
                             has — and after `changes-seed` it shows rows. `settings history` is
@@ -534,6 +555,7 @@ assert-palette-selected <text> | assert-palette-hint <text>
                             token (`view:`), so both can be asserted on
 assert-key-row <command name> <chord,chord|none|absent>
 assert-key-recorder <text>  the Keyboard page's list and what its recorder strip is saying
+assert-launches <n>         how many programs the run tried to start (each refused)
 assert-visible <Name> | assert-hidden <Name> | assert-not-launched
 assert-elevation-offered | assert-no-elevation-offered
                             whether the run offered to retry something as administrator. The

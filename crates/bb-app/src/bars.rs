@@ -13,6 +13,8 @@ use bb_core::commandbars::{
     CommandBarRules, CommandBarSet, SavedCommandBarRules, SavedCommandBarSet, ToolbarSpec,
 };
 use bb_core::commands::{CommandCatalog, CommandMatcher};
+use std::sync::Arc;
+
 use serde_json::{Value, json};
 
 use crate::app::{Inner, lock};
@@ -355,21 +357,25 @@ impl Inner {
     /// The rows a list expands to.
     pub(crate) fn list_rows(&self, list_id: &str) -> Vec<Value> {
         match list_id {
-            CommandBarLists::WORKSPACES => self
-                .saved_workspaces()
-                .iter()
-                .map(|w| {
-                    json!({
-                        "id": w.name,
-                        "name": w.name,
-                        "detail": bb_core::rules::SavedWorkspaceRules::shape_text(&w.layout),
+            CommandBarLists::WORKSPACES => {
+                // Ticked: the workspace the window last came from. Spec: MainWindow.WorkspaceRows.
+                let current = lock(&self.extra.current_workspace).clone();
+                self.saved_workspaces()
+                    .iter()
+                    .map(|w| {
+                        json!({
+                            "id": w.name,
+                            "name": w.name,
+                            "detail": bb_core::rules::SavedWorkspaceRules::shape_text(&w.layout),
+                            "checked": current.as_deref().is_some_and(|c| c.eq_ignore_ascii_case(&w.name)),
+                        })
                     })
-                })
-                .collect(),
+                    .collect()
+            }
             CommandBarLists::SAVED_SEARCHES => self
                 .saved_searches()
                 .iter()
-                .map(|s| json!({ "id": s.name, "name": s.name, "detail": s.query }))
+                .map(|s| json!({ "id": s.name, "name": s.name, "detail": crate::saved::scope_column_text(s.scope) }))
                 .collect(),
             CommandBarLists::BOOKMARKS => self
                 .bookmark_list()
@@ -397,6 +403,7 @@ impl Inner {
                         json!({
                             "id": s.name,
                             "name": s.name,
+                            "detail": SavedCommandBarRules::shape_text(&s.set),
                             "checked": current.as_deref().is_some_and(|c| c.eq_ignore_ascii_case(&s.name)),
                         })
                     })
@@ -838,7 +845,38 @@ impl Inner {
     }
 
     /// One verb of the editor, with its argument. Rows are given by index or by name.
-    pub(crate) fn barpage_do(&self, verb: &str, arg: &str) -> AppResult<()> {
+    /// Puts another arrangement in force, first asking when that would throw away changes saved under
+    /// no name. The question is asked from a worker (it waits for the window's answer); with nothing to
+    /// lose it happens at once. Spec: SettingsViewModel.ResetBars/ApplySavedBars, ConfirmDiscardBars.
+    fn bars_replace_asking(self: &Arc<Self>, saved: Option<String>) -> AppResult<()> {
+        let replacement = match &saved {
+            Some(name) => format!("\"{name}\""),
+            None => "the arrangement BertBrowser ships with".to_string(),
+        };
+        let run = move |inner: &Arc<Inner>| match &saved {
+            Some(name) => inner.bars_apply(name),
+            None => inner.bars_reset(),
+        };
+        lock(&self.extra.barpage).path.clear();
+        if !self.bars_replacing_loses_work() {
+            return run(self);
+        }
+        self.schedule(move |inner| {
+            let message = format!(
+                "The menus and toolbars have changes that are not saved under any name. Switch to {replacement} anyway?"
+            );
+            if inner
+                .seams
+                .confirm
+                .ask(&message, "Menus and toolbars", "Switch")
+            {
+                let _ = run(inner);
+            }
+        });
+        Ok(())
+    }
+
+    pub(crate) fn barpage_do(self: &Arc<Self>, verb: &str, arg: &str) -> AppResult<()> {
         let set = self.bars_set_current();
         let (target, path, selected) = {
             let page = lock(&self.extra.barpage);
@@ -1049,14 +1087,8 @@ impl Inner {
                 changed();
                 Ok(())
             }
-            "reset" => {
-                lock(&self.extra.barpage).path.clear();
-                self.bars_reset()
-            }
-            "apply-saved" => {
-                lock(&self.extra.barpage).path.clear();
-                self.bars_apply(arg)
-            }
+            "reset" => self.bars_replace_asking(None),
+            "apply-saved" => self.bars_replace_asking(Some(arg.to_string())),
             "remove-saved" => self.bars_remove(arg),
             "select-saved" => {
                 lock(&self.extra.barpage).selected_saved = Some(arg.to_string());

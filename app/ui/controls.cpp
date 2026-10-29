@@ -159,10 +159,28 @@ Size Button::measure(Size) {
     const D2D1_SIZE_F t = res().text.measure(text, style.font);
     float w = text.empty() ? 0.0f : std::ceil(t.width);
     if (icon) w += 16.0f + (text.empty() ? 0.0f : 6.0f);
+    if (link) return fixed_or({w + 4.0f, 28.0f});
     return fixed_or({std::max(28.0f, w + 24.0f), 28.0f});
 }
 
+// Spec: Styles.xaml (LinkButton).
+void Button::paint_link(PaintContext& pc) {
+    const Token fg = !flags.enabled ? tok::TextMuted : tok::TextLink;
+    const D2D1_SIZE_F t = pc.res.text.measure(text, style.font);
+    const float x = bounds.l + 2.0f;
+    pc.text(text, Rect{x, bounds.t, bounds.r, bounds.b}, style.font, fg);
+    if (flags.enabled && (hovered() || pressed_)) {
+        const float y = std::floor(bounds.t + (bounds.height() + t.height) / 2) - 0.5f;
+        pc.line({x, y}, {x + t.width, y}, fg);
+    }
+    if (focused()) pc.stroke(bounds, tok::BorderFocus);
+}
+
 void Button::paint(PaintContext& pc) {
+    if (link) {
+        paint_link(pc);
+        return;
+    }
     Token bg = primary ? tok::AccentBackground : tok::ButtonSecondaryBackground;
     if (!flags.enabled) {
         bg = tok::ButtonSecondaryBackground;
@@ -236,8 +254,14 @@ void CheckBox::set_indeterminate(bool v) {
 }
 
 void CheckBox::toggle() {
-    checked_ = indeterminate_ ? true : !checked_;
-    indeterminate_ = false;
+    if (three_state && checked_ && !indeterminate_) {
+        checked_ = false;
+        indeterminate_ = true;
+    } else {
+        checked_ = indeterminate_ ? false : !checked_;
+        if (!three_state && indeterminate_) checked_ = true;
+        indeterminate_ = false;
+    }
     invalidate();
     if (on_toggle) on_toggle(checked_);
 }

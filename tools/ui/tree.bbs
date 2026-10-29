@@ -72,4 +72,10 @@ assert-path Pictures
 hidden off
 settle 500
 
+# A phone under "This PC" is listed after the drives; its contents are no path, so a double-click asks Explorer
+# for it (refused and counted here) and the list stays where it was.
+tree-device Pixel 8
+assert-launches 1
+assert-path Pictures
+
 state

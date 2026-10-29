@@ -2,6 +2,8 @@
 #pragma once
 #include "ui/controls.h"
 
+#include <optional>
+
 namespace bb::ui {
 
 // ---- calendar ---------------------------------------------------------------------------------------
@@ -70,7 +72,7 @@ uint32_t hsv_to_rgb(Hsv c);
 
 class ColorPicker : public Widget {
 public:
-    static constexpr float kPad = 8.0f, kSquareW = 220.0f, kSquareH = 160.0f, kStripW = 20.0f, kGap = 10.0f;
+    static constexpr float kPad = 8.0f, kSquareW = 220.0f, kSquareH = 160.0f, kStripW = 20.0f, kGap = 10.0f, kAlphaH = 14.0f;
 
     ColorPicker() {
         flags.focusable = true;
@@ -79,15 +81,21 @@ public:
     }
 
     uint32_t rgb() const { return hsv_to_rgb(hsv_); }
+    uint32_t argb() const { return (static_cast<uint32_t>(alpha_) << 24) | rgb(); }
+    uint8_t alpha() const { return alpha_; }
     Hsv hsv() const { return hsv_; }
     void set_rgb(uint32_t rgb);  // no callback. Greys keep the hue already shown.
+    void set_argb(uint32_t argb);  // no callback
     void set_hsv(Hsv c);
     std::function<void(uint32_t rgb, bool dragging)> on_change;
 
     Rect square() const;
     Rect strip() const;
+    Rect alpha_strip() const;  // under the square: clear on the left, opaque on the right
     Rect swatch() const;
-    std::wstring hex_text() const;  // "#RRGGBB"
+    std::wstring hex_text() const;  // "#RRGGBB", or "#AARRGGBB" when it is not opaque
+    // "#RRGGBB" or "#AARRGGBB" (the # optional) -> 0xAARRGGBB; nullopt for anything else.
+    static std::optional<uint32_t> parse_hex(std::wstring text);
 
     Size measure(Size) override;
     void paint(PaintContext& pc) override;
@@ -98,9 +106,11 @@ public:
     void on_focus(bool) override { invalidate(); }
 
 private:
-    enum class Drag { None, Square, Strip };
+    enum class Drag { None, Square, Strip, Alpha };
     void drag_to(Point p, bool dragging);
+    void checker(PaintContext& pc, const Rect& r) const;
     Hsv hsv_;
+    uint8_t alpha_ = 255;
     Drag drag_ = Drag::None;
 };
 

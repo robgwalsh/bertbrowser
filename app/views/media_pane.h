@@ -44,6 +44,7 @@ public:
     void arrange(ui::Rect r) override;
     void on_timer(int id) override;
     bool on_key_down(const ui::KeyEvent& e) override;
+    bool on_mouse_down(const ui::MouseEvent& e) override;
 
 private:
     void tick();
