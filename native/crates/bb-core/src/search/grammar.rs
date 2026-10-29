@@ -32,11 +32,21 @@ impl SearchGrammar {
     /// caller that judges a listing already on screen (select by pattern), where `*` or
     /// `is:readonly` on its own is an ordinary thing to ask.
     pub fn parse(text: &str, require_narrow: bool) -> SearchQueryParse {
-        Self::parse_at(text, require_narrow, FileTime::now().to_local())
+        Self::parse_with(text, require_narrow, None)
     }
 
     /// As [`parse`](Self::parse), with the local clock the date shorthands resolve against.
     pub fn parse_at(text: &str, require_narrow: bool, now_local: FileTime) -> SearchQueryParse {
+        Self::parse_with(text, require_narrow, Some(now_local))
+    }
+
+    /// `now_local` None reads the clock only if a date term asks for it: the time-zone call costs
+    /// more than parsing a plain word.
+    fn parse_with(
+        text: &str,
+        require_narrow: bool,
+        now_local: Option<FileTime>,
+    ) -> SearchQueryParse {
         if text.trim().is_empty() {
             return SearchQueryParse {
                 query: None,
@@ -131,13 +141,12 @@ fn op(kind: TokenKind, text: &str) -> Token {
 
 /// Splits the text into terms and operators. Quotes suppress every special meaning inside them.
 fn lex(text: &str) -> Vec<Token> {
-    let chars: Vec<char> = text.chars().collect();
-    let mut tokens = Vec::new();
+    let mut tokens = Vec::with_capacity(text.bytes().filter(|&b| b == b' ').count() + 1);
     let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
+    while i < text.len() {
+        let c = char_at(text, i);
         if c.is_whitespace() {
-            i += 1;
+            i += c.len_utf8();
             continue;
         }
         if c == '(' {
@@ -152,13 +161,18 @@ fn lex(text: &str) -> Vec<Token> {
         }
         // A '!' only negates something. Trailing, or followed by a space, it is a character in a
         // filename and nothing more.
-        if c == '!' && i + 1 < chars.len() && !chars[i + 1].is_whitespace() {
+        if c == '!'
+            && text[i + 1..]
+                .chars()
+                .next()
+                .is_some_and(|n| !n.is_whitespace())
+        {
             tokens.push(op(TokenKind::Not, "!"));
             i += 1;
             continue;
         }
 
-        let (token, next) = lex_term(&chars, i);
+        let (token, next) = lex_term(text, i);
         i = next;
 
         // Operators are uppercase only: lowercase "or" stays a word, so a file named
@@ -183,14 +197,19 @@ fn lex(text: &str) -> Vec<Token> {
 }
 
 /// Reads one term, honouring quoted runs, and notes where its first unquoted colon was.
-fn lex_term(chars: &[char], start: usize) -> (Token, usize) {
+/// The character starting at byte `i`, which the caller keeps on a boundary.
+fn char_at(s: &str, i: usize) -> char {
+    s[i..].chars().next().unwrap_or(' ')
+}
+
+fn lex_term(src: &str, start: usize) -> (Token, usize) {
     let mut text = String::new();
     let mut quoted = false;
     let mut quoted_key = false;
     let mut colon: Option<usize> = None;
     let mut i = start;
-    while i < chars.len() {
-        let c = chars[i];
+    while i < src.len() {
+        let c = char_at(src, i);
         if c.is_whitespace() {
             break;
         }
@@ -206,12 +225,13 @@ fn lex_term(chars: &[char], start: usize) -> (Token, usize) {
                 quoted_key = true;
             }
             i += 1;
-            while i < chars.len() && chars[i] != '"' {
-                text.push(chars[i]);
-                i += 1;
+            while i < src.len() && src.as_bytes()[i] != b'"' {
+                let ch = char_at(src, i);
+                text.push(ch);
+                i += ch.len_utf8();
             }
             // An unclosed quote runs to the end rather than being an error.
-            if i < chars.len() {
+            if i < src.len() {
                 i += 1;
             }
             continue;
@@ -220,7 +240,7 @@ fn lex_term(chars: &[char], start: usize) -> (Token, usize) {
             colon = Some(text.len());
         }
         text.push(c);
-        i += 1;
+        i += c.len_utf8();
     }
     (
         Token {
@@ -244,6 +264,16 @@ fn is_regex_value(text: &str, colon: Option<usize>) -> bool {
     }
 }
 
+/// [`fold_upper`] that reuses the buffer when the text is ASCII.
+fn upper_owned(mut s: String) -> String {
+    if s.is_ascii() {
+        s.make_ascii_uppercase();
+        s
+    } else {
+        fold_upper(&s)
+    }
+}
+
 // ---------------- Parsing ----------------
 
 struct Parser {
@@ -251,7 +281,7 @@ struct Parser {
     at: usize,
     /// The first thing that made the query unusable, if anything did.
     problem: Option<String>,
-    now_local: FileTime,
+    now_local: Option<FileTime>,
 }
 
 impl Parser {
@@ -261,10 +291,12 @@ impl Parser {
 
     /// OR binds loosest, so it is the outermost level.
     fn parse_or(&mut self) -> Option<SearchNode> {
-        let mut branches = Vec::new();
-        if let Some(first) = self.parse_and() {
-            branches.push(first);
+        let first = self.parse_and();
+        if !self.peek().is_some_and(|t| t.kind == TokenKind::Or) {
+            return first;
         }
+        let mut branches = Vec::new();
+        branches.extend(first);
         while self.peek().is_some_and(|t| t.kind == TokenKind::Or) {
             self.at += 1;
             if let Some(next) = self.parse_and() {
@@ -280,23 +312,30 @@ impl Parser {
 
     /// Adjacency is AND.
     fn parse_and(&mut self) -> Option<SearchNode> {
-        let mut parts = Vec::new();
+        let mut first = None;
+        let mut rest: Vec<SearchNode> = Vec::new();
         while self
             .peek()
             .is_some_and(|t| !matches!(t.kind, TokenKind::Or | TokenKind::Close))
         {
             if let Some(part) = self.parse_unary() {
-                parts.push(part);
+                if first.is_none() {
+                    first = Some(part);
+                } else {
+                    rest.push(part);
+                }
             }
             if self.problem.is_some() {
                 return None;
             }
         }
-        match parts.len() {
-            0 => None,
-            1 => parts.pop(),
-            _ => Some(SearchNode::And(parts)),
+        if rest.is_empty() {
+            return first;
         }
+        let mut parts = Vec::with_capacity(rest.len() + 1);
+        parts.extend(first);
+        parts.append(&mut rest);
+        Some(SearchNode::And(parts))
     }
 
     fn parse_unary(&mut self) -> Option<SearchNode> {
@@ -328,14 +367,14 @@ impl Parser {
             }
             _ => {
                 self.at += 1;
-                let token = &self.tokens[self.at - 1];
+                let token = &mut self.tokens[self.at - 1];
                 let (text, quoted, colon, quoted_key) = (
-                    token.text.clone(),
+                    std::mem::take(&mut token.text),
                     token.quoted,
                     token.colon,
                     token.quoted_key,
                 );
-                self.build_term(&text, quoted, colon, quoted_key)
+                self.build_term(text, quoted, colon, quoted_key)
             }
         }
     }
@@ -345,7 +384,7 @@ impl Parser {
     /// is literal text that happens to contain a colon, so `"C:\Users"` stays a name.
     fn build_term(
         &mut self,
-        text: &str,
+        text: String,
         quoted: bool,
         colon: Option<usize>,
         quoted_key: bool,
@@ -367,7 +406,7 @@ impl Parser {
         if text.is_empty() {
             return None;
         }
-        Some(SearchNode::name(&fold_upper(text), quoted))
+        Some(SearchNode::name_owned(upper_owned(text), quoted))
     }
 
     fn build_filter(
@@ -382,7 +421,7 @@ impl Parser {
             return None;
         }
         match key {
-            SearchSyntax::NAME => Some(SearchNode::name(&fold_upper(value), quoted)),
+            SearchSyntax::NAME => Some(SearchNode::name_owned(fold_upper(value), quoted)),
             SearchSyntax::PATH => Some(SearchNode::path(&fold_upper(value))),
             // Deliberately not folded: the other side is file text folded per file otherwise.
             SearchSyntax::CONTENT => {
@@ -494,7 +533,9 @@ impl Parser {
     /// `key` is the key as the user spelled it, so `dc:` is not told what `dm:` accepts.
     fn build_date(&mut self, field: DateField, key: &str, value: &str) -> Option<SearchNode> {
         let (op, rest) = split_operator(value);
-        let now = self.now_local;
+        let now = *self
+            .now_local
+            .get_or_insert_with(|| FileTime::now().to_local());
         if rest.is_empty() {
             return self.fail(&format!(
                 "{key}: needs a date, like {key}:today or {key}:>2026-01-01."

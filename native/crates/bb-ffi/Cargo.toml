@@ -20,6 +20,7 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_UI_Wind
 # product's staticlib (`bbcore.lib`, linked into BertBrowser.exe) carries none of them. The harness
 # links `bbcore_harness.lib` (crate `bb-ffi-harness`), which turns this on.
 bb-test-support = { path = "../bb-test-support", optional = true }
+mimalloc = "0.1.52"
 
 [features]
 default = []

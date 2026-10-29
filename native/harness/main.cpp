@@ -3,6 +3,7 @@
 //   bb-harness.exe --script tools/ui/smoke.bbs
 // Exit codes: 0 ok, 1 a command failed, 2 the environment, 3 the watchdog, 64 usage.
 #include <windows.h>
+#include <timeapi.h>
 
 #include <atomic>
 #include <chrono>
@@ -35,6 +36,10 @@ void remove_scratch_state(const bbh::Options& o) {
 
 int wmain(int argc, wchar_t** argv) {
     SetConsoleOutputCP(CP_UTF8);
+    // The settle loops poll with Sleep(1..5), which rounds up to the 15.6 ms timer tick unless something
+    // raised the resolution; at the default, a measured step carried tens of milliseconds of the harness's
+    // own waiting. The product raises nothing, so this changes the ruler, not the thing measured.
+    timeBeginPeriod(1);
     int exit_code = 0;
     auto options = bbh::parse_options(argc, argv, exit_code);
     if (!options) return exit_code;

@@ -9,12 +9,19 @@ impl GlobText {
     /// class is already literal. When `keep_wildcards` is false (a quoted phrase), `*` and `?` are
     /// escaped as classes too.
     pub fn escape(term: &str, keep_wildcards: bool) -> String {
+        let mut out = String::with_capacity(term.len() + 8);
+        Self::escape_into(&mut out, term, keep_wildcards);
+        out
+    }
+
+    /// [`escape`](Self::escape) appended to `out`, for a caller building a larger string.
+    pub fn escape_into(out: &mut String, term: &str, keep_wildcards: bool) {
         let needs_work =
             term.contains('[') || (!keep_wildcards && (term.contains('*') || term.contains('?')));
         if !needs_work {
-            return term.to_string();
+            out.push_str(term);
+            return;
         }
-        let mut out = String::with_capacity(term.len() + 8);
         for c in term.chars() {
             if c == '[' {
                 out.push_str("[[]");
@@ -26,7 +33,6 @@ impl GlobText {
                 out.push(c);
             }
         }
-        out
     }
 
     /// Classic two-pointer wildcard match with star backtracking, over characters. No regex: this

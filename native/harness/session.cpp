@@ -147,7 +147,6 @@ Session::~Session() {
     if (window_) window_->root().clear_content();
     core_.reset();
     if (app_) bb_app_destroy(app_);
-    window_.reset();
     res_.reset();
     dev_.reset();
 }

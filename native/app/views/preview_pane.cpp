@@ -316,7 +316,10 @@ void PreviewPane::worker_main() {
         }
         if (r.debounce) {
             // Long enough to swallow an arrow-key sweep down a list, short enough that a click feels immediate.
-            for (int i = 0; i < 15 && latest_ == r.generation && !stop_; ++i) Sleep(10);
+            // A newer request (schedule notifies) ends the wait early. Sleep(10) in a loop rounds each step
+            // up to the 15.6 ms timer tick, which made the 150 ms debounce 234 ms.
+            std::unique_lock<std::mutex> lock(mu_);
+            cv_.wait_for(lock, std::chrono::milliseconds(150), [this] { return stop_ || request_.valid; });
         }
         if (latest_ != r.generation || stop_) continue;
         std::unique_ptr<PreviewResult> result;

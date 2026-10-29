@@ -191,7 +191,15 @@ impl TransferExecutor {
         staging_directory: &mut Option<String>,
         run: &mut ProgressCoalescer<'_, '_>,
     ) -> Result<Option<CompletedTransfer>, TransferError> {
-        self.revalidate(plan, transfer)?;
+        // A copied file's length is asked first: finding it proves the source is there, so the
+        // existence check below need not stat the same file a second time (a present file costs far
+        // more to stat than a missing one, and a copy of thousands of small files asks twice).
+        let known_length = if !transfer.is_directory && plan.verb == TransferVerb::Copy {
+            try_length(&transfer.source_path)
+        } else {
+            None
+        };
+        self.revalidate(plan, transfer, known_length.is_some())?;
 
         let mut destination_path = transfer.destination_path.clone();
         let mut displaced_stage_path: Option<String> = None;
@@ -244,6 +252,7 @@ impl TransferExecutor {
                 &transfer.source_path,
                 &destination_path,
                 transfer.is_directory,
+                known_length,
                 run,
             )
         };
@@ -303,8 +312,9 @@ impl TransferExecutor {
         &self,
         plan: &TransferPlan,
         transfer: &PlannedTransfer,
+        source_found: bool,
     ) -> Result<(), TransferError> {
-        if !self.exists(&transfer.source_path) {
+        if !source_found && !self.exists(&transfer.source_path) {
             return Err(TransferError::not_found(format!(
                 "'{}' no longer exists.",
                 transfer.name()
@@ -668,10 +678,11 @@ impl TransferExecutor {
         source: &str,
         destination: &str,
         is_directory: bool,
+        known_length: Option<i64>,
         run: &mut ProgressCoalescer<'_, '_>,
     ) -> Result<(), TransferError> {
         if !is_directory {
-            return self.copy_file(source, destination, try_length(source), run);
+            return self.copy_file(source, destination, known_length, run);
         }
         match self.copy_directory(source, destination, run) {
             // A copy is defined as purely additive, so a cancelled one must add nothing: half a
@@ -841,7 +852,7 @@ impl TransferExecutor {
     }
 
     fn exists(&self, path: &str) -> bool {
-        self.probe.file_exists(path) || self.probe.directory_exists(path)
+        self.probe.exists(path)
     }
 }
 
@@ -884,12 +895,7 @@ fn is_empty_directory(path: &str) -> bool {
 }
 
 fn try_length(path: &str) -> Option<i64> {
-    let meta = std::fs::symlink_metadata(path).ok()?;
-    if meta.file_attributes() & DIRECTORY != 0 {
-        None
-    } else {
-        Some(meta.file_size() as i64)
-    }
+    super::probe::file_length(path)
 }
 
 /// Files and bytes under `root`, however deep. The refusal has already ruled out links, so there

@@ -17,4 +17,4 @@ add_executable(bb-harness
 )
 target_include_directories(bb-harness PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 # bbcore_harness: the same ABI as the product's bbcore, plus the fixtures only a script needs.
-target_link_libraries(bb-harness PRIVATE bbviews bbcore_harness psapi dbghelp)
+target_link_libraries(bb-harness PRIVATE bbviews bbcore_harness psapi dbghelp winmm)
