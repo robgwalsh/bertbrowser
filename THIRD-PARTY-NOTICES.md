@@ -6,7 +6,7 @@ licence. This file lives at the repository root.
 The shipped programs are `BertBrowser.exe` (the C++ UI, linked with the Rust core `bbcore`),
 `bb-indexer.exe` and `bb-elevator.exe`. The Rust crates listed here are the ones
 `cargo tree -p bb-ffi -p bb-indexer -p bb-elevator -e normal` reports, at the versions pinned in
-`native/Cargo.lock`. Where a crate offers a choice of licences ("MIT OR Apache-2.0") BertBrowser uses
+`Cargo.lock`. Where a crate offers a choice of licences ("MIT OR Apache-2.0") BertBrowser uses
 it under the MIT one, or the first one named for the other pairs. The C++ UI uses no third-party
 libraries beyond the Windows SDK and the MSVC runtime, which is linked statically.
 

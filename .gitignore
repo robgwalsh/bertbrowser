@@ -59,7 +59,7 @@ BenchmarkDotNet.Artifacts/
 # tools/BertBrowser.Bench: where runs land, and the per-developer real-data config.
 # bench/baselines/ is committed; see bench/README.md.
 bench-results/
-native/bench/*.local.json
+bench/*.local.json
 csharp/bench/*.local.json
 
 # .NET Core
@@ -409,9 +409,10 @@ FodyWeavers.xsd
 # .claude/skills/release/, so that folder has to be re-included explicitly.
 !.claude/skills/release/
 
-# native rewrite build output
-native/target/
-native/out/
 
-# The native tree keeps cargo binaries under src/bin, which the C# bin/ rule above would hide.
-!native/crates/*/src/bin/
+# Rust and CMake build output (the repository root is the cargo workspace and the CMake source dir).
+/target/
+/out/
+
+# Cargo binaries live under src/bin, which the bin/ rule above would hide.
+!crates/*/src/bin/

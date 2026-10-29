@@ -19,9 +19,9 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       # fmt, clippy, cargo test, the cmake release build and every non-bench harness script. The
-      # version is stamped into the native tree after the tests, so the About box reports the tag.
+      # version is stamped into the tree after the tests, so the About box reports the tag.
       # The frozen C# tree under csharp/ is not built or tested.
-      - uses: ./.github/actions/native-build
+      - uses: ./.github/actions/build
         with:
           version: ${{ steps.ver.outputs.version }}
 
@@ -30,15 +30,15 @@ jobs:
         run: |
           dotnet tool install -g vpk
           # BertBrowser.exe and the two elevated helpers beside it, nothing else: vpk packs the whole folder.
-          pwsh native/tools/stage-package.ps1 -Out native/out/release/pack
+          pwsh tools/stage-package.ps1 -Out out/release/pack
           # Fetch the previous release (if any) so vpk can build a delta package.
           # Fails on the very first release when the repo has none - that's fine.
           vpk download github --repoUrl https://github.com/${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
           if ($LASTEXITCODE -ne 0) { Write-Host "No previous release found; building full package only." }
-          # The pack id stays BertBrowser, so an installed C# copy takes the native build as its next update.
+          # The pack id stays BertBrowser, so an installed C# copy takes this build as its next update.
           vpk pack --packId BertBrowser --packVersion ${{ steps.ver.outputs.version }} `
-            --packDir native/out/release/pack --mainExe BertBrowser.exe --packTitle BertBrowser `
-            --packAuthors "Rob Walsh" --icon native/app/app/app.ico
+            --packDir out/release/pack --mainExe BertBrowser.exe --packTitle BertBrowser `
+            --packAuthors "Rob Walsh" --icon app/app/app.ico
           if ($LASTEXITCODE -ne 0) { exit 1 }
           vpk upload github --repoUrl https://github.com/${{ github.repository }} `
             --token ${{ secrets.GITHUB_TOKEN }} --publish `

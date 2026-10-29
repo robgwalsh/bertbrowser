@@ -1,0 +1,161 @@
+# The name -> picture mapping, and the only place a wrong icon can be introduced.
+#
+# Every icon the app draws is listed here by the job it does, not by a number. `fetch-fluent.ps1`
+# fetches each one from Fluent UI System Icons (MIT, github.com/microsoft/fluentui-system-icons) and
+# caches its outline in icons.geo.txt; `build-icons.ps1` turns that into app/gfx/icons.gen.h.
+# Call sites say icons::Back; a name that is not in this file fails to compile rather than drawing the
+# wrong thing.
+#
+# Why not the Segoe Fluent Icons font, which this replaced:
+#   - a call site was a bare codepoint, so nothing could tell E76E (a smiley face) from a split-pane
+#     button, and four wrong pictures shipped: E76F and E76E on the pane buttons, E8B0 (a mouse
+#     cursor) on "Open in new pane", E74B (a down arrow) on "Delete permanently".
+#   - the font is Windows 11 only. Windows 10 falls back to Segoe MDL2 Assets, where some of those
+#     codepoints are simply absent and render as tofu.
+#   - Segoe is licensed for use on Windows, not for redistribution, so its outlines could not be
+#     bundled to fix that.
+#
+# Format: Name | Fluent asset folder | file stem | size. Size picks the artwork's own grid; 20 is
+# the one drawn for small UI. To change a picture, change its line here and re-run the script —
+# never edit icons.geo.txt or icons.gen.h by hand.
+
+# Navigation
+Back              | Arrow Left              | arrow_left              | 20
+Forward           | Arrow Right             | arrow_right             | 20
+Up                | Arrow Up                | arrow_up                | 20
+Refresh           | Arrow Clockwise         | arrow_clockwise         | 20
+
+# Window chrome. Dismiss is also the search box's clear and the pane's close.
+Minimize          | Subtract                | subtract                | 20
+Maximize          | Maximize                | maximize                | 20
+Restore           | Square Multiple         | square_multiple         | 20
+Dismiss           | Dismiss                 | dismiss                 | 20
+
+# Panes and tabs
+SplitRight        | Layout Column Two       | layout_column_two       | 20
+SplitBelow        | Layout Row Two          | layout_row_two          | 20
+OpenInNewTab      | Tab Add                 | tab_add                 | 20
+OpenInNewPane     | Split Horizontal        | split_horizontal        | 20
+PreviewPane       | Panel Right             | panel_right             | 20
+SidePaneNone      | Square                  | square                  | 20
+DetailsList       | Apps List               | apps_list               | 20
+# The flat branch view's toggle. A plain flat list of bullets, because that is what the button does
+# to the tree it is pointed at -- a "tree" glyph would name what it replaces rather than what it does.
+FlatView          | Text Bullet List        | text_bullet_list        | 20
+
+# File operations
+Cut               | Cut                     | cut                     | 20
+Copy              | Copy                    | copy                    | 20
+Paste             | Clipboard Paste         | clipboard_paste         | 20
+Rename            | Rename                  | rename                  | 20
+Delete            | Delete                  | delete                  | 20
+DeletePermanent   | Delete Dismiss          | delete_dismiss          | 20
+MoveToFolder      | Folder Arrow Right      | folder_arrow_right      | 20
+Undo              | Arrow Undo              | arrow_undo              | 20
+Redo              | Arrow Redo              | arrow_redo              | 20
+
+# Creating things
+Add               | Add                     | add                     | 20
+NewFile           | Document                | document                | 20
+NewFolder         | Folder Add              | folder_add              | 20
+Archive           | Folder Zip              | folder_zip              | 20
+
+# Launching other programs
+Open              | Open                    | open                    | 20
+Terminal          | Window Console          | window_console          | 20
+VSCode            | Code                    | code                    | 20
+Shield            | Shield                  | shield                  | 20
+
+# Everything else
+Search            | Search                  | search                  | 20
+Settings          | Settings                | settings                | 20
+Properties        | Info                    | info                    | 20
+Bookmark          | Star                    | star                    | 20
+DiskUsage         | Data Pie                | data_pie                | 20
+Indexing          | Pulse                   | pulse                   | 20
+Reorder           | Re Order Dots Vertical  | re_order_dots_vertical  | 20
+
+# Dialog severity. MessageDialog and DeleteDialog pick one of these by kind.
+Warning           | Warning                 | warning                 | 20
+Error             | Error Circle            | error_circle            | 20
+Info              | Info                    | info                    | 20
+
+# Settings categories. Preview reuses PreviewPane and New items reuses Add, because they are the
+# same idea in a different place; a second name for the same picture would just be a second thing
+# to keep in step.
+Appearance        | Color                   | color                   | 20
+Columns           | Column Triple           | column_triple           | 20
+
+# A user-defined command in a context menu. This is why the manifest exists: it used to share
+# codepoint E8A7 with "Open in new tab", so one number meant two unrelated things.
+CustomCommand     | Apps                    | apps                    | 20
+
+# "Files you have more than one of" — a different idea from the clipboard's Copy, which it used to
+# share codepoint E8C8 with.
+Duplicates        | Document Multiple       | document_multiple       | 20
+
+# Comparing this pane with the one beside it. "Arrow swap" rather than a scales or a diff glyph:
+# what the command actually offers is moving files from one side to the other.
+Compare           | Arrow Swap              | arrow_swap              | 20
+
+# Widening the preview pane to fit whatever it is currently showing.
+FitWidth          | Arrow Autofit Width     | arrow_autofit_width     | 20
+
+# What changed on this volume recently: the change timeline, its toolbar button and its
+# settings page. A clock with an arrow -- "history" -- rather than a list or a journal glyph.
+Changes           | History                 | history                 | 20
+
+# Keep this search under a name: the button inside both search boxes.
+Save              | Save                    | save                    | 20
+
+# The checksum dialog: a file's SHA-256 digest, for verifying a download.
+Checksum          | Number Symbol           | number_symbol           | 20
+Metadata          | Tag                     | tag                     | 20
+FileDates         | Calendar Clock          | calendar_clock          | 20
+
+# Comparing two files by content. Deliberately not Icon.Compare, which already means "compare this
+# pane with the one beside it" — both appear in the file list's menu, and one picture on two verbs
+# is the wrong-picture mistake nothing else catches.
+CompareFiles      | Document Split Hint     | document_split_hint     | 20
+
+# The preview pane's media transport. Next is "skip to the next video in this folder"; AutoAdvance
+# is the toggle that does the same by itself when one ends, so it is the loop-through-a-list arrow
+# rather than a second skip glyph. LoopOne is its alternative — replay this one — and wears the
+# repeat-one arrow every player uses for that. AutoPlay starts a video as soon as it is selected.
+Play              | Play                    | play                    | 20
+Pause             | Pause                   | pause                   | 20
+SkipNext          | Next                    | next                    | 20
+AutoAdvance       | Arrow Repeat All        | arrow_repeat_all        | 20
+LoopOne           | Arrow Repeat 1          | arrow_repeat_1          | 20
+AutoPlay          | Play Circle             | play_circle             | 20
+FullScreen        | Full Screen Maximize    | full_screen_maximize    | 20
+ExitFullScreen    | Full Screen Minimize    | full_screen_minimize    | 20
+
+# Collapsing and expanding the preview pane's details strip. Up/down chevrons, pointing the way the
+# strip will move.
+ChevronDown       | Chevron Down            | chevron_down            | 20
+ChevronUp         | Chevron Up              | chevron_up              | 20
+
+# The Drives header's button that folds every expanded drive and folder back up.
+CollapseAll       | Arrow Collapse All      | arrow_collapse_all      | 20
+
+# The command palette and the Keyboard settings page. Palette is a lightning bolt -- "do something,
+# quickly" -- rather than a magnifier, which already means searching for files in two boxes on the
+# same title bar. Pin and PinOff are the row's own toggle: an outline to pin, a struck one to unpin.
+Palette           | Flash                   | flash                   | 20
+Keyboard          | Keyboard                | keyboard                | 20
+Pin               | Pin                     | pin                     | 20
+PinOff            | Pin Off                 | pin_off                 | 20
+
+# What the palette's rows are about, for the kinds of command that had no picture because they had
+# no button: places to go, an open tab, what is selected, the order of the list, and hidden items.
+Folder            | Folder                  | folder                  | 20
+Home              | Home                    | home                    | 20
+Desktop           | Desktop                 | desktop                 | 20
+Download          | Arrow Download          | arrow_download          | 20
+Drive             | Hard Drive              | hard_drive              | 20
+Tab               | Tab Desktop             | tab_desktop             | 20
+SelectAll         | Select All On           | select_all_on           | 20
+Sort              | Arrow Sort              | arrow_sort              | 20
+Hidden            | Eye Off                 | eye_off                 | 20
+Thumbnails        | Grid                    | grid                    | 20

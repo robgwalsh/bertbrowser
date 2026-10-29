@@ -6,7 +6,7 @@ description: Ship a new BertBrowser version — pre-flight checks, tag, watch CI
 # Releasing BertBrowser
 
 **The tag is the release.** No file carries a version; CI derives it from the tag, builds, packs
-with Velopack (`vpk pack --packId BertBrowser --packDir native/out/release/app`), publishes the GitHub
+with Velopack (`vpk pack --packId BertBrowser --packDir out/release/app`), publishes the GitHub
 Release, and opens the winget PR. The app is the native one; `csharp/` is a frozen reference and is
 never built or shipped. The first native release is `v2.0.0`. Full detail lives in
 [docs/build-and-release.md](../../../docs/build-and-release.md) — this is the procedure to follow.
@@ -28,7 +28,7 @@ now the way to stage something privately.
 git fetch origin
 git status -sb                      # clean tree, main in sync with origin/main
 git rev-parse HEAD origin/main      # must match — the tag builds what's on the branch
-cd native; cargo test --workspace --release; cd ..   # PowerShell, not the Bash tool (Deny ACEs)
+cargo test --workspace --release   # PowerShell, not the Bash tool (Deny ACEs)
 git tag --sort=-v:refname | head -3 # the last version, to pick the next one
 ```
 
@@ -91,7 +91,7 @@ useful", "security". Read the actual changes:
 ```powershell
 git log --oneline vPREV..vX.Y.Z
 git diff --stat vPREV..vX.Y.Z
-git show <sha> -- native/app/views native/crates/bb-app   # what the user sees
+git show <sha> -- app/views crates/bb-app   # what the user sees
 ```
 
 Write from what changed *for a user*, grouped by feature area, not by commit. Code comments in the

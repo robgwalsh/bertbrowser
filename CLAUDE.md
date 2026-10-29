@@ -5,17 +5,16 @@ Guidance for Claude Code working in this repo.
 ## Project
 
 bertbrowser is a Windows-only file browser with global MFT-backed search and cached recursive
-directory sizes, backed by a local SQLite database. The app is **native**: a Rust core (`native/crates`)
-behind a C ABI, and a C++20 Win32 + Direct2D/DirectWrite UI (`native/app`), everything custom-drawn.
+directory sizes, backed by a local SQLite database. The app is **native**: a Rust core (`crates`)
+behind a C ABI, and a C++20 Win32 + Direct2D/DirectWrite UI (`app`), everything custom-drawn.
 The earlier C#/WPF app lives on, frozen, in `csharp/` as the reference for behaviour (see below).
 
 ## Commands
 
-All from `native/` (PowerShell 7). Windows 10/11, Visual Studio 2022 with the C++ workload, Rust stable
+All from the repository root (PowerShell 7). Windows 10/11, Visual Studio 2022 with the C++ workload, Rust stable
 `x86_64-pc-windows-msvc`, `cargo install cbindgen`.
 
 ```powershell
-cd native
 pwsh .\build.ps1 [-Config release] [-Configure]   # enters the VS dev shell; cargo + cbindgen + cmake. Output in out\<config>\
 cargo test --workspace                             # run via PowerShell, NOT the Bash tool: its sandbox ignores Deny ACEs, so access_denied_tests fails there
 cargo test -p bb-core --test all search_grammar        # one filter over the integration binary
@@ -23,47 +22,47 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 
 # Drive the real window offscreen - see "Never launch the GUI" below. --out must be a fresh dir per run.
-native\out\debug\harness\bb-harness.exe --script ..\tools\ui\smoke.bbs --out $env:TEMP\look-1
+out\debug\harness\bb-harness.exe --script tools\ui\smoke.bbs --out $env:TEMP\look-1
 
-# Measure - see native/bench/README.md. Release build.
-native\target\release\bb-bench.exe run|ui|startup|compare|baseline|report|corpus   # --help for flags
+# Measure - see bench/README.md. Release build.
+target\release\bb-bench.exe run|ui|startup|compare|baseline|report|corpus   # --help for flags
 
-pwsh native\tools\parity\tests.ps1 [-All] [-File X.cs]   # C# test vs Rust test, by file and name
+pwsh tools\parity\tests.ps1 [-All] [-File X.cs]   # C# test vs Rust test, by file and name
 ```
 
 `build.ps1` prints a harmless "vswhere.exe not recognized" line. `LNK1104` on `app\BertBrowser.exe`
 means a running instance holds it - kill it (`Get-Process BertBrowser | Stop-Process -Force`) and
 rebuild, no need to ask. `BERTBROWSER_DATA_DIR` overrides the data directory (`~\.bertbrowser`).
-CI (`unstable.yml`, `release.yml`) is native-only and never builds `csharp/`.
+CI (`unstable.yml`, `release.yml`) builds only the app and never touches `csharp/`.
 
 ## Never launch the GUI
 
 `BertBrowser.exe` puts a real window on the user's screen and steals focus. **Never run it**, even
-"just to check something." Use the harness (`native/harness` -> `bb-harness.exe`, driven via the
+"just to check something." Use the harness (`harness` -> `bb-harness.exe`, driven via the
 `verify` skill). The only sanctioned launch is `bb-bench startup`, which parks the window offscreen
 against a scratch data directory. Exception: the user explicitly asking you to launch it.
 
 ## Structure
 
-- `native/crates/bb-paths` - `PathKey`, `UniquePath`, natural sort, glob text. No other deps.
-- `native/crates/bb-core` - everything pure or Win32-behind-a-trait: SQLite (rusqlite, bundled),
+- `crates/bb-paths` - `PathKey`, `UniquePath`, natural sort, glob text. No other deps.
+- `crates/bb-core` - everything pure or Win32-behind-a-trait: SQLite (rusqlite, bundled),
   search, executors, undo, metadata codecs, archives, the settings model. **The place for anything
   testable**: tests are `crates/bb-core/tests/all/<name>_tests.rs`, real SQLite DBs and trees under `%TEMP%`.
-- `native/crates/bb-shell` - shell/registry/COM services that are not painting (launcher, single
+- `crates/bb-shell` - shell/registry/COM services that are not painting (launcher, single
   instance, foreground, folder handler, updates, startup trace, index/elevation pipes).
-- `native/crates/bb-app` - orchestration (tabs, listings, operations queue, palette, settings pages,
+- `crates/bb-app` - orchestration (tabs, listings, operations queue, palette, settings pages,
   tool-window models, session). No UI; the FFI, the harness and tests call its `api`.
-- `native/crates/bb-ffi` - the C ABI staticlib `bbcore`; cbindgen reads this crate alone.
+- `crates/bb-ffi` - the C ABI staticlib `bbcore`; cbindgen reads this crate alone.
   `bb-ffi-harness` = the same ABI plus test fixtures (`bbcore_harness.lib`); `bb-test-support` = dev-dep fixtures.
-- `native/crates/bb-indexer`, `bb-elevator` - the two elevated exes (`requireAdministrator`). They link
+- `crates/bb-indexer`, `bb-elevator` - the two elevated exes (`requireAdministrator`). They link
   `bb-core` + `bb-paths` only, never shell COM or orchestration. Indexer **outlives the app**
   (gotcha below); Elevator serves one retried file operation and exits.
-- `native/crates/bb-bench` - benchmark driver.
-- `native/app/{platform,gfx,ui,views,app}` - C++ static lib `bbapp` + `BertBrowser.exe` (WinMain only).
+- `crates/bb-bench` - benchmark driver.
+- `app/{platform,gfx,ui,views,app}` - C++ static lib `bbapp` + `BertBrowser.exe` (WinMain only).
   `platform` = hwnd/loop/DPI/chrome; `gfx` = D3D11/D2D/DWrite, palette, text cache, icons; `ui` = widget
   tree and core widgets; `views` = main window, panes, dialogs, tool windows, shell-menu host.
-- `native/harness` - `bb-harness.exe`: links `bbapp` + `bbcore_harness`, runs `tools/ui/*.bbs`.
-- `native/tools/{icons,parity}`, `native/bench/`, `native/docs/`, `native/include/bbcore.h` (generated).
+- `harness` - `bb-harness.exe`: links `bbapp` + `bbcore_harness`, runs `tools/ui/*.bbs`.
+- `tools/{icons,parity}`, `bench/`, `docs/`, `include/bbcore.h` (generated).
 - `tools/ui/*.bbs` - the harness scripts, shared by the native harness and the C# one.
 - `csharp/` - frozen C# reference (below).
 
@@ -73,13 +72,13 @@ The previous C#/WPF app (`csharp/src`, `tests`, `tools/BertBrowser.Harness`, `to
 `bertbrowser.sln`, C# baselines) is **kept as the spec, not shipped, and not built by CI**. When porting
 or checking behaviour, the C# file is the specification: `Spec:` doc comments in the Rust and C++
 point at it - read `Core/...` as `csharp/src/BertBrowser.Core/...`. Never edit it except to keep it
-building. `native/tools/parity/tests.ps1` diffs the C# test suite against the Rust one (deliberate
-drops in `native/tools/parity/dropped.txt`, with a reason).
+building. `tools/parity/tests.ps1` diffs the C# test suite against the Rust one (deliberate
+drops in `tools/parity/dropped.txt`, with a reason).
 
 ## Where to look, by topic
 
-Paths are Rust unless noted: `core/` = `native/crates/bb-core/src`, `app/` = `bb-app/src`, `shell/` =
-`bb-shell/src`; `ui:` = C++ under `native/app/views` (or `ui`, `gfx`, `platform`). Read the source for
+Paths are Rust unless noted: `core/` = `crates/bb-core/src`, `app/` = `bb-app/src`, `shell/` =
+`bb-shell/src`; `ui:` = C++ under `app/views` (or `ui`, `gfx`, `platform`). Read the source for
 behavior - this table only says where.
 
 | Topic | Look at |
@@ -130,27 +129,27 @@ behavior - this table only says where.
 | Command palette | `core/commands/{palette,matcher,goto}.rs`, `app/palette.rs`, ui: `palette_view.cpp`, `tools/ui/palette.bbs` |
 | Settings page | `app/settings_svc.rs`, `core/settings/*`, ui: `settings_view.cpp`, `tools/ui/settings.bbs` |
 | Theming | `core/theming/*` (`catalog`, `resolver`, `system`), `app/themes.rs`, ui: `gfx/palette.cpp`, `gfx/tokens.h` |
-| App icon | `native/tools/icons/build-app-icon.ps1` -> `native/app/app/app.ico` |
-| Icons | `native/tools/icons/icons.txt` (the mapping) -> `app/gfx/icons.gen.h` (generated) via `build-icons.ps1` |
+| App icon | `tools/icons/build-app-icon.ps1` -> `app/app/app.ico` |
+| Icons | `tools/icons/icons.txt` (the mapping) -> `app/gfx/icons.gen.h` (generated) via `build-icons.ps1` |
 | Columns (file list) | `core/columns/*`, `app/columns.rs`, ui: `shell_props.cpp` (shell property values), `ui/list_view.cpp` |
 | Tabs / panes / layout | `app/tabs.rs`, `app/session.rs`, `app/api.rs`, `core/layout/*`, ui: `main_view.cpp` |
 | Flat branch view (Ctrl+B) | `FlatViewRules` in `core/rules.rs`, `SearchService::list_subtree` in `core/fs/search_service.rs`, `app/tabs.rs` |
 | Thumbnail tiles / scrolling | `ui/tile_view.cpp` (uniform tiles by arithmetic), `thumbs.cpp` (4-slot shell gate), `tools/ui/tiles.bbs` |
-| UI test harness | `native/harness/*` (`runner*.cpp`, `session.cpp`, `sandbox.cpp`, `crash.cpp`), `tools/ui/*.bbs`, `.claude/skills/verify` |
-| FFI | `native/include/bbcore.h` (generated), `bb-ffi/src/*`, `app/events.rs`, `app/views/model.h` (JSON models) |
-| Benchmarks / performance evidence | `crates/bb-bench` (`run`, `ui`, `startup`, `compare`, `baseline`, `report`, `corpus`), `core/benchmarking/*`, `native/bench/baselines/<machine-key>.json`, `native/docs/performance.md` (generated), `tools/ui/bench-*.bbs`, `shell/startup_trace.rs`, `native/bench/README.md` |
+| UI test harness | `harness/*` (`runner*.cpp`, `session.cpp`, `sandbox.cpp`, `crash.cpp`), `tools/ui/*.bbs`, `.claude/skills/verify` |
+| FFI | `include/bbcore.h` (generated), `bb-ffi/src/*`, `app/events.rs`, `app/views/model.h` (JSON models) |
+| Benchmarks / performance evidence | `crates/bb-bench` (`run`, `ui`, `startup`, `compare`, `baseline`, `report`, `corpus`), `core/benchmarking/*`, `bench/baselines/<machine-key>.json`, `docs/performance.md` (generated), `tools/ui/bench-*.bbs`, `shell/startup_trace.rs`, `bench/README.md` |
 
 ## Native gotchas
 
 - **Static CRT on both sides.** C++ is `/MT` (`CMAKE_MSVC_RUNTIME_LIBRARY`), Rust is
-  `+crt-static` (`native/.cargo/config.toml`). They must match or the staticlib link yields duplicate CRT
+  `+crt-static` (`.cargo/config.toml`). They must match or the staticlib link yields duplicate CRT
   symbols and heap-crossing bugs. A side effect is no VC redistributable in `Setup.exe`.
 - **The FFI is UI-thread only; the Rust event sink may only enqueue.** Every `bb_*` call comes from the
   UI thread and returns without blocking; results arrive as events. The sink runs on Rust threads and
   does one thing: `PostMessage(hwnd, WM_BB_EVENT, ...)`. Rust never re-enters C++ any other way. Every
   export is `catch_unwind` -> `BB_PANIC` (message via `bb_last_error()`); strings are UTF-16 `BbStr`
   borrowed in, Rust-owned views or `bb_str_free` out; stale ids answer `BB_STALE`.
-- **`native/include/bbcore.h` is generated by cbindgen during the build and committed.** Commit the
+- **`include/bbcore.h` is generated by cbindgen during the build and committed.** Commit the
   regenerated header with the Rust change that caused it; never discard it, never hand-edit it.
 - **Widgets hold theme token ids, never brushes.** `gfx::Palette` owns the brushes and rebuilds them on
   a theme change or device loss, so nothing that draws hears about either. No literal colors in C++
@@ -264,7 +263,7 @@ behavior - this table only says where.
   `palette_rules_tests`). Recents live in memory only: a list of what was run is a history, and a
   persisted one would owe the opt-in switch every history feature here has. Pins are saved. Unavailable
   commands stay listed with their reason. It is an in-tree overlay (`popup_layer`), so `shot` photographs it.
-- **The app is `asInvoker`** (manifest in `native/app/app`). Only the two elevated helper exes touch an
+- **The app is `asInvoker`** (manifest in `app/app`). Only the two elevated helper exes touch an
   administrator token. Don't reintroduce `requireAdministrator` on the app to fix an access-denied error -
   a folder the app can't read, Explorer can't either.
 - **Every executor (transfer/rename/delete/new-item/archive-edit) has the same shape**: a pure `*Planner`
@@ -413,8 +412,8 @@ behavior - this table only says where.
   (`NotDownloaded`/`Offline`) are refused rather than silently hydrated (also true for shell-metadata
   columns - see `MetadataReadRules`).
 - **Icons are named, never numbered.** A wrong picture is the one UI mistake nothing catches. Call sites
-  say `icons::Back`, so a bad name fails at compile time. Add one by editing `native/tools/icons/icons.txt`
-  and re-running `pwsh native/tools/icons/build-icons.ps1` - never hand-edit `icons.gen.h` - then **look at
+  say `icons::Back`, so a bad name fails at compile time. Add one by editing `tools/icons/icons.txt`
+  and re-running `pwsh tools/icons/build-icons.ps1` - never hand-edit `icons.gen.h` - then **look at
   it** in a harness capture. Drawn outlines from Fluent UI System Icons (MIT), not the Segoe font.
 - **Settings is a page of the main window, not a dialog, and it applies as you go.** It lies over
   everything under the title bar, at most 1024 wide and centred over a scrim that dims the folders and
@@ -438,7 +437,7 @@ behavior - this table only says where.
   scenarios through the harness (`tools/ui/bench-*.bbs`; the `time` verb wraps any verb), Tier C launches
   the real exe. **CI gates allocations only** (deterministic); time gates run locally at 15% over a noise
   floor, and so does process memory (managed heap tight, private bytes loose). A deliberate slowdown
-  re-records the baseline and regenerates `native/docs/performance.md` (`report`) in the same commit, with
+  re-records the baseline and regenerates `docs/performance.md` (`report`) in the same commit, with
   the reason in the message. Easy to undo: an allocation tolerance is for benchmarks over SQLite, threads
   or disk only - loosening a pure one defeats the gate; `settle-thumbnails` is a verb rather than part of
   `settle`, or every script would wait on shell COM calls; the synthetic corpus lives on drive `Q:` so it

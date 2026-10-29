@@ -1,8 +1,8 @@
 # csharp
 
 The frozen C#/WPF reference implementation of BertBrowser. It is **not shipped, not built by CI, and not
-maintained**: the product is the native app under `native/`. It stays in the repository so behaviour can be
-compared while parity is still being checked (`native/tools/parity/tests.ps1` maps each C# test to its Rust
+maintained**: the product is the native app at the repository root. It stays in the repository so behaviour can be
+compared while parity is still being checked (`tools/parity/tests.ps1` maps each C# test to its Rust
 counterpart; the offscreen scripts in `../tools/ui/*.bbs` run against either harness).
 
 The layout is the one the code was written in, so nothing inside it moved relative to anything else:

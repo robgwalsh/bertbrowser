@@ -7,7 +7,7 @@ description: Run, drive, and screenshot the BertBrowser app without it appearing
 
 The user multitasks while you work. A window that pops up over what they are doing and takes the
 keyboard is not a minor annoyance - their keystrokes and yours end up in the same input queue. So
-the app is never launched directly. Instead `bb-harness.exe` (`native/harness`) builds the same
+the app is never launched directly. Instead `bb-harness.exe` (`harness`) builds the same
 window from the same C++ UI library and the same Rust core, in its own process, parked at
 -32000,-32000, refused activation and disabled, rendering through WARP into an offscreen bitmap, and
 you look at PNGs of it. It is a separate exe, never a mode of `BertBrowser.exe`: it links
@@ -25,7 +25,7 @@ The only exceptions are the user explicitly asking you to launch the app, and `b
 
 **Is the question about a rule?** What a move refuses, how a numbered rename lands, which items a
 delete protects, how a path is canonicalised, what the planner does with a junction - none of that
-needs a window. Write a test in `native/crates/bb-core/tests/all/` (`transfer_planner_tests.rs`,
+needs a window. Write a test in `crates/bb-core/tests/all/` (`transfer_planner_tests.rs`,
 `rename_planner_tests.rs`, `delete_planner_tests.rs` run against fake filesystems, the executor tests
 against real files under `%TEMP%`). Run it with `cargo test -p bb-core --test all <filter>`, from
 PowerShell. Deterministic, fast, no UI.
@@ -33,18 +33,18 @@ PowerShell. Deterministic, fast, no UI.
 **Is the question about the interface?** Layout, theming, what a dialog looks like, whether the tree
 reveals, what the status bar says, how tabs and panes arrange - that is the harness.
 
-**Is the question about speed?** `native\target\release\bb-bench.exe run --filter *pathkey*` for a core
+**Is the question about speed?** `target\release\bb-bench.exe run --filter *pathkey*` for a core
 path, `... ui --scenario listing-10k` for what a user feels - not a stopwatch in a script. The harness's
 `time` verb exists, but only `bb-bench` turns its samples into something a baseline can be compared
-with. See `native/bench/README.md`.
+with. See `bench/README.md`.
 
 ## Running it
 
 ```powershell
-$harness = "C:\Source\bertbrowser\native\out\debug\harness\bb-harness.exe"
+$harness = "C:\Source\bertbrowser\out\debug\harness\bb-harness.exe"
 ```
 
-Build with `cd C:\Source\bertbrowser\native; pwsh .\build.ps1` first (`-Config release` for
+Build with `cd C:\Source\bertbrowser; pwsh .\build.ps1` first (`-Config release` for
 `out\release\...`). `build.ps1` prints a harmless "vswhere.exe not recognized" line. The harness links
 the Rust core, so a Rust change needs the rebuild too, and the regenerated `include\bbcore.h` is to be
 committed. If the link fails with LNK1104 on a running exe, kill it and rebuild.

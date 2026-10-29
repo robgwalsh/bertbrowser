@@ -352,8 +352,8 @@ for every one of them, and **no temp B-tree anywhere**. A regular expression is 
 visibly so: it cannot stop early, so it always reads the whole scope.
 
 Kept as the reference measurement that shaped the design. The same seven queries now run as
-`core.fsindex.search(…)` and `core.fsindex.searchglobal(…)` in `bb-bench` (`native/crates/bb-bench`), against a
-synthetic index by default and this machine's own under `--real`; `native/docs/performance.md` carries the
+`core.fsindex.search(…)` and `core.fsindex.searchglobal(…)` in `bb-bench` (`crates/bb-bench`), against a
+synthetic index by default and this machine's own under `--real`; `docs/performance.md` carries the
 current numbers, and a regression is judged against the baseline there, not against this table.
 
 ### Rebuilding display paths
@@ -453,8 +453,8 @@ tree extrapolates to about 19 s warm, which is why this streams, reports progres
 while keeping what it found.
 
 As above, this is the reference measurement; the scan runs as `core.content.scaninmemory2k` (the
-scanner alone) and `core.content.scandisk2k` (with real reads) in `bb-bench` (`native/crates/bb-bench`), and
-`native/docs/performance.md` has the current numbers.
+scanner alone) and `core.content.scandisk2k` (with real reads) in `bb-bench` (`crates/bb-bench`), and
+`docs/performance.md` has the current numbers.
 
 **Two refusals rather than wrong answers.** `content:` with `in:archives`, and `content:` typed while
 standing inside a container, are both refused by name. The reason is worth keeping: an archive entry
@@ -571,7 +571,7 @@ the canonical path.
 
 ## Where the tests are
 
-Rust integration tests in `native/crates/bb-core/tests/all/`, one file per row, the name snake_cased
+Rust integration tests in `crates/bb-core/tests/all/`, one file per row, the name snake_cased
 (`NtfsParsingTests` is `ntfs_parsing_tests.rs`).
 
 | Test | Covers |

@@ -4,7 +4,7 @@
 [![Unstable](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Frobgwalsh%2Fbertbrowser%2Freleases%2Ftags%2Funstable&query=%24.name&label=unstable&color=d29922)](https://github.com/robgwalsh/bertbrowser/releases/tag/unstable)
 [![Unstable build](https://img.shields.io/github/actions/workflow/status/robgwalsh/bertbrowser/unstable.yml?branch=main&label=build)](https://github.com/robgwalsh/bertbrowser/actions/workflows/unstable.yml)
 
-A [fast and memory-efficient](native/docs/performance.md) offline Windows 10/11 file browser.
+A [fast and memory-efficient](docs/performance.md) offline Windows 10/11 file browser.
 
 - **Offline** - BertBrowser does not connect to the Internet except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates.
 - **[Instant global search](docs/search-indexing.md)** - MFT indexing and USN journal tracking for fastest possible performance.
@@ -74,26 +74,30 @@ Needs Visual Studio 2022 with the *Desktop development with C++* workload, Rust 
 
 ```powershell
 git clone https://github.com/robgwalsh/bertbrowser.git
-cd bertbrowser\native
+cd bertbrowser
 
 pwsh .\build.ps1                  # build (add -Config release for a release build)
 cargo test --workspace            # run the Rust tests
 ```
 
+`build.ps1` enters the Visual Studio developer shell, then configures and builds the CMake preset; the
+build itself runs `cargo build -p bb-ffi -p bb-indexer -p bb-elevator` and `cbindgen`, so the C++ side
+always links the current Rust code. The header `include/bbcore.h` is generated and committed.
+
 Warnings are errors on both sides (clippy `-D warnings`, MSVC `/W4 /WX`), so a clean build is a
-warning-free build. The app lands in `native\out\<config>\app\BertBrowser.exe`.
+warning-free build. The app lands in `out\<config>\app\BertBrowser.exe`.
 
 See [docs/build-and-release.md](docs/build-and-release.md) for packaging, the tag-driven release workflow, and how updates reach installed copies.
 
 ## Testing the interface
 
-`native/harness` builds `bb-harness.exe`, which allows testing BertBrowser in a headless way: it links the
+`harness/` builds `bb-harness.exe`, which allows testing BertBrowser in a headless way: it links the
 app's own UI library and Rust core, shows the real main window parked outside every monitor and refused
 activation, then drives it with a small script language and captures it through Direct2D on the WARP
 software rasteriser - so being offscreen and covered costs nothing.
 
 ```powershell
-$harness = "native\out\debug\harness\bb-harness.exe"
+$harness = "out\debug\harness\bb-harness.exe"
 
 & $harness --script tools\ui\smoke.bbs --out $env:TEMP\look-1     # browse, search, move, rename, delete, undo
 & $harness --script tools\ui\themes.bbs --out $env:TEMP\look-2    # every built-in theme, and the dialogs
@@ -109,16 +113,16 @@ executors, not stubs.
 
 ## Benchmarking
 
-`bb-bench` (`native/crates/bb-bench`) benchmarks the core, whole UI scenarios and startup. Results are
+`bb-bench` (`crates/bb-bench`) benchmarks the core, whole UI scenarios and startup. Results are
 compared against a committed per-machine baseline, CI gates allocations on every push, and
-[native/docs/performance.md](native/docs/performance.md) is generated from the baselines. See
-[native/bench/README.md](native/bench/README.md).
+[docs/performance.md](docs/performance.md) is generated from the baselines. See
+[bench/README.md](bench/README.md).
 
 ```powershell
-$bench = "native\target\release\bb-bench.exe"
+$bench = "target\release\bb-bench.exe"
 & $bench run --filter *fsindex*          # a core area
 & $bench ui --scenario listing-10k       # a UI scenario, five fresh processes
-& $bench compare --baseline native\bench\baselines\<key>.json --current native\bench-results\current.json
+& $bench compare --baseline bench\baselines\<key>.json --current bench-results\current.json
 ```
 
 ## Data locations
@@ -133,13 +137,15 @@ Delete the folder to reset the app completely. Data left by the 1.x (C#) version
 
 ## Project layout
 
-- `native/crates` — the Rust core: `bb-paths` (path keys), `bb-core` (everything testable and UI-free:
+- `crates/` — the Rust core: `bb-paths` (path keys), `bb-core` (everything testable and UI-free:
   SQLite persistence, search, executors, undo, metadata, archives), `bb-shell` (shell/registry/COM
   services), `bb-app` (orchestration), `bb-ffi` (the C ABI), the two elevated helpers `bb-indexer` and
-  `bb-elevator`, and `bb-bench`.
-- `native/app` — the C++20 Win32 + Direct2D/DirectWrite UI, custom-drawn.
-- `native/harness` — the offscreen UI harness; `tools/ui/*.bbs` are its scripts.
-- `native/bench` — benchmark baselines and notes.
+  `bb-elevator`, and `bb-bench` (the benchmark driver). `bb-ffi` is the `bbcore` staticlib that cbindgen reads;
+  `bb-ffi-harness` is the same ABI plus test fixtures, used by the harness only.
+- `app/` — the C++20 Win32 + Direct2D/DirectWrite UI, custom-drawn: a static library `bbapp` plus `BertBrowser.exe` (WinMain only).
+- `harness/` — the offscreen UI harness; `tools/ui/*.bbs` are its scripts.
+- `bench/`, `docs/` — benchmark baselines and notes; design and build documents.
+- `tools/` — `ui/` harness scripts, `icons/` (the icon pipeline), `parity/` (diffs the C# test suite against the Rust one), and the version, staging and harness-runner scripts CI uses.
 - `csharp/` — the frozen C#/WPF app of the 1.x releases, kept as a behavioural reference. Not built or shipped.
 
 See [CLAUDE.md](CLAUDE.md) for a deeper architecture walkthrough (path-key invariants, the FFI rules, the size-scan algorithm).

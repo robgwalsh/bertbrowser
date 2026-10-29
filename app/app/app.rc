@@ -1,0 +1,5 @@
+// Resources of BertBrowser.exe: the application icon (id 1, which Window::register_class loads for the
+// window class: title bar, taskbar, alt-tab). Drawn by tools/icons/build-app-icon.ps1.
+#include <winuser.h>
+
+1 ICON "app.ico"
