@@ -1,0 +1,45 @@
+# The folder tree's right-click menu and the sidebar's Bookmarks section.
+#
+# A tree menu is about the folder right-clicked, never the file list's selection: every entry
+# below names a folder the tab is not showing, and the tab's own folder must be untouched by it.
+# Dialogs (New, Properties, What changed) cannot open in a run, so they are not exercised here.
+
+tree .
+refresh
+assert-row Pictures
+tree-menu-run Copy as path on Pictures
+assert-status Copied 1 path
+assert-path sandbox
+
+# Bookmark, from the tree and from the list; the tree's caption turns into Remove bookmark.
+assert-bookmarks none
+tree-menu-run Bookmark on Pictures
+assert-bookmarks Pictures
+select notes.txt
+run file.bookmark
+assert-bookmarks Pictures | notes.txt
+tree-menu-run Remove bookmark on Pictures
+assert-bookmarks notes.txt
+
+# A hidden target is listed only while hidden items are shown (dimmed then, like the tree's row).
+hidden on
+settle 500
+select HiddenFolder
+run file.bookmark
+assert-bookmarks HiddenFolder | notes.txt
+shot 01-bookmarks-hidden-shown
+hidden off
+settle 500
+assert-bookmarks notes.txt
+shot 02-bookmarks-hidden-left-out
+
+tree-menu-run Delete… on Empty
+assert-missing Empty
+assert-path sandbox
+tree-menu-run Open in new tab on Documents
+assert-path Documents
+assert-tabs 2
+tree-menu-run Open in pane right on Pictures
+assert-panes 2
+assert-path Pictures
+shot 03-after-tree-menu

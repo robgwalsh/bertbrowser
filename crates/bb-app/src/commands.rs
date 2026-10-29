@@ -63,7 +63,6 @@ const UI_OWNED: &[&str] = &[
     "file.extract-here",
     "file.extract-to",
     "file.unlock-archive",
-    "file.bookmark",
     "file.checksum",
     "file.verify-checksums",
     "file.compare-files",
@@ -1028,6 +1027,10 @@ impl Inner {
             "file.delete-permanently" => {
                 let paths = self.selected_paths(tab)?;
                 self.op_delete(paths, DeleteMode::Permanent).map(|_| ())
+            }
+            "file.bookmark" => {
+                let paths = self.selected_paths(tab)?;
+                self.toggle_bookmarks(tab, &paths)
             }
             "edit.undo" => self.op_undo_step(1).map(|_| ()),
             "edit.redo" => self.op_undo_step(-1).map(|_| ()),

@@ -184,8 +184,27 @@ impl Inner {
         if let Some(reason) = self.why_not_now(id)? {
             return Err(AppError::Invalid(reason));
         }
-        let resolve = |p: &str| self.seams.launcher.resolve(p);
         let targets = self.launch_targets();
+        self.launch_on(id, &targets);
+        Ok(())
+    }
+
+    /// As `run_launch_command`, on one folder rather than the selection: the folder tree's menu,
+    /// whose subject is the folder right-clicked, not anything the file list has selected.
+    pub(crate) fn run_launch_command_at(self: &Arc<Self>, id: &str, folder: &str) -> AppResult<()> {
+        if !is_launch_command(id) || id == "file.run-as-admin" {
+            return Err(AppError::Invalid(format!("'{id}' cannot run on a folder")));
+        }
+        let targets = [Target {
+            path: folder.to_string(),
+            is_directory: true,
+        }];
+        self.launch_on(id, &targets);
+        Ok(())
+    }
+
+    fn launch_on(self: &Arc<Self>, id: &str, targets: &[Target]) {
+        let resolve = |p: &str| self.seams.launcher.resolve(p);
 
         let outcome: Result<String, String> = match id {
             "file.run-as-admin" => match targets.first() {
@@ -219,7 +238,7 @@ impl Inner {
             },
             custom => match self.custom_command(custom) {
                 None => Err(format!("'{custom}' is not a command.")),
-                Some(command) => match custom_requests(&command, &targets, &resolve) {
+                Some(command) => match custom_requests(&command, targets, &resolve) {
                     Err(why) => Err(why),
                     Ok(requests) if requests.is_empty() => Ok(String::new()),
                     Ok(requests) => {
@@ -247,7 +266,6 @@ impl Inner {
             Ok(text) => self.set_active_status(text),
             Err(why) => self.set_active_status(why),
         }
-        Ok(())
     }
 }
 

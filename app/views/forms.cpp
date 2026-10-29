@@ -157,7 +157,11 @@ void ItemList::paint(PaintContext& pc) {
         if (sel) pc.fill(rc, focused() ? tok::ListSelectedBackground : tok::ListSelectedInactiveBackground);
         Token fg = e.heading ? tok::TextMuted : !e.enabled || e.muted ? tok::TextDisabled : sel ? tok::ListSelectedForeground : tok::TextPrimary;
         float x = rc.l + 8;
-        if (e.icon) {
+        if (e.picture) {
+            if (const ThumbPtr image = e.picture(device_px(pc, 16.0f)))
+                images_.draw(pc, image, Rect::xywh(x, rc.t + (rc.height() - 16) / 2, 16, 16), e.faded ? 0.5f : 1.0f);
+            x += 22;
+        } else if (e.icon) {
             Icon::draw(pc, *e.icon, Rect::xywh(x, rc.t + (rc.height() - 16) / 2, 16, 16), fg, icon_geo_[static_cast<size_t>(i)], icon_gen_[static_cast<size_t>(i)]);
             x += 24;
         }
@@ -187,6 +191,11 @@ void ItemList::paint(PaintContext& pc) {
 }
 
 bool ItemList::on_mouse_down(const MouseEvent& e) {
+    if (e.button == MouseButton::Right && on_context) {
+        const int i = row_at(e.pt);
+        if (i >= 0 && !entries[static_cast<size_t>(i)].heading && !entries[static_cast<size_t>(i)].separator) on_context(i, e.pt);
+        return true;
+    }
     if (e.button != MouseButton::Left) return false;
     if (v_.mouse_down(e.pt)) {
         root()->capture(this);

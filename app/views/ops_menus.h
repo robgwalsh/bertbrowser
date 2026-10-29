@@ -19,7 +19,8 @@ struct ComposedMenu {
     std::shared_ptr<void> keep;  // the shell session behind the items; dropped once the menu has closed
 };
 
-ComposedMenu compose_context_menu(MainView& main, MenuKind kind);
+// `subject` is the folder a tree menu is about (the one right-clicked); the file list's menus ignore it.
+ComposedMenu compose_context_menu(MainView& main, MenuKind kind, const std::wstring& subject = {});
 
 // `undo`, `undo-range` (the third action marked, as a pointer hovering it would), `redo`.
 bool build_step_menu(MainView& main, const std::wstring& kind, ui::MenuItems* out);

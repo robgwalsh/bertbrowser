@@ -19,6 +19,8 @@ public:
     virtual bool has_children(uint64_t node) const { return child_count(node) > 0; }
     // A picture before the label, `px` pixels square, or null for none (the settings pages have none).
     virtual ThumbPtr icon(uint64_t /*node*/, uint32_t /*px*/) const { return nullptr; }
+    // Draws the icon faded (a hidden folder, as Explorer does).
+    virtual bool dimmed(uint64_t /*node*/) const { return false; }
 };
 
 class TreeView : public Widget {
@@ -32,6 +34,8 @@ public:
     std::function<void(uint64_t id)> on_select;
     std::function<void(uint64_t id, bool expanded)> on_toggle;  // load children here, then refresh()
     std::function<void(uint64_t id)> on_activate;
+    // A right click on a row. It does not select the row: selecting is navigating, and a menu is not.
+    std::function<void(uint64_t id, Point at)> on_context;
 
     void set_provider(TreeProvider* p);
     void refresh();  // the provider's tree changed: re-flatten, keep expansion and selection

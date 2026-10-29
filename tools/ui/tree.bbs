@@ -20,6 +20,8 @@ assert-path Documents
 hidden on
 settle 500
 assert-path Documents
+tree-expand HiddenFolder
+tree-expand HiddenFolder off
 shot 01-hidden-on
 hidden off
 settle 500

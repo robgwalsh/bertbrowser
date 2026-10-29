@@ -11,6 +11,7 @@
 #include "views/shell_props.h"
 
 #include <dwmapi.h>
+#include <shobjidl.h>
 
 #include <algorithm>
 #include <cmath>
@@ -864,11 +865,16 @@ MainView::MainView(core::Core& core, platform::Window& window)
     tree_->dock = Dock::Fill;
     tree_->name = "FolderTree";
     tree_->set_provider(tree_provider_.get());
+    sync_tree_hidden();
     // A program's or special folder's own icon came back from the shell: repaint whatever shows it.
     icons_->on_ready = [this] { window_.root().invalidate_all(); };
     pane_host_ = main_split_->emplace<Panel>();
     pane_host_->name = "PaneHostSite";
 
+    tree_->on_context = [this](uint64_t id, Point at) {
+        const std::wstring path = tree_provider_->path_of(id);
+        if (!path.empty()) open_tree_menu(path, at);
+    };
     tree_->on_select = [this](uint64_t id) {
         if (revealing_ || !active_tab_) return;
         const std::wstring path = tree_provider_->path_of(id);
@@ -906,11 +912,15 @@ MainView::MainView(core::Core& core, platform::Window& window)
 
     hwnd_ = window_.hwnd();
     window_.on_message = [this](UINT msg, WPARAM wp, LPARAM lp) { return on_window_message(msg, wp, lp); };
+    // Paste is available while the clipboard holds files: told now, and again whenever it changes.
+    AddClipboardFormatListener(window_.hwnd());
+    push_clipboard_flag();
     window_.root().on_preview_key = [this](const KeyEvent& e) { return on_preview_key(e); };
     bb_app_set_event_sink(core_.app(), &MainView::sink, this);
 }
 
 MainView::~MainView() {
+    RemoveClipboardFormatListener(window_.hwnd());
     bb_app_set_event_sink(core_.app(), nullptr, nullptr);
     window_.on_message = nullptr;
     window_.root().on_preview_key = nullptr;
@@ -938,6 +948,10 @@ bool MainView::on_window_message(UINT msg, WPARAM wp, LPARAM lp) {
         auto run = std::move(deferred_);
         deferred_.clear();
         for (auto& fn : run) fn();
+        return true;
+    }
+    if (msg == WM_CLIPBOARDUPDATE) {
+        push_clipboard_flag();
         return true;
     }
     if (msg == WM_BB_ICONS) {
@@ -1005,10 +1019,25 @@ void MainView::handle(const BbEvent& e) {
         case BB_EVT_SETTINGS_CHANGED: {
             const std::wstring key = core::w(e.text);
             if (core::icontains(key, L"theme")) apply_theme();
+            if (key == L"showHiddenItems") sync_tree_hidden();
             break;
         }
-        case BB_EVT_UNDO_CHANGED:
         case BB_EVT_OP_FINISHED:
+            // A cut is one-shot once something has moved; a paste that failed leaves it to try elsewhere.
+            if (cut_paste_op_ && e.id == cut_paste_op_) {
+                if (e.a && clipboard_seq() == cut_paste_seq_) {
+                    if (headless_dialogs_) {
+                        run_clipboard_.reset();
+                        ++run_clipboard_seq_;
+                    } else {
+                        file_clipboard::clear();
+                    }
+                    push_clipboard_flag();
+                }
+                cut_paste_op_ = 0;
+            }
+            [[fallthrough]];
+        case BB_EVT_UNDO_CHANGED:
         case BB_EVT_BUSY_CHANGED:
             if (e.kind != BB_EVT_BUSY_CHANGED && on_undo_changed) on_undo_changed();
             refresh_status();
@@ -1144,6 +1173,17 @@ void MainView::reveal_in_tree(const std::wstring& path) {
     revealing_ = false;
 }
 
+// "Show hidden items" governs the tree as well as the file list. The tree re-filters in place, then reveals the
+// active folder again: turning it on may expose the rest of the chain to a hidden folder already open.
+void MainView::sync_tree_hidden() {
+    BbOwnedStr o{};
+    const bool on = bb_settings_get(core_.app(), core::s(L"showHiddenItems"), &o) == BB_OK && core::take(o) == L"true";
+    if (!tree_provider_->set_show_hidden(on)) return;
+    tree_->refresh();
+    revealed_.clear();
+    if (active_tab_) reveal_in_tree(core_.tab_text(active_tab_, BB_TEXT_PATH));
+}
+
 bool MainView::run_command(const std::wstring& id) {
     return bb_command_run(core_.app(), core::s(id)) == BB_OK;
 }
@@ -1258,17 +1298,217 @@ bool MainView::host_command(const std::wstring& id) {
         return true;
     }
     if (id == L"tools.duplicates" && !headless_dialogs_) {
-        const std::wstring folder = core_.tab_text(active_tab_, BB_TEXT_PATH);
-        BbOwnedStr o{};
-        if (bb_duplicates_scan(core_.app(), core::s(folder), 1024 * 1024, &o) == BB_OK) {
-            duplicates_.result = json::parse(core::utf8(core::take(o)));
-            duplicates_.has = true;
-            duplicates_.ticked.clear();
+        open_duplicates(core_.tab_text(active_tab_, BB_TEXT_PATH));
+        return true;
+    }
+    if (id == L"edit.copy" || id == L"edit.cut") {
+        std::vector<std::wstring> paths;
+        for (const auto& r : selected_rows()) paths.push_back(r.path);
+        if (paths.empty()) return false;
+        const bool cut = id == L"edit.cut";
+        const std::wstring said = clipboard_put(paths, cut)
+                                      ? std::to_wstring(paths.size()) + L" item(s) " + (cut ? L"cut" : L"copied")
+                                      : L"Could not copy - the clipboard is in use by another program.";
+        bb_status_set(core_.app(), core::s(said));
+        return true;
+    }
+    if (id == L"edit.paste" || id == L"edit.paste-shortcut") return paste(id == L"edit.paste-shortcut");
+    if (id == L"file.copy-to" || id == L"file.move-to") return transfer_to_chosen(id == L"file.move-to");
+    if (id == L"app.exit") {
+        // A run has no window of the person's to close.
+        if (headless_dialogs_) return false;
+        PostMessageW(window_.hwnd(), WM_CLOSE, 0, 0);
+        return true;
+    }
+    if (id == L"pane.focus-tree") {
+        window_.root().set_focus(tree_);
+        return true;
+    }
+    if (id == L"pane.focus-list" || id == L"search.folder" || id == L"search.pc") {
+        TabView* tv = active_view();
+        if (!tv) return false;
+        Widget* target = id == L"search.folder" ? static_cast<Widget*>(tv->search_box())
+                         : id == L"search.pc"   ? static_cast<Widget*>(tv->global_search_box())
+                         : tv->tiles_mode()     ? static_cast<Widget*>(tv->tiles())
+                                                : static_cast<Widget*>(tv->list());
+        if (!target) return false;
+        window_.root().set_focus(target);
+        // A search box takes focus with its text selected, so typing replaces it.
+        if (auto* edit = dynamic_cast<Edit*>(target)) edit->select(0, edit->text().size());
+        return true;
+    }
+    if (id == L"app.save-workspace" || id == L"app.save-command-bars") {
+        if (headless_dialogs_) return false;
+        open_dialog(id == L"app.save-workspace" ? L"save-workspace" : L"save-command-bars");
+        return true;
+    }
+    if (id == L"edit.copy-path" || id == L"edit.copy-name" || id == L"edit.copy-folder-path") {
+        std::vector<std::wstring> paths;
+        if (id == L"edit.copy-folder-path") paths.push_back(core_.tab_text(active_tab_, BB_TEXT_PATH));
+        else {
+            for (const auto& r : selected_rows()) paths.push_back(id == L"edit.copy-name" ? r.name : r.path);
         }
-        open_dialog(L"duplicates");
+        if (paths.empty() || paths.front().empty()) return false;
+        copy_text(paths, id != L"edit.copy-name", id == L"edit.copy-folder-path");
         return true;
     }
     return tool_host_command(*this, id);
+}
+
+void MainView::set_headless_dialogs(bool on) {
+    headless_dialogs_ = on;
+    push_clipboard_flag();
+}
+
+uint32_t MainView::clipboard_seq() const { return headless_dialogs_ ? run_clipboard_seq_ : GetClipboardSequenceNumber(); }
+
+bool MainView::clipboard_put(const std::vector<std::wstring>& paths, bool cut) {
+    if (headless_dialogs_) {
+        run_clipboard_ = ClipboardFiles{paths, cut};
+        ++run_clipboard_seq_;
+        push_clipboard_flag();
+        return true;
+    }
+    return file_clipboard::put(paths, cut);  // WM_CLIPBOARDUPDATE pushes the flag
+}
+
+std::optional<ClipboardFiles> MainView::clipboard_get() { return headless_dialogs_ ? run_clipboard_ : file_clipboard::get(); }
+
+void MainView::push_clipboard_flag() {
+    const bool has = headless_dialogs_ ? run_clipboard_.has_value() : file_clipboard::has_files();
+    bb_ui_set_flag(core_.app(), core::s(L"clipboardHasFiles"), has);
+}
+
+bool MainView::paste(bool shortcut) {
+    const std::wstring here = core_.tab_text(active_tab_, BB_TEXT_PATH);
+    if (here.empty()) return false;
+    const std::optional<ClipboardFiles> clip = clipboard_get();
+    if (!clip || clip->paths.empty()) {
+        bb_status_set(core_.app(), core::s(L"There are no files on the clipboard."));
+        return true;
+    }
+    // A paste is a drop by another name: the one planner and executor, with progress, conflicts and undo.
+    const uint64_t op = transfer_into(core_, clip->paths, here, shortcut ? "shortcut" : clip->cut ? "move" : "copy");
+    if (!shortcut && clip->cut && op) {
+        cut_paste_op_ = op;
+        cut_paste_seq_ = clipboard_seq();
+    }
+    return true;
+}
+
+bool MainView::transfer_to_chosen(bool move) {
+    std::vector<std::wstring> sources;
+    for (const auto& r : selected_rows()) sources.push_back(r.path);
+    // A run cannot answer Windows' folder picker, so it reports the command instead.
+    if (sources.empty() || headless_dialogs_) return false;
+    IFileOpenDialog* dialog = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) return false;
+    DWORD options = 0;
+    dialog->GetOptions(&options);
+    dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+    dialog->SetTitle(move ? L"Move to folder" : L"Copy to folder");
+    const std::wstring here = core_.tab_text(active_tab_, BB_TEXT_PATH);
+    IShellItem* start = nullptr;
+    if (!here.empty() && SUCCEEDED(SHCreateItemFromParsingName(here.c_str(), nullptr, IID_PPV_ARGS(&start)))) {
+        dialog->SetFolder(start);
+        start->Release();
+    }
+    std::wstring chosen;
+    if (SUCCEEDED(dialog->Show(window_.hwnd()))) {
+        IShellItem* item = nullptr;
+        if (SUCCEEDED(dialog->GetResult(&item))) {
+            PWSTR path = nullptr;
+            if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+                chosen = path;
+                CoTaskMemFree(path);
+            }
+            item->Release();
+        }
+    }
+    dialog->Release();
+    if (!chosen.empty()) transfer_into(core_, sources, chosen, move ? "move" : "copy");
+    return true;
+}
+
+void MainView::open_duplicates(const std::wstring& folder) {
+    BbOwnedStr o{};
+    if (bb_duplicates_scan(core_.app(), core::s(folder), 1024 * 1024, &o) == BB_OK) {
+        duplicates_.result = json::parse(core::utf8(core::take(o)));
+        duplicates_.has = true;
+        duplicates_.ticked.clear();
+    }
+    open_dialog(L"duplicates");
+}
+
+// "Copy as path" quotes every path, as Explorer's does, one per line; a name is bare text. A scripted run
+// leaves the clipboard alone (it is the person's, not the run's) and only says what it would have copied.
+void MainView::copy_text(const std::vector<std::wstring>& items, bool paths, bool this_folder) {
+    std::wstring text;
+    for (const auto& item : items) {
+        if (!text.empty()) text += L"\r\n";
+        text += paths ? L"\"" + item + L"\"" : item;
+    }
+    bool copied = headless_dialogs_;
+    if (!headless_dialogs_ && OpenClipboard(window_.hwnd())) {
+        EmptyClipboard();
+        const size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+        if (HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes)) {
+            if (void* p = GlobalLock(mem)) {
+                memcpy(p, text.c_str(), bytes);
+                GlobalUnlock(mem);
+                copied = SetClipboardData(CF_UNICODETEXT, mem) != nullptr;
+            }
+            if (!copied) GlobalFree(mem);
+        }
+        CloseClipboard();
+    }
+    const std::wstring noun = paths ? L"path" : L"name";
+    const std::wstring said = !copied ? L"Could not copy - the clipboard is in use by another program."
+                              : this_folder ? L"Copied this folder's path"
+                                            : L"Copied " + std::to_wstring(items.size()) + L" " + noun + (items.size() == 1 ? L"" : L"s");
+    bb_status_set(core_.app(), core::s(said));
+}
+
+void MainView::open_tree_menu(const std::wstring& folder, Point at) {
+    ops::ComposedMenu composed = ops::compose_context_menu(*this, ops::MenuKind::Tree, folder);
+    keep_menu_session(std::move(composed.keep));
+    show_context_menu(std::move(composed.items), at);
+}
+
+void MainView::tree_verb(const std::wstring& id, const std::wstring& folder) {
+    BbApp* app = core_.app();
+    // The dialogs that read a folder take this one while they are built.
+    auto dialog_on = [&](const wchar_t* kind) {
+        dialog_folder_ = folder;
+        open_dialog(kind);
+        dialog_folder_.clear();
+    };
+    if (id == L"file.new-folder") dialog_on(L"new-folder");
+    else if (id == L"file.new-file") dialog_on(L"new-file");
+    else if (id == L"file.properties") dialog_on(L"properties");
+    else if (id == L"tools.changes") dialog_on(L"changes");
+    else if (id == L"tools.disk-usage") {
+        tools_ui(*this).disk_root = folder;
+        open_dialog(L"disk-usage-at");
+    } else if (id == L"tools.duplicates") {
+        if (!headless_dialogs_) open_duplicates(folder);
+    } else if (id == L"file.open-new-tab") {
+        uint64_t tab = 0;
+        bb_tab_open(app, 0, core::s(folder), true, &tab);
+    } else if (id == L"file.open-pane-right" || id == L"file.open-pane-below") {
+        uint64_t pane = 0;
+        bb_pane_split(app, 0, id == L"file.open-pane-right" ? BB_VERTICAL : BB_HORIZONTAL, core::s(folder), &pane);
+    } else if (id == L"file.open-terminal" || id == L"file.open-vscode") {
+        bb_launch_command_at(app, core::s(id), core::s(folder));
+    } else if (id == L"file.bookmark") {
+        bb_saved_do(app, 0, core::s(L"toggle-bookmark"), core::s(folder));
+    } else if (id == L"file.delete") {
+        const BbStr src = core::s(folder);
+        uint64_t op = 0;
+        bb_op_delete(app, &src, 1, BB_DELETE_RECYCLE, &op);
+    } else if (id == L"edit.copy-path") {
+        copy_text({folder}, true, false);
+    }
 }
 
 // ---- the menu bar and the toolbars ----------------------------------------------------------------------
@@ -1532,7 +1772,9 @@ bool MainView::build_named_menu(const std::wstring& kind, MenuItems* out) {
     else if (kind == L"files") *out = tv->build_files_menu(false);
     else if (kind == L"background") *out = tv->build_files_menu(true);
     else if (kind == L"tree") {
-        ops::ComposedMenu composed = ops::compose_context_menu(*this, ops::MenuKind::Tree);
+        std::wstring folder = tree_provider_->path_of(tree_->selected_id());
+        if (folder.empty()) folder = core_.tab_text(active_tab_, BB_TEXT_PATH);
+        ops::ComposedMenu composed = ops::compose_context_menu(*this, ops::MenuKind::Tree, folder);
         keep_menu_session(std::move(composed.keep));
         *out = std::move(composed.items);
     } else if (!ops::build_step_menu(*this, kind, out)) return false;

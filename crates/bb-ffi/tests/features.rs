@@ -193,26 +193,26 @@ fn a_new_folder_through_the_c_surface() {
     let mut out = none();
     let empty = w("");
     assert_eq!(BbStatus::BB_OK, unsafe {
-        bb_new_item_suggest(rig.app, rig.tab, 0, bs(&empty), &mut out)
+        bb_new_item_suggest(rig.app, rig.tab, bs(&empty), 0, bs(&empty), &mut out)
     });
     let name = unsafe { take(out) }.unwrap();
     assert_eq!("New folder", name);
     let name_w = w(&name);
     let mut plan = none();
     assert_eq!(BbStatus::BB_OK, unsafe {
-        bb_new_item_plan(rig.app, rig.tab, 0, bs(&name_w), &mut plan)
+        bb_new_item_plan(rig.app, rig.tab, bs(&empty), 0, bs(&name_w), &mut plan)
     });
     let plan: Value = serde_json::from_str(&unsafe { take(plan) }.unwrap()).unwrap();
     assert_eq!(true, plan["ok"]);
     let mut op = 0u64;
     assert_eq!(BbStatus::BB_OK, unsafe {
-        bb_new_item(rig.app, rig.tab, 0, bs(&name_w), &mut op)
+        bb_new_item(rig.app, rig.tab, bs(&empty), 0, bs(&name_w), &mut op)
     });
     rig.settle();
     assert!(rig.tree.join("New folder").is_dir());
     let taken = w("notes.txt");
     assert_eq!(BbStatus::BB_ERR, unsafe {
-        bb_new_item(rig.app, rig.tab, 1, bs(&taken), &mut op)
+        bb_new_item(rig.app, rig.tab, bs(&empty), 1, bs(&taken), &mut op)
     });
     assert!(last_error().contains("refused"), "{}", last_error());
     let kinds = rig.json(bb_new_file_types);

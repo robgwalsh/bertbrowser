@@ -596,7 +596,9 @@ std::unique_ptr<Panel> changes_card(DialogContext& cx, const json::Value& m) {
 }
 
 std::unique_ptr<Panel> changes_start(DialogContext& cx) {
-    const std::wstring scope = cx.main.core().tab_text(cx.main.active_tab(), BB_TEXT_PATH);
+    // From the tree's menu, the folder right-clicked; otherwise the folder the tab shows.
+    const std::wstring scope = cx.main.dialog_folder().empty() ? cx.main.core().tab_text(cx.main.active_tab(), BB_TEXT_PATH)
+                                                               : cx.main.dialog_folder();
     std::wstring error;
     const json::Value m = try_tool_call(cx.main, "changes.open", "{\"path\":" + json_quote(scope) + "}", &error);
     if (m.is_null()) return refusal(cx, L"What changed", error);

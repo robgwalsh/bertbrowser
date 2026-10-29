@@ -35,15 +35,19 @@ fn kind_of(kind: u32) -> NewItemKind {
 pub unsafe extern "C" fn bb_new_item_suggest(
     app: *mut BbApp,
     tab: u64,
+    directory: BbStr,
     kind: u32,
     extension: BbStr,
     out_name: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
         let app = unsafe { app_of(app)? };
-        let name = app
-            .app
-            .new_item_suggest(TabId(tab), kind_of(kind), &text_of(extension))?;
+        let name = app.app.new_item_suggest_in(
+            TabId(tab),
+            &text_of(directory),
+            kind_of(kind),
+            &text_of(extension),
+        )?;
         unsafe { put(out_name, &name) }
     })
 }
@@ -54,34 +58,42 @@ pub unsafe extern "C" fn bb_new_item_suggest(
 pub unsafe extern "C" fn bb_new_item_plan(
     app: *mut BbApp,
     tab: u64,
+    directory: BbStr,
     kind: u32,
     name: BbStr,
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
         let app = unsafe { app_of(app)? };
-        let json = app
-            .app
-            .new_item_plan(TabId(tab), &text_of(name), kind_of(kind))?;
+        let json = app.app.new_item_plan_in(
+            TabId(tab),
+            &text_of(directory),
+            &text_of(name),
+            kind_of(kind),
+        )?;
         unsafe { put(out_json, &json) }
     })
 }
 
-/// Creates a folder (`kind` 0) or file (1) in the folder the tab shows and selects it when its
-/// listing arrives. Returns the operation.
+/// Creates a folder (`kind` 0) or file (1) in `directory` (empty: the folder the tab shows) and
+/// selects it when its listing arrives. Returns the operation.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_new_item(
     app: *mut BbApp,
     tab: u64,
+    directory: BbStr,
     kind: u32,
     name: BbStr,
     out_op: *mut u64,
 ) -> BbStatus {
     guard(|| {
         let app = unsafe { app_of(app)? };
-        let op = app
-            .app
-            .new_item(TabId(tab), &text_of(name), kind_of(kind))?;
+        let op = app.app.new_item_in(
+            TabId(tab),
+            &text_of(directory),
+            &text_of(name),
+            kind_of(kind),
+        )?;
         if let Some(out_op) = unsafe { out_op.as_mut() } {
             *out_op = op.0;
         }
@@ -578,7 +590,8 @@ pub unsafe extern "C" fn bb_tab_tile_state(
 // ---- saved searches, workspaces, bookmarks ----
 
 /// `{searches:[{name, query, scope: current|folder|pc, scopePath, scopeText}], workspaces:[{name,
-/// shape, folders}], workspacesPlacement, savedSearchesPlacement}`.
+/// shape, folders}], bookmarks:[{path, name, isDirectory, hidden}], workspacesPlacement,
+/// savedSearchesPlacement}`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_saved_state(app: *mut BbApp, out_json: *mut BbOwnedStr) -> BbStatus {
     guard(|| {
@@ -591,7 +604,7 @@ pub unsafe extern "C" fn bb_saved_state(app: *mut BbApp, out_json: *mut BbOwnedS
 /// searching for. Otherwise: `run-search <name>`, `run-search-new-tab <name>`,
 /// `rename-search <old> to <new>`, `remove-search <name>`, `save-workspace <name>`,
 /// `switch-workspace <name>`, `rename-workspace <old> to <new>`, `remove-workspace <name>`,
-/// `toggle-bookmark <path>`.
+/// `toggle-bookmark <path>`, `open-bookmark <here|new-tab|pane-right|pane-below> <path>`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_saved_do(
     app: *mut BbApp,
@@ -603,6 +616,45 @@ pub unsafe extern "C" fn bb_saved_do(
         let app = unsafe { app_of(app)? };
         let tab = (tab != 0).then_some(TabId(tab));
         Ok(app.app.saved_do(tab, &text_of(verb), &text_of(arg))?)
+    })
+}
+
+/// What a Save workspace (`kind` = `workspace`) or Save menus-and-toolbars (`command-bars`) dialog
+/// shows for `name`, as JSON `{default, problem, taken}`: the name it opens with, why this one
+/// cannot be saved (null when it can), and whether saving replaces one of that name.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_save_name(
+    app: *mut BbApp,
+    kind: BbStr,
+    name: BbStr,
+    out_json: *mut BbOwnedStr,
+) -> BbStatus {
+    guard(|| {
+        let app = unsafe { app_of(app)? };
+        let json = app.app.save_name_json(&text_of(kind), &text_of(name))?;
+        unsafe { put(out_json, &json) }
+    })
+}
+
+/// Whether `path` is bookmarked.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_is_bookmarked(app: *mut BbApp, path: BbStr) -> bool {
+    let Ok(app) = (unsafe { app_of(app) }) else {
+        return false;
+    };
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        app.app.is_bookmarked(&text_of(path))
+    }))
+    .unwrap_or(false)
+}
+
+/// Puts `text` on the active tab's status bar: an outcome only the host knows (a copied path).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_status_set(app: *mut BbApp, text: BbStr) -> BbStatus {
+    guard(|| {
+        let app = unsafe { app_of(app)? };
+        app.app.set_status(&text_of(text));
+        Ok(())
     })
 }
 

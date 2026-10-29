@@ -3,6 +3,6 @@
     "**/bin": true,
     "**/obj": true
   },
-  "dotnet.defaultSolution": "bertbrowser.sln",
-  "cmake.sourceDirectory": "C:/Source/bertbrowser/native"
+  "dotnet.defaultSolution": "csharp/bertbrowser.sln",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/out/debug/compile_commands.json"
 }

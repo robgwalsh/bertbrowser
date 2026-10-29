@@ -239,7 +239,93 @@ std::optional<Payload> read_payload(IDataObject* obj) {
 
 std::string json_array(const std::vector<std::wstring>& items) { return ops::qa(items); }
 
+// A file list as CF_HDROP carries it: the DROPFILES header, then the paths.
+std::vector<uint8_t> hdrop_bytes(const std::vector<std::wstring>& paths) {
+    DROPFILES df{};
+    df.pFiles = sizeof(df);
+    df.fWide = TRUE;
+    std::vector<uint8_t> bytes = list_of(paths, sizeof(df));
+    memcpy(bytes.data(), &df, sizeof(df));
+    return bytes;
+}
+
 }  // namespace
+
+// ---- the clipboard -------------------------------------------------------------------------------------------
+
+namespace file_clipboard {
+
+bool put(const std::vector<std::wstring>& paths, bool cut) {
+    auto* data = new DataObject();
+    data->put(CF_HDROP, hdrop_bytes(paths));
+    data->put(preferred_format(), dword_bytes(cut ? DROPEFFECT_MOVE : DROPEFFECT_COPY));
+    bool ok = SUCCEEDED(OleSetClipboard(data));
+    // Rendered onto the clipboard now, so the files stay there after this window has gone.
+    if (ok) ok = SUCCEEDED(OleFlushClipboard());
+    data->Release();
+    return ok;
+}
+
+std::optional<ClipboardFiles> get() {
+    IDataObject* obj = nullptr;
+    if (FAILED(OleGetClipboard(&obj)) || !obj) return std::nullopt;
+    std::optional<ClipboardFiles> out;
+    if (std::optional<Payload> p = read_payload(obj)) {
+        ClipboardFiles files;
+        files.paths = std::move(p->paths);
+        FORMATETC f = hglobal_format(preferred_format());
+        STGMEDIUM m{};
+        if (SUCCEEDED(obj->GetData(&f, &m))) {
+            if (GlobalSize(m.hGlobal) >= sizeof(DWORD)) {
+                if (const auto* effect = static_cast<const DWORD*>(GlobalLock(m.hGlobal))) {
+                    files.cut = (*effect & DROPEFFECT_MOVE) != 0;
+                    GlobalUnlock(m.hGlobal);
+                }
+            }
+            ReleaseStgMedium(&m);
+        }
+        out = std::move(files);
+    }
+    obj->Release();
+    return out;
+}
+
+bool has_files() { return IsClipboardFormatAvailable(CF_HDROP) != FALSE; }
+
+void clear() {
+    if (!OpenClipboard(nullptr)) return;
+    EmptyClipboard();
+    CloseClipboard();
+}
+
+}  // namespace file_clipboard
+
+uint64_t transfer_into(core::Core& core, const std::vector<std::wstring>& sources, const std::wstring& destination,
+                       const std::string& verb) {
+    try {
+        if (verb == "shortcut") {
+            ops::run(core, "shortcut", "{\"sources\":" + json_array(sources) + ",\"directory\":" + ops::q(destination) + "}");
+            return 0;
+        }
+        // Into a container is a different operation: the archive is rewritten with the files added.
+        const json::Value inside = ops::query(core, "archive-of", core::utf8(destination));
+        if (!inside.is_null()) {
+            ops::run(core, "archive-add",
+                     "{\"archive\":" + ops::q(core::wide(inside["archive"].str())) + ",\"entryDir\":" + ops::q(core::wide(inside["entry"].str())) +
+                         ",\"sources\":" + json_array(sources) + "}");
+            return 0;
+        }
+        std::vector<BbStr> views;
+        for (const auto& p : sources) views.push_back(core::s(p));
+        uint64_t op = 0;
+        core::check((verb == "copy" ? bb_op_copy : bb_op_move)(core.app(), views.data(), static_cast<uint32_t>(views.size()), core::s(destination), &op),
+                    "transfer");
+        return op;
+    } catch (const std::exception&) {
+        // The core has already said why on the status line.
+        return 0;
+    }
+}
 
 // ---- the window as a drop target -------------------------------------------------------------------------------
 
@@ -456,14 +542,7 @@ void FileDrag::start(uint64_t tab, MouseButton button) {
     auto* data = new DataObject();
     data->put(items_format(), list_of(paths, 0));
     // What makes this a drag source for Explorer, editors, browsers and mail clients.
-    {
-        DROPFILES df{};
-        df.pFiles = sizeof(df);
-        df.fWide = TRUE;
-        std::vector<uint8_t> bytes = list_of(paths, sizeof(df));
-        memcpy(bytes.data(), &df, sizeof(df));
-        data->put(CF_HDROP, std::move(bytes));
-    }
+    data->put(CF_HDROP, hdrop_bytes(paths));
     // Ask for a copy: between two folders on one volume Explorer would otherwise default to a move, and
     // dragging a file into another program should add it there rather than quietly take it out of the
     // folder being browsed. Shift still overrides this.
@@ -503,27 +582,7 @@ void FileDrag::start(uint64_t tab, MouseButton button) {
 }
 
 void FileDrag::perform(const std::vector<std::wstring>& sources, const std::wstring& destination, const std::string& verb) {
-    core::Core& core = main_.core();
-    try {
-        if (verb == "shortcut") {
-            ops::run(core, "shortcut", "{\"sources\":" + json_array(sources) + ",\"directory\":" + ops::q(destination) + "}");
-            return;
-        }
-        // A drop into a container is a different operation: the archive is rewritten with the files added.
-        const json::Value inside = ops::query(core, "archive-of", core::utf8(destination));
-        if (!inside.is_null()) {
-            ops::run(core, "archive-add",
-                     "{\"archive\":" + ops::q(core::wide(inside["archive"].str())) + ",\"entryDir\":" + ops::q(core::wide(inside["entry"].str())) +
-                         ",\"sources\":" + json_array(sources) + "}");
-            return;
-        }
-        std::vector<BbStr> views;
-        for (const auto& p : sources) views.push_back(core::s(p));
-        uint64_t op = 0;
-        core::check((verb == "copy" ? bb_op_copy : bb_op_move)(core.app(), views.data(), static_cast<uint32_t>(views.size()), core::s(destination), &op), "drop");
-    } catch (const std::exception&) {
-        // The core has already said why on the status line.
-    }
+    transfer_into(main_.core(), sources, destination, verb);
 }
 
 MenuItems FileDrag::verb_menu(const std::vector<std::wstring>& sources, const std::wstring& destination) {

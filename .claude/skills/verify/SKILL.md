@@ -172,6 +172,9 @@ run-saved <name> [newtab]   run one as a click on its sidebar row does (or its "
 rename-saved <old> to <new> the edit dialog's rename, through the same save the dialog uses
 remove-saved <name>
 saved-searches              the names on the sidebar, each with its scope
+assert-bookmarks <a> | <b> | … | none
+                            the sidebar's Bookmarks section, by name, in order - hidden targets
+                            are left out while hidden items are, and shown dimmed otherwise
 
 newfolder <name>            create a folder in the active tab's directory, through
                             the new-item planner and executor (acts on the folder, not the selection)
@@ -313,8 +316,10 @@ key <chord> [in list|text|readonly|other]
 run <command id>            run a command by its CommandCatalog id (tab.new, file.rename, select.all),
                             as choosing it in the palette does. Both this and `key` refuse to go
                             further than the availability check for a command that would open a
-                            window, play media or write the clipboard: they print `WOULD-RUN <id>`,
-                            or `UNAVAILABLE <id> — <reason>` when the rules say no
+                            window, play media or close the app: they print `WOULD-RUN <id>`,
+                            or `UNAVAILABLE <id> — <reason>` when the rules say no. Cut, copy and
+                            paste do run, against the run's own clipboard (held in memory - the
+                            person's is never read or written); `tools/ui/clipboard.bbs`
 bind <command id> <chord>… | bind <command id> none
                             give a command exactly those shortcuts, taking each from whoever had it
 unbind [command id]         back to the shipped shortcut; bare `unbind` resets them all
@@ -405,12 +410,16 @@ menu main <Menu> [name]     PNG of one of the menu bar's dropdowns, by its headi
 menu columns|files|background|tree|workspaces|saved-searches|undo|undo-range|redo [name]
                             PNG of a menu's items — the column header's, the file list's for the selection,
                             the file list's over empty space (the folder background), or the
-                            folder tree's — for the current folder's row when `tree-expand` has
-                            got the tree that far, else for the first drive. They are rendered
+                            folder tree's — for the tree's selected row, else the current folder.
+                            They are rendered
                             detached, not opened: a menu run is never posted a click, and a native
                             popup could land on the user's screen. files/background/tree carry other programs' entries
                             (7-Zip, Git, TortoiseSVN) from a canned source, so they prove the
                             hosting and never what a real extension offers
+tree-menu-run <item> on <folder>
+                            runs one entry of the folder tree's menu for that folder, as a
+                            right-click on its row and a click would: it acts on the folder, not
+                            on the file list's selection (`tree-menu-run Bookmark on Pictures`)
 assert-menu-item <text> | assert-no-menu-item <text>
                             whether the last `menu` offered an item containing the text, submenus
                             included — the check a screenshot cannot make

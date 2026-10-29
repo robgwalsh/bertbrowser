@@ -20,24 +20,29 @@ public:
     std::wstring label(uint64_t node) const override;
     bool has_children(uint64_t node) const override;
     ui::ThumbPtr icon(uint64_t node, uint32_t px) const override;
+    bool dimmed(uint64_t node) const override;
 
     std::wstring path_of(uint64_t node) const;
     // The nodes from the drive down to `path`, loading each level. Empty when the path is not under a drive.
     std::vector<uint64_t> chain_to(const std::wstring& path) const;
-    // Hidden folders are left out unless asked for.
-    bool show_hidden = false;
+    // Hidden folders are left out unless asked for, and dimmed when they are shown. Every node found is kept either way, so
+    // a change re-filters in place: ids, expansion and selection survive it. True when it changed.
+    bool set_show_hidden(bool on);
 
 private:
     struct Node {
         std::wstring label, path;
         bool loaded = false;
-        std::vector<uint64_t> kids;
+        std::vector<uint64_t> kids;   // every sub-folder found
         uint32_t attributes = 0;  // from the listing that found it: a special folder is read-only or system
+        std::vector<uint64_t> shown;  // the ones `show_hidden_` lets through
     };
     void load(uint64_t node) const;
     uint64_t add(Node n) const;
+    void filter(Node& n) const;
 
     ShellIcons* icons_;
+    bool show_hidden_ = false;
     mutable std::unordered_map<uint64_t, Node> nodes_;
     mutable uint64_t next_ = 1;
 };

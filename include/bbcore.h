@@ -546,6 +546,7 @@ enum BbStatus bb_theme_palette(struct BbApp *app,
 // is 0 for a folder, 1 for a file; `extension` is the file type's, with its dot.
 enum BbStatus bb_new_item_suggest(struct BbApp *app,
                                   uint64_t tab,
+                                  struct BbStr directory,
                                   uint32_t kind,
                                   struct BbStr extension,
                                   struct BbOwnedStr *out_name);
@@ -554,14 +555,16 @@ enum BbStatus bb_new_item_suggest(struct BbApp *app,
 // `{directory, name, target, ok, rejected}`.
 enum BbStatus bb_new_item_plan(struct BbApp *app,
                                uint64_t tab,
+                               struct BbStr directory,
                                uint32_t kind,
                                struct BbStr name,
                                struct BbOwnedStr *out_json);
 
-// Creates a folder (`kind` 0) or file (1) in the folder the tab shows and selects it when its
-// listing arrives. Returns the operation.
+// Creates a folder (`kind` 0) or file (1) in `directory` (empty: the folder the tab shows) and
+// selects it when its listing arrives. Returns the operation.
 enum BbStatus bb_new_item(struct BbApp *app,
                           uint64_t tab,
+                          struct BbStr directory,
                           uint32_t kind,
                           struct BbStr name,
                           uint64_t *out_op);
@@ -720,15 +723,30 @@ enum BbStatus bb_props_supply(struct BbApp *app, uint64_t tab, struct BbStr json
 enum BbStatus bb_tab_tile_state(struct BbApp *app, uint64_t tab, struct BbOwnedStr *out_json);
 
 // `{searches:[{name, query, scope: current|folder|pc, scopePath, scopeText}], workspaces:[{name,
-// shape, folders}], workspacesPlacement, savedSearchesPlacement}`.
+// shape, folders}], bookmarks:[{path, name, isDirectory, hidden}], workspacesPlacement,
+// savedSearchesPlacement}`.
 enum BbStatus bb_saved_state(struct BbApp *app, struct BbOwnedStr *out_json);
 
 // One verb. On `tab` (0: none): `save-search <name> [current|folder|pc]` saves what the tab is
 // searching for. Otherwise: `run-search <name>`, `run-search-new-tab <name>`,
 // `rename-search <old> to <new>`, `remove-search <name>`, `save-workspace <name>`,
 // `switch-workspace <name>`, `rename-workspace <old> to <new>`, `remove-workspace <name>`,
-// `toggle-bookmark <path>`.
+// `toggle-bookmark <path>`, `open-bookmark <here|new-tab|pane-right|pane-below> <path>`.
 enum BbStatus bb_saved_do(struct BbApp *app, uint64_t tab, struct BbStr verb, struct BbStr arg);
+
+// What a Save workspace (`kind` = `workspace`) or Save menus-and-toolbars (`command-bars`) dialog
+// shows for `name`, as JSON `{default, problem, taken}`: the name it opens with, why this one
+// cannot be saved (null when it can), and whether saving replaces one of that name.
+enum BbStatus bb_save_name(struct BbApp *app,
+                           struct BbStr kind,
+                           struct BbStr name,
+                           struct BbOwnedStr *out_json);
+
+// Whether `path` is bookmarked.
+bool bb_is_bookmarked(struct BbApp *app, struct BbStr path);
+
+// Puts `text` on the active tab's status bar: an outcome only the host knows (a copied path).
+enum BbStatus bb_status_set(struct BbApp *app, struct BbStr text);
 
 // The name a new saved search (or, with `workspace`, a new workspace) starts with.
 enum BbStatus bb_saved_default_name(struct BbApp *app,
@@ -1003,6 +1021,9 @@ void bb_trace_mark(struct BbStr name);
 // `custom:` command): the program, its arguments and its working directory are decided in Rust
 // from the selection, and started through the one launcher. The outcome is on the status line.
 enum BbStatus bb_launch_command(struct BbApp *app, struct BbStr id);
+
+// As `bb_launch_command`, on `folder` rather than the selection: the folder tree's menu.
+enum BbStatus bb_launch_command_at(struct BbApp *app, struct BbStr id, struct BbStr folder);
 
 // Who opens folders and drives on this machine, as JSON: `{"state": "NotRegistered" |
 // "RegisteredToThisApp" | "RegisteredToThisAppStale" | "RegisteredToAnotherApp", "other": <program

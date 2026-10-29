@@ -39,20 +39,66 @@ impl App {
         kind: NewItemKind,
         extension: &str,
     ) -> AppResult<String> {
-        self.inner.new_item_suggest(tab, kind, extension)
+        self.inner.new_item_suggest(tab, None, kind, extension)
+    }
+
+    /// As `new_item_suggest`, for `directory` rather than the tab's folder (empty: the tab's).
+    pub fn new_item_suggest_in(
+        &self,
+        tab: TabId,
+        directory: &str,
+        kind: NewItemKind,
+        extension: &str,
+    ) -> AppResult<String> {
+        let directory = (!directory.is_empty()).then_some(directory);
+        self.inner.new_item_suggest(tab, directory, kind, extension)
     }
 
     /// What creating `name` would produce, without changing anything, as JSON
     /// `{directory, name, target, ok, rejected}`.
     pub fn new_item_plan(&self, tab: TabId, name: &str, kind: NewItemKind) -> AppResult<String> {
+        self.new_item_plan_in(tab, "", name, kind)
+    }
+
+    /// As `new_item_plan`, for `directory` rather than the tab's folder (empty: the tab's).
+    pub fn new_item_plan_in(
+        &self,
+        tab: TabId,
+        directory: &str,
+        name: &str,
+        kind: NewItemKind,
+    ) -> AppResult<String> {
+        let directory = (!directory.is_empty()).then_some(directory);
         self.inner
-            .new_item_plan_json(tab, name, kind)
+            .new_item_plan_json(tab, directory, name, kind)
             .map(|v| text(&v))
     }
 
     /// Creates a folder or file in the folder the tab shows, selecting it when its listing arrives.
     pub fn new_item(&self, tab: TabId, name: &str, kind: NewItemKind) -> AppResult<OpId> {
-        self.inner.op_new_item(tab, name, kind)
+        self.inner.op_new_item(tab, None, name, kind)
+    }
+
+    /// As `new_item`, in `directory` rather than the tab's folder (empty: the tab's).
+    pub fn new_item_in(
+        &self,
+        tab: TabId,
+        directory: &str,
+        name: &str,
+        kind: NewItemKind,
+    ) -> AppResult<OpId> {
+        let directory = (!directory.is_empty()).then_some(directory);
+        self.inner.op_new_item(tab, directory, name, kind)
+    }
+
+    /// Whether the path is bookmarked (the tree menu's Bookmark / Remove bookmark).
+    pub fn is_bookmarked(&self, path: &str) -> bool {
+        self.inner.is_bookmarked(path).unwrap_or(false)
+    }
+
+    /// Puts a line on the active tab's status bar (the host's own outcomes, a copied path).
+    pub fn set_status(&self, text: &str) {
+        self.inner.set_active_status(text);
     }
 
     /// The file types the New submenu offers: `[{label, extension, templatePath}]`.
@@ -452,7 +498,7 @@ impl App {
 
     // ---- saved searches, workspaces, bookmarks ----
 
-    /// `{searches, workspaces, workspacesPlacement, savedSearchesPlacement}`.
+    /// `{searches, workspaces, bookmarks, workspacesPlacement, savedSearchesPlacement}`.
     pub fn saved_json(&self) -> String {
         text(&self.inner.saved_json())
     }
@@ -460,7 +506,8 @@ impl App {
     /// One verb: `save-search <name> [current|folder|pc]` on `tab`, `run-search <name>`,
     /// `run-search-new-tab <name>`, `rename-search <old> to <new>`, `remove-search <name>`,
     /// `save-workspace <name>`, `switch-workspace <name>`, `rename-workspace <old> to <new>`,
-    /// `remove-workspace <name>`, `toggle-bookmark <path>`.
+    /// `remove-workspace <name>`, `toggle-bookmark <path>`, `open-bookmark <here|new-tab|pane-right|
+    /// pane-below> <path>`.
     pub fn saved_do(&self, tab: Option<TabId>, verb: &str, arg: &str) -> AppResult<()> {
         let i = &self.inner;
         let pair = |arg: &str| -> AppResult<(String, String)> {
@@ -493,6 +540,12 @@ impl App {
             }
             "remove-workspace" => i.workspace_remove(arg),
             "toggle-bookmark" => i.toggle_bookmark(arg, std::path::Path::new(arg).is_dir()),
+            "open-bookmark" => {
+                let (how, path) = arg.split_once(' ').ok_or_else(|| {
+                    AppError::Invalid("open-bookmark takes '<how> <path>'".into())
+                })?;
+                i.open_bookmark(how, path)
+            }
             other => Err(AppError::Invalid(format!("unknown saved verb '{other}'"))),
         }
     }
@@ -504,6 +557,36 @@ impl App {
         } else {
             self.inner.search_default_name(tab)
         }
+    }
+
+    /// What the Save workspace and Save menus-and-toolbars dialogs show for a name, as JSON
+    /// `{default, problem, taken}`: the name they open with, why this one cannot be saved (or
+    /// null), and whether saving it replaces one already saved - the button says Replace then.
+    /// `kind` is `workspace` or `command-bars`.
+    pub fn save_name_json(&self, kind: &str, name: &str) -> AppResult<String> {
+        let i = &self.inner;
+        let (default, problem, taken) = match kind {
+            "workspace" => (
+                i.workspace_default_name(),
+                bb_core::rules::SavedWorkspaceRules::validate(name, |_| false),
+                i.workspace_name_taken(name.trim()),
+            ),
+            "command-bars" => (
+                i.bars_current_name().unwrap_or_else(|| {
+                    bb_core::commandbars::SavedCommandBarRules::default_name(
+                        bb_core::FileTime::now().to_local(),
+                    )
+                }),
+                bb_core::commandbars::SavedCommandBarRules::validate(name, |_| false),
+                i.bars_name_taken(name.trim(), None),
+            ),
+            other => return Err(AppError::Invalid(format!("unknown kind '{other}'"))),
+        };
+        Ok(text(&serde_json::json!({
+            "default": default,
+            "problem": problem,
+            "taken": taken,
+        })))
     }
 
     /// The first reason a workspace cannot be saved under this name, or None.

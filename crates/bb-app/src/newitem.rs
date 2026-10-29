@@ -33,7 +33,12 @@ impl Inner {
             .find(|t| !t.extension.is_empty() && lower.ends_with(&t.extension.to_lowercase()))
     }
 
-    fn new_item_directory(&self, tab: TabId) -> AppResult<String> {
+    /// Where a new item goes: `directory` when given (a folder in the tree), else the folder the
+    /// tab shows.
+    fn new_item_directory(&self, tab: TabId, directory: Option<&str>) -> AppResult<String> {
+        if let Some(directory) = directory {
+            return Ok(directory.to_string());
+        }
         let cell = self.tab(tab)?;
         let t = lock(&cell);
         if t.path.is_empty() || (t.is_flattened && !t.is_flat_browse) {
@@ -48,10 +53,11 @@ impl Inner {
     pub(crate) fn new_item_suggest(
         &self,
         tab: TabId,
+        directory: Option<&str>,
         kind: NewItemKind,
         extension: &str,
     ) -> AppResult<String> {
-        let directory = self.new_item_directory(tab)?;
+        let directory = self.new_item_directory(tab, directory)?;
         let planner = NewItemPlanner::local();
         Ok(match kind {
             NewItemKind::Folder => {
@@ -76,10 +82,11 @@ impl Inner {
     pub(crate) fn new_item_plan_json(
         &self,
         tab: TabId,
+        directory: Option<&str>,
         name: &str,
         kind: NewItemKind,
     ) -> AppResult<Value> {
-        let directory = self.new_item_directory(tab)?;
+        let directory = self.new_item_directory(tab, directory)?;
         let plan = self.plan_new_item(&directory, name, kind);
         Ok(json!({
             "directory": plan.directory,
@@ -105,10 +112,11 @@ impl Inner {
     pub(crate) fn op_new_item(
         self: &Arc<Self>,
         tab: TabId,
+        directory: Option<&str>,
         name: &str,
         kind: NewItemKind,
     ) -> AppResult<OpId> {
-        let directory = self.new_item_directory(tab)?;
+        let directory = self.new_item_directory(tab, directory)?;
         let plan = self.plan_new_item(&directory, name, kind);
         if let Some(rejected) = &plan.rejected {
             let text = format!("The create was refused: {}", rejected.message);

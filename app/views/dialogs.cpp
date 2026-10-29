@@ -124,9 +124,11 @@ std::unique_ptr<Panel> new_item(DialogContext& cx, bool file) {
     Card c = make_card(file ? L"New file" : L"New folder", 460);
     BbApp* app = cx.main.core().app();
     const uint64_t tab = cx.main.active_tab();
+    // From the tree's menu, the folder right-clicked; otherwise (empty) the folder the tab shows.
+    const std::wstring dir = cx.main.dialog_folder();
     BbOwnedStr sugg{};
     std::wstring name = file ? L"New file.txt" : L"New folder";
-    if (bb_new_item_suggest(app, tab, file ? 1 : 0, core::s(std::wstring(file ? L".txt" : L"")), &sugg) == BB_OK) name = core::take(sugg);
+    if (bb_new_item_suggest(app, tab, core::s(dir), file ? 1 : 0, core::s(std::wstring(file ? L".txt" : L"")), &sugg) == BB_OK) name = core::take(sugg);
     if (file) {
         const json::Value types = try_model([&](BbOwnedStr* o) { return bb_new_file_types(app, o); });
         std::vector<std::wstring> labels;
@@ -138,13 +140,13 @@ std::unique_ptr<Panel> new_item(DialogContext& cx, bool file) {
     }
     auto* edit = labelled_edit(*c.body, L"Name", name);
     edit->name = "NewItemName";
-    const json::Value plan = try_model([&](BbOwnedStr* o) { return bb_new_item_plan(app, tab, file ? 1 : 0, core::s(name), o); });
+    const json::Value plan = try_model([&](BbOwnedStr* o) { return bb_new_item_plan(app, tab, core::s(dir), file ? 1 : 0, core::s(name), o); });
     const std::wstring target = core::wide(plan["target"].str());
     f::note(*c.body, plan["ok"].boolean(true) || plan.is_null() ? L"It will be made in " + core::wide(plan["directory"].str())
                                                                 : core::wide(plan["rejected"].str()));
-    add_button(c, L"Create", [cx, edit, file] {
+    add_button(c, L"Create", [cx, edit, file, dir] {
         uint64_t op = 0;
-        bb_new_item(cx.main.core().app(), cx.main.active_tab(), file ? 1 : 0, core::s(edit->text()), &op);
+        bb_new_item(cx.main.core().app(), cx.main.active_tab(), core::s(dir), file ? 1 : 0, core::s(edit->text()), &op);
         cx.close();
     }, true);
     add_button(c, L"Cancel", cx.close);
@@ -290,8 +292,24 @@ std::unique_ptr<Panel> columns_dialog(DialogContext& cx) {
     return std::move(c.root);
 }
 
+// The folder a tree menu's Properties is about, read from disk: the tree holds names, not sizes or dates.
+std::vector<SelectedRow> folder_row(const std::wstring& folder) {
+    SelectedRow r;
+    r.path = folder;
+    r.dir = true;
+    const size_t cut = folder.find_last_of(L'\\');
+    r.name = folder.size() <= 3 || cut == std::wstring::npos ? folder : folder.substr(cut + 1);
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (GetFileAttributesExW(folder.c_str(), GetFileExInfoStandard, &data)) {
+        auto ticks = [](const FILETIME& t) { return static_cast<int64_t>((static_cast<uint64_t>(t.dwHighDateTime) << 32) | t.dwLowDateTime); };
+        r.modified = ticks(data.ftLastWriteTime);
+        r.created = ticks(data.ftCreationTime);
+    }
+    return {r};
+}
+
 std::unique_ptr<Panel> properties(DialogContext& cx) {
-    const auto rows = cx.main.selected_rows();
+    const auto rows = cx.main.dialog_folder().empty() ? cx.main.selected_rows() : folder_row(cx.main.dialog_folder());
     Card c = make_card(rows.size() == 1 ? rows[0].name + L" properties" : L"Properties", 460);
     auto line = [&](const wchar_t* label, const std::wstring& value) {
         if (value.empty()) return;
@@ -528,6 +546,48 @@ std::unique_ptr<Panel> flat_large(DialogContext& cx) {
     return std::move(c.root);
 }
 
+// Save workspace / Save menus and toolbars: one name, checked as it is typed. A name already saved is
+// replaced, and the button says so. Spec: Views/SavedWorkspaceDialog.
+std::unique_ptr<Panel> save_named(DialogContext& cx, bool workspace) {
+    Card c = make_card(workspace ? L"Save workspace" : L"Save menus and toolbars", 460);
+    BbApp* app = cx.main.core().app();
+    const std::wstring kind = workspace ? L"workspace" : L"command-bars";
+    auto check = [app, kind](const std::wstring& name) {
+        return try_model([&](BbOwnedStr* o) { return bb_save_name(app, core::s(kind), core::s(name), o); });
+    };
+    auto* edit = labelled_edit(*c.body, L"Name", core::wide(check(L"")["default"].str()));
+    edit->name = "SaveName";
+    const std::wstring about = workspace ? L"The panes and tabs as they are now, to switch back to by name."
+                                         : L"The menu bar and toolbars as they are now, to switch back to by name.";
+    auto* note = f::note(*c.body, about);
+    Button* save = add_button(c, L"Save", nullptr, true);
+    add_button(c, L"Cancel", cx.close);
+    auto refresh = [check, note, save, about](const std::wstring& name) {
+        const json::Value st = check(name);
+        const bool ok = st["problem"].is_null();
+        const bool replacing = ok && st["taken"].boolean();
+        note->set_text(!ok ? core::wide(st["problem"].str()) : replacing ? L"This replaces the one already saved under this name." : about);
+        save->text = replacing ? L"Replace" : L"Save";
+        save->set_enabled(ok);
+        save->invalidate();
+    };
+    refresh(edit->text());
+    edit->on_changed = refresh;
+    save->on_click = [cx, app, edit, workspace] {
+        const std::wstring name = edit->text();
+        const BbStatus st = workspace ? bb_saved_do(app, 0, core::s(L"save-workspace"), core::s(name))
+                                      : bb_bars_do(app, core::s(L"save"), core::s(name));
+        if (st != BB_OK) return;  // the name was refused: the note already says why
+        const std::wstring said = workspace ? L"Saved the workspace \"" + name + L"\"" : L"Saved the menus and toolbars as \"" + name + L"\"";
+        bb_status_set(app, core::s(said));
+        cx.close();
+    };
+    edit->on_commit = [save] {
+        if (save->flags.enabled && save->on_click) save->on_click();
+    };
+    return std::move(c.root);
+}
+
 std::unique_ptr<Panel> saved_command_bars(DialogContext& cx) {
     Card c = make_card(L"Saved menus and toolbars", 460);
     const json::Value st = try_model([&](BbOwnedStr* o) { return bb_bars_query(cx.main.core().app(), core::s(L"state"), core::s(std::wstring()), o); });
@@ -571,6 +631,8 @@ const std::map<std::wstring, Builder>& builders() {
         {L"select-pattern", select_pattern},
         {L"flat-large", flat_large},
         {L"saved-command-bars", saved_command_bars},
+        {L"save-workspace", [](DialogContext& cx) { return save_named(cx, true); }},
+        {L"save-command-bars", [](DialogContext& cx) { return save_named(cx, false); }},
     };
     return table;
 }

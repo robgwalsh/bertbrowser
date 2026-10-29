@@ -30,6 +30,7 @@
 
 #include <atomic>
 #include <memory>
+#include <optional>
 #include <set>
 #include <unordered_map>
 
@@ -236,8 +237,29 @@ public:
     ui::TreeView* tree_view() const { return tree_; }
     // Reveals the tab's folder in the tree without navigating.
     void reveal_in_tree(const std::wstring& path);
+    void sync_tree_hidden();
     // A tab navigated: the tree follows when it is the active one.
     void tab_navigated(uint64_t tab, const std::wstring& path);
+    // The files on the clipboard (the system's, or a run's own), put there by Copy or Cut.
+    bool clipboard_put(const std::vector<std::wstring>& paths, bool cut);
+    std::optional<ClipboardFiles> clipboard_get();
+    // Tells the core whether Paste has anything to paste.
+    void push_clipboard_flag();
+    // Edit > Paste (or Paste shortcut): what is on the clipboard, into the folder the tab shows.
+    bool paste(bool shortcut);
+    // Copy to / Move to: the selection into a folder chosen in Windows' folder picker.
+    bool transfer_to_chosen(bool move);
+    // Scans `folder` for duplicates and shows what it found.
+    void open_duplicates(const std::wstring& folder);
+    // Puts paths (quoted, one per line) or names on the clipboard and says so on the status line.
+    void copy_text(const std::vector<std::wstring>& items, bool paths, bool this_folder);
+    // The folder tree's right-click menu, about `folder` (the row right-clicked), at a point.
+    void open_tree_menu(const std::wstring& folder, ui::Point at);
+    // One of the tree menu's entries, carried out on `folder` rather than on the file list's selection.
+    void tree_verb(const std::wstring& id, const std::wstring& folder);
+    // The folder a dialog opened from the tree menu is about, while it is being built (New, Properties,
+    // What changed); empty for one opened any other way, which reads the active tab.
+    const std::wstring& dialog_folder() const { return dialog_folder_; }
 
     // Runs one command against the active tab through the one gate the keys and menus share.
     bool run_command(const std::wstring& id);
@@ -296,7 +318,9 @@ public:
     void push_system_appearance();
     void set_follow_windows(bool on) { follow_windows_ = on; }
     // The harness never opens a dialog nobody could answer: a command that would is reported instead.
-    void set_headless_dialogs(bool on) { headless_dialogs_ = on; }
+    // It also swaps the system clipboard for one held in memory: a run's copy and paste must not touch the
+    // person's clipboard, and what is on theirs must not leak into the run.
+    void set_headless_dialogs(bool on);
     // Poses the insertion line on the active pane's tab strip (see TabStrip::set_drag_gap). false if no such gap.
     bool pose_tab_drag(int gap);
     // The search index offer and line, as the window shows them.
@@ -370,6 +394,15 @@ private:
     bool bars_pending_ = false;
     bool headless_dialogs_ = false;
     bool follow_windows_ = true;
+    std::wstring dialog_folder_;
+    // A run's clipboard (see set_headless_dialogs), and its change count, standing in for Windows'.
+    std::optional<ClipboardFiles> run_clipboard_;
+    uint32_t run_clipboard_seq_ = 0;
+    // A paste of cut files under way: the clipboard is emptied once it has moved them, as Explorer's is -
+    // unless something else has been put on the clipboard meanwhile.
+    uint64_t cut_paste_op_ = 0;
+    uint32_t cut_paste_seq_ = 0;
+    uint32_t clipboard_seq() const;
     std::unique_ptr<ShellMenuSource> shell_source_;
     std::unique_ptr<FileDrag> file_drag_;
     std::shared_ptr<void> menu_session_;

@@ -12,12 +12,36 @@
 #include <windows.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
+
+namespace bb::core {
+class Core;
+}
 
 namespace bb::views {
 
 class MainView;
+
+// The files on the clipboard as Explorer puts them there: CF_HDROP for the paths and "Preferred DropEffect"
+// to tell a cut from a copy, so cut, copy and paste work both ways with Explorer. Spec: Services/FileClipboard.
+struct ClipboardFiles {
+    std::vector<std::wstring> paths;
+    bool cut = false;
+};
+namespace file_clipboard {
+bool put(const std::vector<std::wstring>& paths, bool cut);  // false: another program holds the clipboard
+std::optional<ClipboardFiles> get();
+bool has_files();
+void clear();
+}  // namespace file_clipboard
+
+// Moves, copies or links (`verb`: move, copy, shortcut) sources into a folder - what a drop and a paste both
+// are. Into an archive it is an archive edit. Returns the operation, or 0 when none started (the core has
+// said why on the status line).
+uint64_t transfer_into(core::Core& core, const std::vector<std::wstring>& sources, const std::wstring& destination,
+                       const std::string& verb);
 
 class FileDrag {
 public:

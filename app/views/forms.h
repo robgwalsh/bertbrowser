@@ -34,6 +34,9 @@ RadioGroup* radios(Widget& parent, std::vector<std::wstring> items, int selected
 struct ListEntry {
     std::wstring text, detail;
     const IconData* icon = nullptr;
+    // A picture instead of `icon` (a shell icon), asked for at paint time since it may still be loading.
+    std::function<ThumbPtr(uint32_t px)> picture;
+    bool faded = false;  // the picture drawn dimmed (a hidden file)
     bool heading = false;  // a group title: not selectable
     bool separator = false;
     bool enabled = true;
@@ -56,6 +59,7 @@ public:
     int selected = -1;
     std::function<void(int)> on_select;    // a click or a key moved the selection
     std::function<void(int)> on_activate;  // a double click or Enter
+    std::function<void(int, Point)> on_context;  // a right click on a row, which does not select it
 
     void set_entries(std::vector<ListEntry> e, int select = -1);
     void select(int i, bool notify = false);
@@ -78,6 +82,7 @@ private:
     int step(int from, int dir) const;
     void layout_bar();
     ScrollBar v_{true};
+    ImageCache images_;
     std::vector<ComPtr<ID2D1PathGeometry>> icon_geo_;
     std::vector<uint32_t> icon_gen_;
 };

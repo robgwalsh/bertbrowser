@@ -11,6 +11,7 @@
 #include <fstream>
 
 #include "views/command_ui.h"
+#include "views/ops_menus.h"
 #include "views/dialogs.h"
 #include "views/json.h"
 #include "views/model.h"
@@ -447,6 +448,32 @@ void Runner::install_ui() {
                                           : "an item of the last menu contains '" + to_utf8(text) + "', and none should.");
         }
     };
+    // Runs one entry of the folder tree's menu for a folder, as a right-click on its row then a click on
+    // the entry would: the entry acts on that folder, whatever the file list shows.
+    verbs_[L"tree-menu-run"] = [this](const std::wstring& r) {
+        const std::wstring rest = require(r, "tree-menu-run");
+        const size_t on = rest.rfind(L" on ");
+        if (on == std::wstring::npos) throw FormatError("tree-menu-run wants <item text> on <folder>.");
+        const std::wstring text = trim(rest.substr(0, on));
+        const std::wstring folder = sandbox_.resolve(trim(rest.substr(on + 4))).wstring();
+        views::ops::ComposedMenu composed = views::ops::compose_context_menu(s_.view(), views::ops::MenuKind::Tree, folder);
+        std::function<const ui::MenuItem*(const ui::MenuItems&)> find = [&](const ui::MenuItems& items) -> const ui::MenuItem* {
+            for (const ui::MenuItem& m : items) {
+                if (m.is_separator) continue;
+                if (m.is_submenu()) {
+                    if (const ui::MenuItem* hit = find(m.sub)) return hit;
+                } else if (core::iequals(ui::parse_menu_label(m.text).display, text)) {
+                    return &m;
+                }
+            }
+            return nullptr;
+        };
+        const ui::MenuItem* item = find(composed.items);
+        if (!item) throw AssertionError("The tree's menu for '" + to_utf8(folder) + "' has no '" + to_utf8(text) + "'.");
+        if (!item->enabled) throw AssertionError("'" + to_utf8(text) + "' is disabled in the tree's menu.");
+        if (item->on_invoke) item->on_invoke();
+        s_.settle();
+    };
     verbs_[L"assert-menu-item"] = [menu_item](const std::wstring& r) { menu_item(r, true); };
     verbs_[L"assert-no-menu-item"] = [menu_item](const std::wstring& r) { menu_item(r, false); };
     verbs_[L"assert-menu-gesture"] = [this](const std::wstring& r) {
@@ -862,6 +889,17 @@ void Runner::install_ui() {
         return out;
     };
     verbs_[L"saved-searches"] = [saved_names](const std::wstring&) { say("SAVED " + join(saved_names("searches"), ", ")); };
+    // The sidebar's Bookmarks section as it shows now (hidden targets left out unless hidden items are shown).
+    verbs_[L"assert-bookmarks"] = [this](const std::wstring& r) {
+        const std::wstring rest = require(r, "assert-bookmarks");
+        const std::vector<std::wstring> wanted = core::iequals(rest, L"none") ? std::vector<std::wstring>{} : bar_split(rest);
+        s_.view().sync_overlays();
+        std::vector<std::wstring> shown;
+        for (const std::wstring& p : s_.view().sidebar()->bookmarks()) shown.push_back(fs::path(p).filename().wstring());
+        bool same = shown.size() == wanted.size();
+        for (size_t i = 0; same && i < shown.size(); ++i) same = core::iequals(shown[i], wanted[i]);
+        if (!same) throw AssertionError("The bookmarks are: " + (shown.empty() ? std::string("none") : join(shown, " | ")) + ".");
+    };
     verbs_[L"workspaces"] = [saved_names](const std::wstring&) { say("WORKSPACES " + join(saved_names("workspaces"), ", ")); };
     auto saved_assert = [this](const std::wstring& r, bool expected, const char* what) {
         const std::wstring name = require(r, expected ? "assert-saved-search" : "assert-no-saved-search");
@@ -1072,7 +1110,7 @@ void Runner::install_ui() {
     auto new_item = [this](const std::wstring& r, uint32_t kind) {
         const std::wstring name = require(r, kind == 0 ? "newfolder" : "newfile");
         uint64_t op = 0;
-        core::check(bb_new_item(s_.core().app(), tab(), kind, core::s(name), &op), "new item");
+        core::check(bb_new_item(s_.core().app(), tab(), core::s(L""), kind, core::s(name), &op), "new item");
         await_op(op);
     };
     verbs_[L"newfolder"] = [new_item](const std::wstring& r) { new_item(r, 0); };

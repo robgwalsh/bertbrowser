@@ -169,6 +169,23 @@ pub unsafe extern "C" fn bb_launch_command(app: *mut BbApp, id: BbStr) -> BbStat
     })
 }
 
+/// As `bb_launch_command`, on `folder` rather than the selection: the folder tree's menu.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_launch_command_at(
+    app: *mut BbApp,
+    id: BbStr,
+    folder: BbStr,
+) -> BbStatus {
+    guard(|| {
+        let app = unsafe { app_of(app)? };
+        Ok(app
+            .app
+            .launch_command_at(&unsafe { id.to_string_lossy() }, &unsafe {
+                folder.to_string_lossy()
+            })?)
+    })
+}
+
 /// Who opens folders and drives on this machine, as JSON: `{"state": "NotRegistered" |
 /// "RegisteredToThisApp" | "RegisteredToThisAppStale" | "RegisteredToAnotherApp", "other": <program
 /// or null>, "executable": <this app's path>}`. Reads the registry; free with `bb_str_free`. Product

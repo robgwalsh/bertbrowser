@@ -1,0 +1,63 @@
+# Cut, copy and paste of files, and the other commands the window carries out itself.
+#
+# A run has a clipboard of its own, held in memory: the person's is never read or written, so what
+# they have copied cannot leak into a run and a run cannot overwrite it. Paste is a drop by another
+# name, so it goes through the same planner, executor and undo history a drop does.
+
+tree .
+refresh
+assert-command edit.paste unavailable no files on the clipboard
+
+# Copy, then paste somewhere else: the original stays.
+select notes.txt
+run edit.copy
+assert-status 1 item(s) copied
+assert-command edit.paste available
+go Documents
+run edit.paste
+assert-row notes.txt
+assert-exists notes.txt
+assert-exists Documents\notes.txt
+
+# A copy stays on the clipboard, to paste again somewhere else.
+go Pictures
+run edit.paste
+assert-exists Pictures\notes.txt
+
+# Cut, then paste: the original goes, and the clipboard empties once it has moved, as Explorer's does.
+go .
+select budget.xlsx
+run edit.cut
+assert-status 1 item(s) cut
+go Empty
+run edit.paste
+assert-exists Empty\budget.xlsx
+assert-missing budget.xlsx
+assert-command edit.paste unavailable no files on the clipboard
+undo
+assert-exists budget.xlsx
+
+# Paste shortcut makes links to what is on the clipboard, not copies of it.
+go .
+select photo.jpg
+run edit.copy
+go Empty
+run edit.paste-shortcut
+assert-exists Empty\photo.jpg - Shortcut.lnk
+assert-command edit.paste available
+
+# The focus commands move the keyboard, and nothing else.
+run pane.focus-tree
+run pane.focus-list
+run search.folder
+assert-path Empty
+
+# These need a person: a folder picker, a name, the window itself. A run reports them instead.
+select photo.jpg - Shortcut.lnk
+run file.copy-to
+run app.save-workspace
+run app.save-command-bars
+run app.exit
+shot 01-after-clipboard
+dialog save-workspace 02-save-workspace
+dialog save-command-bars 03-save-command-bars

@@ -335,6 +335,11 @@ impl App {
         self.inner.run_launch_command(id)
     }
 
+    /// As `launch_command`, on `folder` rather than the selection (the folder tree's menu).
+    pub fn launch_command_at(&self, id: &str, folder: &str) -> AppResult<()> {
+        self.inner.run_launch_command_at(id, folder)
+    }
+
     /// Opens what the command line (or a second launch's hand-off) named: a tab, a pane or the
     /// active tab per the request's mode, with a file highlighted when asked.
     pub fn open_request(&self, request: &bb_core::cli::CommandLineRequest) -> AppResult<()> {

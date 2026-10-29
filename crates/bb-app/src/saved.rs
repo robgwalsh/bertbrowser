@@ -204,6 +204,11 @@ impl Inner {
         SavedWorkspaceRules::validate(name, |n| repo.exists(n).unwrap_or(false))
     }
 
+    /// Whether a workspace of this name is saved already (saving it would replace that one).
+    pub(crate) fn workspace_name_taken(&self, name: &str) -> bool {
+        self.workspaces_repo().exists(name).unwrap_or(false)
+    }
+
     /// Captures the arrangement under a name (replacing one of that name).
     pub(crate) fn workspace_save(&self, name: &str) -> AppResult<()> {
         let repo = self.workspaces_repo();
@@ -288,6 +293,7 @@ impl Inner {
                 "shape": SavedWorkspaceRules::shape_text(&w.layout),
                 "folders": SavedWorkspaceRules::folders(&w.layout),
             })).collect::<Vec<_>>(),
+            "bookmarks": self.bookmark_rows(),
             "workspacesPlacement": wp,
             "savedSearchesPlacement": sp,
         })

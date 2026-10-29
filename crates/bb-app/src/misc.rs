@@ -4,9 +4,11 @@
 //! MainWindow (IsContentBlocked), CustomCommandDefinition.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use bb_core::custom_commands::CustomCommandDefinition;
 use bb_core::data::{Bookmark, BookmarkRepository, BookmarkService};
+use bb_core::layout::SplitOrientation;
 use serde_json::{Value, json};
 use windows_sys::Win32::Storage::FileSystem::{
     GetDriveTypeW, GetLogicalDriveStringsW, GetVolumeInformationW,
@@ -15,7 +17,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 use crate::app::{Inner, lock};
 use crate::commands::Ctx;
 use crate::events::Model;
-use crate::ids::{AppError, AppResult, PaneId};
+use crate::ids::{AppError, AppResult, PaneId, TabId};
 use crate::keys::CUSTOM_PREFIX;
 use crate::tabs::tab_title;
 
@@ -71,10 +73,110 @@ impl Inner {
         self.bookmark_service().get_all().unwrap_or_default()
     }
 
+    /// The sidebar's Bookmarks section: `[{path, name, isDirectory, hidden}]`, folders first. A
+    /// hidden target is left out unless hidden items are shown, and dimmed when it is.
+    pub(crate) fn bookmark_rows(&self) -> Vec<Value> {
+        let show_hidden = lock(&self.settings).show_hidden_items;
+        self.bookmark_list()
+            .into_iter()
+            .filter_map(|b| {
+                let hidden = bookmark_is_hidden(&b.display_path);
+                if hidden && !show_hidden {
+                    return None;
+                }
+                let name = std::path::Path::new(&b.display_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| b.display_path.clone());
+                Some(json!({
+                    "path": b.display_path,
+                    "name": name,
+                    "isDirectory": b.is_directory,
+                    "hidden": hidden,
+                }))
+            })
+            .collect()
+    }
+
+    /// Opens a bookmark: `here` (the active tab), `new-tab`, `pane-right` or `pane-below`. A folder
+    /// opens; a file opens the folder it is in with the file selected. A folder that is gone says so
+    /// rather than leaving the tab where it was without a word.
+    pub(crate) fn open_bookmark(self: &Arc<Self>, how: &str, path: &str) -> AppResult<()> {
+        let is_dir = std::path::Path::new(path).is_dir();
+        let folder = if is_dir {
+            path.to_string()
+        } else {
+            crate::tabs::parent_path(path).ok_or(AppError::Stale)?
+        };
+        let pane = lock(&self.shell).active_pane;
+        let tab = match how {
+            "here" => lock(&self.shell).active_tab_id().ok_or(AppError::Stale)?,
+            "new-tab" => self.open_tab(pane, &folder, true)?,
+            "pane-right" | "pane-below" => {
+                let orientation = if how == "pane-right" {
+                    SplitOrientation::Vertical
+                } else {
+                    SplitOrientation::Horizontal
+                };
+                return self.split_pane(pane, orientation, &folder).map(|_| ());
+            }
+            other => {
+                return Err(AppError::Invalid(format!(
+                    "unknown bookmark verb '{other}'"
+                )));
+            }
+        };
+        if is_dir {
+            return if how == "here" {
+                self.navigate(tab, path)
+            } else {
+                Ok(())
+            };
+        }
+        if !std::path::Path::new(path).exists() {
+            self.set_status(tab, format!("Not found: {path}"));
+            return Ok(());
+        }
+        self.reveal_file(tab, path)
+    }
+
     pub(crate) fn is_bookmarked(&self, path: &str) -> Result<bool, AppError> {
         self.bookmark_service()
             .exists(path)
             .map_err(|e| AppError::Invalid(e.to_string()))
+    }
+
+    /// The selection's Bookmark command: when any is not bookmarked yet, bookmarks them all;
+    /// otherwise removes them all. Spec: ShellViewModel.ToggleBookmarksAsync.
+    pub(crate) fn toggle_bookmarks(&self, tab: TabId, paths: &[String]) -> AppResult<()> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+        let service = self.bookmark_service();
+        let err = |e: bb_core::data::Error| AppError::Invalid(e.to_string());
+        let mut any_missing = false;
+        for p in paths {
+            any_missing |= !service.exists(p).map_err(err)?;
+        }
+        for p in paths {
+            if any_missing {
+                service
+                    .add(p, std::path::Path::new(p).is_dir())
+                    .map_err(err)?;
+            } else {
+                service.remove(p).map_err(err)?;
+            }
+        }
+        self.hub.model(Model::Saved);
+        self.set_status(
+            tab,
+            if any_missing {
+                format!("Bookmarked {} item(s)", paths.len())
+            } else {
+                format!("Removed {} bookmark(s)", paths.len())
+            },
+        );
+        Ok(())
     }
 
     /// Bookmarks the path, or removes the bookmark if there is one.
@@ -294,4 +396,10 @@ impl Inner {
             })),
         })
     }
+}
+
+/// The target's hidden attribute; false for a path that is gone or cannot be read.
+fn bookmark_is_hidden(path: &str) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    std::fs::metadata(path).is_ok_and(|m| m.file_attributes() & bb_core::attributes::HIDDEN != 0)
 }

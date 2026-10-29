@@ -137,7 +137,8 @@ void TreeView::paint(PaintContext& pc) {
         }
         float text_l = cv.r + 2.0f;
         if (const ThumbPtr image = provider_->icon(e.id, icon_px)) {
-            images_.draw(pc, image, Rect::xywh(text_l, rr.t + (row_height - 16.0f) / 2, 16.0f, 16.0f));
+            images_.draw(pc, image, Rect::xywh(text_l, rr.t + (row_height - 16.0f) / 2, 16.0f, 16.0f),
+                         provider_->dimmed(e.id) ? 0.5f : 1.0f);
             text_l += 22.0f;
         }
         pc.text(provider_->label(e.id), Rect{text_l, rr.t, rr.r, rr.b}, style.font,
@@ -208,6 +209,10 @@ bool TreeView::on_mouse_down(const MouseEvent& e) {
     const size_t row = row_at(e.pt);
     if (row == npos) return false;
     const Entry en = rows_[row];  // a copy: toggling rebuilds rows_
+    if (e.button == MouseButton::Right) {
+        if (on_context) on_context(en.id, e.pt);
+        return true;
+    }
     if (e.button == MouseButton::Left && en.has_children && chevron_rect(row).contains(e.pt)) {
         toggle(en.id);
         return true;

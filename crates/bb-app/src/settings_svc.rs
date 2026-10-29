@@ -213,7 +213,11 @@ impl Inner {
         match key {
             "keyBindings" => self.rebuild_keymap(),
             "customCommands" => self.keymap_refresh(),
-            "showHiddenItems" => self.refresh_all(),
+            "showHiddenItems" => {
+                self.refresh_all();
+                // The Bookmarks section filters hidden targets too.
+                self.hub.model(crate::events::Model::Saved);
+            }
             "commandBars" => self.reload_bars(),
             "fileListColumns" => self.columns_default_changed(),
             "searchContentMaxBytes" => {}

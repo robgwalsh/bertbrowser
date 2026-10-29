@@ -12,6 +12,22 @@ FolderTreeProvider::FolderTreeProvider(ShellIcons* icons) : icons_(icons) {
     next_ = 1;
 }
 
+bool FolderTreeProvider::set_show_hidden(bool on) {
+    if (on == show_hidden_) return false;
+    show_hidden_ = on;
+    for (auto& kv : nodes_) {
+        if (kv.second.loaded) filter(kv.second);
+    }
+    return true;
+}
+
+void FolderTreeProvider::filter(Node& n) const {
+    n.shown.clear();
+    for (const uint64_t k : n.kids) {
+        if (show_hidden_ || !(nodes_[k].attributes & FILE_ATTRIBUTE_HIDDEN)) n.shown.push_back(k);
+    }
+}
+
 uint64_t FolderTreeProvider::add(Node n) const {
     const uint64_t id = next_++;
     nodes_[id] = std::move(n);
@@ -30,6 +46,7 @@ void FolderTreeProvider::load(uint64_t node) const {
             const uint64_t id = add(Node{root.substr(0, 2), root, false, {}});
             nodes_[0].kids.push_back(id);
         }
+        nodes_[0].shown = nodes_[0].kids;
         return;
     }
     struct Found {
@@ -46,7 +63,6 @@ void FolderTreeProvider::load(uint64_t node) const {
         do {
             if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
             if (fd.cFileName[0] == L'.' && (fd.cFileName[1] == 0 || (fd.cFileName[1] == L'.' && fd.cFileName[2] == 0))) continue;
-            if (!show_hidden && (fd.dwFileAttributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM))) continue;
             found.push_back({fd.cFileName, base + fd.cFileName, fd.dwFileAttributes});
         } while (FindNextFileW(h, &fd));
         FindClose(h);
@@ -57,17 +73,18 @@ void FolderTreeProvider::load(uint64_t node) const {
         const uint64_t id = add(Node{f.label, f.path, false, {}, f.attributes});
         nodes_[node].kids.push_back(id);
     }
+    filter(nodes_[node]);
 }
 
 size_t FolderTreeProvider::child_count(uint64_t node) const {
     load(node);
-    return nodes_[node].kids.size();
+    return nodes_[node].shown.size();
 }
 
 uint64_t FolderTreeProvider::child_id(uint64_t node, size_t index) const {
     load(node);
-    const auto& kids = nodes_[node].kids;
-    return index < kids.size() ? kids[index] : 0;
+    const auto& shown = nodes_[node].shown;
+    return index < shown.size() ? shown[index] : 0;
 }
 
 std::wstring FolderTreeProvider::label(uint64_t node) const {
@@ -79,7 +96,7 @@ bool FolderTreeProvider::has_children(uint64_t node) const {
     const auto it = nodes_.find(node);
     if (it == nodes_.end()) return false;
     // Unloaded means "maybe": a chevron now, the truth when it is opened.
-    return it->second.loaded ? !it->second.kids.empty() : true;
+    return it->second.loaded ? !it->second.shown.empty() : true;
 }
 
 ui::ThumbPtr FolderTreeProvider::icon(uint64_t node, uint32_t px) const {
@@ -89,6 +106,11 @@ ui::ThumbPtr FolderTreeProvider::icon(uint64_t node, uint32_t px) const {
     // A drive's path is its root ("C:\"); everything under it is a folder.
     if (n.path.size() == 3) return icons_->drive(n.path, px);
     return icons_->file(n.path, true, n.attributes, px);
+}
+
+bool FolderTreeProvider::dimmed(uint64_t node) const {
+    const auto it = nodes_.find(node);
+    return it != nodes_.end() && (it->second.attributes & FILE_ATTRIBUTE_HIDDEN) != 0;
 }
 
 std::wstring FolderTreeProvider::path_of(uint64_t node) const {
@@ -117,7 +139,7 @@ std::vector<uint64_t> FolderTreeProvider::chain_to(const std::wstring& path) con
         if (part.empty()) continue;
         load(cur);
         uint64_t found = 0;
-        for (const uint64_t k : nodes_[cur].kids) {
+        for (const uint64_t k : nodes_[cur].shown) {
             if (_wcsicmp(nodes_[k].label.c_str(), part.c_str()) == 0) {
                 found = k;
                 break;

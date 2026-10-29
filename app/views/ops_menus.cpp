@@ -88,10 +88,38 @@ const Spec* spec_of(const std::string& id) {
     return nullptr;
 }
 
-MenuItems built_in_items(MainView& main, const Spec& s, MenuKind kind) {
+// The tree's entries act on the folder right-clicked, not on the file list's selection, so each one is the
+// command's caption and icon with the tree's own action; the shortcut is the file list's, so none is shown.
+MenuItems tree_items(MainView& main, const Spec& s, const std::wstring& subject) {
+    MenuItems items;
+    for (const char* c : s.commands) {
+        BarRow r = command_row(main.core(), c);
+        if (r.id.empty()) continue;
+        std::wstring caption = r.caption;
+        if (r.id == "file.bookmark") {
+            caption = bb_is_bookmarked(main.core().app(), core::s(subject)) ? L"Remove &bookmark" : L"&Bookmark";
+        }
+        MenuItem m = MenuItem::make(caption);
+        m.icon = icon_for(r.icon);
+        // A drive is not a folder that can be deleted.
+        m.enabled = !(r.id == "file.delete" && subject.size() <= 3);
+        MainView* mv = &main;
+        const std::wstring id = core::wide(r.id);
+        m.on_invoke = [mv, id, subject] { mv->tree_verb(id, subject); };
+        items.push_back(std::move(m));
+    }
+    if (items.empty() || !s.group) return items;
+    MenuItem group = MenuItem::make(s.group);
+    group.icon = icon_for(command_row(main.core(), s.commands.front()).icon);
+    group.sub = std::move(items);
+    return MenuItems{std::move(group)};
+}
+
+MenuItems built_in_items(MainView& main, const Spec& s, MenuKind kind, const std::wstring& subject) {
     const bool files = kind == MenuKind::Files, background = kind == MenuKind::Background, tree = kind == MenuKind::Tree;
     if ((background && !s.background) || (tree && !s.tree)) return {};
-    const bool always = files ? s.files_always : background ? s.background_always : s.tree_always;
+    if (tree) return tree_items(main, s, subject);
+    const bool always = files ? s.files_always : s.background_always;
     std::vector<BarRow> rows;
     for (const char* c : s.commands) {
         // The folder's own path is what Copy as path means over empty space.
@@ -133,16 +161,25 @@ MenuItem from_entry(const ShellEntry& e, const std::shared_ptr<ShellMenuSession>
 
 }  // namespace
 
-ComposedMenu compose_context_menu(MainView& main, MenuKind kind) {
+ComposedMenu compose_context_menu(MainView& main, MenuKind kind, const std::wstring& subject) {
     core::Core& core = main.core();
     ComposedMenu out;
-    const std::wstring folder = core.tab_text(main.active_tab(), BB_TEXT_PATH);
+    const bool tree = kind == MenuKind::Tree;
+    // A folder in the tree is an item in its parent, which is what the handlers are told; a drive root has
+    // no parent and stands in for itself.
+    std::wstring folder = core.tab_text(main.active_tab(), BB_TEXT_PATH);
+    if (tree) {
+        folder = subject;
+        const size_t cut = subject.find_last_of(L'\\');
+        if (subject.size() > 3 && cut != std::wstring::npos) folder = subject.substr(0, cut < 3 ? 3 : cut);
+    }
 
     // Who the menu is about.
     std::vector<ShellTarget> targets;
     if (kind == MenuKind::Files) {
         for (const auto& r : main.selected_rows()) targets.push_back({r.path, r.dir});
     }
+    if (tree) targets.push_back({subject, true});
     if (targets.empty()) targets.push_back({folder, true});
     const ShellContext context = kind == MenuKind::Background ? ShellContext::Background : ShellContext::Items;
 
@@ -164,7 +201,7 @@ ComposedMenu compose_context_menu(MainView& main, MenuKind kind) {
         if (hidden.count(id)) continue;
         const Spec* s = spec_of(id);
         if (!s) continue;
-        declared[id] = built_in_items(main, *s, kind);
+        declared[id] = built_in_items(main, *s, kind, subject);
         declared_ids.push_back(core::wide(id));
     }
 
@@ -179,7 +216,14 @@ ComposedMenu compose_context_menu(MainView& main, MenuKind kind) {
         if (!applies || commands.count(c["id"].str())) continue;
         const std::string id = c["id"].str();
         MainView* mv = &main;
-        commands.emplace(id, MenuItem::make(escape_caption(w(c["name"])), [mv, id] { mv->run_command(L"custom:" + core::wide(id)); }));
+        if (tree) {
+            BbApp* app = core.app();
+            commands.emplace(id, MenuItem::make(escape_caption(w(c["name"])), [app, id, subject] {
+                bb_launch_command_at(app, core::s(L"custom:" + core::wide(id)), core::s(subject));
+            }));
+        } else {
+            commands.emplace(id, MenuItem::make(escape_caption(w(c["name"])), [mv, id] { mv->run_command(L"custom:" + core::wide(id)); }));
+        }
         command_ids.push_back(core::wide(id));
     }
 

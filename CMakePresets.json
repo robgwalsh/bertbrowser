@@ -8,7 +8,7 @@
       "binaryDir": "${sourceDir}/out/${presetName}",
       "architecture": { "value": "x64", "strategy": "external" },
       "toolset": { "value": "host=x64", "strategy": "external" },
-      "cacheVariables": { "CMAKE_CXX_COMPILER": "cl" }
+      "cacheVariables": { "CMAKE_CXX_COMPILER": "cl", "CMAKE_EXPORT_COMPILE_COMMANDS": "ON" }
     },
     { "name": "debug", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } },
     { "name": "release", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" } }

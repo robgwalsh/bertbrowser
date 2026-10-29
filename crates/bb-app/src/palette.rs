@@ -911,8 +911,8 @@ impl Inner {
             PaletteAction::NewFile(ext) => {
                 if let Some(tab) = tab {
                     let name =
-                        self.new_item_suggest(tab, bb_core::newitem::NewItemKind::File, ext)?;
-                    self.op_new_item(tab, &name, bb_core::newitem::NewItemKind::File)?;
+                        self.new_item_suggest(tab, None, bb_core::newitem::NewItemKind::File, ext)?;
+                    self.op_new_item(tab, None, &name, bb_core::newitem::NewItemKind::File)?;
                 }
             }
             PaletteAction::Tab(number) => {
