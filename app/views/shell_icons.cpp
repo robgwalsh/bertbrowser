@@ -28,39 +28,54 @@ std::wstring lower_ext(const std::wstring& path) {
 
 bool is_shortcut(const std::wstring& ext) { return ext == L".lnk" || ext == L".url"; }
 
-// The pictures the shell keeps, one list per size: 16, 32, 48 and 256 at 96 DPI, scaled by the system DPI.
+// The pictures the shell keeps, one list per size: 16, 32, 48 and 256 at 96 DPI, scaled by the system DPI. Each is
+// asked of the shell the first time something needs it - a list of 16-pixel rows never touches the jumbo one, and
+// getting all four up front cost tens of milliseconds in the first listing and in startup.
 struct ImageLists {
     struct List {
         ComPtr<IImageList> list;
         int size = 0;
+        bool loaded = false;
     };
-    List small_, large_, extra_, jumbo_;
-    bool loaded = false;
+    static constexpr int kSizes[4] = {SHIL_SMALL, SHIL_LARGE, SHIL_EXTRALARGE, SHIL_JUMBO};
+    List lists_[4];
 
-    void load() {
-        if (loaded) return;
-        loaded = true;
-        const std::pair<int, List*> want[] = {
-            {SHIL_SMALL, &small_}, {SHIL_LARGE, &large_}, {SHIL_EXTRALARGE, &extra_}, {SHIL_JUMBO, &jumbo_}};
-        for (const auto& [shil, slot] : want) {
-            if (FAILED(SHGetImageList(shil, IID_PPV_ARGS(&slot->list))) || !slot->list) continue;
-            int cx = 0, cy = 0;
-            slot->list->GetIconSize(&cx, &cy);
-            slot->size = cx;
+    // Smallest (0) to jumbo (3). A list the shell would not give has a null `list`.
+    const List& at(int i) {
+        List& l = lists_[i];
+        if (!l.loaded) {
+            l.loaded = true;
+            if (SUCCEEDED(SHGetImageList(kSizes[i], IID_PPV_ARGS(&l.list))) && l.list) {
+                int cx = 0, cy = 0;
+                l.list->GetIconSize(&cx, &cy);
+                l.size = cx;
+            }
         }
+        return l;
     }
 };
 
+// Per thread: an IImageList belongs to the apartment that asked for it, and the workers render too.
 ImageLists& lists() {
-    static ImageLists l;
-    l.load();
+    static thread_local ImageLists l;
     return l;
 }
 
+ComPtr<IWICImagingFactory>& wic_slot() {
+    static thread_local ComPtr<IWICImagingFactory> f;
+    return f;
+}
+
 IWICImagingFactory* wic() {
-    static ComPtr<IWICImagingFactory> f;
+    ComPtr<IWICImagingFactory>& f = wic_slot();
     if (!f) CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f));
     return f.Get();
+}
+
+// A worker lets go of its COM objects before it uninitialises COM.
+void release_thread_state() {
+    wic_slot().Reset();
+    for (auto& l : lists().lists_) l = {};
 }
 
 // The list's picture for a slot, `px` square, premultiplied.
@@ -122,6 +137,39 @@ uint32_t drawn_extent(const ui::ThumbImage& img) {
     return std::max(r, b);
 }
 
+uint64_t image_key(int index, int overlay, uint32_t px) {
+    return (static_cast<uint64_t>(index) << 24) | (static_cast<uint64_t>(overlay & 0xFF) << 16) | (px & 0xFFFF);
+}
+
+// The picture of one system image list entry, `px` square, from this thread's lists. The smallest list at least
+// as big, so a picture is only ever scaled down - except a jumbo one that turns out to be a small picture in a big
+// frame, where the 48 scaled up is the better answer.
+ui::ThumbPtr render_for(int index, int overlay, uint32_t px) {
+    ImageLists& l = lists();
+    const ImageLists::List* pick = nullptr;
+    for (int i = 0; i < 4 && !pick; ++i) {
+        const ImageLists::List& c = l.at(i);
+        if (c.list && c.size >= static_cast<int>(px)) pick = &c;
+    }
+    if (!pick) {
+        for (int i = 3; i >= 0 && !pick; --i) {
+            if (l.at(i).list) pick = &l.at(i);
+        }
+    }
+    if (!pick) pick = &l.at(0);
+    ui::ThumbPtr img = render(pick->list.Get(), index, overlay, px);
+    if (img && pick == &l.lists_[3]) {
+        const ImageLists::List& extra = l.at(2);
+        if (extra.list) {
+            const ui::ThumbPtr full = render(pick->list.Get(), index, overlay, static_cast<uint32_t>(pick->size));
+            if (full && drawn_extent(*full) <= static_cast<uint32_t>(extra.size)) {
+                img = render(extra.list.Get(), index, overlay, px);
+            }
+        }
+    }
+    return img;
+}
+
 }  // namespace
 
 ShellIcons::ShellIcons(HWND ui_window) : window_(ui_window) {
@@ -142,23 +190,22 @@ bool ShellIcons::is_per_file(const std::wstring& path, bool directory, uint32_t 
            e == L".scr" || e == L".cpl" || e == L".msc";
 }
 
-ShellIcons::Slot ShellIcons::type_slot(const std::wstring& path, bool directory) {
+// A type lookup is a registry walk (about 2 ms) and its picture a render (about 1 ms): a folder of a dozen kinds
+// of file would hold the UI thread for most of a frame. So the first sight of a type asks a worker, the row draws
+// its glyph meanwhile, and the answer comes back with the picture already made.
+void ShellIcons::ask_type(const std::wstring& path, bool directory, uint32_t px) {
     const std::wstring ext = directory ? L"<dir>" : lower_ext(path);
     const std::wstring key = ext.empty() ? L"<none>" : ext;
-    if (const auto it = by_type_.find(key); it != by_type_.end()) return it->second;
-    SHFILEINFOW info{};
-    UINT flags = SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES;
-    if (is_shortcut(ext)) flags |= SHGFI_ICON | SHGFI_SMALLICON | SHGFI_OVERLAYINDEX;  // the arrow
-    const wchar_t* query = directory ? L"folder" : ext.empty() ? L"file" : ext.c_str();
-    const DWORD attrs = directory ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
-    Slot s;
-    if (SHGetFileInfoW(query, attrs, &info, sizeof(info), flags)) {
-        s.index = info.iIcon & 0x00FFFFFF;
-        s.overlay = (flags & SHGFI_OVERLAYINDEX) ? (info.iIcon >> 24) & 0xFF : 0;
-    }
-    if (info.hIcon) DestroyIcon(info.hIcon);
-    by_type_[key] = s;
-    return s;
+    if (!types_asked_.insert(key).second) return;
+    TypeJob job;
+    job.key = key;
+    job.query = directory ? L"folder" : ext.empty() ? L"file" : ext;
+    job.directory = directory;
+    job.shortcut = is_shortcut(ext);
+    job.px = px;
+    std::lock_guard<std::mutex> lock(mu_);
+    type_jobs_.push_back(std::move(job));
+    cv_.notify_one();
 }
 
 ShellIcons::Slot ShellIcons::own_slot(const std::wstring& path, Slot fallback) {
@@ -183,32 +230,21 @@ ShellIcons::Slot ShellIcons::own_slot(const std::wstring& path, Slot fallback) {
 
 ui::ThumbPtr ShellIcons::image(Slot s, uint32_t px) {
     if (s.index < 0 || px == 0) return nullptr;
-    const uint64_t key = (static_cast<uint64_t>(s.index) << 24) | (static_cast<uint64_t>(s.overlay & 0xFF) << 16) | (px & 0xFFFF);
+    const uint64_t key = image_key(s.index, s.overlay, px);
     if (const auto it = images_.find(key); it != images_.end()) return it->second;
-    ImageLists& l = lists();
-    // The smallest list at least as big, so a picture is only ever scaled down - except a jumbo one that turns
-    // out to be a small picture in a big frame, where the 48 scaled up is the better answer.
-    const ImageLists::List* pick = nullptr;
-    for (const ImageLists::List* c : {&l.small_, &l.large_, &l.extra_, &l.jumbo_}) {
-        if (c->list && c->size >= static_cast<int>(px)) {
-            pick = c;
-            break;
-        }
-    }
-    if (!pick) pick = l.jumbo_.list ? &l.jumbo_ : l.extra_.list ? &l.extra_ : l.large_.list ? &l.large_ : &l.small_;
-    ui::ThumbPtr img = render(pick->list.Get(), s.index, s.overlay, px);
-    if (img && pick == &l.jumbo_ && l.extra_.list) {
-        const ui::ThumbPtr full = render(l.jumbo_.list.Get(), s.index, s.overlay, static_cast<uint32_t>(l.jumbo_.size));
-        if (full && drawn_extent(*full) <= static_cast<uint32_t>(l.extra_.size)) {
-            img = render(l.extra_.list.Get(), s.index, s.overlay, px);
-        }
-    }
+    ui::ThumbPtr img = render_for(s.index, s.overlay, px);
     images_[key] = img;
     return img;
 }
 
 ui::ThumbPtr ShellIcons::file(const std::wstring& path, bool directory, uint32_t attributes, uint32_t px, bool real) {
-    Slot s = type_slot(path, directory);
+    const std::wstring ext = directory ? L"<dir>" : lower_ext(path);
+    const auto known = by_type_.find(ext.empty() ? std::wstring(L"<none>") : ext);
+    if (known == by_type_.end()) {
+        ask_type(path, directory, px);
+        return nullptr;  // the caller draws its own glyph until the worker answers
+    }
+    Slot s = known->second;
     if (real && is_per_file(path, directory, attributes)) s = own_slot(path, s);
     return image(s, px);
 }
@@ -250,47 +286,125 @@ ui::ThumbPtr ShellIcons::stock(int siid, uint32_t px) {
     return image(it->second, px);
 }
 
+namespace {
+
+// The shell sets its icon cache, the system image list and its overlays up the first time anything asks, and
+// that cost lands on whoever asks first - the UI thread, in the middle of the first listing. One worker pays it
+// at startup instead (the answers are process-wide; this thread keeps none of them).
+void warm_shell_icons() {
+    SHFILEINFOW info{};
+    for (const wchar_t* query : {L"file", L"folder"}) {
+        const bool dir = query[1] == L'o';
+        SHGetFileInfoW(query, dir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL, &info, sizeof(info),
+                       SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES);
+    }
+    if (SHGetFileInfoW(L".lnk", FILE_ATTRIBUTE_NORMAL, &info, sizeof(info),
+                       SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES | SHGFI_ICON | SHGFI_SMALLICON | SHGFI_OVERLAYINDEX) &&
+        info.hIcon) {
+        DestroyIcon(info.hIcon);
+    }
+    ComPtr<IImageList> small_list;
+    SHGetImageList(SHIL_SMALL, IID_PPV_ARGS(&small_list));
+    ComPtr<IWICImagingFactory> factory;
+    CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory));
+}
+
+}  // namespace
+
 void ShellIcons::work() {
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    if (!warmed_.exchange(true)) warm_shell_icons();
+    // Tells the UI thread there is something to drain. Every drain repaints the window, so a burst of answers is
+    // held back until the queues are empty - or, in a long run, for at most kHoldBack, so pictures still arrive
+    // while it goes on.
+    const auto announce = [this] {
+        bool post = false;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            --running_;
+            const auto now = std::chrono::steady_clock::now();
+            const bool idle = jobs_.empty() && type_jobs_.empty() && running_ == 0;
+            if (!notified_ && (idle || now - last_post_ >= kHoldBack)) {
+                post = true;
+                notified_ = true;
+                last_post_ = now;
+            }
+        }
+        if (post && window_) PostMessageW(window_, WM_BB_ICONS, 0, 0);
+    };
     for (;;) {
+        TypeJob type;
         std::wstring path;
+        bool is_type = false;
         {
             std::unique_lock<std::mutex> lock(mu_);
-            cv_.wait(lock, [&] { return stop_ || !jobs_.empty(); });
+            cv_.wait(lock, [&] { return stop_ || !type_jobs_.empty() || !jobs_.empty(); });
             if (stop_) break;
-            path = std::move(jobs_.front());
-            jobs_.pop_front();
+            // A type is what a row on screen is waiting for; a file's own picture can follow it.
+            if (!type_jobs_.empty()) {
+                type = std::move(type_jobs_.front());
+                type_jobs_.pop_front();
+                is_type = true;
+            } else {
+                path = std::move(jobs_.front());
+                jobs_.pop_front();
+            }
             ++running_;
         }
         SHFILEINFOW info{};
         Slot s;
+        if (is_type) {
+            UINT flags = SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES;
+            if (type.shortcut) flags |= SHGFI_ICON | SHGFI_SMALLICON | SHGFI_OVERLAYINDEX;  // the arrow
+            if (SHGetFileInfoW(type.query.c_str(), type.directory ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL, &info,
+                               sizeof(info), flags)) {
+                s.index = info.iIcon & 0x00FFFFFF;
+                s.overlay = (flags & SHGFI_OVERLAYINDEX) ? (info.iIcon >> 24) & 0xFF : 0;
+            }
+            if (info.hIcon) DestroyIcon(info.hIcon);
+            TypeDone done;
+            done.key = std::move(type.key);
+            done.slot = s;
+            done.px = type.px;
+            if (s.index >= 0 && type.px) done.image = render_for(s.index, s.overlay, type.px);
+            {
+                std::lock_guard<std::mutex> lock(mu_);
+                type_done_.push_back(std::move(done));
+            }
+            announce();
+            continue;
+        }
         if (SHGetFileInfoW(path.c_str(), 0, &info, sizeof(info),
                            SHGFI_SYSICONINDEX | SHGFI_ICON | SHGFI_SMALLICON | SHGFI_OVERLAYINDEX)) {
             s.index = info.iIcon & 0x00FFFFFF;
             s.overlay = (info.iIcon >> 24) & 0xFF;
         }
         if (info.hIcon) DestroyIcon(info.hIcon);
-        bool post = false;
         {
             std::lock_guard<std::mutex> lock(mu_);
             done_.emplace_back(std::move(path), s);
-            --running_;
-            post = !notified_;
-            notified_ = true;
         }
-        if (post && window_) PostMessageW(window_, WM_BB_ICONS, 0, 0);
+        announce();
     }
+    release_thread_state();
     CoUninitialize();
 }
 
 void ShellIcons::drain() {
     std::vector<std::pair<std::wstring, Slot>> done;
+    std::vector<TypeDone> types;
     {
         std::lock_guard<std::mutex> lock(mu_);
         done.swap(done_);
+        types.swap(type_done_);
         notified_ = false;
     }
-    if (done.empty()) return;
+    if (done.empty() && types.empty()) return;
+    for (TypeDone& t : types) {
+        by_type_[t.key] = t.slot;
+        types_asked_.erase(t.key);
+        if (t.slot.index >= 0 && t.px) images_.emplace(image_key(t.slot.index, t.slot.overlay, t.px), std::move(t.image));
+    }
     for (auto& [path, slot] : done) {
         asked_.erase(path);
         if (const auto it = by_path_.find(path); it != by_path_.end()) {
@@ -309,7 +423,7 @@ void ShellIcons::drain() {
 
 size_t ShellIcons::pending() const {
     std::lock_guard<std::mutex> lock(mu_);
-    return jobs_.size() + running_ + done_.size();
+    return jobs_.size() + type_jobs_.size() + running_ + done_.size() + type_done_.size();
 }
 
 }  // namespace bb::views

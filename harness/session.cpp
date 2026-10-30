@@ -130,7 +130,10 @@ std::unique_ptr<Session> Session::start(const Options& options) {
         if (s->view_->active_tab() && !s->core_->tab_text(s->view_->active_tab(), BB_TEXT_PATH).empty() && !s->busy()) break;
         Sleep(1);
     }
+    // The listing is up when its rows are; the icons that follow are not part of how long it took to start.
+    s->wait_for_icons_ = false;
     s->settle();
+    s->wait_for_icons_ = true;
     s->startup_ms_ = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - began).count()) / 1000.0;
 
     const HWND after = GetForegroundWindow();
@@ -179,9 +182,9 @@ void Session::settle(int quiet_ms) {
     // And one more look: an event handled above may have started more work.
     if (busy()) settle(0);
     window_->render();
-    // Tiles ask for their pictures, and rows for a program's or shortcut's own icon, as they are painted; wait
-    // for those too, then paint them in.
-    const auto pictures = [&] { return view_->thumbnails_pending() + view_->icons_pending(); };
+    // Tiles ask for their pictures, and rows for their file type's or a program's own icon, as they are painted;
+    // wait for those too, then paint them in.
+    const auto pictures = [&] { return view_->thumbnails_pending() + (wait_for_icons_ ? view_->icons_pending() : 0); };
     for (int i = 0; i < 400 && pictures() > 0; ++i) {
         pump();
         Sleep(5);

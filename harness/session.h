@@ -53,6 +53,11 @@ public:
     bool busy();
     // Waits for the core to go quiet (and stay quiet for `quiet_ms`), handling events as they arrive.
     void settle(int quiet_ms = 0);
+    // Whether `settle` also waits for the icon workers (on by default, so a `shot` shows the real pictures). A
+    // timed verb turns it off: a row draws its glyph until its icon arrives, so the icons are not part of how
+    // long the window took to answer.
+    void set_wait_for_icons(bool wait) { wait_for_icons_ = wait; }
+    bool wait_for_icons() const { return wait_for_icons_; }
 
 private:
     explicit Session(const Options& o) : options_(o) {}
@@ -67,6 +72,7 @@ private:
     std::unique_ptr<bb::views::MainView> view_;
     std::unique_ptr<ForegroundGuard> guard_;
     double startup_ms_ = 0;
+    bool wait_for_icons_ = true;
 };
 
 }  // namespace bbh

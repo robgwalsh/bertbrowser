@@ -13,6 +13,7 @@
 #include <windows.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -58,7 +59,20 @@ private:
         int index = -1;
         int overlay = 0;
     };
-    Slot type_slot(const std::wstring& path, bool directory);
+    // A file type not seen yet: asks a worker (once) for its slot and its picture at `px`.
+    void ask_type(const std::wstring& path, bool directory, uint32_t px);
+    struct TypeJob {
+        std::wstring key, query;
+        bool directory = false;
+        bool shortcut = false;
+        uint32_t px = 0;
+    };
+    struct TypeDone {
+        std::wstring key;
+        Slot slot;
+        uint32_t px = 0;
+        ui::ThumbPtr image;
+    };
     // The file's own slot when known; otherwise asks a worker and answers `fallback` meanwhile.
     Slot own_slot(const std::wstring& path, Slot fallback);
     ui::ThumbPtr image(Slot s, uint32_t px);
@@ -77,16 +91,22 @@ private:
     static constexpr size_t kPerFileCap = 512;
     std::list<std::pair<std::wstring, Slot>> lru_;
     std::unordered_map<std::wstring, std::list<std::pair<std::wstring, Slot>>::iterator> by_path_;
+    std::unordered_set<std::wstring> types_asked_;  // types queued or running, until their answer is drained
     std::unordered_set<std::wstring> asked_;  // queued or running, so a repaint does not ask twice
 
     mutable std::mutex mu_;
     std::condition_variable cv_;
     std::deque<std::wstring> jobs_;  // newest at the front: what is on screen now matters most
     std::vector<std::pair<std::wstring, Slot>> done_;
+    std::deque<TypeJob> type_jobs_;
+    std::vector<TypeDone> type_done_;
     std::vector<std::thread> threads_;
     std::atomic<bool> stop_{false};
+    std::atomic<bool> warmed_{false};  // one worker primes the shell's icon state at startup
     size_t running_ = 0;
     bool notified_ = false;
+    static constexpr std::chrono::milliseconds kHoldBack{50};
+    std::chrono::steady_clock::time_point last_post_{};
 };
 
 }  // namespace bb::views

@@ -71,9 +71,17 @@ void Runner::time_verb(const std::wstring& rest) {
     if (inner.empty()) throw FormatError("time wants '<name> <verb> [args]'.");
     const std::vector<std::wstring> steps = steps_of(inner);
     if (steps.empty()) throw FormatError("time has nothing to run.");
+    const bool waited_for_icons = s_.wait_for_icons();
+    s_.set_wait_for_icons(false);
     const auto start = Clock::now();
-    for (const std::wstring& step : steps) execute(step);
+    try {
+        for (const std::wstring& step : steps) execute(step);
+    } catch (...) {
+        s_.set_wait_for_icons(waited_for_icons);
+        throw;
+    }
     const double ms = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+    s_.set_wait_for_icons(waited_for_icons);
     record_time(name, ms);
 }
 

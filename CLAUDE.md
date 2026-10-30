@@ -425,6 +425,12 @@ behavior - this table only says where.
   result is posted to the UI thread and handed to the tile that asked, and the list asks only for the
   rows it paints (`bb_listing_row` fills views for visible rows at paint time only). `tools/ui/tiles.bbs`
   and `bench-tiles-5k.bbs` hold this down.
+- **The UI thread never asks the shell about a file type** (`views/shell_icons`). A type's lookup (~2 ms) and
+  picture (~1 ms) are done by a worker the first time it is seen; `file()` answers null meanwhile and the row
+  draws its glyph. A drain repaints the whole window, so the worker only posts when its queues are idle or
+  every 50 ms. The harness's `settle` waits for the icons (so a `shot` has them); `time` and the startup
+  timer turn that off, since the icons are not how long the window took to answer. Doing the lookups inline
+  was +25 ms on a 10k listing and +65 ms to first listing.
 - **Nothing holds a file open** across previews, content search, or duplicate hashing - share
   read|write|delete everywhere, or this app's own rename/move/delete blocks itself. Cloud placeholders
   (`NotDownloaded`/`Offline`) are refused rather than silently hydrated (also true for shell-metadata
