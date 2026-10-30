@@ -50,7 +50,7 @@ jobs:
           echo "Latest release tag ${latest}; building ${version}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      # fmt, clippy, cargo test, the cmake release build and the harness scripts. The version is
+      # fmt, clippy, cargo test and the cmake release build. The version is
       # stamped into the tree after the tests, so the About box reports this build.
       - uses: ./.github/actions/build
         with:

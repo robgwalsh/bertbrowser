@@ -74,7 +74,7 @@ git push origin v2.0.0
 
 Tag a commit that's already pushed to `main` - the tag is what the workflow builds.
 
-**Run the tests before you tag** (`cargo test --workspace --release`). The workflow runs them and a
+**Run the tests and the harness scripts before you tag** (`cargo test --workspace --release`, `pwsh tools/run-harness-scripts.ps1`; CI does not run the scripts). The workflow runs them and a
 single red test fails the release *after* the tag exists, which is the annoying case (see [Recovering a
 failed release](#recovering-a-failed-release)).
 
@@ -83,12 +83,11 @@ That push triggers `.github/workflows/release.yml`, which on `windows-latest`:
 1. Derives the version from the tag (`v2.0.0` -> `2.0.0`).
 2. `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --workspace --release`.
 3. `cmake --preset release` and `cmake --build --preset release`.
-4. Runs every non-bench `tools/ui/*.bbs` on the release harness (WARP needs no GPU).
-5. `vpk download github` - pulls the **previous** release so the next step can build a delta against it.
+4. `vpk download github` - pulls the **previous** release so the next step can build a delta against it.
    This fails harmlessly on the first release; the script logs it and carries on with a full package only.
-6. `vpk pack --packId BertBrowser --packVersion <version> --packDir out/release/app --mainExe BertBrowser.exe`
+5. `vpk pack --packId BertBrowser --packVersion <version> --packDir out/release/app --mainExe BertBrowser.exe`
    (plus title, authors and `--icon src/app/app/app.ico`).
-7. `vpk upload github --publish` - creates the GitHub Release, tagged with the tag you pushed and named
+6. `vpk upload github --publish` - creates the GitHub Release, tagged with the tag you pushed and named
    `BertBrowser <version>`, and uploads every asset.
 
 A second job then opens the [winget](#winget) pull request for the version just published.

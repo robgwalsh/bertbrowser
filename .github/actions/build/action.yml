@@ -1,10 +1,12 @@
 # The app's checks and release build, shared by unstable.yml and release.yml so the two cannot
-# drift: format, lints, the Rust tests, the C++ build, then every non-bench tools/ui script through the
-# offscreen harness (WARP, no GPU, no focus). Leaves out/release/app holding the product.
+# drift: format, lints, the Rust tests and the C++ build (with its widget tests). Leaves
+# out/release/app holding the product. The harness scripts are not run here: 50 of them take far
+# longer than the rest of the pipeline and one stalled a run for over an hour. Run them locally
+# (`pwsh tools/run-harness-scripts.ps1`) before a release.
 #
 # The frozen C# app lives in its own repository (bertbrowser-csharp-archive) and is never built here.
 name: Build and check the app
-description: fmt, clippy, cargo test, cmake release build, the harness scripts
+description: fmt, clippy, cargo test, cmake release build
 
 inputs:
   version:
@@ -58,16 +60,3 @@ runs:
     - name: Build
       shell: pwsh
       run: cmake --build --preset release
-
-    # One fresh --out per script, tree.bbs and index-degraded.bbs with their own flags: see the script.
-    - name: Harness scripts
-      shell: pwsh
-      run: pwsh tools/run-harness-scripts.ps1 -Out out/harness-run
-
-    - name: Harness captures (on failure)
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: harness-captures-${{ github.run_number }}
-        path: out/harness-run/
-        if-no-files-found: ignore

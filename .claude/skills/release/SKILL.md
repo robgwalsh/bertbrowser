@@ -32,9 +32,9 @@ cargo test --workspace --release   # PowerShell, not the Bash tool (Deny ACEs)
 git tag --sort=-v:refname | head -3 # the last version, to pick the next one
 ```
 
-A red test, or a failing harness script, fails the release *after* the tag exists, which is the annoying
-case. Run the tests locally, and `smoke.bbs` on the release harness for anything the user can see (see the
-`verify` skill).
+A red test fails the release *after* the tag exists, which is the annoying case. CI no longer runs the
+harness scripts (too slow), so run them yourself on the release build:
+`pwsh toolsun-harness-scripts.ps1` (or `-Only smoke,...` for the ones near what changed; see the `verify` skill).
 `main` is now built and tested on every push too, so
 `gh run list --workflow=unstable.yml --branch main --limit 1` says whether the commit you are about
 to tag is already green — check it, but run the suite locally anyway if that run hasn't finished.

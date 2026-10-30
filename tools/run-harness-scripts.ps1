@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Runs every non-bench tools/ui/*.bbs through the offscreen harness, each with its own fresh --out
-    directory. What CI does after the build, and what to run locally before a release.
+    directory. Local only (CI skips it: too slow, and one stalled a run); run it before a release.
 
 .DESCRIPTION
     The harness is bb-harness.exe, built with the app (out/<config>/harness). A script stops at
