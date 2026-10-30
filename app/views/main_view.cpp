@@ -2979,7 +2979,8 @@ void MainView::set_thumbnail_source(ThumbSource s) {
 void MainView::sync_devices(bool refresh) {
     if (!tree_provider_) return;
     const json::Value m = try_tool_call(*this, "devices.list", refresh ? "{\"refresh\":true}" : "{}");
-    if (!m["loaded"].boolean()) return;
+    devices_pending_ = !m["loaded"].boolean();  // the core is reading them; Model::Devices says when it is done
+    if (devices_pending_) return;
     std::vector<std::pair<std::wstring, std::wstring>> devices;
     for (size_t i = 0; i < m["devices"].size(); ++i) {
         devices.push_back({core::wide(m["devices"][i]["name"].str()), core::wide(m["devices"][i]["path"].str())});
@@ -2997,7 +2998,7 @@ void MainView::sync_wheel_speed() {
     if (bb_settings_get(core_.app(), core::s(L"scrollSpeedMultiplier"), &o) == BB_OK) ui::set_wheel_multiplier(_wtof(core::take(o).c_str()));
 }
 
-size_t MainView::tree_pending() const { return tree_provider_ ? tree_provider_->pending() : 0; }
+size_t MainView::tree_pending() const { return (tree_provider_ ? tree_provider_->pending() : 0) + (devices_pending_ ? 1 : 0); }
 
 void MainView::refresh_tooltips() {
     for (auto& kv : by_tab_) kv.second->refresh_tooltips();

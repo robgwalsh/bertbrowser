@@ -485,7 +485,7 @@ public:
     // File, folder and drive icons, shared by every list and the folder tree.
     ShellIcons& shell_icons() { return *icons_; }
     size_t icons_pending() const { return icons_->pending(); }
-    size_t tree_pending() const;  // folder-tree reads still on a worker
+    size_t tree_pending() const;  // folder-tree reads still on a worker, and the portable-device scan
     // The property system still being read for the Add column panel (the harness waits for it).
     bool column_props_pending();
     // A preview scheduled or being read in any tab (the harness waits for it to land).
@@ -529,6 +529,7 @@ private:
     SavedSidebar* sidebar_ = nullptr;
     std::string menu_sig_;
     bool bars_pending_ = false;
+    bool devices_pending_ = false;  // the portable-device scan has been asked for and has not landed
     bool headless_dialogs_ = false;
     bool live_dialogs_ = false;
     std::pair<std::wstring, std::vector<std::pair<std::wstring, std::wstring>>> properties_details_;

@@ -540,6 +540,13 @@ impl Inner {
         });
     }
 
+    /// Runs `job` on a worker without counting it as "loading": for background reads nobody is waiting on, which
+    /// must not hold the app busy (the startup trace, the busy event) for as long as they take.
+    pub(crate) fn schedule_quiet(self: &Arc<Self>, job: impl FnOnce(&Arc<Inner>) + Send + 'static) {
+        let inner = self.clone();
+        self.pool.execute(move || job(&inner));
+    }
+
     pub(crate) fn set_status(&self, tab: TabId, text: impl Into<String>) {
         if let Ok(cell) = self.tab(tab) {
             lock(&cell).status = text.into();

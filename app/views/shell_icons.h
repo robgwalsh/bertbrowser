@@ -61,18 +61,25 @@ private:
     };
     // A file type not seen yet: asks a worker (once) for its slot and its picture at `px`.
     void ask_type(const std::wstring& path, bool directory, uint32_t px);
+    enum class Kind { Type, Drive, Stock };
     struct TypeJob {
-        std::wstring key, query;
+        Kind kind = Kind::Type;
+        std::wstring key, query;  // key: the extension, the drive root, or the stock id as text
+        int siid = 0;
         bool directory = false;
         bool shortcut = false;
         uint32_t px = 0;
     };
     struct TypeDone {
+        Kind kind = Kind::Type;
         std::wstring key;
+        int siid = 0;
         Slot slot;
+        bool fixed = false;  // a drive: a local disk, whose own picture may be read from it
         uint32_t px = 0;
         ui::ThumbPtr image;
     };
+    void ask(TypeJob job);
     // The file's own slot when known; otherwise asks a worker and answers `fallback` meanwhile.
     Slot own_slot(const std::wstring& path, Slot fallback);
     ui::ThumbPtr image(Slot s, uint32_t px);

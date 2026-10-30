@@ -367,7 +367,8 @@ impl App {
                         .devices_reading
                         .swap(true, std::sync::atomic::Ordering::SeqCst)
                 {
-                    inner.schedule(|inner| {
+                    // Not "loading": the read can take seconds, and the folders are not waiting on it.
+                    inner.schedule_quiet(|inner| {
                         let found = inner.seams.devices.list();
                         *lock(&inner.extra.tools.devices) = Some(found);
                         inner

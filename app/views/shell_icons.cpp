@@ -195,14 +195,19 @@ bool ShellIcons::is_per_file(const std::wstring& path, bool directory, uint32_t 
 // its glyph meanwhile, and the answer comes back with the picture already made.
 void ShellIcons::ask_type(const std::wstring& path, bool directory, uint32_t px) {
     const std::wstring ext = directory ? L"<dir>" : lower_ext(path);
-    const std::wstring key = ext.empty() ? L"<none>" : ext;
-    if (!types_asked_.insert(key).second) return;
     TypeJob job;
-    job.key = key;
+    job.key = ext.empty() ? L"<none>" : ext;
     job.query = directory ? L"folder" : ext.empty() ? L"file" : ext;
     job.directory = directory;
     job.shortcut = is_shortcut(ext);
     job.px = px;
+    ask(std::move(job));
+}
+
+// Queues a lookup once, however often the rows that want it are painted before it is answered.
+void ShellIcons::ask(TypeJob job) {
+    const wchar_t* tag = job.kind == Kind::Type ? L"t:" : job.kind == Kind::Drive ? L"d:" : L"s:";
+    if (!types_asked_.insert(tag + job.key).second) return;
     std::lock_guard<std::mutex> lock(mu_);
     type_jobs_.push_back(std::move(job));
     cv_.notify_one();
@@ -251,37 +256,31 @@ ui::ThumbPtr ShellIcons::file(const std::wstring& path, bool directory, uint32_t
 
 ui::ThumbPtr ShellIcons::drive(const std::wstring& root, uint32_t px) {
     // The stock picture for the kind of drive needs nothing from the drive itself; a fixed drive's own picture
-    // (the Windows logo, a BitLocker lock) is read from it on a worker, which is safe for a local disk.
-    auto it = drives_.find(root);
+    // (the Windows logo, a BitLocker lock) is read from it on a worker, which is safe for a local disk. Which kind
+    // of drive it is is asked on a worker too: the answer for a network share can take a while.
+    const auto it = drives_.find(root);
     if (it == drives_.end()) {
-        SHSTOCKICONID id = SIID_DRIVEFIXED;
-        const UINT kind = GetDriveTypeW(root.c_str());
-        switch (kind) {
-            case DRIVE_REMOVABLE: id = SIID_DRIVEREMOVE; break;
-            case DRIVE_REMOTE: id = SIID_DRIVENET; break;
-            case DRIVE_CDROM: id = SIID_DRIVECD; break;
-            case DRIVE_RAMDISK: id = SIID_DRIVERAM; break;
-            default: break;
-        }
-        Drive d;
-        d.fixed = kind == DRIVE_FIXED;
-        SHSTOCKICONINFO info{};
-        info.cbSize = sizeof(info);
-        if (SUCCEEDED(SHGetStockIconInfo(id, SHGSI_SYSICONINDEX, &info))) d.stock.index = info.iSysImageIndex;
-        it = drives_.emplace(root, d).first;
+        TypeJob job;
+        job.kind = Kind::Drive;
+        job.key = root;
+        job.px = px;
+        ask(std::move(job));
+        return nullptr;
     }
     const Slot s = it->second.fixed ? own_slot(root, it->second.stock) : it->second.stock;
     return image(s, px);
 }
 
 ui::ThumbPtr ShellIcons::stock(int siid, uint32_t px) {
-    auto it = stock_.find(siid);
+    const auto it = stock_.find(siid);
     if (it == stock_.end()) {
-        Slot s;
-        SHSTOCKICONINFO info{};
-        info.cbSize = sizeof(info);
-        if (SUCCEEDED(SHGetStockIconInfo(static_cast<SHSTOCKICONID>(siid), SHGSI_SYSICONINDEX, &info))) s.index = info.iSysImageIndex;
-        it = stock_.emplace(siid, s).first;
+        TypeJob job;
+        job.kind = Kind::Stock;
+        job.key = std::to_wstring(siid);
+        job.siid = siid;
+        job.px = px;
+        ask(std::move(job));
+        return nullptr;
     }
     return image(it->second, px);
 }
@@ -354,18 +353,39 @@ void ShellIcons::work() {
         SHFILEINFOW info{};
         Slot s;
         if (is_type) {
-            UINT flags = SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES;
-            if (type.shortcut) flags |= SHGFI_ICON | SHGFI_SMALLICON | SHGFI_OVERLAYINDEX;  // the arrow
-            if (SHGetFileInfoW(type.query.c_str(), type.directory ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL, &info,
-                               sizeof(info), flags)) {
-                s.index = info.iIcon & 0x00FFFFFF;
-                s.overlay = (flags & SHGFI_OVERLAYINDEX) ? (info.iIcon >> 24) & 0xFF : 0;
-            }
-            if (info.hIcon) DestroyIcon(info.hIcon);
             TypeDone done;
+            done.kind = type.kind;
             done.key = std::move(type.key);
-            done.slot = s;
+            done.siid = type.siid;
             done.px = type.px;
+            if (type.kind == Kind::Type) {
+                UINT flags = SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES;
+                if (type.shortcut) flags |= SHGFI_ICON | SHGFI_SMALLICON | SHGFI_OVERLAYINDEX;  // the arrow
+                if (SHGetFileInfoW(type.query.c_str(), type.directory ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL,
+                                   &info, sizeof(info), flags)) {
+                    s.index = info.iIcon & 0x00FFFFFF;
+                    s.overlay = (flags & SHGFI_OVERLAYINDEX) ? (info.iIcon >> 24) & 0xFF : 0;
+                }
+                if (info.hIcon) DestroyIcon(info.hIcon);
+            } else {
+                SHSTOCKICONID id = static_cast<SHSTOCKICONID>(type.siid);
+                if (type.kind == Kind::Drive) {
+                    id = SIID_DRIVEFIXED;
+                    const UINT drive_kind = GetDriveTypeW(done.key.c_str());
+                    switch (drive_kind) {
+                        case DRIVE_REMOVABLE: id = SIID_DRIVEREMOVE; break;
+                        case DRIVE_REMOTE: id = SIID_DRIVENET; break;
+                        case DRIVE_CDROM: id = SIID_DRIVECD; break;
+                        case DRIVE_RAMDISK: id = SIID_DRIVERAM; break;
+                        default: break;
+                    }
+                    done.fixed = drive_kind == DRIVE_FIXED;
+                }
+                SHSTOCKICONINFO stock_info{};
+                stock_info.cbSize = sizeof(stock_info);
+                if (SUCCEEDED(SHGetStockIconInfo(id, SHGSI_SYSICONINDEX, &stock_info))) s.index = stock_info.iSysImageIndex;
+            }
+            done.slot = s;
             if (s.index >= 0 && type.px) done.image = render_for(s.index, s.overlay, type.px);
             {
                 std::lock_guard<std::mutex> lock(mu_);
@@ -401,8 +421,24 @@ void ShellIcons::drain() {
     }
     if (done.empty() && types.empty()) return;
     for (TypeDone& t : types) {
-        by_type_[t.key] = t.slot;
-        types_asked_.erase(t.key);
+        switch (t.kind) {
+            case Kind::Type:
+                by_type_[t.key] = t.slot;
+                types_asked_.erase(L"t:" + t.key);
+                break;
+            case Kind::Drive: {
+                Drive d;
+                d.stock = t.slot;
+                d.fixed = t.fixed;
+                drives_[t.key] = d;
+                types_asked_.erase(L"d:" + t.key);
+                break;
+            }
+            case Kind::Stock:
+                stock_[t.siid] = t.slot;
+                types_asked_.erase(L"s:" + t.key);
+                break;
+        }
         if (t.slot.index >= 0 && t.px) images_.emplace(image_key(t.slot.index, t.slot.overlay, t.px), std::move(t.image));
     }
     for (auto& [path, slot] : done) {
