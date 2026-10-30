@@ -284,13 +284,15 @@ bool MediaPane::on_mouse_down(const MouseEvent& e) {
 
 void MediaPane::set_full_screen(bool on) {
     if (on == full_ || !root() || !parent()) return;
+    // Taking the pane out of the tree detaches it (root() goes null) and forgets its focus and tick timer, so the
+    // root is kept first and both are put back once it has a parent again.
+    ui::UiRoot* const tree = root();
     if (on) {
         home_ = parent();
         std::unique_ptr<Widget> me = home_->remove_child(this);
-        root()->content()->add_child(std::move(me));
+        tree->content()->add_child(std::move(me));
         full_ = true;
         style.bg = tok::WindowBackground;
-        root()->set_focus(this);
     } else {
         Widget* host = home_;
         std::unique_ptr<Widget> me = parent()->remove_child(this);
@@ -298,6 +300,8 @@ void MediaPane::set_full_screen(bool on) {
         style.bg = tok::SurfaceBackground;
         if (host) host->add_child(std::move(me));
     }
+    tree->set_focus(this);
+    if (player_) start_ticking();
     if (on_full_screen) on_full_screen(full_);
     sync_transport();
     request_layout();

@@ -80,6 +80,13 @@ void TitleBar::arrange(Rect r) {
         (*it)->arrange(Rect{right - w, r.t, right, r.b});
         right -= w;
     }
+    // A group of fixed-height controls is laid out from the top of its rect, so give it a rect of its own height
+    // in the middle of the bar rather than the whole bar's.
+    auto centred_rows = [&r](Widget* w, float l, float rr) {
+        const float h = std::min(r.height(), w->measure_tree({kInf, r.height()}).h);
+        const float t = r.t + std::floor((r.height() - h) / 2);
+        return Rect{l, t, rr, t + h};
+    };
     float x = r.l + 8;
     if (app_icon && app_icon->flags.visible) {
         constexpr float kIcon = 16.0f;
@@ -104,7 +111,7 @@ void TitleBar::arrange(Rect r) {
         float l = std::max((r.l + r.r) / 2 - natural / 2, x + mid_natural + after_part + 8);
         if (right - 8 - l < kNarrowest) l = std::max(x + 8, right - 8 - std::min(natural, kNarrowest));
         const float cr = std::min(l + natural, right - 8);
-        center->arrange(Rect{l, r.t, std::max(l, cr), r.b});
+        center->arrange(centred_rows(center, l, std::max(l, cr)));
         limit = l - 8;
     }
     // `after` sits right after what `middle` needs, and `middle` gives way first when the bar is short.
@@ -113,7 +120,7 @@ void TitleBar::arrange(Rect r) {
     if (middle) middle->arrange(Rect{x, r.t, x + mid_w, r.b});
     if (after && after->flags.visible) {
         const float ax = x + mid_w + 6;
-        after->arrange(Rect{ax, r.t, std::min(ax + after_w, limit), r.b});
+        after->arrange(centred_rows(after, ax, std::min(ax + after_w, limit)));
     }
 }
 
