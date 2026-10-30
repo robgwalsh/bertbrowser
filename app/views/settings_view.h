@@ -16,6 +16,7 @@
 namespace bb::views {
 
 class MainView;
+class LeaveLayer;
 
 class SettingsView : public ui::Widget {
 public:
@@ -51,7 +52,14 @@ public:
 
 private:
     void build_chrome();
-    void go_back();
+    // Back to the folders. A list the page could not save is refused by the core, which brings its page to
+    // the front; this then asks whether to leave anyway, and `then` runs once the page has really closed.
+    void go_back(std::function<void()> then = nullptr);
+    void ask_leave(const std::wstring& why, std::function<void()> then);
+    // Leave anyway: the unsaved lists go (the page's copies, and the core's hold on them), then the page closes.
+    void leave_unsaved(const std::function<void()>& then);
+    // The theme editor is a window of its own, so the page gets out of the way first. Spec: MainWindow.CustomiseTheme.
+    void customise_colours();
     void build_nav(const json::Value& pages);
     void build_page();
     void rebuild_if_changed(bool force);
@@ -109,9 +117,14 @@ private:
     std::wstring folder_handler_warning_;  // why the last change to the folder handler did not happen
     bool dragging_pose_ = false;
     int menu_selected_ = -1;
+    // The Context menu page's commands as typed, while the core holds them unwritten for a missing field: a
+    // JSON array, or null. The page re-reads the saved list otherwise, which would drop the half-typed command.
+    json::Value pending_commands_;
+    bool reveal_problem_ = false;  // a refused leave asked the page to open the command that is incomplete
     bool command_editor_ = false;
     std::string command_editing_;  // the id of the user's command whose editor is open, or empty
     ui::Widget* card_ = nullptr;
+    LeaveLayer* leave_ = nullptr;  // the "leave anyway?" card, over the page
     ui::StackPanel* nav_ = nullptr;
     ui::ScrollViewer* scroll_ = nullptr;
     ui::StackPanel* body_ = nullptr;

@@ -728,8 +728,8 @@ fn rar_walk(
 
 // ---------------------------------------------------------------- tar ----------------------------
 
-/// The decompressor a tar family suffix needs over the raw file, or None for one nothing here
-/// decodes (`.tar.lz`, `.tar.zst`), which is then reported as unreadable.
+/// The decompressor a tar family suffix needs over the raw file. `.tar.lz` is liblzma's lzip
+/// decoder, `.tar.zst` is `ruzstd` (pure Rust, decode only).
 fn tar_stream(archive_file: &str, format: &ArchiveFormat) -> Result<Box<dyn Read>, Stop> {
     let file = open_shared(archive_file)?;
     Ok(match format.suffix {
@@ -737,8 +737,52 @@ fn tar_stream(archive_file: &str, format: &ArchiveFormat) -> Result<Box<dyn Read
         ".tar.gz" | ".tgz" => Box::new(flate2::read::MultiGzDecoder::new(file)),
         ".tar.bz2" | ".tbz2" => Box::new(bzip2::read::MultiBzDecoder::new(file)),
         ".tar.xz" | ".txz" => Box::new(liblzma::read::XzDecoder::new_multi_decoder(file)),
+        ".tar.lz" => {
+            let stream =
+                liblzma::stream::Stream::new_lzip_decoder(u64::MAX, liblzma::stream::CONCATENATED)
+                    .map_err(|e| Stop::Malformed(e.to_string()))?;
+            Box::new(liblzma::read::XzDecoder::new_stream(file, stream))
+        }
+        ".tar.zst" => Box::new(ZstdFrames::new(BufReader::new(file))?),
         other => return Err(Stop::Malformed(format!("{other} is not decoded here"))),
     })
+}
+
+/// Every zstd frame of a file in turn, as `zstd -d` reads one (`pzstd` writes a frame per chunk,
+/// and files are concatenated): `ruzstd`'s decoder stops at the end of one.
+struct ZstdFrames<R: io::BufRead> {
+    frame: Option<ruzstd::decoding::StreamingDecoder<R, ruzstd::decoding::FrameDecoder>>,
+}
+
+impl<R: io::BufRead> ZstdFrames<R> {
+    fn new(source: R) -> Result<Self, Stop> {
+        let frame = ruzstd::decoding::StreamingDecoder::new(source)
+            .map_err(|e| Stop::Malformed(e.to_string()))?;
+        Ok(ZstdFrames { frame: Some(frame) })
+    }
+}
+
+impl<R: io::BufRead> Read for ZstdFrames<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        loop {
+            let Some(frame) = self.frame.as_mut() else {
+                return Ok(0);
+            };
+            let n = frame.read(buf)?;
+            if n > 0 || buf.is_empty() {
+                return Ok(n);
+            }
+            // That frame is done: the next one starts where it ended, unless the file did.
+            let (mut source, decoder) = self.frame.take().expect("just read from it").into_parts();
+            if source.fill_buf()?.is_empty() {
+                return Ok(0);
+            }
+            self.frame = Some(
+                ruzstd::decoding::StreamingDecoder::new_with_decoder(source, decoder)
+                    .map_err(io::Error::other)?,
+            );
+        }
+    }
 }
 
 fn tar_list(

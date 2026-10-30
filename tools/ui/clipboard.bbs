@@ -37,6 +37,14 @@ assert-command edit.paste unavailable no files on the clipboard
 undo
 assert-exists budget.xlsx
 
+# Pasting a cut back where it came from has nothing to do, and says so as a paste.
+go .
+select budget.xlsx
+run edit.cut
+run edit.paste
+assert-status Nothing to paste here
+assert-exists budget.xlsx
+
 # Paste shortcut makes links to what is on the clipboard, not copies of it.
 go .
 select photo.jpg

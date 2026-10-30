@@ -273,7 +273,8 @@ public:
     MainView& operator=(const MainView&) = delete;
 
     // Opens the first tab and loads everything.
-    void start(const std::wstring& path);
+    // `restore_session`: last session's panes (or the startup folder), `path` only as the fallback.
+    void start(const std::wstring& path, bool restore_session = false);
     // Pulls the palette from the core into the window's resources.
     void apply_theme();
     // Re-reads the layout and every tab's view from the core.
@@ -283,6 +284,9 @@ public:
 
     core::Core& core() { return core_; }
     platform::Window& window() { return window_; }
+    // The menu a toolbar button, its overflow or its chevron last dropped down (harness).
+    const ui::MenuItems* floating_menu() const { return floating_menu_.get(); }
+    bool menu_open() const { return popup_ && popup_->menu_open(); }  // an in-tree menu is up (harness)
     uint64_t active_tab() const { return active_tab_; }
     uint64_t active_pane() const { return active_pane_; }
     TabView* tab_view(uint64_t tab);

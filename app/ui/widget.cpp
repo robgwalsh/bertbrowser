@@ -342,7 +342,7 @@ bool UiRoot::mouse_down(Point p, MouseButton b, Mods m, int clicks) {
     }
     for (Widget* w = modal_ ? nullptr : target; w; w = w->parent_) {
         if (w->flags.focusable && w->flags.enabled) {
-            set_focus(w);
+            if (w->flags.click_focus) set_focus(w);
             break;
         }
     }
@@ -456,6 +456,12 @@ bool UiRoot::key_up(unsigned vk) {
 bool UiRoot::char_input(wchar_t c) {
     Widget* target = modal_ ? modal_ : (focus_ ? focus_ : content_.get());
     return target && bubble(target, [&](Widget* w) { return w->flags.enabled && w->on_char(c); });
+}
+
+bool UiRoot::context_key() {
+    if (modal_) return true;  // an open menu has the keyboard; no second one opens over it
+    Widget* target = focus_ ? focus_ : content_.get();
+    return target && bubble(target, [&](Widget* w) { return w->flags.enabled && w->on_context_key(); });
 }
 
 Cursor UiRoot::cursor() const {

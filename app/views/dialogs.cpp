@@ -1055,7 +1055,7 @@ std::unique_ptr<Panel> save_named(DialogContext& cx, bool workspace) {
         const BbStatus st = workspace ? bb_saved_do(app, 0, core::s(L"save-workspace"), core::s(name))
                                       : bb_bars_do(app, core::s(L"save"), core::s(name));
         if (st != BB_OK) return;  // the name was refused: the note already says why
-        const std::wstring said = workspace ? L"Saved the workspace \"" + name + L"\"" : L"Saved the menus and toolbars as \"" + name + L"\"";
+        const std::wstring said = workspace ? L"Saved workspace \"" + name + L"\"" : L"Saved the menus and toolbars as \"" + name + L"\"";
         bb_status_set(app, core::s(said));
         cx.close();
     };

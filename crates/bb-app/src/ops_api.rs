@@ -1082,6 +1082,21 @@ impl App {
                 }
                 Ok(op_json(inner.op_archive_edit(archive, edits, "Added")?))
             }
+            // A paste: a drop by another name, but it says so when there is nothing to do.
+            "paste" => {
+                let a = parse(arg)?;
+                let verb = if a["move"].as_bool().unwrap_or(false) {
+                    TransferVerb::Move
+                } else {
+                    TransferVerb::Copy
+                };
+                Ok(op_json(inner.op_transfer_as(
+                    strings(&a["sources"]),
+                    text(&a["destination"]).to_string(),
+                    verb,
+                    true,
+                )?))
+            }
             "shortcut" => {
                 let a = parse(arg)?;
                 Ok(op_json(inner.op_shortcut(

@@ -37,7 +37,7 @@ bool has_files();
 void clear();
 }  // namespace file_clipboard
 
-// Moves, copies or links (`verb`: move, copy, shortcut) sources into a folder - what a drop and a paste both
+// Moves, copies or links (`verb`: move, copy, shortcut; paste-move, paste-copy for a paste) sources into a folder - what a drop and a paste both
 // are. Into an archive it is an archive edit. Returns the operation, or 0 when none started (the core has
 // said why on the status line).
 uint64_t transfer_into(core::Core& core, const std::vector<std::wstring>& sources, const std::wstring& destination,

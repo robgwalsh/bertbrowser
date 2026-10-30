@@ -193,19 +193,40 @@ void TreeView::toggle(uint64_t id) {
     }
 }
 
-void TreeView::select_row(size_t row) {
+void TreeView::select_row(size_t row, bool scroll) {
     if (row >= rows_.size()) return;
+    // Selecting what is already selected is no change, so nothing navigates. Spec: TreeView.SelectedItemChanged.
+    const bool same = !scroll && selected_ == rows_[row].id;
     selected_ = rows_[row].id;
-    const float top = static_cast<float>(row) * row_height;
-    float y = v_.offset();
-    if (top < y) {
-        y = top;
-    } else if (top + row_height > y + v_.viewport) {
-        y = top + row_height - v_.viewport;
+    // Spec: MainWindow.FolderTreeItems_RequestBringIntoView - only the keyboard and a deliberate reveal scroll the tree;
+    // a click on a partly clipped row leaves it where it is.
+    if (scroll) {
+        const float top = static_cast<float>(row) * row_height;
+        float y = v_.offset();
+        if (top < y) {
+            y = top;
+        } else if (top + row_height > y + v_.viewport) {
+            y = top + row_height - v_.viewport;
+        }
+        v_.set_offset(y);
     }
-    v_.set_offset(y);
     invalidate();
-    if (on_select) on_select(selected_);
+    if (!same && on_select) on_select(selected_);
+}
+
+// The Apps key / Shift+F10: the selected node's menu, beside its row. Spec: MainWindow.FolderTree_ContextMenuOpening.
+bool TreeView::on_context_key() {
+    const size_t row = row_of(selected_);
+    if (row == npos || !on_context) return false;
+    const float top = static_cast<float>(row) * row_height;
+    if (top < v_.offset() || top + row_height > v_.offset() + v_.viewport) {
+        v_.set_offset(top + row_height > v_.offset() + v_.viewport ? top + row_height - v_.viewport : top);
+        invalidate();
+    }
+    const Rect r = row_rect(row);
+    const float x = std::min(r.r - 8.0f, r.l + 4.0f + static_cast<float>(rows_[row].depth) * indent + 40.0f);
+    on_context(selected_, Point{x, (r.t + r.b) * 0.5f});
+    return true;
 }
 
 void TreeView::place(uint64_t id, float fraction) {
@@ -253,7 +274,7 @@ bool TreeView::on_mouse_down(const MouseEvent& e) {
         toggle(en.id);
         return true;
     }
-    select_row(row);
+    select_row(row, false);
     if (e.button == MouseButton::Left && e.clicks >= 2) {
         if (en.has_children) toggle(en.id);
         if (on_activate) on_activate(en.id);

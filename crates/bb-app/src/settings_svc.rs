@@ -3,7 +3,7 @@
 //! nothing), flushed on Back and on window close. The services that own their own keys (keymap,
 //! command bars, theme, palette pins, session) write at once instead, through `save_settings_now`.
 //! A list with a missing field keeps the whole list unwritten and says so in a strip; only leaving
-//! (`settings_leave`) takes the user to it. Spec: SettingsViewModel (Apply, Flush, TryLeave).
+//! (`settings_leave`) takes the user to it, and the host then asks whether to leave anyway. Spec: SettingsViewModel (Apply, Flush, TryLeave).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -79,11 +79,36 @@ const THEME_KEYS: &[&str] = &[
     "themeOverrides",
 ];
 
+/// The two lists that are held unwritten while an entry in them is incomplete.
+#[derive(Clone, Copy)]
+enum HeldList {
+    NewFileTypes,
+    CustomCommands,
+}
+
+impl HeldList {
+    fn of(key: &str) -> Option<HeldList> {
+        match key {
+            "newFileTypes" => Some(HeldList::NewFileTypes),
+            "customCommands" => Some(HeldList::CustomCommands),
+            _ => None,
+        }
+    }
+
+    /// The page that shows the list; leaving a refused page goes there.
+    fn page(self) -> &'static str {
+        match self {
+            HeldList::NewFileTypes => "new-items",
+            HeldList::CustomCommands => "context-menu",
+        }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct SaveState {
     generation: AtomicU64,
-    /// A list the page holds that cannot be written yet, and why.
-    problem: Mutex<Option<String>>,
+    /// Why each list the page holds cannot be written yet: (new file types, custom commands).
+    problem: Mutex<(Option<String>, Option<String>)>,
     /// Something changed in memory since the file was last written.
     dirty: std::sync::atomic::AtomicBool,
 }
@@ -93,11 +118,8 @@ fn custom_command_problem(value: &Value) -> Option<String> {
     for item in list {
         let name = item.get("name").and_then(Value::as_str).unwrap_or("");
         let command = item.get("command").and_then(Value::as_str).unwrap_or("");
-        if name.trim().is_empty() {
-            return Some("Every command needs a name.".into());
-        }
-        if command.trim().is_empty() {
-            return Some(format!("'{name}' needs a program to run."));
+        if name.trim().is_empty() || command.trim().is_empty() {
+            return Some("Every command needs a name and a program.".into());
         }
         // A command offered for neither could never be in a menu. Spec: SettingsViewModel.CommandProblem.
         let files = item
@@ -185,21 +207,26 @@ impl Inner {
     pub(crate) fn settings_set(self: &Arc<Self>, key: &str, json_value: &str) -> AppResult<()> {
         let value: Value = serde_json::from_str(json_value)
             .map_err(|e| AppError::Invalid(format!("not JSON: {e}")))?;
-        let problem = match key {
-            "customCommands" => custom_command_problem(&value),
-            "newFileTypes" => new_file_type_problem(&value),
-            _ => None,
-        };
-        if let Some(problem) = problem {
-            // Held, not written: the page keeps editing and the strip says why nothing is saved.
-            *lock(&self.extra.save.problem) = Some(problem);
-            self.hub.emit(AppEvent::SettingsChanged {
-                key: key.to_string(),
-            });
-            return Ok(());
-        }
-        if matches!(key, "customCommands" | "newFileTypes") {
-            *lock(&self.extra.save.problem) = None;
+        if let Some(list) = HeldList::of(key) {
+            let problem = match list {
+                HeldList::CustomCommands => custom_command_problem(&value),
+                HeldList::NewFileTypes => new_file_type_problem(&value),
+            };
+            let held = problem.is_some();
+            {
+                let mut slots = lock(&self.extra.save.problem);
+                match list {
+                    HeldList::NewFileTypes => slots.0 = problem,
+                    HeldList::CustomCommands => slots.1 = problem,
+                }
+            }
+            if held {
+                // Held, not written: the page keeps editing and the strip says why nothing is saved.
+                self.hub.emit(AppEvent::SettingsChanged {
+                    key: key.to_string(),
+                });
+                return Ok(());
+            }
         }
         {
             let mut settings = lock(&self.settings);
@@ -232,7 +259,19 @@ impl Inner {
             }
             "commandBars" => self.reload_bars(),
             "fileListColumns" => self.columns_default_changed(),
-            "searchContentMaxBytes" => {}
+            // Read afresh by every search, through the closure `App::new` gave the search service.
+            // Spec: App.xaml.cs (the content budget is read per search).
+            "searchContentMaxBytes" => {
+                let bytes = lock(&self.settings).search_content_max_bytes;
+                let budget = &self.content_budget;
+                budget.store(i64::from(bytes), Ordering::Relaxed);
+            }
+            // Lowering a limit releases entries, so it is applied the moment it changes.
+            // Spec: MainWindow.Settings_Applied (SetUndoBudgetAsync).
+            "undoMaxSteps" | "undoMaxHeldGigabytes" => {
+                let budget = lock(&self.settings).effective_undo_budget();
+                self.set_undo_budget(budget);
+            }
             "recordFileChanges" | "fileChangeRetentionHours" => self.change_log_policy_changed(),
             k if THEME_KEYS.contains(&k) => self.theme_settings_changed(),
             _ => {}
@@ -243,17 +282,34 @@ impl Inner {
         Ok(())
     }
 
+    /// The first list that cannot be written and why (file types before commands, as the original
+    /// checks them), without the strip's trailing sentence.
+    fn held_list(&self) -> Option<(HeldList, String)> {
+        let slots = lock(&self.extra.save.problem);
+        let (types, commands) = &*slots;
+        if let Some(why) = types {
+            return Some((HeldList::NewFileTypes, why.clone()));
+        }
+        commands.clone().map(|why| (HeldList::CustomCommands, why))
+    }
+
     /// The strip the page shows when a list could not be written, if any.
+    /// Spec: SettingsViewModel.Apply (PendingProblem).
     pub(crate) fn settings_problem(&self) -> Option<String> {
-        lock(&self.extra.save.problem).clone()
+        self.held_list()
+            .map(|(_, why)| format!("{why} That list is not saved until this is fixed."))
     }
 
     /// Leaving the page: writes what is pending, and refuses (with the reason) while a list is
-    /// still unwritable.
+    /// still unwritable. Like `TryLeave`, a refusal brings the offending list's page to the front;
+    /// the reason is the entry's own, since the host asks whether to leave anyway.
     pub(crate) fn settings_leave(&self) -> Result<(), String> {
         self.flush_settings();
-        match self.settings_problem() {
-            Some(problem) => Err(problem),
+        match self.held_list() {
+            Some((list, why)) => {
+                let _ = self.settings_open_page(list.page());
+                Err(why)
+            }
             None => Ok(()),
         }
     }

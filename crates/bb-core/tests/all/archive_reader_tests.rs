@@ -132,6 +132,31 @@ fn reads_a_tar_bz2() {
     assert!(index.capabilities.sequential_only);
 }
 
+/// A .tar.zst, written as two frames the way `pzstd` and a concatenation write one: both are read.
+#[test]
+fn reads_a_tar_zst_across_frames() {
+    let f = Fixture::new();
+    let tar = f.write(
+        ArchiveType::Tar,
+        CompressionType::None,
+        "e.tar",
+        &[("pkg/a.txt", b"first"), ("pkg/b.txt", b"second")],
+    );
+    let bytes = std::fs::read(&tar).unwrap();
+    let (head, tail) = bytes.split_at(bytes.len() / 2);
+    let level = ruzstd::encoding::CompressionLevel::Fastest;
+    let mut packed = ruzstd::encoding::compress_to_vec(head, level);
+    packed.extend(ruzstd::encoding::compress_to_vec(tail, level));
+    let path = f.root.path("e.tar.zst");
+    std::fs::write(&path, packed).unwrap();
+
+    let index = f.read(&path);
+
+    assert!(index.ok(), "{:?}", index.error);
+    assert_eq!(vec!["a.txt", "b.txt"], names(&index, "pkg"));
+    assert!(index.capabilities.sequential_only);
+}
+
 /// A gzipped single file carries the inner name, so syslog.gz browses to syslog.
 #[test]
 fn a_gzipped_file_browses_to_its_inner_name() {

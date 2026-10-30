@@ -151,7 +151,9 @@ impl SavedSearchRepository {
 
 pub(super) fn rename_row(db: &Db, table: &str, old_name: &str, new_name: &str) -> Result<bool> {
     let mut conn = db.open()?;
-    let tx = conn.transaction()?;
+    // Immediate: it reads before it writes, and a deferred transaction that does that is refused
+    // outright (no busy wait) when a crawl has written in between.
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let same_row = bb_paths::fold_upper(old_name) == bb_paths::fold_upper(new_name);
     if !same_row {
         let taken: Option<i64> = tx

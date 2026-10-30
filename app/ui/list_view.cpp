@@ -71,6 +71,10 @@ Size ListView::measure(Size) { return fixed_or({0, 0}); }
 void ListView::arrange(Rect r) {
     bounds = r;
     layout_bars();
+    if (reveal_pending_) {
+        reveal_pending_ = false;
+        if (cursor_ != npos) scroll_to_row(cursor_);
+    }
 }
 
 float ListView::content_width() const {
@@ -349,6 +353,12 @@ void ListView::reveal_cursor(size_t row) {
     anchor_ = cursor_ = row;
     scroll_to_row(row);
     invalidate();
+}
+
+void ListView::reveal_cursor_when_arranged(size_t row) {
+    if (row >= count()) return;
+    reveal_cursor(row);
+    reveal_pending_ = true;
 }
 
 void ListView::select_row(size_t row) {
@@ -755,6 +765,14 @@ bool ListView::on_key_down(const KeyEvent& e) {
                 invalidate();
                 return true;
             }
+            // Plain Space on a row the cursor reached with Ctrl+arrow selects it, as an Extended ListBox does. On
+            // a selected row it is left to type-ahead, where it is part of a name.
+            if (!e.mods.ctrl && !e.mods.shift && !e.mods.alt && cursor_ != npos && cursor_ < n && !provider_->selected(cursor_)) {
+                provider_->select(SelectOp::Replace, cursor_, cursor_);
+                anchor_ = cursor_;
+                invalidate();
+                return true;
+            }
             return false;
         case 'A':
             if (e.mods.ctrl && n > 0) {
@@ -768,9 +786,32 @@ bool ListView::on_key_down(const KeyEvent& e) {
     }
 }
 
+// The Apps key / Shift+F10: the menu of the row the cursor is on (scrolled into view first), or the
+// empty-space menu when the cursor is not on the selection. Spec: ListView.ContextMenu opens at the focused item.
+bool ListView::on_context_key() {
+    if (!provider_ || !on_context) return false;
+    // The menu is the selection's: at the cursor when it is on it, else at the first selected row (a Ctrl+arrow
+    // can leave the cursor off the selection). Nothing selected is the folder's own menu.
+    size_t at = cursor_ != npos && cursor_ < count() && provider_->selected(cursor_) ? cursor_ : npos;
+    for (size_t i = 0; at == npos && i < count(); ++i) {
+        if (provider_->selected(i)) at = i;
+    }
+    if (at == npos) {
+        on_context(Point{body_.l + 24.0f, body_.t + row_height * 0.5f}, npos);
+        return true;
+    }
+    scroll_to_row(at);
+    const Rect r = row_rect(at);
+    on_context(Point{r.l + 24.0f, (r.t + r.b) * 0.5f}, at);
+    return true;
+}
+
 bool ListView::on_char(wchar_t c) {
     const NoteIds noted{this};
     if (c < 0x20 || c == 0x7f || !on_typeahead) return false;
+    // A character typed with Ctrl or Alt held (AltGr counts as both) is not part of a name.
+    // Spec: DirectoryTabView.FileList_TextInput.
+    if (root()->mods().ctrl || root()->mods().alt) return false;
     const uint64_t now = root()->now_ms();
     if (now - typed_at_ > kTypeAheadMs) typed_.clear();
     if (c == L' ' && typed_.empty()) return false;

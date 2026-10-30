@@ -432,9 +432,14 @@ impl Inner {
         }
     }
 
-    /// The comparison's folders changed on disk through this app (a sync, an undo, a drop): read
-    /// them again, so what is on screen is never a verdict about a folder as it was before.
-    pub(crate) fn compare_directories_changed(self: &Arc<Self>, keys: &HashSet<String>) {
+    /// The comparison's folders changed on disk through this app. A sync reads them again
+    /// (`rescan`); anything else marks the comparison stale, so the banner offers Rescan rather
+    /// than the app re-reading two trees after every rename. Spec: CompareSessionViewModel (IsStale).
+    pub(crate) fn compare_directories_changed(
+        self: &Arc<Self>,
+        keys: &HashSet<String>,
+        rescan: bool,
+    ) {
         let (left, right) = {
             let ui = lock(&self.extra.ui);
             let Some(state) = ui.compare.as_ref() else {
@@ -449,9 +454,17 @@ impl Inner {
             keys.iter()
                 .any(|k| *k == root_key || bb_paths::PathKey::is_under_key(k, &root_key))
         };
-        if inside(&left) || inside(&right) {
-            self.compare_scan_now();
+        if !(inside(&left) || inside(&right)) {
+            return;
         }
+        if rescan {
+            self.compare_scan_now();
+            return;
+        }
+        if let Some(state) = lock(&self.extra.ui).compare.as_ref() {
+            state.stale.store(true, Ordering::Relaxed);
+        }
+        self.hub.model(Model::Compare);
     }
 
     /// Runs a scan on this thread and applies it. For a caller already off the UI thread.
@@ -793,6 +806,11 @@ impl Inner {
         directories.sort_by_key(|d| d.to_uppercase());
         directories.dedup_by_key(|d| d.to_uppercase());
         self.refresh_tabs_showing(&directories);
+        let keys: HashSet<String> = directories
+            .iter()
+            .filter_map(|d| bb_paths::PathKey::canonicalize(d).ok())
+            .collect();
+        self.compare_directories_changed(&keys, true);
 
         let failed = outcome.failed_copies().len() + outcome.removals.failed.len();
         let text = self.describe_sync(&outcome, &plans);

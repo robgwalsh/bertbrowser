@@ -60,6 +60,7 @@ public:
     void update(const json::Value& model);
     const std::vector<Item>& items() const { return items_; }
     size_t visible_count() const { return visible_; }
+    ui::Rect item_rect(size_t i) const;
     bool shows_text() const { return show_text_; }
 
     // A button was clicked (its row) / the overflow button was (the rows behind it, the button's rect).
@@ -82,7 +83,6 @@ private:
     float item_width(const BarRow& r) const;
     void lay_out(float avail);
     int index_at(ui::Point p) const;  // an item index, kOverflow, or -1
-    ui::Rect item_rect(size_t i) const;
     ui::Rect overflow_rect() const;
     // Undo and Redo are split buttons: the face runs the command, the chevron lists the steps.
     // Spec: CommandBarToolbar.Build (CommandBarRules.DropdownFor).
@@ -91,6 +91,7 @@ private:
     static constexpr float kChevron = 14.0f;
     static constexpr int kOverflow = -2;
     bool pressed_chevron_ = false;
+    bool hot_chevron_ = false;  // the pointer is on the hot split button's chevron
 
     std::string which_;
     std::string signature_;

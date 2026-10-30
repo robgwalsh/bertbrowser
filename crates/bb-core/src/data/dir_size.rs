@@ -34,7 +34,7 @@ impl DirSizeRepository {
         results: impl IntoIterator<Item = &'a DirSizeResult>,
     ) -> Result<()> {
         let mut conn = self.db.open()?;
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO dir_size_cache(path_key, size_bytes, file_count, dir_count, incomplete, computed_utc)

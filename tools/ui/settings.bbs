@@ -65,6 +65,24 @@ settings close
 select notes.txt
 menu files 11-menu-new-types
 assert-menu-item Recipe card
+
+# Leaving with a type that has no name asks first; Cancel stays, Leave drops the unsaved entry.
+live-dialogs on
+settings new-items
+press NewTypeAdd
+field-type NewTypeName
+window-key Esc
+assert-visible SettingsLeaveConfirm
+shot 11a-leave-anyway
+press SettingsLeaveCancel
+assert-hidden SettingsLeaveConfirm
+assert-visible SettingsProblem
+window-key Esc
+press SettingsLeaveConfirm
+assert-hidden SettingsLayer
+live-dialogs off
+menu files
+assert-menu-item Recipe card
 assert-menu-item Rich Text Document
 assert-menu-item Bitmap image
 deselect

@@ -20,17 +20,35 @@ constexpr size_t kNone = static_cast<size_t>(-1);
 CaptionButton::CaptionButton(Kind k) : kind(k) {
     width = 46.0f;
     nc_hit = k == Kind::Minimize ? HTMINBUTTON : k == Kind::Maximize ? HTMAXBUTTON : HTCLOSE;
+    tooltip = k == Kind::Minimize ? L"Minimise" : k == Kind::Maximize ? L"Maximise" : L"Close";  // Spec: Window.xaml
 }
+
+static bool window_maximized(const Widget& w) { return w.root() && w.root()->window_maximized; }
+static bool window_active(const Widget& w) { return !w.root() || w.root()->window_active; }
 
 void CaptionButton::paint(PaintContext& pc) {
     const bool close = kind == Kind::Close;
     const bool hot = hovered();
+    if (kind == Kind::Maximize) tooltip = window_maximized(*this) ? L"Restore" : L"Maximise";
     if (hot) pc.fill(bounds, close ? tok::TitleBarCloseHoverBackground : tok::TitleBarButtonHoverBackground);
-    const Token fg = hot && close ? tok::TitleBarCloseHoverForeground : tok::TitleBarForeground;
+    const Token fg = hot && close ? tok::TitleBarCloseHoverForeground
+                     : window_active(*this) ? tok::TitleBarForeground
+                                            : tok::TitleBarInactiveForeground;
     const float cx = std::floor((bounds.l + bounds.r) / 2) + 0.5f, cy = std::floor((bounds.t + bounds.b) / 2) + 0.5f;
     switch (kind) {
         case Kind::Minimize: pc.line({cx - 5, cy}, {cx + 5, cy}, fg); break;
-        case Kind::Maximize: pc.stroke(Rect{cx - 5, cy - 5, cx + 5, cy + 5}, fg); break;
+        case Kind::Maximize:
+            if (window_maximized(*this)) {
+                // Restore: two overlapped squares, the back one showing only its top and right edges.
+                pc.stroke(Rect{cx - 5, cy - 3, cx + 3, cy + 5}, fg);
+                pc.line({cx - 3, cy - 3}, {cx - 3, cy - 5}, fg);
+                pc.line({cx - 3, cy - 5}, {cx + 5, cy - 5}, fg);
+                pc.line({cx + 5, cy - 5}, {cx + 5, cy + 3}, fg);
+                pc.line({cx + 5, cy + 3}, {cx + 3, cy + 3}, fg);
+            } else {
+                pc.stroke(Rect{cx - 5, cy - 5, cx + 5, cy + 5}, fg);
+            }
+            break;
         case Kind::Close:
             pc.line({cx - 5, cy - 5}, {cx + 5, cy + 5}, fg);
             pc.line({cx + 5, cy - 5}, {cx - 5, cy + 5}, fg);
@@ -100,10 +118,16 @@ void TitleBar::arrange(Rect r) {
 }
 
 void TitleBar::paint(PaintContext& pc) {
+    // Dimmed while another window is active. Spec: Window.xaml (IsActive false -> TitleBar.Inactive*).
+    const bool active = window_active(*this);
+    style.bg = active ? tok::TitleBarBackground : tok::TitleBarInactiveBackground;
     Widget::paint(pc);
     gfx::FontSpec font;
     font.size = 13.0f;
-    if (show_title) pc.text(title, Rect{bounds.l + 12, bounds.t, bounds.r - 150, bounds.b}, font, tok::TitleBarForeground);
+    if (show_title) {
+        pc.text(title, Rect{bounds.l + 12, bounds.t, bounds.r - 150, bounds.b}, font,
+                active ? tok::TitleBarForeground : tok::TitleBarInactiveForeground);
+    }
     pc.line({bounds.l, bounds.b - 0.5f}, {bounds.r, bounds.b - 0.5f}, tok::TitleBarBorder);
 }
 
@@ -542,6 +566,7 @@ void TabStrip::on_mouse_leave() {
 
 void BreadcrumbBar::set_crumbs(std::vector<core::Crumb> crumbs) {
     crumbs_ = std::move(crumbs);
+    key_crumb_ = crumbs_.empty() ? 0 : crumbs_.size() - 1;
     back_ = 0;  // scrolled to the right end, where the folder you are in is. Spec: DirectoryTabView (ScrollToRightEnd)
     laid_out_ = false;
     hot_ = kNone;
@@ -604,6 +629,7 @@ void BreadcrumbBar::paint(PaintContext& pc) {
     for (size_t i = 0; i < segs_.size(); ++i) {
         const Seg& sg = segs_[i];
         if (i == hot_) pc.fill(sg.rect, tok::ButtonSecondaryHoverBackground);
+        if (focused() && sg.crumb == key_crumb_) pc.stroke(sg.rect, tok::BorderFocus);
         pc.text(crumbs_[sg.crumb].name, sg.rect.deflate(6, 0, 6, 0), gfx::FontSpec{},
                 sg.crumb + 1 == crumbs_.size() ? tok::InputForeground : tok::TextSecondary);
         if (i + 1 < segs_.size()) {
@@ -662,5 +688,53 @@ void BreadcrumbBar::on_mouse_leave() {
 }
 
 Cursor BreadcrumbBar::cursor_at(Point p) const { return seg_at(p) != kNone ? Cursor::Hand : Cursor::IBeam; }
+
+void BreadcrumbBar::on_focus(bool f) {
+    // Tabbing in lands on the folder you are in, the last crumb.
+    if (f) {
+        key_crumb_ = crumbs_.empty() ? 0 : crumbs_.size() - 1;
+        show_key_crumb();
+    }
+    invalidate();
+}
+
+void BreadcrumbBar::show_key_crumb() {
+    if (!laid_out_) lay_out();
+    auto shown = [this] {
+        for (const Seg& sg : segs_) {
+            if (sg.crumb == key_crumb_) return true;
+        }
+        return segs_.empty();
+    };
+    while (!shown()) {
+        const bool left = !segs_.empty() && key_crumb_ < segs_.front().crumb;
+        if (left && more_left_) ++back_;
+        else if (!left && back_ > 0) --back_;
+        else break;
+        lay_out();
+    }
+}
+
+bool BreadcrumbBar::on_key_down(const KeyEvent& e) {
+    if (crumbs_.empty() || e.mods.ctrl || e.mods.alt) return false;
+    const size_t last = crumbs_.size() - 1;
+    size_t to = key_crumb_;
+    switch (e.vk) {
+        case VK_LEFT: to = key_crumb_ > 0 ? key_crumb_ - 1 : 0; break;
+        case VK_RIGHT: to = std::min(key_crumb_ + 1, last); break;
+        case VK_HOME: to = 0; break;
+        case VK_END: to = last; break;
+        case VK_RETURN:
+        case VK_SPACE:
+            if (on_navigate && key_crumb_ <= last) on_navigate(crumbs_[key_crumb_].path);
+            return true;
+        default: return false;
+    }
+    key_crumb_ = to;
+    hot_ = kNone;
+    show_key_crumb();
+    invalidate();
+    return true;
+}
 
 }  // namespace bb::views

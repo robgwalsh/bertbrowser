@@ -92,9 +92,9 @@ authors; each crate's repository, named by its entry on https://crates.io, state
 
 `icu_collections`, `icu_locale_core`, `icu_normalizer`, `icu_normalizer_data`, `icu_properties`, `icu_properties_data`, `icu_provider`, `litemap`, `potential_utf`, `tinystr`, `writeable`, `yoke`, `yoke-derive`, `zerofrom`, `zerofrom-derive`, `zerotrie`, `zerovec`, `zerovec-derive`
 
-### MIT (15)
+### MIT (17)
 
-`bytes`, `data-encoding`, `fancy-regex`, `generic-array`, `libmimalloc-sys`, `libsqlite3-sys`, `mimalloc`, `quick-xml`, `rusqlite`, `simd-adler32`, `synstructure`, `velopack`, `xml`, `zip`, `zmij`
+`bytes`, `data-encoding`, `fancy-regex`, `generic-array`, `libmimalloc-sys`, `libsqlite3-sys`, `mimalloc`, `quick-xml`, `rusqlite`, `ruzstd`, `simd-adler32`, `synstructure`, `twox-hash`, `velopack`, `xml`, `zip`, `zmij`
 
 ### Apache-2.0 OR MIT (11)
 

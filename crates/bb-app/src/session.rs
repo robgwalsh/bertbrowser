@@ -195,15 +195,15 @@ impl Inner {
         let layout = self.capture_layout();
         // Separate statements: `self.tab` locks the shell, and the guard is not re-entrant.
         let active = lock(&self.shell).active_tab_id();
+        // Never a hidden folder: next launch should not open somewhere the list would not show.
+        // Spec: MainWindow.OnClosing (LastPath, IsHiddenDirectory).
         let last = active
             .and_then(|t| self.tab(t).ok())
             .map(|c| lock(&c).path.clone())
-            .filter(|p| !p.is_empty());
+            .filter(|p| !p.is_empty() && !crate::palette::is_hidden_dir(p));
         let mut s = lock(&self.settings);
         s.session = Some(layout);
-        if last.is_some() {
-            s.last_path = last;
-        }
+        s.last_path = last;
     }
 
     /// The launch rule: the saved session when asked for and usable, otherwise one pane at the

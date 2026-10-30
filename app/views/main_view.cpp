@@ -63,6 +63,7 @@ std::wstring key_name(unsigned vk) {
         case VK_PRIOR: return L"PageUp";
         case VK_NEXT: return L"PageDown";
         case VK_INSERT: return L"Insert";
+        case VK_APPS: return L"Apps";
         case VK_ADD: return L"Num+";
         case VK_SUBTRACT: return L"Num-";
         case VK_MULTIPLY: return L"Num*";
@@ -681,11 +682,23 @@ void TabView::sync_view_mode(const BbTabState& st) {
         tiles_->refresh();
     }
     if (want == tiles_on_) return;
+    // The keyboard follows the switch: the view that had it is about to be hidden, and arrows have to act on
+    // (and scroll) the one that replaces it, from the same row. Spec: one ListView in C#, so focus never moves.
+    const size_t cursor = tiles_on_ ? tiles_->cursor() : list_->cursor();
+    Widget* outgoing = tiles_on_ ? static_cast<Widget*>(tiles_) : static_cast<Widget*>(list_);
+    const bool had_focus = root() && root()->focused() == outgoing;
     tiles_on_ = want;
     list_->set_visible(!want);
     tiles_->set_visible(want);
     if (want) tiles_->refresh();
     else list_->refresh();
+    if (had_focus) {
+        root()->set_focus(want ? static_cast<Widget*>(tiles_) : static_cast<Widget*>(list_));
+        if (cursor != ListView::npos) {
+            if (want) tiles_->reveal_cursor_when_arranged(cursor);
+            else list_->reveal_cursor_when_arranged(cursor);
+        }
+    }
     view_area_->request_layout();
 }
 
@@ -709,7 +722,7 @@ void TabView::sync_side_pane(const BbTabState& st) {
     side_mode_ = static_cast<int>(st.side_pane);
     side_pane_->set_visible(side_mode_ != 0);
     for (int i = 0; i < 3; ++i) side_buttons_[i]->primary = i == side_mode_;
-    flat_button_->primary = st.is_flat_browse;
+    flat_button_->primary = st.is_flat_view;  // the mode, not the listing. Spec: DirectoryTabView.xaml (IsFlatView)
 
     // Built the first time it is shown, not declared with the tab: most tabs never show one.
     if (side_mode_ == 1) ensure_preview();
@@ -814,6 +827,7 @@ void TabView::refresh_tooltips() {
 }
 
 void TabView::open_context(Point p, bool header, bool background) {
+    if (main_.dialog_up()) return;  // the Apps key reaches a list behind a card; a click never could
     main_.show_context_menu(header ? build_column_menu() : build_files_menu(background), p);
 }
 
@@ -1041,9 +1055,13 @@ void TabView::begin_path_edit() {
 
 void TabView::end_path_edit() {
     if (!path_->flags.visible) return;
+    // Enter and Esc leave the keyboard on a hidden box; the folders take it back. A blur that came from a
+    // click elsewhere finds the focus already moved, and is left alone.
+    const bool had_focus = root() && root()->focused() == path_;
     path_->set_visible(false);
     crumbs_->set_visible(true);
     path_bar_->request_layout();
+    if (had_focus) root()->set_focus(tiles_on_ ? static_cast<Widget*>(tiles_) : static_cast<Widget*>(list_));
 }
 
 // ---- PaneView ----------------------------------------------------------------------------------------
@@ -1386,6 +1404,7 @@ MainView::MainView(core::Core& core, platform::Window& window)
     };
     // No menu on a device: there is no path behind it for any entry to act on. Spec: MainWindow.FolderTree_ContextMenu.
     tree_->on_context = [this](uint64_t id, Point at) {
+        if (dialog_up()) return;
         const std::wstring path = tree_provider_->path_of(id);
         if (!path.empty() && !tree_provider_->is_device(id)) open_tree_menu(path, at);
     };
@@ -1450,6 +1469,7 @@ MainView::MainView(core::Core& core, platform::Window& window)
     menu_bar_->allows_mode = [this] { return (focus_flags() & (BB_FOCUS_PALETTE_OPEN | BB_FOCUS_CONTENT_BLOCKED | BB_FOCUS_RECORDING)) == 0; };
     title_toolbar_->on_activate = [this](const BarRow& r, Rect anchor) {
         if (r.kind == "list" || r.kind == "placeholder") open_toolbar_list(r, anchor);
+        else if (r.kind == "menu") open_overflow(r.children, anchor);  // a submenu drops down its rows
         else execute_command(core::wide(r.id));
     };
     title_toolbar_->on_overflow = [this](const std::vector<BarRow>& rows, Rect anchor) { open_overflow(rows, anchor); };
@@ -1663,7 +1683,7 @@ void MainView::push_system_appearance() {
     bb_theme_set_system_appearance(core_.app(), light == 0, high_contrast);
 }
 
-void MainView::start(const std::wstring& path) {
+void MainView::start(const std::wstring& path, bool restore_session) {
     bb_ui_set_flag(core_.app(), core::s(L"propertyProvider"), true);
     bb_set_property_host(core_.app(), make_property_host());
     if (follow_windows_) {
@@ -1672,7 +1692,8 @@ void MainView::start(const std::wstring& path) {
     }
     apply_theme();
     uint64_t tab = 0;
-    core::check(bb_app_initialize(core_.app(), core::s(path), &tab), "initialize");
+    if (restore_session) core::check(bb_session_restore(core_.app(), core::s(path), &tab), "restore the session");
+    else core::check(bb_app_initialize(core_.app(), core::s(path), &tab), "initialize");
     sync_layout();
     refresh_bars();
     sync_overlays();
@@ -2033,7 +2054,12 @@ bool MainView::host_command(const std::wstring& id) {
     if (id == L"file.extract-here") {
         const ops::ExtractSubject subject = ops::extract_subject(*this);
         if (subject.archive.empty()) return false;
-        ops::run_extract(*this, subject, ops::extract_destination(*this, subject.archive), false);
+        // A refused plan is a warning card, as Extract to's is. Spec: DirectoryTabView.ExtractAsync.
+        try {
+            ops::run_extract(*this, subject, ops::extract_destination(*this, subject.archive), false);
+        } catch (const std::exception& e) {
+            show_message(L"Extract", core::message_of(e));
+        }
         return true;
     }
     if (id == L"tools.duplicates" && shows_dialogs()) {
@@ -2126,7 +2152,7 @@ bool MainView::paste(bool shortcut) {
         return true;
     }
     // A paste is a drop by another name: the one planner and executor, with progress, conflicts and undo.
-    const uint64_t op = transfer_into(core_, clip->paths, here, shortcut ? "shortcut" : clip->cut ? "move" : "copy");
+    const uint64_t op = transfer_into(core_, clip->paths, here, shortcut ? "shortcut" : clip->cut ? "paste-move" : "paste-copy");
     if (!shortcut && clip->cut && op) {
         cut_paste_op_ = op;
         cut_paste_seq_ = clipboard_seq();
@@ -2393,6 +2419,7 @@ void MainView::sync_row_toolbars(const json::Value& state) {
             tb->name = "ToolbarRow" + std::to_string(row_toolbars_.size() + 1);
             tb->on_activate = [this](const BarRow& r, Rect anchor) {
                 if (r.kind == "list" || r.kind == "placeholder") open_toolbar_list(r, anchor);
+                else if (r.kind == "menu") open_overflow(r.children, anchor);
                 else execute_command(core::wide(r.id));
             };
             tb->on_overflow = [this](const std::vector<BarRow>& rows, Rect anchor) { open_overflow(rows, anchor); };

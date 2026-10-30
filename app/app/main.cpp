@@ -172,15 +172,19 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                     bb_status_set(app, core::s(core::message_of(e)));
                 };
                 try {
-                    // The folder the command line named, else the user's profile.
+                    // The folder the command line named; else last session's panes (or the startup folder, as
+                    // Settings says), falling back to the user's profile. Someone who named a folder asked for
+                    // it, so reopening the session over it would bury it. Spec: App.OnStartup (start path priority).
                     const BbStr named = bb_launch_start_path(launch);
                     std::wstring start(reinterpret_cast<const wchar_t*>(named.ptr), named.len);
-                    if (start.empty()) {
+                    const DWORD attrs = start.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesW(start.c_str());
+                    const bool asked = attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY);
+                    if (!asked) {
                         wchar_t profile[MAX_PATH];
                         const DWORD n = GetEnvironmentVariableW(L"USERPROFILE", profile, MAX_PATH);
                         start = n ? std::wstring(profile, n) : std::wstring(L"C:\\");
                     }
-                    view.start(start);
+                    view.start(start, !asked);
                     view.enable_file_drag_drop();
                     mark(L"windowBuilt");
                     const bool maximize = !options.offscreen && restore_placement(window.hwnd(), app);

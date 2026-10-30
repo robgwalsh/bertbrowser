@@ -3,7 +3,7 @@
 //! Spec: ShellViewModel, PaneViewModel.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 
@@ -88,6 +88,9 @@ pub(crate) struct TabData {
     pub is_loading: bool,
     /// Bumped by every refresh; a job that finds it moved discards its result.
     pub generation: u64,
+    /// The generation of a search the index re-ran: that run's own re-crawl does not run it again,
+    /// or a root nothing watches (so never fresh) would search and crawl for ever.
+    pub index_rerun: u64,
     pub search_gen: u64,
     pub cancel: CancelToken,
     /// What Stop cancels: the search pass alone, so it returns what it found so far. Navigating
@@ -157,6 +160,7 @@ impl TabData {
             is_search_running: false,
             is_loading: false,
             generation: 0,
+            index_rerun: u64::MAX,
             search_gen: 0,
             cancel: CancelToken::new(),
             search_stop: CancelToken::new(),
@@ -286,6 +290,8 @@ pub(crate) struct Inner {
     pub probes: Option<Arc<HarnessProbes>>,
     pub settings: Mutex<AppSettings>,
     pub settings_path: std::path::PathBuf,
+    /// How much of each file `content:` reads (bytes); the live `searchContentMaxBytes`.
+    pub content_budget: Arc<AtomicI64>,
     pub dir_sizes: DirSizeRepository,
     pub search: SearchService,
     /// The real file system with archives made to look like folders (a path inside one lists its
@@ -363,7 +369,8 @@ impl App {
             Fakes::Harness => Arc::new(NoWatchers),
             Fakes::None => Arc::new(IndexWatcherService::new(repository.clone())),
         };
-        let content_bytes = settings.search_content_max_bytes;
+        // Read by every search, and moved by the Preview page. Spec: App.xaml.cs (per search).
+        let content_budget = Arc::new(AtomicI64::new(i64::from(settings.search_content_max_bytes)));
         let fs = Arc::new(
             bb_core::archives::ArchiveAwareFileSystemService::with_passwords(
                 Arc::new(LocalFileSystem),
@@ -373,7 +380,10 @@ impl App {
             ),
         );
         let search = SearchService::new(repository, crawler, watchers, seams.index.clone())
-            .with_content_budget(Box::new(move || content_bytes.max(0) as u64))
+            .with_content_budget({
+                let budget = content_budget.clone();
+                Box::new(move || budget.load(Ordering::Relaxed).max(0) as u64)
+            })
             .with_archives(fs.clone());
 
         let (layout, _) = LayoutTree::new(PaneId(1));
@@ -425,6 +435,7 @@ impl App {
             ),
             settings: Mutex::new(settings),
             settings_path,
+            content_budget,
             db,
             config,
         });

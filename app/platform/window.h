@@ -97,6 +97,7 @@ private:
     void update_tick_timer();
     ui::Mods mouse_mods(WPARAM wp) const;
     bool mouse_button(UINT msg, WPARAM wp, LPARAM lp);
+    bool shift_f10(WPARAM wp, LPARAM lp);
 
     gfx::Resources& res_;
     WindowOptions options_;

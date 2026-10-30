@@ -315,6 +315,11 @@ uint64_t transfer_into(core::Core& core, const std::vector<std::wstring>& source
                          ",\"sources\":" + json_array(sources) + "}");
             return 0;
         }
+        if (verb == "paste-move" || verb == "paste-copy") {
+            const json::Value r = ops::run(core, "paste", "{\"sources\":" + json_array(sources) + ",\"destination\":" + ops::q(destination) +
+                                                              ",\"move\":" + (verb == "paste-move" ? "true" : "false") + "}");
+            return static_cast<uint64_t>(r["op"].num());
+        }
         std::vector<BbStr> views;
         for (const auto& p : sources) views.push_back(core::s(p));
         uint64_t op = 0;
@@ -476,7 +481,7 @@ private:
                     return site;
                 }
                 const BbTabState st = main.core().tab_state(tab->tab());
-                if (st.is_flattened && !st.is_flat_view) return std::nullopt;  // a search result has no "here"
+                if (st.is_flattened && !st.is_flat_browse) return std::nullopt;  // a search result has no "here"
                 site.destination = tab->path_text();
                 if (site.destination.empty()) return std::nullopt;
                 return site;

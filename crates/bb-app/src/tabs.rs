@@ -207,8 +207,16 @@ impl Inner {
                 return Ok(());
             }
         }
-        // A real folder, or somewhere inside a readable archive (which opens the container).
-        if !std::path::Path::new(path).is_dir() && !self.fs.can_list(path) {
+        // A real folder, or somewhere inside a container file that is there. The container itself is
+        // not opened here (it may be large, or on a share that has gone away): the load reads it off
+        // this thread, and a folder it does not hold is the banner's to say. Spec:
+        // DirectoryTabViewModel.NavigateToAsync.
+        let container = || {
+            self.fs
+                .resolve(path)
+                .is_some_and(|a| std::path::Path::new(&a.archive_file).is_file())
+        };
+        if !std::path::Path::new(path).is_dir() && !container() {
             self.set_status(tab, format!("Folder not found: {path}"));
             return Err(AppError::Invalid(format!("Folder not found: {path}")));
         }
@@ -417,6 +425,61 @@ impl Inner {
         }
     }
 
+    /// A volume's MFT index just finished: an active whole-PC search runs again against it, and a
+    /// plain folder picks up the sizes `dir_size_cache` now has. Spec: DirectoryTabViewModel.OnMftIndexRefreshed.
+    pub(crate) fn mft_index_refreshed(self: &Arc<Self>) {
+        for (id, cell) in self.all_tabs() {
+            let (search, global, flattened) = {
+                let t = lock(&cell);
+                (
+                    parse_has_search(t.active_search_text()),
+                    t.is_global_search(),
+                    t.is_flattened,
+                )
+            };
+            if search {
+                if global {
+                    self.refresh_view(id);
+                }
+                continue;
+            }
+            if flattened {
+                continue;
+            }
+            let mut t = lock(&cell);
+            let mut rows: Vec<Row> = t.listing.rows().iter().map(|r| clone_row(r)).collect();
+            for r in rows.iter_mut().filter(|r| r.is_directory) {
+                r.size = None;
+            }
+            self.hydrate_dir_sizes(&mut rows);
+            t.install(rows, true);
+            let version = t.version;
+            drop(t);
+            self.hub.emit(AppEvent::ListingChanged { tab: id, version });
+        }
+    }
+
+    /// A background (re)crawl of `root_key` finished: a search in a tab at or under it runs again.
+    /// Spec: DirectoryTabViewModel.OnIndexRefreshed.
+    pub(crate) fn folder_index_refreshed(self: &Arc<Self>, root_key: &str) {
+        for (id, cell) in self.all_tabs() {
+            let under = {
+                let t = lock(&cell);
+                !t.path.is_empty()
+                    && t.index_rerun != t.generation
+                    && parse_has_search(t.active_search_text())
+                    && !t.is_global_search()
+                    && PathKey::canonicalize(&t.path)
+                        .is_ok_and(|k| k == root_key || PathKey::is_under_key(&k, root_key))
+            };
+            if under {
+                self.refresh_view(id);
+                let mut t = lock(&cell);
+                t.index_rerun = t.generation;
+            }
+        }
+    }
+
     /// Folder sizes come from `dir_size_cache` and nowhere else; a missing row stays blank.
     fn hydrate_dir_sizes(&self, rows: &mut [Row]) {
         let dirs: Vec<usize> = rows
@@ -613,6 +676,23 @@ impl Inner {
         t.is_flattened = true;
         t.is_flat_browse = flat_browse;
         t.install(Vec::new(), false);
+        // Still loading while the rows stream in; the final install lowers it. Spec:
+        // FileListViewModel.BeginFlattened (IsLoading).
+        t.is_loading = true;
+    }
+
+    /// A streamed run that ended without its final install (refused, failed): the activity bar stops.
+    fn stop_loading(&self, tab: TabId, generation: u64) {
+        let Ok(cell) = self.tab(tab) else { return };
+        {
+            let mut t = lock(&cell);
+            if t.generation != generation {
+                return;
+            }
+            t.is_loading = false;
+            t.is_search_running = false;
+        }
+        self.hub.emit(AppEvent::TabChanged { tab });
     }
 
     /// Appends a streamed batch, unsorted: the final sort replaces it when the run ends.
@@ -625,8 +705,13 @@ impl Inner {
         let mut rows: Vec<Row> = t.listing.rows().iter().map(|r| clone_row(r)).collect();
         rows.extend(hits.iter().map(Row::from_hit));
         t.install(rows, true);
+        t.is_loading = true;
         if let Some(status) = status {
-            t.status = status.replace("{n}", &t.listing.len().to_string());
+            // `{N}` is the count with thousands separators (the flat view's), `{n}` without.
+            let n = t.listing.len();
+            t.status = status
+                .replace("{N}", &thousands(n as i64))
+                .replace("{n}", &n.to_string());
         }
         let version = t.version;
         drop(t);
@@ -652,6 +737,9 @@ impl Inner {
         if let Some(problem) = parse.problem {
             let mut t = lock(&cell);
             if t.generation == generation {
+                // Refused before anything ran, so nothing is loading. Spec:
+                // DirectoryTabViewModel.RunSearchAsync (Problem returns before BeginSearch).
+                t.is_loading = false;
                 t.error = Some(problem.clone());
                 t.status = problem;
             }
@@ -659,7 +747,10 @@ impl Inner {
             self.hub.emit(AppEvent::TabChanged { tab });
             return;
         }
-        let Some(query) = parse.query else { return };
+        let Some(query) = parse.query else {
+            self.stop_loading(tab, generation);
+            return;
+        };
         let needs_content = query.needs_content();
         // Inside a container the answer comes from the index its listing was read from: instant, and
         // nowhere near fs_entry, which must never learn a virtual path.
@@ -674,6 +765,7 @@ impl Inner {
             let mut t = lock(&cell);
             if t.generation == generation {
                 Self::begin_flattened(&mut t, false);
+                t.is_loading = false;
                 t.error = Some(message.clone());
                 t.status = message;
                 t.is_search_running = false;
@@ -777,12 +869,7 @@ impl Inner {
         let outcome = match result {
             Ok(Some(outcome)) => outcome,
             _ => {
-                if let Ok(cell) = self.tab(tab) {
-                    let mut t = lock(&cell);
-                    if t.generation == generation {
-                        t.is_search_running = false;
-                    }
-                }
+                self.stop_loading(tab, generation);
                 return;
             }
         };
@@ -851,13 +938,15 @@ impl Inner {
                 .confirm
                 .ask(&preflight.message, "Flat view", &preflight.confirm_label)
         {
+            // Declining leaves the listing, and the selection, exactly where they were. Spec:
+            // DirectoryTabViewModel (the flat-view prompt declined).
             let mut t = lock(&cell);
             if t.generation == generation {
                 t.is_flat_view = false;
+                t.is_loading = false;
             }
             drop(t);
             self.hub.emit(AppEvent::TabChanged { tab });
-            self.refresh_view(tab);
             return;
         }
 
@@ -878,7 +967,7 @@ impl Inner {
             self.hub.emit(AppEvent::ListingChanged { tab, version });
         }
 
-        let stream_status = format!("{{n}} file(s) so far under {folder}\u{2026}");
+        let stream_status = format!("{{N}} file(s) so far under {folder}\u{2026}");
         let on_batch = |hits: &[SearchHit]| {
             if !token.is_cancelled() {
                 self.append_hits(tab, generation, hits, Some(stream_status.clone()));
@@ -909,7 +998,10 @@ impl Inner {
                         false,
                     )
                 }
-                Err(_) => return,
+                Err(_) => {
+                    self.stop_loading(tab, generation);
+                    return;
+                }
             }
         } else {
             match self
@@ -917,7 +1009,10 @@ impl Inner {
                 .list_subtree(&path, cap, include_hidden, progress, &token)
             {
                 Ok(outcome) => outcome,
-                Err(_) => return,
+                Err(_) => {
+                    self.stop_loading(tab, generation);
+                    return;
+                }
             }
         };
         if token.is_cancelled() {
@@ -929,6 +1024,7 @@ impl Inner {
             return;
         }
         if let Some(problem) = outcome.problem {
+            t.is_loading = false;
             t.error = Some(problem.clone());
             t.status = problem;
             drop(t);
@@ -1310,23 +1406,46 @@ impl Inner {
         {
             // A name is a claim and only the bytes settle it: one that is not what its name says goes
             // to whatever owns the extension; anything else (an unsupported kind included) is entered,
-            // and its listing says what is wrong. Spec: DirectoryTabViewModel.EnterArchiveOrLaunchAsync.
-            let index = self.fs.read_archive(&row.full_path);
-            if index.failure != bb_core::archives::ArchiveFailure::Damaged {
-                return self.navigate(tab, &row.full_path);
-            }
+            // and its listing says what is wrong. Read off this thread, with the list showing it is
+            // busy, since a large container takes a while. Spec: DirectoryTabViewModel.EnterArchiveOrLaunchAsync.
+            let generation = {
+                let mut t = lock(&cell);
+                t.is_loading = true;
+                t.generation
+            };
+            self.hub.emit(AppEvent::TabChanged { tab });
+            self.schedule(move |inner| {
+                let index = inner.fs.read_archive(&row.full_path);
+                let Ok(cell) = inner.tab(tab) else { return };
+                {
+                    let mut t = lock(&cell);
+                    if t.generation != generation {
+                        return; // the tab went somewhere else meanwhile
+                    }
+                    t.is_loading = false;
+                }
+                inner.hub.emit(AppEvent::TabChanged { tab });
+                if index.failure != bb_core::archives::ArchiveFailure::Damaged {
+                    let _ = inner.navigate(tab, &row.full_path);
+                } else {
+                    inner.launch_row(tab, &row);
+                }
+            });
+            return Ok(());
         }
         // Nothing inside a container has a path another program can open.
         if inside {
             self.set_status(tab, format!("Extract {} to open it.", row.name));
             return Ok(());
         }
-        match self.seams.launcher.launch(&row.full_path, false) {
-            Ok(()) => Ok(()),
-            Err(why) => {
-                self.set_status(tab, format!("{} was not launched \u{2014} {why}", row.name));
-                Ok(())
-            }
+        self.launch_row(tab, &row);
+        Ok(())
+    }
+
+    /// Hands a file to whatever owns its extension, saying so when that is refused.
+    fn launch_row(&self, tab: TabId, row: &Row) {
+        if let Err(why) = self.seams.launcher.launch(&row.full_path, false) {
+            self.set_status(tab, format!("{} was not launched \u{2014} {why}", row.name));
         }
     }
 
@@ -1353,8 +1472,8 @@ impl Inner {
                 self.refresh_view(id);
             }
         }
-        // A comparison over these folders is a verdict about a disk that just changed.
-        self.compare_directories_changed(&keys);
+        // A comparison over these folders is a verdict about a disk that just changed: it says so.
+        self.compare_directories_changed(&keys, false);
     }
 
     /// Steps any tab that is inside a folder that just went away out to the nearest parent that

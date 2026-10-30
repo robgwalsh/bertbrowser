@@ -110,7 +110,7 @@ impl FsIndexRepository {
             return Ok(());
         }
         let mut conn = self.db.open()?;
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO fs_entry(path_key, name, name_key, is_dir, size_bytes, modified_utc, hidden,
@@ -408,7 +408,7 @@ impl FsIndexRepository {
     pub fn delete_subtree(&self, path_key: &str) -> Result<()> {
         let (lo, hi) = PathKey::prefix_bounds(path_key)?;
         let mut conn = self.db.open()?;
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute(
             "DELETE FROM fs_entry WHERE path_key = ?1;",
             params![path_key],
@@ -431,7 +431,7 @@ impl FsIndexRepository {
         crawl_gen: i64,
     ) -> Result<()> {
         let mut conn = self.db.open()?;
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let name_key = fold_upper(new_name);
         if old_key != new_key {
             let (old_lo, old_hi) = PathKey::prefix_bounds(old_key)?;

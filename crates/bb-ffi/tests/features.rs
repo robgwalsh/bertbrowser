@@ -536,7 +536,11 @@ fn settings_page_flush_and_the_debounce() {
         bb_settings_set(rig.app, bs(&key), bs(&bad))
     });
     assert_eq!(BbStatus::BB_ERR, unsafe { bb_settings_page_close(rig.app) });
-    assert!(last_error().contains("needs a program"), "{}", last_error());
+    assert!(
+        last_error().contains("needs a name and a program"),
+        "{}",
+        last_error()
+    );
     let ok = w("[]");
     unsafe { bb_settings_set(rig.app, bs(&key), bs(&ok)) };
     assert_eq!(BbStatus::BB_OK, unsafe { bb_settings_page_close(rig.app) });

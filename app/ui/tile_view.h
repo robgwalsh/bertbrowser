@@ -100,6 +100,8 @@ public:
     size_t cursor() const { return cursor_; }
     void select_row(size_t row);   // cursor + selection + scroll into view
     void reveal_cursor(size_t row);  // cursor + scroll into view; the selection is left alone
+    // The same, but scrolled once the view has been laid out: for a view that has just been shown.
+    void reveal_cursor_when_arranged(size_t row);
     void scroll_to_row(size_t row);
     void set_scroll_y(float y);
     float scroll_y() const { return v_.offset(); }
@@ -129,6 +131,7 @@ public:
     bool on_wheel(Point p, int delta, Mods m) override;
     bool on_key_down(const KeyEvent& e) override;
     bool on_char(wchar_t c) override;
+    bool on_context_key() override;
     void on_focus(bool) override { invalidate(); }
     void on_modal_cancel() override;
 
@@ -152,6 +155,7 @@ private:
     ScrollBar v_;
     Rect body_;
     size_t cursor_ = npos, anchor_ = npos;
+    bool reveal_pending_ = false;
     size_t leading_ = 0;  // full-width rows above the grid
     // The rows the cursor and the anchor were on, by identity: a watcher merge that adds a row above moves
     // them with their row rather than leaving them on the index. Noted after every gesture and paint.

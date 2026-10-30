@@ -73,6 +73,7 @@ public:
     bool on_mouse_move(const MouseEvent& e) override;
     bool on_mouse_up(const MouseEvent& e) override;
     bool on_wheel(Point p, int delta, Mods m) override;
+    bool on_context_key() override;
     bool on_key_down(const KeyEvent& e) override;
     void on_focus(bool) override { invalidate(); }
 
@@ -88,7 +89,8 @@ private:
     void rebuild();
     void layout_bar();
     Rect chevron_rect(size_t row) const;
-    void select_row(size_t row);
+    // `scroll` false is a click: the row stays where it is, and a click on the selected row says nothing.
+    void select_row(size_t row, bool scroll = true);
 
     TreeProvider* provider_ = nullptr;
     std::vector<Entry> rows_;

@@ -118,6 +118,18 @@ namespace {
 constexpr float kBtn = 32.0f, kSep = 9.0f, kPadX = 4.0f, kOverflowW = 28.0f, kIcon = 16.0f;
 }
 
+// Whether a refresh finds a row exactly as it was, children and all.
+static bool same_row(const BarRow& a, const BarRow& b) {
+    if (a.kind != b.kind || a.id != b.id || a.icon != b.icon || a.caption != b.caption || a.name != b.name || a.gesture != b.gesture ||
+        a.reason != b.reason || a.checked != b.checked || a.enabled != b.enabled || a.show_text != b.show_text || a.hidden != b.hidden ||
+        a.children.size() != b.children.size())
+        return false;
+    for (size_t i = 0; i < a.children.size(); ++i) {
+        if (!same_row(a.children[i], b.children[i])) return false;
+    }
+    return true;
+}
+
 CommandToolbar::CommandToolbar(std::string which) : which_(std::move(which)) {
     height = kHeight;
     flags.focusable = false;  // a button that took the focus would run its command against a list that just lost it
@@ -132,6 +144,12 @@ float CommandToolbar::item_width(const BarRow& r) const {
     }
     if (r.kind == "separator") return kSep;
     if (r.kind == "list" || r.kind == "placeholder") return 40.0f;
+    if (r.kind == "menu") {
+        // A submenu has no picture, so it is its caption and the chevron that says it drops down.
+        // Spec: CommandBarToolbar.UpdateButton.
+        const float t = std::ceil(res().text.measure(plain_caption(r.caption), gfx::FontSpec{}).width);
+        return 8.0f + t + 5.0f + 10.0f + 8.0f;
+    }
     if (r.show_text) {
         const float t = std::ceil(res().text.measure(plain_caption(r.caption), gfx::FontSpec{}).width);
         return 8.0f + (icon_for(r.icon) ? kIcon + 6.0f : 0.0f) + t + 8.0f;
@@ -147,15 +165,21 @@ void CommandToolbar::update(const json::Value& model) {
     }
     show_text_ = model["showText"].boolean();
     if (sig == signature_ && rows.size() == items_.size()) {
-        bool changed = false;
+        // The whole row is taken, children included, so a dropdown opened from it is as fresh as the button.
+        bool changed = false, refit = false;
         for (size_t i = 0; i < rows.size(); ++i) {
             BarRow fresh = read_bar_row(rows[i]);
             BarRow& old = items_[i].row;
-            if (old.enabled != fresh.enabled || old.checked != fresh.checked || old.reason != fresh.reason ||
-                old.gesture != fresh.gesture || old.caption != fresh.caption) {
+            if (!same_row(old, fresh)) {
+                // A caption shown beside the icon changes the button's width. Spec: CommandBarToolbar.Show.
+                if ((fresh.show_text || fresh.kind == "menu") && fresh.caption != old.caption) refit = true;
                 old = std::move(fresh);
                 changed = true;
             }
+        }
+        if (refit) {
+            laid_width_ = -1;
+            request_layout();
         }
         if (changed) invalidate();
         return;
@@ -266,6 +290,9 @@ void CommandToolbar::paint(PaintContext& pc) {
         }
         if (r.kind == "list" || r.kind == "placeholder") {
             pc.text(L"▾", Rect{x - 2, rc.t, rc.r, rc.b}, font, fg);
+        } else if (r.kind == "menu") {
+            pc.text(plain_caption(r.caption), Rect{x, rc.t, rc.r - 4, rc.b}, font, fg);
+            pc.text(L"▾", Rect{rc.r - 8 - 10, rc.t, rc.r - 4, rc.b}, font, fg);
         } else if (r.show_text || !icon) {
             pc.text(plain_caption(r.caption), Rect{x, rc.t, rc.r - 4, rc.b}, font, fg);
         }
@@ -300,8 +327,12 @@ bool CommandToolbar::on_mouse_up(const MouseEvent& e) {
     invalidate();
     if (down == -1 || index_at(e.pt) != down) return false;
     if (down == kOverflow) {
+        // Not starting on a rule. Spec: MainWindow.CommandBars (SkipWhile Separator).
         std::vector<BarRow> rest;
-        for (size_t i = visible_; i < items_.size(); ++i) rest.push_back(items_[i].row);
+        for (size_t i = visible_; i < items_.size(); ++i) {
+            if (rest.empty() && items_[i].row.kind == "separator") continue;
+            rest.push_back(items_[i].row);
+        }
         if (on_overflow) on_overflow(rest, overflow_rect());
         return true;
     }
@@ -317,15 +348,22 @@ bool CommandToolbar::on_mouse_up(const MouseEvent& e) {
 
 bool CommandToolbar::on_mouse_move(const MouseEvent& e) {
     const int at = index_at(e.pt);
+    const bool on_chevron = at >= 0 && is_split(items_[static_cast<size_t>(at)].row) && chevron_rect(static_cast<size_t>(at)).contains(e.pt);
     if (at >= 0 && at == hot_ && is_split(items_[static_cast<size_t>(at)].row)) invalidate(item_rect(static_cast<size_t>(at)));
-    if (at != hot_) {
+    if (at != hot_ || on_chevron != hot_chevron_) {
         hot_ = at;
-        if (at >= 0) {
+        hot_chevron_ = on_chevron;
+        if (at == kOverflow) {
+            tooltip = L"More";
+        } else if (at >= 0) {
+            // What it is and its shortcut, the live caption ("Undo move 3 items"); or, greyed, why not.
+            // Spec: CommandBarToolbar.UpdateButton / Update (the chevron is "{Name} history").
             const BarRow& r = items_[static_cast<size_t>(at)].row;
-            std::wstring tip = r.name.empty() ? plain_caption(r.caption) : r.name;
-            if (!r.gesture.empty()) tip += L" (" + r.gesture + L")";
-            if (!r.enabled && !r.reason.empty()) tip += L"\n" + r.reason;
-            tooltip = tip;
+            const std::wstring caption = plain_caption(r.caption).empty() ? r.name : plain_caption(r.caption);
+            if (on_chevron) tooltip = (r.name.empty() ? caption : r.name) + L" history";
+            else if (!r.enabled && !r.reason.empty()) tooltip = (r.name.empty() ? caption : r.name) + L" \u2014 " + r.reason;
+            else if (!r.gesture.empty()) tooltip = caption + L" (" + r.gesture + L")";
+            else tooltip = caption;
         } else {
             tooltip.clear();
         }
@@ -336,6 +374,7 @@ bool CommandToolbar::on_mouse_move(const MouseEvent& e) {
 
 void CommandToolbar::on_mouse_leave() {
     hot_ = -1;
+    hot_chevron_ = false;
     pressed_ = -1;
     tooltip.clear();
     invalidate();

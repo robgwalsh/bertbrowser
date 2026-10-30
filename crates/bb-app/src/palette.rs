@@ -1056,7 +1056,7 @@ impl Inner {
     }
 }
 
-fn is_hidden_dir(path: &str) -> bool {
+pub(crate) fn is_hidden_dir(path: &str) -> bool {
     use windows_sys::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, GetFileAttributesW};
     let wide: Vec<u16> = path.encode_utf16().chain([0]).collect();
     let attrs = unsafe { GetFileAttributesW(wide.as_ptr()) };

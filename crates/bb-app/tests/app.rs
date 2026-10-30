@@ -776,7 +776,9 @@ fn a_folder_size_comes_from_the_cache_and_only_from_the_cache() {
 #[test]
 fn entering_a_file_reaches_the_refusing_launcher_and_says_so() {
     let f = Fixture::new();
+    // An archive's bytes are read off the calling thread before it is entered or handed on.
     f.app.open_item(f.tab, f.index_of("archive.zip")).unwrap();
+    f.settle();
     assert_eq!(vec![(f.path("archive.zip"), false)], f.probes.launches());
     assert!(f.status().contains("was not launched"), "{}", f.status());
     // A folder opens in place and launches nothing.

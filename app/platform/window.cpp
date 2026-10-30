@@ -267,6 +267,14 @@ ui::Mods Window::mouse_mods(WPARAM wp) const {
     return {(wp & MK_SHIFT) != 0, (wp & MK_CONTROL) != 0, false};
 }
 
+// Shift+F10 is the Apps key's twin. Windows turns its release into WM_CONTEXTMENU, but only when the Shift is
+// really down; the press asks as well so a posted key (the harness) gets the menu too. A bare F10 is the menu bar's.
+bool Window::shift_f10(WPARAM wp, LPARAM lp) {
+    if (wp != VK_F10 || (lp & (1 << 30))) return false;  // a repeat of a held key does not ask again
+    const ui::Mods m = root_.mods();
+    return m.shift && !m.ctrl && !m.alt && root_.context_key();
+}
+
 bool Window::mouse_button(UINT msg, WPARAM wp, LPARAM lp) {
     const ui::Point p = to_dip(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
     const ui::Mods m = mouse_mods(wp);
@@ -422,7 +430,10 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             }
             break;
         case WM_SIZE:
-            if (wp != SIZE_MINIMIZED) on_size();
+            if (wp != SIZE_MINIMIZED) {
+                root_.window_maximized = wp == SIZE_MAXIMIZED;
+                on_size();
+            }
             return 0;
         case WM_SETTINGCHANGE:
         case WM_SYSCOLORCHANGE:
@@ -491,7 +502,7 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_KEYDOWN: {
-            const bool handled = root_.key_down(static_cast<unsigned>(wp));
+            const bool handled = root_.key_down(static_cast<unsigned>(wp)) || shift_f10(wp, lp);
             position_ime();
             if (handled) return 0;
             break;
@@ -499,12 +510,24 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_SYSKEYDOWN: {
             const bool handled = root_.key_down(static_cast<unsigned>(wp));
             if (handled && wp != VK_MENU && wp != VK_F10) return 0;
+            if (!handled && shift_f10(wp, lp)) return 0;
             break;
         }
         case WM_KEYUP:
         case WM_SYSKEYUP:
             root_.key_up(static_cast<unsigned>(wp));
+            // The Apps key's release opens the menu here rather than through DefWindowProc's WM_CONTEXTMENU, which
+            // a posted key (the harness) never gets; stopping it here means the menu is asked for once.
+            if (msg == WM_KEYUP && wp == VK_APPS) {
+                root_.context_key();
+                return 0;
+            }
             if (msg == WM_KEYUP) return 0;
+            break;
+        case WM_CONTEXTMENU:
+            // From the keyboard (the Apps key, Shift+F10) the position is -1: there is no pointer to open the
+            // menu at, so the widget with the keyboard opens it where it is. A mouse one never gets here.
+            if (GET_X_LPARAM(lp) == -1 && GET_Y_LPARAM(lp) == -1 && root_.context_key()) return 0;
             break;
         case WM_CHAR:
             root_.char_input(static_cast<wchar_t>(wp));
@@ -515,6 +538,10 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             break;
         case WM_ACTIVATE:
             if (LOWORD(wp) == WA_INACTIVE) root_.cancel_modal();
+            if (!options_.parked && root_.window_active != (LOWORD(wp) != WA_INACTIVE)) {
+                root_.window_active = LOWORD(wp) != WA_INACTIVE;
+                root_.invalidate_all();
+            }
             break;
         case WM_SETFOCUS:
         case WM_KILLFOCUS:

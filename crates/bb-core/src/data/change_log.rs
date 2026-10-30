@@ -35,7 +35,7 @@ impl ChangeLogRepository {
         }
         let window = duration_ticks(ChangeLogRules::COALESCE_WINDOW);
         let mut conn = self.db.open()?;
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         {
             let mut fold = tx.prepare(
                 "UPDATE fs_change SET count = count + 1, last_utc = ?1
@@ -75,7 +75,7 @@ impl ChangeLogRepository {
     /// Drops rows older than `retention`, then anything past the cap, newest kept. Idempotent.
     pub fn prune(&self, now_utc: FileTime, retention: Duration, max_rows: i64) -> Result<()> {
         let mut conn = self.db.open()?;
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute(
             "DELETE FROM fs_change WHERE last_utc < ?1;",
             params![(now_utc - retention).0],

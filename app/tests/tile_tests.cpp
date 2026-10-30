@@ -392,11 +392,11 @@ TEST(tile_view_keyboard_moves_by_tile_and_by_row) {
     const size_t selected = t.rows.selected_count();
     t.rig.key(VK_RIGHT, false, true);
     CHECK_EQ(t.rows.selected_count(), selected);
-    // Ctrl+A, Escape, Enter.
+    // Ctrl+A, Escape (which leaves the selection alone, as the details list does), Enter.
     t.rig.key('A', false, true);
     CHECK_EQ(t.rows.selected_count(), 100);
     t.rig.key(VK_ESCAPE);
-    CHECK_EQ(t.rows.selected_count(), 0);
+    CHECK_EQ(t.rows.selected_count(), 100);
     size_t activated = TileView::npos;
     t.view->on_activate = [&](size_t row) { activated = row; };
     t.rig.key(VK_RETURN);

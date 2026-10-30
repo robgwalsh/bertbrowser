@@ -1,0 +1,56 @@
+# Where the keyboard goes: back to the list when the address box is put away, to whichever view is
+# showing when the view mode changes, and the context-menu key (Apps, Shift+F10) opening the menu a
+# right-click would.
+
+tree .
+refresh
+focus FileListView
+assert-focus FileListView
+
+# The address box takes the keys while it is up, and gives them back to the list when Esc puts it away.
+window-key Ctrl+L
+assert-focus PathBox
+window-key Esc
+assert-focus FileListView
+
+# Thumbnails on: the tiles take the focus the hidden list had, and give it back.
+thumbnails 0.5
+assert-focus FileTileView
+thumbnails 0
+assert-focus FileListView
+
+# The context-menu key opens the selection's menu, as a right-click on it would.
+select notes.txt
+window-key Shift+F10
+assert-menu-open
+shot 01-context-key
+window-key Esc
+assert-menu-closed
+window-key Apps
+assert-menu-open
+window-key Esc
+assert-menu-closed
+
+# The tree's menu from the keyboard.
+focus FolderTree
+window-key Shift+F10
+assert-menu-open
+shot 02-tree-context-key
+window-key Esc
+
+# Ctrl+arrow moves the cursor and leaves the selection; Space then selects the row it is on.
+focus FileListView
+select notes.txt
+window-key Ctrl+Down
+window-key Space
+assert-selected 1
+
+# The breadcrumb is a Tab stop, as the original's crumbs were buttons: Left picks the crumb above the
+# folder you are in, Enter goes there. A click on a crumb leaves the keyboard with the list.
+go Documents
+focus Breadcrumb
+assert-focus Breadcrumb
+window-key Left
+shot 03-breadcrumb-key
+window-key Enter
+assert-row Documents

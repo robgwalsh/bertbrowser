@@ -35,8 +35,21 @@ pub struct SessionPasswords(
 );
 
 impl SessionPasswords {
+    /// The archive as it is now: its path, length and write time, so a different file put at the same
+    /// path is asked about afresh. Spec: ArchivePasswordStore (the key).
     fn key(archive_file: &str) -> String {
-        PathKey::canonicalize(archive_file).unwrap_or_else(|_| archive_file.to_string())
+        let path = PathKey::canonicalize(archive_file).unwrap_or_else(|_| archive_file.to_string());
+        let stamp = std::fs::metadata(archive_file)
+            .map(|m| {
+                let written = m
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map_or(0, |d| d.as_nanos());
+                format!("{}|{written}", m.len())
+            })
+            .unwrap_or_default();
+        format!("{path}|{stamp}")
     }
 
     pub fn remember(&self, archive_file: &str, password: &str) {
@@ -60,8 +73,7 @@ impl SessionPasswords {
 
 impl ArchivePasswords for SessionPasswords {
     fn for_archive(&self, archive_file: &str) -> Option<String> {
-        let key = PathKey::canonicalize(archive_file).unwrap_or_else(|_| archive_file.to_string());
-        lock(&self.0).get(&key).cloned()
+        lock(&self.0).get(&Self::key(archive_file)).cloned()
     }
 }
 

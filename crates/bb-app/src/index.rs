@@ -84,6 +84,7 @@ impl IndexListener for Listener {
     fn index_refreshed(&self, _root_key: &str) {
         if let Some(inner) = self.0.upgrade() {
             inner.hub.model(Model::Index);
+            inner.mft_index_refreshed();
         }
     }
 }
@@ -104,6 +105,13 @@ impl Inner {
             .seams
             .index
             .subscribe(Arc::new(Listener(Arc::downgrade(self))));
+        // A folder's background crawl finished: a folder search over it runs again on the fresh index.
+        let weak = Arc::downgrade(self);
+        self.search.on_index_refreshed(Box::new(move |root_key| {
+            if let Some(inner) = weak.upgrade() {
+                inner.folder_index_refreshed(root_key);
+            }
+        }));
         if self.seams.index.presence() == IndexerPresence::NotApplicable {
             return;
         }

@@ -164,7 +164,13 @@ private:
 
 class BreadcrumbBar : public ui::Widget {
 public:
-    BreadcrumbBar() { flags.focusable = false; }
+    // A Tab stop, as the original's crumbs were buttons: Left/Right/Home/End pick a crumb, Enter or Space goes
+    // there. A click goes without taking the keyboard from the list. Spec: DirectoryTabView.xaml (crumb Buttons).
+    BreadcrumbBar() {
+        flags.focusable = true;
+        flags.tab_stop = true;
+        flags.click_focus = false;
+    }
     std::function<void(const std::wstring&)> on_navigate;
     std::function<void(const std::wstring&)> on_middle;  // a crumb middle-clicked
     std::function<void()> on_edit;  // a click on the empty part: the path box takes over
@@ -179,8 +185,12 @@ public:
     // The wheel walks back through crumbs that did not fit, and forward again.
     bool on_wheel(ui::Point p, int delta, ui::Mods m) override;
     ui::Cursor cursor_at(ui::Point p) const override;
+    bool on_key_down(const ui::KeyEvent& e) override;
+    void on_focus(bool f) override;
 
 private:
+    void show_key_crumb();  // scrolls the crumbs until the keyboard's one is laid out
+    size_t key_crumb_ = 0;  // the crumb the keyboard is on, while focused
     struct Seg {
         size_t crumb;
         ui::Rect rect;

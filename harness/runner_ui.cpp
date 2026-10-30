@@ -370,6 +370,44 @@ void Runner::install_ui() {
                                  " overflowed, not [" + join(expected, " ") + "] with " + std::to_string(overflow) + ".");
         }
     };
+    // Clicks a toolbar button (by its token, as assert-toolbar names it) through the toolbar's own mouse
+    // handling; a dropdown it opens becomes the last menu, for assert-menu-item.
+    verbs_[L"toolbar-click"] = [this, toolbar_named](const std::wstring& r) {
+        auto [which, token] = split_first(require(r, "toolbar-click"));
+        views::CommandToolbar* tb = toolbar_named(which);
+        size_t at = tb->items().size();
+        for (size_t i = 0; i < tb->visible_count(); ++i) {
+            if (core::wide(views::bar_token(tb->items()[i].row)) == trim(token)) at = i;
+        }
+        if (at == tb->items().size()) throw AssertionError("Toolbar " + to_utf8(which) + " shows no " + to_utf8(token) + ".");
+        const ui::Rect rc = tb->item_rect(at);
+        ui::MouseEvent e;
+        e.pt = {rc.l + 6, (rc.t + rc.b) / 2};
+        const ui::MenuItems* before = s_.view().floating_menu();
+        tb->on_mouse_down(e);
+        tb->on_mouse_up(e);
+        s_.settle();
+        const ui::MenuItems* menu = s_.view().floating_menu();
+        if (menu && menu != before) ui_->last_menu = *menu;
+    };
+    verbs_[L"assert-menu-open"] = [this](const std::wstring&) {
+        if (!s_.view().menu_open()) throw AssertionError("expected a menu to be open, and none is.");
+    };
+    verbs_[L"assert-menu-closed"] = [this](const std::wstring&) {
+        if (s_.view().menu_open()) throw AssertionError("expected no menu to be open, and one is.");
+    };
+    // The widget with the keyboard focus is the one named (or, with "none", nothing has it).
+    verbs_[L"assert-focus"] = [this](const std::wstring& r) {
+        const std::wstring name = require(r, "assert-focus");
+        const ui::Widget* f = s_.view().window().root().focused();
+        if (lower(name) == L"none") {
+            if (f) throw AssertionError("expected nothing focused, got '" + f->name + "'.");
+            return;
+        }
+        const ui::Widget* want = s_.view().find_named(to_utf8(name));
+        if (!want) throw FormatError("There is no widget named '" + to_utf8(name) + "' in the window.");
+        if (f != want) throw AssertionError("expected '" + to_utf8(name) + "' to have the focus, got '" + (f ? f->name : std::string("nothing")) + "'.");
+    };
     verbs_[L"assert-toolbar-item"] = [this, toolbar_named](const std::wstring& r) {
         const auto parts = words(require(r, "assert-toolbar-item"));
         if (parts.size() != 3) {

@@ -189,11 +189,20 @@ std::string commands_json(const std::vector<CommandFields>& all) {
     return out + "]";
 }
 
-std::vector<CommandFields> commands_of(const json::Value& page) {
+std::vector<CommandFields> commands_of_list(const json::Value& list) {
     std::vector<CommandFields> out;
-    for (size_t i = 0; i < page["commands"].size(); ++i) out.push_back(command_of(page["commands"][i]));
+    for (size_t i = 0; i < list.size(); ++i) out.push_back(command_of(list[i]));
     return out;
 }
+
+std::vector<CommandFields> commands_of(const json::Value& page) { return commands_of_list(page["commands"]); }
+
+bool is_blank(const std::wstring& t) {
+    return std::all_of(t.begin(), t.end(), [](wchar_t c) { return iswspace(c) != 0; });
+}
+
+// What the core refuses to save. Spec: SettingsViewModel.CommandProblem.
+bool incomplete(const CommandFields& c) { return is_blank(c.name) || is_blank(c.command) || (!c.files && !c.folders); }
 
 std::string array_of(const std::vector<std::string>& items) {
     std::string out = "[";
@@ -374,16 +383,20 @@ void SettingsView::page_context_menu(Widget& p) {
                 rows.push_back(row_for_built_in(core_.app(), *it->second));
             }
         }
-        std::vector<Row> kept;
+        // Your commands, then other programs' entries: each group behind a separator of its own, just above the
+        // "new entries" row. Spec: SettingsViewModel.PlaceUnplaced.
+        std::vector<Row> commands, shell;
         for (const Row& r : model->rows) {
-            if (!r.separator() && !r.more() && r.token.rfind("app:", 0) != 0) kept.push_back(r);
+            if (r.separator() || r.more() || r.token.rfind("app:", 0) == 0) continue;
+            (r.token.rfind("cmd:", 0) == 0 ? commands : shell).push_back(r);
         }
-        if (!kept.empty()) {
+        for (std::vector<Row>* group : {&commands, &shell}) {
+            if (group->empty()) continue;
             size_t at = more_index(rows);
             Row sep;
             sep.token = "-";
             rows.insert(rows.begin() + static_cast<std::ptrdiff_t>(at++), sep);
-            for (Row& r : kept) rows.insert(rows.begin() + static_cast<std::ptrdiff_t>(at++), std::move(r));
+            for (Row& r : *group) rows.insert(rows.begin() + static_cast<std::ptrdiff_t>(at++), std::move(r));
         }
         commit(std::move(rows), -1);
     });
@@ -498,12 +511,27 @@ void SettingsView::page_context_menu(Widget& p) {
 
     // -- one of your commands, edited where it is: every change is written at once (a command missing a
     // field keeps the whole list unwritten, and the strip says why). Spec: SettingsView.xaml (CommandEditor).
-    auto all = std::make_shared<std::vector<CommandFields>>(commands_of(model->page));
+    // The commands as typed while the core holds them unwritten (a missing field), else the saved ones. The hold is
+    // the core's: once it is gone (fixed, discarded, left) the saved list is the truth again.
+    if (try_model([&](BbOwnedStr* o) { return bb_settings_page_state(main.core().app(), o); })["problem"].str().empty()) pending_commands_ = json::Value();
+    auto all = std::make_shared<std::vector<CommandFields>>(pending_commands_.is_null() ? commands_of(model->page) : commands_of_list(pending_commands_));
+    if (reveal_problem_ && !pending_commands_.is_null()) {
+        reveal_problem_ = false;
+        const auto bad = std::find_if(all->begin(), all->end(), incomplete);
+        if (bad != all->end()) {
+            command_editing_ = bad->id;
+            command_editor_ = false;
+        }
+    }
     const auto editing = std::find_if(all->begin(), all->end(), [this](const CommandFields& c) { return c.id == command_editing_; });
     if (!command_editor_ && !command_editing_.empty() && editing != all->end()) {
         const size_t index = static_cast<size_t>(editing - all->begin());
-        BbApp* app = main.core().app();
-        auto write = [all, app] { bb_settings_set(app, core::s(L"customCommands"), core::s(core::wide(commands_json(*all)))); };
+        // Written at once; if the core kept it out of the settings (a missing field) the list stays here, as typed.
+        auto write = [this, all] {
+            const std::string text = commands_json(*all);
+            set_raw("customCommands", text);
+            pending_commands_ = commands_json(commands_of_list(get("customCommands"))) == text ? json::Value() : json::parse(text);
+        };
         f::gap(p, 6);
         f::text(p, L"Your command", tok::TextSecondary, 14.0f, 600);
         auto* card = p.emplace<StackPanel>(Orientation::Vertical, 8.0f);
@@ -588,13 +616,18 @@ void SettingsView::page_context_menu(Widget& p) {
         auto* command = field(L"Program", L"C:\\Tools\\diff.exe", "CommandProgram");
         auto* args = field(L"Arguments", L"{path}", "CommandArguments");
         auto* switches = f::row(*card, 16);
-        auto* files = f::check(*switches, L"Files", true, nullptr);
-        auto* dirs = f::check(*switches, L"Folders", false, nullptr);
+        auto* files = f::check(*switches, L"Show for files", true, nullptr);
+        auto* dirs = f::check(*switches, L"Show for folders", false, nullptr);
         auto* admin = f::check(*switches, L"Run as administrator", false, nullptr);
         f::note(*card, L"{path} is the item's full path, {name} its file name, {dir} the folder it is in. The command is offered in the menu once saved.");
         auto* buttons = f::row(*card);
         f::button(*buttons, L"Save", [this, name_box, command, args, files, dirs, admin, model, &main] {
-            if (name_box->text().empty() || command->text().empty()) return;
+            // Said, not ignored. Spec: SettingsViewModel.CommandProblem.
+            if (is_blank(name_box->text()) || is_blank(command->text())) {
+                refused_ = L"Every command needs a name and a program.";
+                show_problem(L"");
+                return;
+            }
             std::string cmds = "[";
             for (size_t i = 0; i < model->page["commands"].size(); ++i) {
                 const json::Value& c = model->page["commands"][i];

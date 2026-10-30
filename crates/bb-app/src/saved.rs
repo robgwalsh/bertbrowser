@@ -248,15 +248,19 @@ impl Inner {
             .find(|w| w.name.eq_ignore_ascii_case(name))
             .ok_or_else(|| AppError::Invalid(format!("no saved workspace '{name}'")))?;
         if !self.apply_layout(workspace.layout.clone())? {
-            return Err(AppError::Invalid(
-                "None of the folders in this workspace are still there.".into(),
-            ));
+            let text = format!("Nothing in \"{}\" still exists.", workspace.name);
+            self.set_active_status(text.clone());
+            return Err(AppError::Invalid(text));
         }
         let _ = self
             .workspaces_repo()
             .mark_used(&workspace.name, FileTime::now());
         *lock(&self.extra.current_workspace) = Some(workspace.name.clone());
         self.saved_changed();
+        // Once the new tabs have listed, or their item counts would say over it.
+        let me = self.clone();
+        let text = format!("Switched to workspace \"{}\"", workspace.name);
+        std::thread::spawn(move || me.set_final_status(text));
         Ok(())
     }
 

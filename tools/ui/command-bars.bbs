@@ -207,6 +207,16 @@ settings bars remove Find duplicates
 assert-toolbar title edit.undo edit.redo - tools.disk-usage tools.changes tools.compare app.settings
 shot 06-editing-toolbar
 
+# A submenu on a toolbar is a button that drops its rows down. Spec: CommandBarToolbar.Build.
+settings bars add-menu
+settings bars name Panes
+settings bars open Panes
+settings bars add pane.swap
+settings bars up
+toolbar-click title menu:Panes
+assert-menu-item Swap panes
+settings bars remove Panes
+
 command-bars save Trimmed
 settings command-bars
 shot 07-saved-list

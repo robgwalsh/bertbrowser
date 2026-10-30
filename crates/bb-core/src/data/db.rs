@@ -123,7 +123,7 @@ impl Db {
         let mut conn = self.open()?;
         let current: i64 = conn.query_row("PRAGMA user_version;", [], |r| r.get(0))?;
         for (version, sql) in MIGRATIONS.iter().filter(|(v, _)| *v > current) {
-            let tx = conn.transaction()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             tx.execute_batch(sql)?;
             tx.execute_batch(&format!("PRAGMA user_version = {version};"))?;
             tx.commit()?;

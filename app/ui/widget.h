@@ -48,6 +48,7 @@ struct Flags {
     bool enabled = true;
     bool focusable = false;  // can take focus by click or code
     bool tab_stop = false;   // and by Tab
+    bool click_focus = true; // false: a press leaves the focus where it was (Tab and code still reach it)
     bool clip_children = false;
     bool hit_testable = true;
 };
@@ -164,6 +165,9 @@ public:
     virtual bool on_key_down(const KeyEvent&) { return false; }
     virtual bool on_key_up(const KeyEvent&) { return false; }
     virtual bool on_char(wchar_t) { return false; }
+    // The keyboard asked for this widget's context menu (the Apps key, Shift+F10): open it where the keyboard
+    // is, since there is no pointer to say. True when it did. Bubbles from the focused widget.
+    virtual bool on_context_key() { return false; }
     virtual void on_focus(bool) {}
     virtual void on_timer(int) {}
     // The root took the modal away from this widget (window deactivated, capture cancelled by the system).
@@ -206,6 +210,10 @@ public:
     UiRoot& operator=(const UiRoot&) = delete;
 
     gfx::Resources& resources() const { return res_; }
+    // The window's state as its chrome draws it: an inactive window's title bar dims, and a maximised one's
+    // middle caption button is Restore. Set by the window; a parked (harness) window always reads active.
+    bool window_active = true;
+    bool window_maximized = false;
 
     template <class T>
     T* set_content(std::unique_ptr<T> w) {
@@ -247,6 +255,7 @@ public:
     // Sees a key before the focused widget does (the app's one shortcut dispatcher); true = handled.
     std::function<bool(const KeyEvent&)> on_preview_key;
     bool char_input(wchar_t c);
+    bool context_key();  // WM_CONTEXTMENU from the keyboard: asks the focused widget, then its ancestors
     Mods mods() const { return mods_; }
     void set_mods(Mods m) { mods_ = m; }
     Cursor cursor() const;

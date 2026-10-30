@@ -3,6 +3,7 @@
 
 #include "gfx/icons.gen.h"
 #include "views/main_view.h"
+#include "views/ops_card.h"
 #include "views/tool_widgets.h"
 
 #include <windows.h>
@@ -71,6 +72,44 @@ public:
 
 }  // namespace
 
+// The "leave anyway?" card, over the whole page: a scrim that takes every click and one card centred on it. It
+// is in-tree, not the dialog layer's, because the page it asks about is itself a layer of the main window.
+class LeaveLayer : public Widget {
+public:
+    LeaveLayer() {
+        style.bg = tok::Scrim;
+        flags.visible = false;
+    }
+    void show_card(std::unique_ptr<Widget> card) {
+        hide_card();
+        card_ = add(std::move(card));
+        set_visible(true);
+        request_layout();
+        invalidate();
+    }
+    void hide_card() {
+        if (!card_) return;
+        remove_child(card_);
+        card_ = nullptr;
+        set_visible(false);
+        invalidate();
+    }
+    bool has_card() const { return card_ != nullptr; }
+    Size measure(Size avail) override { return avail; }
+    void arrange(Rect r) override {
+        bounds = r;
+        if (!card_) return;
+        const Size d = card_->measure_tree({card_->width >= 0 ? card_->width : r.width() - 80, r.height() - 40});
+        const float w = card_->width >= 0 ? card_->width : d.w;
+        card_->arrange(Rect::xywh(r.l + (r.width() - w) / 2, r.t + std::max(20.0f, (r.height() - d.h) / 3), w, d.h));
+    }
+    bool on_mouse_down(const MouseEvent&) override { return true; }
+    bool on_wheel(Point, int, Mods) override { return true; }
+
+private:
+    Widget* card_ = nullptr;
+};
+
 SettingsView::SettingsView(MainView& main, core::Core& core) : main_(main), core_(core) {
     style.bg = tok::Scrim;
     flags.visible = false;
@@ -137,6 +176,10 @@ void SettingsView::build_chrome() {
     body_ = scroll_->emplace<StackPanel>(Orientation::Vertical, 10.0f);
     body_->pad = 24;
     body_->name = "SettingsBody";
+
+    auto leave = std::make_unique<LeaveLayer>();
+    leave_ = leave.get();
+    add(std::move(leave));
 }
 
 void SettingsView::arrange(Rect r) {
@@ -146,6 +189,8 @@ void SettingsView::arrange(Rect r) {
     const float x = r.l + (r.width() - w) / 2, y = r.t + (r.height() - h) / 2;
     card_->measure_tree({w, h});
     card_->arrange(Rect::xywh(x, y, w, h));
+    leave_->measure_tree({r.width(), r.height()});
+    leave_->arrange(r);
 }
 
 void SettingsView::paint(PaintContext& pc) {
@@ -153,22 +198,82 @@ void SettingsView::paint(PaintContext& pc) {
 }
 
 bool SettingsView::on_mouse_down(const MouseEvent& e) {
-    if (!card_->bounds.contains(e.pt)) {
-        try {
-            core::check(bb_settings_page_close(core_.app()), "close settings");
-        } catch (const core::CoreError&) {
-        }
-    }
+    // A click on the dimmed folders means "back to them", as Esc does. Spec: MainWindow.SettingsScrim_MouseDown.
+    if (!card_->bounds.contains(e.pt)) go_back();
     return true;
 }
 
-void SettingsView::go_back() {
+// Back to the folders, unless something on the page could not be saved and the person would rather stay and
+// finish it: the core refuses and has already brought the page that holds it to the front. A scripted run
+// reports the refusal in the strip instead of putting a card up. Spec: MainWindow.CloseSettings.
+void SettingsView::go_back(std::function<void()> then) {
+    if (leave_->has_card()) return;
     try {
         core::check(bb_settings_page_close(core_.app()), "close settings");
+        if (then) then();
     } catch (const core::CoreError& e) {
-        refused_ = core::wide(e.what());
+        const std::wstring why = core::message_of(e);
+        // The core has brought the offending page up; if it is this one, show the entry on it now.
+        reveal_problem_ = true;
+        signature_.clear();
+        rebuild_if_changed(false);
+        if (!main_.shows_dialogs()) {
+            refused_ = why;
+            show_problem(L"");
+            return;
+        }
+        ask_leave(why, std::move(then));
+    }
+}
+
+void SettingsView::ask_leave(const std::wstring& why, std::function<void()> then) {
+    ops::Card c = ops::make_card(L"Settings", 460);
+    auto* head = f::row(*c.body, 12);
+    auto* glyph = head->emplace<Icon>(icons::find("Warning"), 22.0f);
+    glyph->style.fg = tok::WarningForeground;
+    auto* words = f::column(*head, 8);
+    words->flex = 1;
+    f::text(*words, why, tok::TextPrimary, 13.5f)->wrap = true;
+    f::text(*words, L"Leave anyway? That entry and the rest of its list won\u2019t be saved.", tok::TextPrimary, 13.5f)->wrap = true;
+    // Cancel is the default, so Enter stays and finishes the entry. The handlers are deferred: they free the card
+    // the button is on.
+    Button* cancel = ops::add_button(c, L"Cancel", [this] { main_.defer([this] { leave_->hide_card(); }); });
+    cancel->name = "SettingsLeaveCancel";
+    cancel->is_default = true;
+    ops::add_button(c, L"Leave", [this, then = std::move(then)] {
+        main_.defer([this, then] {
+            leave_->hide_card();
+            leave_unsaved(then);
+        });
+    }, true)->name = "SettingsLeaveConfirm";
+    leave_->show_card(std::move(c.root));
+    if (root()) root()->set_focus(cancel);
+}
+
+// The lists the core is holding are dropped by writing back the ones it still has in force (a valid list
+// clears its hold), and the page's own copies of them are forgotten so they are read again.
+void SettingsView::leave_unsaved(const std::function<void()>& then) {
+    for (const char* key : {"newFileTypes", "customCommands"}) {
+        BbOwnedStr o{};
+        if (bb_settings_get(core_.app(), core::s(core::wide(key)), &o) == BB_OK) set_raw(key, core::utf8(core::take(o)));
+    }
+    new_types_loaded_ = false;
+    pending_commands_ = json::Value();
+    reveal_problem_ = false;
+    command_editor_ = false;
+    command_editing_.clear();
+    refused_.clear();
+    try {
+        core::check(bb_settings_page_close(core_.app()), "close settings");
+        if (then) then();
+    } catch (const core::CoreError& e) {
+        refused_ = core::message_of(e);
         show_problem(L"");
     }
+}
+
+void SettingsView::customise_colours() {
+    main_.defer([this] { go_back([this] { main_.open_dialog(L"theme-editor"); }); });
 }
 
 // Esc and the Keyboard page's recorder, taken before the focused control sees the key (the main view asks
@@ -177,6 +282,12 @@ void SettingsView::go_back() {
 // Spec: SettingsView.xaml.cs (View_KeyDown, OnPreviewKeyDown).
 bool SettingsView::preview_key(const KeyEvent& e) {
     if (!open_) return false;
+    // While the "leave anyway?" card is up, Esc is its Cancel and everything else is the card's.
+    if (leave_->has_card()) {
+        if (e.vk != VK_ESCAPE || e.mods.ctrl || e.mods.alt || e.mods.shift) return false;
+        main_.defer([this] { leave_->hide_card(); });
+        return true;
+    }
     const bool modifier = e.vk == VK_SHIFT || e.vk == VK_CONTROL || e.vk == VK_MENU || e.vk == VK_LWIN || e.vk == VK_RWIN;
     const bool bare = !e.mods.ctrl && !e.mods.alt && !e.mods.shift;
     if (nudge_ && e.mods.alt && !e.mods.ctrl && !e.mods.shift && (e.vk == VK_UP || e.vk == VK_DOWN) && root() && root()->focused() == nudge_for_) {
@@ -322,6 +433,7 @@ void SettingsView::sync() {
     open_ = now_open;
     flags.visible = now_open;
     if (!now_open) {
+        leave_->hide_card();
         if (was) {
             request_layout();
             invalidate();
@@ -336,7 +448,9 @@ void SettingsView::sync() {
     }
     if (page != page_) {
         page_ = page;
-        new_types_loaded_ = false;
+        // The New items page keeps its half-typed list across pages while the core is holding it unwritten, as the
+        // original's view model did; otherwise it reads the saved list again.
+        if (!was || st["problem"].str().empty()) new_types_loaded_ = false;
         refused_.clear();
         for (size_t i = 0; i < nav_->children().size(); ++i) {
             if (auto* list = dynamic_cast<f::ItemList*>(nav_->children()[i].get())) {
@@ -489,7 +603,7 @@ void SettingsView::page_general(Widget& p) {
     auto* browse = f::button(*row, L"Browse\u2026", [this, e, trimmed] {
         if (!main_.shows_dialogs()) return;
         PickPath pick;
-        pick.title = L"Open this folder when there is no session";
+        pick.title = L"Choose a startup folder";
         pick.folder = e->text();
         if (const auto chosen = pick_folder(main_.window().hwnd(), pick)) {
             e->set_text(*chosen);
@@ -596,7 +710,7 @@ void SettingsView::page_appearance(Widget& p) {
             if (i >= 0 && bb_theme_do(core_.app(), core::s(L"slot"), core::s(L"light " + core::wide(light_ids[static_cast<size_t>(i)])), &o) == BB_OK) bb_str_free(o);
         });
         c1->name = "LightThemeCombo";
-        f::button(*r1, L"Customise colours…", [this] { main_.open_dialog(L"theme-editor"); })->tooltip =
+        f::button(*r1, L"Customise colours…", [this] { customise_colours(); })->tooltip =
             L"Edit any colour in the theme currently in use and save it as your own";
         auto* r2 = f::row(p);
         f::row_label(*r2, L"Dark theme", 160);
@@ -605,7 +719,7 @@ void SettingsView::page_appearance(Widget& p) {
             if (i >= 0 && bb_theme_do(core_.app(), core::s(L"slot"), core::s(L"dark " + core::wide(dark_ids[static_cast<size_t>(i)])), &o) == BB_OK) bb_str_free(o);
         });
         c2->name = "DarkThemeCombo";
-        f::button(*r2, L"Customise colours…", [this] { main_.open_dialog(L"theme-editor"); })->tooltip =
+        f::button(*r2, L"Customise colours…", [this] { customise_colours(); })->tooltip =
             L"Edit any colour in the theme currently in use and save it as your own";
     } else {
         auto* r = f::row(p);
@@ -615,7 +729,7 @@ void SettingsView::page_appearance(Widget& p) {
             if (i >= 0 && bb_theme_do(core_.app(), core::s(L"select"), core::s(core::wide(ids[static_cast<size_t>(i)])), &o) == BB_OK) bb_str_free(o);
         });
         c->name = "ThemeCombo";
-        f::button(*r, L"Customise colours…", [this] { main_.open_dialog(L"theme-editor"); })->tooltip =
+        f::button(*r, L"Customise colours…", [this] { customise_colours(); })->tooltip =
             L"Edit any colour in this theme and save it as your own";
     }
     (void)theme_do;
@@ -794,7 +908,7 @@ void SettingsView::page_new_items(Widget& p) {
     const int sel = new_type_selected_;
     const bool has = sel >= 0 && sel < static_cast<int>(new_types_.size());
     f::button(*buttons, L"Add", [this] {
-        new_types_.push_back({L"New file type", L".new", L"", true});
+        new_types_.push_back({L"New type", L".txt", L"", true});  // Spec: AddNewFileType
         new_type_selected_ = static_cast<int>(new_types_.size()) - 1;
         write_new_types();
         main_.defer([this] { build_page(); });
@@ -1308,7 +1422,10 @@ void SettingsView::page_bars(Widget& p) {
     f::button(*rb, L"Remove", [bars_do] { bars_do(L"remove"); })->tooltip = L"Take this off (Del)";
     f::text(*mid, L"Alt+\u2191/\u2193 moves \u00b7 Del removes \u00b7 Enter opens a menu", tok::TextMuted, 11.0f);
     auto* rb2 = f::row(*mid, 6);
-    f::button(*rb2, L"Add separator", [bars_do] { bars_do(L"add-separator"); });
+    // The menu bar's own level holds menus only, so there is nothing to separate. Spec: CanAddBarSeparator.
+    auto* add_sep = f::button(*rb2, L"Add separator", [bars_do] { bars_do(L"add-separator"); });
+    add_sep->name = "BarAddSeparator";
+    add_sep->set_enabled(m["canAdd"].boolean());
     // At the top of the menu bar only menus can be added: a command needs a menu to be in.
     auto* addm = f::button(*rb2, m["addSubmenuLabel"].str() == "Submenu" ? L"Add submenu" : L"Add menu", [bars_do] { bars_do(L"add-menu"); });
     addm->name = "BarAddMenu";

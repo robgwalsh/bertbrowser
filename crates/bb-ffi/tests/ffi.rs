@@ -745,6 +745,8 @@ fn enter_on_a_file_reaches_the_refusing_launcher() {
     let rig = Rig::new();
     unsafe {
         assert_eq!(BbStatus::BB_OK, bb_tab_open_item(rig.app, rig.tab, 1));
+        // An archive is read off this thread before it is entered or handed on.
+        rig.settle();
         let mut t = BbOwnedStr {
             ptr: ptr::null_mut(),
             len: 0,

@@ -1781,9 +1781,9 @@ fn a_list_with_a_missing_field_stays_unwritten_until_leaving_says_so() {
         f.app.settings_get("customCommands").unwrap() == "[]",
         "kept out of the live settings"
     );
-    assert!(f.app.state_json().contains("needs a program"));
+    assert!(f.app.state_json().contains("needs a name and a program"));
     let why = f.app.settings_close().unwrap_err();
-    assert!(why.contains("needs a program"), "{why}");
+    assert!(why.contains("needs a name and a program"), "{why}");
     assert_eq!(
         true,
         json(&f.app.settings_page_json())["open"],

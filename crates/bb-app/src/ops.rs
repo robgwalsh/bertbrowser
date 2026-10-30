@@ -330,6 +330,17 @@ impl Inner {
         destination: String,
         verb: TransferVerb,
     ) -> AppResult<OpId> {
+        self.op_transfer_as(sources, destination, verb, false)
+    }
+
+    /// A drop, or a paste (`paste`), which differs only in what it says when there is nothing to do.
+    pub(crate) fn op_transfer_as(
+        self: &Arc<Self>,
+        sources: Vec<String>,
+        destination: String,
+        verb: TransferVerb,
+        paste: bool,
+    ) -> AppResult<OpId> {
         if sources.is_empty() {
             return Err(AppError::Invalid("nothing to transfer".into()));
         }
@@ -352,7 +363,7 @@ impl Inner {
             meta,
             false,
             Box::new(move |inner, _op, cancel| {
-                inner.run_transfer(&sources, &destination, verb, cancel)
+                inner.run_transfer(&sources, &destination, verb, paste, cancel)
             }),
         )
     }
@@ -362,6 +373,7 @@ impl Inner {
         sources: &[String],
         destination: &str,
         verb: TransferVerb,
+        paste: bool,
         cancel: &CancelToken,
     ) -> (bool, String) {
         let planner = TransferPlanner::default();
@@ -370,11 +382,16 @@ impl Inner {
         if !plan.has_work() {
             // The first thing the planner refused, verbatim, else the no-op it is. Said in the tab
             // that shows the destination: the pane dropped into, not whichever has the focus.
-            // Spec: DropPipeline.PerformAsync.
-            let text = plan.problems().first().map_or_else(
-                || "Nothing to move \u{2014} those items are already there.".to_string(),
-                |r| r.message.clone(),
-            );
+            // Spec: DropPipeline.PerformAsync, ShellViewModel.PasteAsync.
+            let problem = plan.problems().first().map(|r| r.message.clone());
+            let text = match (paste, problem) {
+                (true, Some(m)) => format!("Nothing pasted \u{2014} {m}"),
+                (true, None) => "Nothing to paste here".to_string(),
+                (false, Some(m)) => m,
+                (false, None) => {
+                    "Nothing to move \u{2014} those items are already there.".to_string()
+                }
+            };
             self.set_status_where(destination, text.clone());
             return (false, text);
         }
