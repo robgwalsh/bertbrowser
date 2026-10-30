@@ -22,7 +22,7 @@ $bench = "target\release\bb-bench.exe"
 & $bench report                                 # this file
 ```
 
-How to read the native numbers next to the .NET ones in `csharp/docs/performance.md`:
+How to read the native numbers next to the .NET ones in `docs/performance.md` of the `bertbrowser-csharp-archive` repository:
 
 - **Allocated/op** is exact: a counting global allocator sums the bytes requested by one operation, so it
   does not vary between runs. **Gen0/kop** has no collector behind it here and reads *allocator calls per

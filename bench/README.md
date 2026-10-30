@@ -2,7 +2,7 @@
 
 How BertBrowser's speed is measured, kept, and defended. The tool is `bb-bench`
 (`crates/bb-bench`); the evidence is `docs/performance.md`, generated from the baselines in
-this folder. The C# app's numbers, for comparison, are in `csharp/` (its baselines and
+this folder. The C# app's numbers, for comparison, are in the `bertbrowser-csharp-archive` repository (its baselines and
 `docs/performance.md`).
 
 ## Layout

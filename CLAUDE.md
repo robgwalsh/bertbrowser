@@ -7,7 +7,7 @@ Guidance for Claude Code working in this repo.
 bertbrowser is a Windows-only file browser with global MFT-backed search and cached recursive
 directory sizes, backed by a local SQLite database. The app is **native**: a Rust core (`crates`)
 behind a C ABI, and a C++20 Win32 + Direct2D/DirectWrite UI (`app`), everything custom-drawn.
-The earlier C#/WPF app lives on, frozen, in `csharp/` as the reference for behaviour (see below).
+The earlier C#/WPF app lives on, frozen, in the private `bertbrowser-csharp-archive` repo as the reference for behaviour (see below).
 
 ## Commands
 
@@ -33,7 +33,7 @@ pwsh tools\parity\tests.ps1 [-All] [-File X.cs]   # C# test vs Rust test, by fil
 `build.ps1` prints a harmless "vswhere.exe not recognized" line. `LNK1104` on `app\BertBrowser.exe`
 means a running instance holds it - kill it (`Get-Process BertBrowser | Stop-Process -Force`) and
 rebuild, no need to ask. `BERTBROWSER_DATA_DIR` overrides the data directory (`~\.bertbrowser`).
-CI (`unstable.yml`, `release.yml`) builds only the app and never touches `csharp/`.
+CI (`unstable.yml`, `release.yml`) builds only the app; the C# archive is a separate repo.
 
 ## Never launch the GUI
 
@@ -64,14 +64,15 @@ against a scratch data directory. Exception: the user explicitly asking you to l
 - `harness` - `bb-harness.exe`: links `bbapp` + `bbcore_harness`, runs `tools/ui/*.bbs`.
 - `tools/{icons,parity}`, `bench/`, `docs/`, `include/bbcore.h` (generated).
 - `tools/ui/*.bbs` - the harness scripts, shared by the native harness and the C# one.
-- `csharp/` - frozen C# reference (below).
+- The frozen C# reference is its own repo, `bertbrowser-csharp-archive` (below).
 
-## C# reference (csharp/)
+## C# reference (bertbrowser-csharp-archive)
 
-The previous C#/WPF app (`csharp/src`, `tests`, `tools/BertBrowser.Harness`, `tools/BertBrowser.Bench`,
-`bertbrowser.sln`, C# baselines) is **kept as the spec, not shipped, and not built by CI**. When porting
+The previous C#/WPF app (`src`, `tests`, `tools/BertBrowser.Harness`, `tools/BertBrowser.Bench`,
+`bertbrowser.sln`, C# baselines) lives in the private repo `robgwalsh/bertbrowser-csharp-archive`, cloned beside this
+one (`../bertbrowser-csharp-archive`, or `$env:BERTBROWSER_CSHARP_ARCHIVE`). It is **the spec, not shipped, and not built by CI**. When porting
 or checking behaviour, the C# file is the specification: `Spec:` doc comments in the Rust and C++
-point at it - read `Core/...` as `csharp/src/BertBrowser.Core/...`. Never edit it except to keep it
+point at it - read `Core/...` as `src/BertBrowser.Core/...` in the archive. Never edit it except to keep it
 building. `tools/parity/tests.ps1` diffs the C# test suite against the Rust one (deliberate
 drops in `tools/parity/dropped.txt`, with a reason).
 

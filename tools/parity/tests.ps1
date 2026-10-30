@@ -8,14 +8,19 @@
 #   .\tests.ps1            files that have a Rust counterpart; exit 1 if any test is unaccounted for
 #   .\tests.ps1 -All       every C# file, including those not ported yet (never fails)
 #   .\tests.ps1 -File PathKeyTests.cs
+#
+# The C# suite lives in the bertbrowser-csharp-archive repository. -Archive points at a clone of it
+# (default: beside this repository, or $env:BERTBROWSER_CSHARP_ARCHIVE).
 param(
     [switch] $All,
     [string] $File,
-    [string] $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+    [string] $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
+    [string] $Archive = $(if ($env:BERTBROWSER_CSHARP_ARCHIVE) { $env:BERTBROWSER_CSHARP_ARCHIVE } else { Join-Path (Split-Path $Root -Parent) "bertbrowser-csharp-archive" })
 )
 $ErrorActionPreference = "Stop"
 
-$csDir = Join-Path $Root "csharp\tests\BertBrowser.Core.Tests"
+$csDir = Join-Path $Archive "tests\BertBrowser.Core.Tests"
+if (-not (Test-Path $csDir)) { throw "C# archive not found at $Archive - clone https://github.com/robgwalsh/bertbrowser-csharp-archive there, or pass -Archive." }
 $rsDir = Join-Path $Root "crates"
 $droppedFile = Join-Path $PSScriptRoot "dropped.txt"
 

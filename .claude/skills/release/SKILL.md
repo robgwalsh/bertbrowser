@@ -7,7 +7,7 @@ description: Ship a new BertBrowser version — pre-flight checks, tag, watch CI
 
 **The tag is the release.** No file carries a version; CI derives it from the tag, builds, packs
 with Velopack (`vpk pack --packId BertBrowser --packDir out/release/app`), publishes the GitHub
-Release, and opens the winget PR. The app is the native one; `csharp/` is a frozen reference and is
+Release, and opens the winget PR. The app is the native one; the C# app is a frozen reference in a separate repo and is
 never built or shipped. The first native release is `v2.0.0`. Full detail lives in
 [docs/build-and-release.md](../../../docs/build-and-release.md) — this is the procedure to follow.
 

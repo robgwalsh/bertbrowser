@@ -20,7 +20,7 @@ jobs:
 
       # fmt, clippy, cargo test, the cmake release build and every non-bench harness script. The
       # version is stamped into the tree after the tests, so the About box reports the tag.
-      # The frozen C# tree under csharp/ is not built or tested.
+      # The frozen C# app lives in its own repository and is not built here.
       - uses: ./.github/actions/build
         with:
           version: ${{ steps.ver.outputs.version }}

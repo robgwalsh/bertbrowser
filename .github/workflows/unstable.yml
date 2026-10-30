@@ -5,15 +5,13 @@
 # release copy looks for releases.win.json and never sees releases.unstable.json, and GitHub's
 # "latest" excludes pre-releases, so the README's stable download links skip this entirely.
 #
-# Pull requests that touch anything but the frozen csharp/ tree run the same checks and build, and stop
-# before anything is packed or published.
+# Pull requests run the same checks and build, and stop before anything is packed or published.
 name: Unstable
 
 on:
   push:
     branches: [main]
   pull_request:
-    paths-ignore: ["csharp/**"]
   workflow_dispatch:
 
 permissions:

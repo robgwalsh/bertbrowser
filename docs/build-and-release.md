@@ -41,8 +41,8 @@ Things about this build worth knowing:
 - If a build fails with `LNK1104` on `app\BertBrowser.exe`, a running instance holds it:
   `Get-Process BertBrowser | Stop-Process -Force`.
 
-The previous C#/WPF app is frozen under `csharp/` for reference. It is not built, tested or shipped by
-any workflow.
+The previous C#/WPF app is frozen in the private `bertbrowser-csharp-archive` repository, cloned beside this one for
+reference. It is not built, tested or shipped by any workflow.
 
 ## What a release actually is
 

@@ -146,7 +146,7 @@ Delete the folder to reset the app completely. Data left by the 1.x (C#) version
 - `harness/` — the offscreen UI harness; `tools/ui/*.bbs` are its scripts.
 - `bench/`, `docs/` — benchmark baselines and notes; design and build documents.
 - `tools/` — `ui/` harness scripts, `icons/` (the icon pipeline), `parity/` (diffs the C# test suite against the Rust one), and the version, staging and harness-runner scripts CI uses.
-- `csharp/` — the frozen C#/WPF app of the 1.x releases, kept as a behavioural reference. Not built or shipped.
+- The frozen C#/WPF app of the 1.x releases lives in the separate private `bertbrowser-csharp-archive` repository, kept as a behavioural reference. Not built or shipped.
 
 See [CLAUDE.md](CLAUDE.md) for a deeper architecture walkthrough (path-key invariants, the FFI rules, the size-scan algorithm).
 

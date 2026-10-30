@@ -2,7 +2,7 @@
 # drift: format, lints, the Rust tests, the C++ build, then every non-bench tools/ui script through the
 # offscreen harness (WARP, no GPU, no focus). Leaves out/release/app holding the product.
 #
-# The C# tree under csharp/ is a frozen reference and is deliberately never built or tested here.
+# The frozen C# app lives in its own repository (bertbrowser-csharp-archive) and is never built here.
 name: Build and check the app
 description: fmt, clippy, cargo test, cmake release build, the harness scripts
 
