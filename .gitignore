@@ -414,4 +414,4 @@ FodyWeavers.xsd
 /out/
 
 # Cargo binaries live under src/bin, which the bin/ rule above would hide.
-!crates/*/src/bin/
+!src/crates/*/src/bin/

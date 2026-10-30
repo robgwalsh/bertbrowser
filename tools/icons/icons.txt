@@ -2,7 +2,7 @@
 #
 # Every icon the app draws is listed here by the job it does, not by a number. `fetch-fluent.ps1`
 # fetches each one from Fluent UI System Icons (MIT, github.com/microsoft/fluentui-system-icons) and
-# caches its outline in icons.geo.txt; `build-icons.ps1` turns that into app/gfx/icons.gen.h.
+# caches its outline in icons.geo.txt; `build-icons.ps1` turns that into src/app/gfx/icons.gen.h.
 # Call sites say icons::Back; a name that is not in this file fails to compile rather than drawing the
 # wrong thing.
 #

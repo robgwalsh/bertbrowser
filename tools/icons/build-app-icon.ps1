@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Draws app/app/app.ico from scratch.
+    Draws src/app/app/app.ico from scratch.
 
 .DESCRIPTION
     This script is the icon's source of truth -- there is no .svg or .psd behind it. Run it after
@@ -46,7 +46,7 @@ $ErrorActionPreference = 'Stop'
 # block when the script is invoked as `powershell -File <relative path>`, which is how it is meant
 # to be run.
 if (-not $OutputPath) {
-    $OutputPath = Join-Path $PSScriptRoot '..\..\app\app\app.ico'
+    $OutputPath = Join-Path $PSScriptRoot '..\..\src\app\app\app.ico'
 }
 
 Add-Type -AssemblyName System.Drawing

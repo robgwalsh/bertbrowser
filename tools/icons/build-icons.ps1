@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Turns icons.txt (beside this script) into app/gfx/icons.gen.h (name -> path data the Icon widget draws).
+    Turns icons.txt (beside this script) into src/app/gfx/icons.gen.h (name -> path data the Icon widget draws).
 
 .DESCRIPTION
     The app's icons are Fluent UI System Icons (MIT) named by the job they do in icons.txt.
@@ -20,7 +20,7 @@
 param(
     [string] $Manifest = (Join-Path $PSScriptRoot 'icons.txt'),
     [string] $Geometry = (Join-Path $PSScriptRoot 'icons.geo.txt'),
-    [string] $OutFile  = (Join-Path $PSScriptRoot '..\..\app\gfx\icons.gen.h')
+    [string] $OutFile  = (Join-Path $PSScriptRoot '..\..\src\app\gfx\icons.gen.h')
 )
 $ErrorActionPreference = 'Stop'
 $inv = [System.Globalization.CultureInfo]::InvariantCulture

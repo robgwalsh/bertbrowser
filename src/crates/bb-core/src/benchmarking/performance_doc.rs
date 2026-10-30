@@ -19,7 +19,7 @@ impl PerformanceDoc {
         sb.push_str(Self::HEADER);
         sb.push('\n');
         sb.push_str("# Performance\n\n");
-        sb.push_str("Every number here was produced by `crates/bb-bench` and recorded as a baseline under\n");
+        sb.push_str("Every number here was produced by `src/crates/bb-bench` and recorded as a baseline under\n");
         sb.push_str("`bench/baselines/`. Later runs on the same machine are compared against that file; CI compares\n");
         sb.push_str("allocations on every push. See `bench/README.md` for the workflow.\n\n");
         sb.push_str("## How to run\n\n");

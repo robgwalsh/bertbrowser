@@ -1,4 +1,4 @@
-# Generates include/bbcore.h from crates/bb-ffi. Run by the CMake target `cargo_build` and by
+# Generates include/bbcore.h from src/crates/bb-ffi. Run by the CMake target `cargo_build` and by
 # build.ps1. The header is committed so IDEs can index the C++ tree before cargo has run.
 language = "C"
 include_guard = "BBCORE_H"

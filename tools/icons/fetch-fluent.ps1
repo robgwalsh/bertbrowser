@@ -6,7 +6,7 @@
     Fetches each icon named in the manifest from Fluent UI System Icons (MIT) and writes its outline
     out, one line per icon, keyed by the job it does, so a call site says icons::Back rather than a
     codepoint nobody can read. See icons.txt for why the app stopped using the Segoe font.
-    build-icons.ps1 turns the cache into app/gfx/icons.gen.h without a network.
+    build-icons.ps1 turns the cache into src/app/gfx/icons.gen.h without a network.
 
     Nothing here is clever on purpose: an SVG this cannot convert exactly is an error, never a
     silently dropped subpath. A missing piece of an icon looks like a design choice, which is the

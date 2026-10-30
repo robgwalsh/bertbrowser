@@ -25,7 +25,7 @@ The only exceptions are the user explicitly asking you to launch the app, and `b
 
 **Is the question about a rule?** What a move refuses, how a numbered rename lands, which items a
 delete protects, how a path is canonicalised, what the planner does with a junction - none of that
-needs a window. Write a test in `crates/bb-core/tests/all/` (`transfer_planner_tests.rs`,
+needs a window. Write a test in `src/crates/bb-core/tests/all/` (`transfer_planner_tests.rs`,
 `rename_planner_tests.rs`, `delete_planner_tests.rs` run against fake filesystems, the executor tests
 against real files under `%TEMP%`). Run it with `cargo test -p bb-core --test all <filter>`, from
 PowerShell. Deterministic, fast, no UI.

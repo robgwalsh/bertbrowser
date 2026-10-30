@@ -91,7 +91,7 @@ useful", "security". Read the actual changes:
 ```powershell
 git log --oneline vPREV..vX.Y.Z
 git diff --stat vPREV..vX.Y.Z
-git show <sha> -- app/views crates/bb-app   # what the user sees
+git show <sha> -- src/app/views src/crates/bb-app   # what the user sees
 ```
 
 Write from what changed *for a user*, grouped by feature area, not by commit. Code comments in the

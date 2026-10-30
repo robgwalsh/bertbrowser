@@ -113,7 +113,7 @@ executors, not stubs.
 
 ## Benchmarking
 
-`bb-bench` (`crates/bb-bench`) benchmarks the core, whole UI scenarios and startup. Results are
+`bb-bench` (`src/crates/bb-bench`) benchmarks the core, whole UI scenarios and startup. Results are
 compared against a committed per-machine baseline, CI gates allocations on every push, and
 [docs/performance.md](docs/performance.md) is generated from the baselines. See
 [bench/README.md](bench/README.md).
@@ -137,12 +137,12 @@ Delete the folder to reset the app completely. Data left by the 1.x (C#) version
 
 ## Project layout
 
-- `crates/` — the Rust core: `bb-paths` (path keys), `bb-core` (everything testable and UI-free:
+- `src/crates/` — the Rust core: `bb-paths` (path keys), `bb-core` (everything testable and UI-free:
   SQLite persistence, search, executors, undo, metadata, archives), `bb-shell` (shell/registry/COM
   services), `bb-app` (orchestration), `bb-ffi` (the C ABI), the two elevated helpers `bb-indexer` and
   `bb-elevator`, and `bb-bench` (the benchmark driver). `bb-ffi` is the `bbcore` staticlib that cbindgen reads;
   `bb-ffi-harness` is the same ABI plus test fixtures, used by the harness only.
-- `app/` — the C++20 Win32 + Direct2D/DirectWrite UI, custom-drawn: a static library `bbapp` plus `BertBrowser.exe` (WinMain only).
+- `src/app/` — the C++20 Win32 + Direct2D/DirectWrite UI, custom-drawn: a static library `bbapp` plus `BertBrowser.exe` (WinMain only).
 - `harness/` — the offscreen UI harness; `tools/ui/*.bbs` are its scripts.
 - `bench/`, `docs/` — benchmark baselines and notes; design and build documents.
 - `tools/` — `ui/` harness scripts, `icons/` (the icon pipeline), `parity/` (diffs the C# test suite against the Rust one), and the version, staging and harness-runner scripts CI uses.

@@ -13,9 +13,9 @@ add_executable(bb-harness
   runner_panes.cpp
   runner_tools.cpp
   runner_ops.cpp
-  ../app/app/version.cpp
+  ../src/app/app/version.cpp
   # The app's icon, so what draws it (About, the window class) looks in a run as it does in the product.
-  ../app/app/app.rc
+  ../src/app/app/app.rc
 )
 target_include_directories(bb-harness PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 # bbcore_harness: the same ABI as the product's bbcore, plus the fixtures only a script needs.

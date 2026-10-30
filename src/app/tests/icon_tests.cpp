@@ -92,10 +92,10 @@ TEST(icon_data_is_well_formed) {
 
 // The manifest is the source of truth for the names: the generated header must list exactly its entries, in order.
 TEST(icon_names_match_the_manifest) {
-    // __FILE__ is <repo>/app/tests/icon_tests.cpp.
+    // __FILE__ is <repo>/src/app/tests/icon_tests.cpp.
     const std::filesystem::path file = __FILE__;
     if (!file.has_parent_path()) return;
-    std::ifstream in(file.parent_path().parent_path().parent_path() / "tools" / "icons" / "icons.txt");
+    std::ifstream in(file.parent_path().parent_path().parent_path().parent_path() / "tools" / "icons" / "icons.txt");
     if (!in) {
         std::printf("  (icons.txt not found next to the sources; skipped)\n");
         return;

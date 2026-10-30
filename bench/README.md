@@ -1,7 +1,7 @@
 # Benchmarks
 
 How BertBrowser's speed is measured, kept, and defended. The tool is `bb-bench`
-(`crates/bb-bench`); the evidence is `docs/performance.md`, generated from the baselines in
+(`src/crates/bb-bench`); the evidence is `docs/performance.md`, generated from the baselines in
 this folder. The C# app's numbers, for comparison, are in the `bertbrowser-csharp-archive` repository (its baselines and
 `docs/performance.md`).
 
@@ -21,7 +21,7 @@ this folder. The C# app's numbers, for comparison, are in the `bertbrowser-cshar
 
 | Tier | Measures | How | Unit |
 |---|---|---|---|
-| A | `bb-core` code paths: search, index writes, planners, hashing, preview readers... | `bb-bench run`: a hand-rolled runner (`crates/bb-bench/src/suite.rs`) with a counting global allocator | ns, bytes allocated |
+| A | `bb-core` code paths: search, index writes, planners, hashing, preview readers... | `bb-bench run`: a hand-rolled runner (`src/crates/bb-bench/src/suite.rs`) with a counting global allocator | ns, bytes allocated |
 | B | Whole UI scenarios: open a 10k folder, flat view, tiles, search, transfer, preview | The offscreen harness, `tools/ui/bench-*.bbs`, each scenario K times in a fresh process | ms, process memory |
 | C | Startup of the real `BertBrowser.exe` to first listing, and what it holds once there | N launches against a scratch data dir, marks and memory written by the app | ms, process memory |
 

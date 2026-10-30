@@ -44,21 +44,21 @@ against a scratch data directory. Exception: the user explicitly asking you to l
 
 ## Structure
 
-- `crates/bb-paths` - `PathKey`, `UniquePath`, natural sort, glob text. No other deps.
-- `crates/bb-core` - everything pure or Win32-behind-a-trait: SQLite (rusqlite, bundled),
+- `src/crates/bb-paths` - `PathKey`, `UniquePath`, natural sort, glob text. No other deps.
+- `src/crates/bb-core` - everything pure or Win32-behind-a-trait: SQLite (rusqlite, bundled),
   search, executors, undo, metadata codecs, archives, the settings model. **The place for anything
-  testable**: tests are `crates/bb-core/tests/all/<name>_tests.rs`, real SQLite DBs and trees under `%TEMP%`.
-- `crates/bb-shell` - shell/registry/COM services that are not painting (launcher, single
+  testable**: tests are `src/crates/bb-core/tests/all/<name>_tests.rs`, real SQLite DBs and trees under `%TEMP%`.
+- `src/crates/bb-shell` - shell/registry/COM services that are not painting (launcher, single
   instance, foreground, folder handler, updates, startup trace, index/elevation pipes).
-- `crates/bb-app` - orchestration (tabs, listings, operations queue, palette, settings pages,
+- `src/crates/bb-app` - orchestration (tabs, listings, operations queue, palette, settings pages,
   tool-window models, session). No UI; the FFI, the harness and tests call its `api`.
-- `crates/bb-ffi` - the C ABI staticlib `bbcore`; cbindgen reads this crate alone.
+- `src/crates/bb-ffi` - the C ABI staticlib `bbcore`; cbindgen reads this crate alone.
   `bb-ffi-harness` = the same ABI plus test fixtures (`bbcore_harness.lib`); `bb-test-support` = dev-dep fixtures.
-- `crates/bb-indexer`, `bb-elevator` - the two elevated exes (`requireAdministrator`). They link
+- `src/crates/bb-indexer`, `bb-elevator` - the two elevated exes (`requireAdministrator`). They link
   `bb-core` + `bb-paths` only, never shell COM or orchestration. Indexer **outlives the app**
   (gotcha below); Elevator serves one retried file operation and exits.
-- `crates/bb-bench` - benchmark driver.
-- `app/{platform,gfx,ui,views,app}` - C++ static lib `bbapp` + `BertBrowser.exe` (WinMain only).
+- `src/crates/bb-bench` - benchmark driver.
+- `src/app/{platform,gfx,ui,views,app}` - C++ static lib `bbapp` + `BertBrowser.exe` (WinMain only).
   `platform` = hwnd/loop/DPI/chrome; `gfx` = D3D11/D2D/DWrite, palette, text cache, icons; `ui` = widget
   tree and core widgets; `views` = main window, panes, dialogs, tool windows, shell-menu host.
 - `harness` - `bb-harness.exe`: links `bbapp` + `bbcore_harness`, runs `tools/ui/*.bbs`.
@@ -78,8 +78,8 @@ drops in `tools/parity/dropped.txt`, with a reason).
 
 ## Where to look, by topic
 
-Paths are Rust unless noted: `core/` = `crates/bb-core/src`, `app/` = `bb-app/src`, `shell/` =
-`bb-shell/src`; `ui:` = C++ under `app/views` (or `ui`, `gfx`, `platform`). Read the source for
+Paths are Rust unless noted: `core/` = `src/crates/bb-core/src`, `app/` = `bb-app/src`, `shell/` =
+`bb-shell/src`; `ui:` = C++ under `src/app/views` (or `ui`, `gfx`, `platform`). Read the source for
 behavior - this table only says where.
 
 | Topic | Look at |
@@ -111,13 +111,13 @@ behavior - this table only says where.
 | Content search (`content:`) | `core/search/{node (the `content:` term),content_reader,content_scanner,content_text,snippet}.rs` |
 | Saved workspaces | `core/data/saved_workspace.rs`, `SavedWorkspaceRules` in `core/rules.rs`, `app/saved.rs`, ui: `sidebar.cpp`, Workspaces page of `settings_view.cpp` |
 | Saved searches | `core/data/saved_search.rs`, `SavedSearchRules` in `core/rules.rs`, `app/saved.rs`, ui: `dialogs.cpp`, `sidebar.cpp`, Saved searches page |
-| Elevated MFT indexer | `crates/bb-indexer`, `core/mft/*` (`reader`, `volume_indexer`, `host`, `client`, `service`, `presence`), `core/ipc/{index_endpoint,index_protocol,indexer_presence_lock}.rs` |
+| Elevated MFT indexer | `src/crates/bb-indexer`, `core/mft/*` (`reader`, `volume_indexer`, `host`, `client`, `service`, `presence`), `core/ipc/{index_endpoint,index_protocol,indexer_presence_lock}.rs` |
 | Indexer banner / sign-in task | `core/mft/{banner_rules,autostart}.rs`, `app/index.rs`, `shell/indexing.rs` |
 | Change timeline ("What changed") | `core/changes/*`, `core/data/change_log.rs`, `app/tools_changes.rs`, History page of `settings_view.cpp` |
-| Elevated file-op retry | `crates/bb-elevator`, `core/elevation/*`, `core/ipc/elevation_protocol.rs`, `shell/elevation.rs` |
+| Elevated file-op retry | `src/crates/bb-elevator`, `core/elevation/*`, `core/ipc/elevation_protocol.rs`, `shell/elevation.rs` |
 | Launching other programs | `shell/launcher.rs`, `app/launching.rs`, `core/launch/*`, `shell/run_as.rs` |
 | Shell context menu (7-Zip, Git, TortoiseSVN...) | `core/shellmenu/*` (`keys`, `rules`, `built_in`, `layout`, `separators`, `static_verb`), ui: `shell_menu_real.cpp` (hosts the handlers), `ops_menus.cpp` (composer), Context menu page `settings_ctxmenu.cpp`, `harness/canned_shell_menu.h`, `tools/ui/shellmenu.bbs` |
-| Startup / CLI / single instance | `core/cli/*`, `shell/single_instance.rs`, `core/ipc/instance_endpoint.rs`, `bb-ffi/src/startup.rs`, `app/requests.rs`, ui: `app/app/main.cpp` |
+| Startup / CLI / single instance | `core/cli/*`, `shell/single_instance.rs`, `core/ipc/instance_endpoint.rs`, `bb-ffi/src/startup.rs`, `app/requests.rs`, ui: `src/app/app/main.cpp` |
 | Foreground raise | `shell/foreground.rs`, `ForegroundRaiseRules` in `core/rules.rs` |
 | Default folder handler (shell) | `core/shell_integration/*`, `shell/folder_handler.rs` |
 | Updates / legacy data | `shell/updates.rs`, `core/updates/mod.rs` (`ReleaseChannel`), `core/settings/legacy.rs` |
@@ -130,15 +130,15 @@ behavior - this table only says where.
 | Command palette | `core/commands/{palette,matcher,goto}.rs`, `app/palette.rs`, ui: `palette_view.cpp`, `tools/ui/palette.bbs` |
 | Settings page | `app/settings_svc.rs`, `core/settings/*`, ui: `settings_view.cpp`, `tools/ui/settings.bbs` |
 | Theming | `core/theming/*` (`catalog`, `resolver`, `system`), `app/themes.rs`, ui: `gfx/palette.cpp`, `gfx/tokens.h` |
-| App icon | `tools/icons/build-app-icon.ps1` -> `app/app/app.ico` |
-| Icons | `tools/icons/icons.txt` (the mapping) -> `app/gfx/icons.gen.h` (generated) via `build-icons.ps1` |
+| App icon | `tools/icons/build-app-icon.ps1` -> `src/app/app/app.ico` |
+| Icons | `tools/icons/icons.txt` (the mapping) -> `src/app/gfx/icons.gen.h` (generated) via `build-icons.ps1` |
 | Columns (file list) | `core/columns/*`, `app/columns.rs`, ui: `shell_props.cpp` (shell property values), `ui/list_view.cpp` |
 | Tabs / panes / layout | `app/tabs.rs`, `app/session.rs`, `app/api.rs`, `core/layout/*`, ui: `main_view.cpp` |
 | Flat branch view (Ctrl+B) | `FlatViewRules` in `core/rules.rs`, `SearchService::list_subtree` in `core/fs/search_service.rs`, `app/tabs.rs` |
 | Thumbnail tiles / scrolling | `ui/tile_view.cpp` (uniform tiles by arithmetic), `thumbs.cpp` (4-slot shell gate), `tools/ui/tiles.bbs` |
 | UI test harness | `harness/*` (`runner*.cpp`, `session.cpp`, `sandbox.cpp`, `crash.cpp`), `tools/ui/*.bbs`, `.claude/skills/verify` |
-| FFI | `include/bbcore.h` (generated), `bb-ffi/src/*`, `app/events.rs`, `app/views/model.h` (JSON models) |
-| Benchmarks / performance evidence | `crates/bb-bench` (`run`, `ui`, `startup`, `compare`, `baseline`, `report`, `corpus`), `core/benchmarking/*`, `bench/baselines/<machine-key>.json`, `docs/performance.md` (generated), `tools/ui/bench-*.bbs`, `shell/startup_trace.rs`, `bench/README.md` |
+| FFI | `include/bbcore.h` (generated), `bb-ffi/src/*`, `app/events.rs`, `src/app/views/model.h` (JSON models) |
+| Benchmarks / performance evidence | `src/crates/bb-bench` (`run`, `ui`, `startup`, `compare`, `baseline`, `report`, `corpus`), `core/benchmarking/*`, `bench/baselines/<machine-key>.json`, `docs/performance.md` (generated), `tools/ui/bench-*.bbs`, `shell/startup_trace.rs`, `bench/README.md` |
 
 ## Native gotchas
 
@@ -298,7 +298,7 @@ behavior - this table only says where.
   `palette_rules_tests`). Recents live in memory only: a list of what was run is a history, and a
   persisted one would owe the opt-in switch every history feature here has. Pins are saved. Unavailable
   commands stay listed with their reason. It is an in-tree overlay (`popup_layer`), so `shot` photographs it.
-- **The app is `asInvoker`** (manifest in `app/app`). Only the two elevated helper exes touch an
+- **The app is `asInvoker`** (manifest in `src/app/app`). Only the two elevated helper exes touch an
   administrator token. Don't reintroduce `requireAdministrator` on the app to fix an access-denied error -
   a folder the app can't read, Explorer can't either.
 - **Every executor (transfer/rename/delete/new-item/archive-edit) has the same shape**: a pure `*Planner`

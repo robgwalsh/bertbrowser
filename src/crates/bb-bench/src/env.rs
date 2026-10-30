@@ -9,7 +9,7 @@ use bb_core::benchmarking::{GitInfo, MachineInfo, MachineKey, MachineProbe, Win3
 
 use crate::args::Fail;
 
-/// The repository root: the directory holding the workspace manifest and `crates/bb-bench`.
+/// The repository root: the directory holding the workspace manifest and `src/crates/bb-bench`.
 pub fn repo_root(override_path: Option<&str>) -> Result<PathBuf, Fail> {
     if let Some(p) = override_path {
         let full =
@@ -52,7 +52,7 @@ fn strip_verbatim(p: PathBuf) -> PathBuf {
 }
 
 fn is_root(dir: &Path) -> bool {
-    dir.join("Cargo.toml").is_file() && dir.join("crates").join("bb-bench").is_dir()
+    dir.join("Cargo.toml").is_file() && dir.join("src").join("crates").join("bb-bench").is_dir()
 }
 
 /// Everything the commands resolve from the repository, in one place.

@@ -42,7 +42,7 @@ try {
     Step {
         vpk pack --packId BertBrowser --packVersion $Version --packDir "$root\out\release\pack" `
             --mainExe BertBrowser.exe --packTitle BertBrowser --packAuthors 'Rob Walsh' `
-            --icon "$root\app\app\app.ico" --outputDir "$root\Releases"
+            --icon "$root\src\app\app\app.ico" --outputDir "$root\Releases"
     }
 }
 finally {

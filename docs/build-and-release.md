@@ -87,7 +87,7 @@ That push triggers `.github/workflows/release.yml`, which on `windows-latest`:
 5. `vpk download github` - pulls the **previous** release so the next step can build a delta against it.
    This fails harmlessly on the first release; the script logs it and carries on with a full package only.
 6. `vpk pack --packId BertBrowser --packVersion <version> --packDir out/release/app --mainExe BertBrowser.exe`
-   (plus title, authors and `--icon app/app/app.ico`).
+   (plus title, authors and `--icon src/app/app/app.ico`).
 7. `vpk upload github --publish` - creates the GitHub Release, tagged with the tag you pushed and named
    `BertBrowser <version>`, and uploads every asset.
 
@@ -210,7 +210,7 @@ install puts it back on the release channel.
 ```powershell
 pwsh .\build.ps1 -Config release
 vpk pack --packId BertBrowser --packVersion 2.0.1 --packDir out\release\app --mainExe BertBrowser.exe `
-  --packTitle BertBrowser --packAuthors "Rob Walsh" --icon app\app\app.ico --outputDir ..\Releases
+  --packTitle BertBrowser --packAuthors "Rob Walsh" --icon src\app\app\app.ico --outputDir ..\Releases
 ```
 
 Same steps CI runs, minus the tests and the upload. Running it again with a higher version against the

@@ -77,5 +77,5 @@ set_target_properties(bbcore_harness PROPERTIES IMPORTED_LOCATION "${BBCORE_HARN
 target_link_libraries(bbcore_harness INTERFACE bbcore_abi)
 add_dependencies(bbcore_harness cargo_build_harness)
 
-add_subdirectory(app)
+add_subdirectory(src/app app)
 add_subdirectory(harness)

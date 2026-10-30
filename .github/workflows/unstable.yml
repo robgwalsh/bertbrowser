@@ -78,7 +78,7 @@ jobs:
             --token ${{ secrets.GITHUB_TOKEN }} --channel unstable --pre
           vpk pack --packId BertBrowser --packVersion ${{ steps.ver.outputs.version }} `
             --packDir out/release/pack --mainExe BertBrowser.exe --packTitle BertBrowser `
-            --packAuthors "Rob Walsh" --icon app/app/app.ico `
+            --packAuthors "Rob Walsh" --icon src/app/app/app.ico `
             --channel unstable
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
@@ -117,7 +117,7 @@ jobs:
             --tag unstable --targetCommitish ${{ github.sha }}
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
-  # The bb-core micro-benchmarks (crates/bb-bench, Tier A), gated on allocations only. A shared
+  # The bb-core micro-benchmarks (src/crates/bb-bench, Tier A), gated on allocations only. A shared
   # runner's wall clock is noise and is reported in the job summary, never judged; the bytes a
   # benchmark allocates are deterministic and a regression there fails this job.
   #

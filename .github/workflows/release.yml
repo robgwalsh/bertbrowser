@@ -38,7 +38,7 @@ jobs:
           # The pack id stays BertBrowser, so an installed C# copy takes this build as its next update.
           vpk pack --packId BertBrowser --packVersion ${{ steps.ver.outputs.version }} `
             --packDir out/release/pack --mainExe BertBrowser.exe --packTitle BertBrowser `
-            --packAuthors "Rob Walsh" --icon app/app/app.ico
+            --packAuthors "Rob Walsh" --icon src/app/app/app.ico
           if ($LASTEXITCODE -ne 0) { exit 1 }
           vpk upload github --repoUrl https://github.com/${{ github.repository }} `
             --token ${{ secrets.GITHUB_TOKEN }} --publish `

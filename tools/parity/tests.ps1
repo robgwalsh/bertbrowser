@@ -1,7 +1,7 @@
 #Requires -Version 7
 # Compares the C# test suite with the Rust one, file by file and name by name.
 #
-# A C# test file Foo/BarTests.cs maps to a Rust file bar_tests.rs anywhere under crates; a C#
+# A C# test file Foo/BarTests.cs maps to a Rust file bar_tests.rs anywhere under src/crates; a C#
 # method Some_TestName maps to a Rust fn some_test_name. A [Theory] counts once (the Rust port loops
 # over its rows). Deliberately dropped tests are listed in dropped.txt as "BarTests.cs::MethodName".
 #
@@ -21,7 +21,7 @@ $ErrorActionPreference = "Stop"
 
 $csDir = Join-Path $Archive "tests\BertBrowser.Core.Tests"
 if (-not (Test-Path $csDir)) { throw "C# archive not found at $Archive - clone https://github.com/robgwalsh/bertbrowser-csharp-archive there, or pass -Archive." }
-$rsDir = Join-Path $Root "crates"
+$rsDir = Join-Path $Root "src\crates"
 $droppedFile = Join-Path $PSScriptRoot "dropped.txt"
 
 function ConvertTo-Snake([string] $name) {
