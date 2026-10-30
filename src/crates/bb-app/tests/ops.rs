@@ -401,6 +401,18 @@ fn deleting_inside_an_archive_rewrites_it_and_the_undo_history_puts_it_back() {
 fn shortcuts_are_real_links_named_the_way_explorer_names_them() {
     let f = Fixture::new();
     let out = f.root.join("Pictures");
+    // Made first and waited for: a folder that appears in the watched root during the run is merged in by
+    // the watcher a debounce later, and that reload ends by writing "N items" over the sentence checked below.
+    std::fs::create_dir_all(&out).unwrap();
+    let start = std::time::Instant::now();
+    while !f.names().iter().any(|n| n == "Pictures") {
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "the watcher never listed Pictures"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    f.settle();
     let op = op_of(&run(
         &f,
         "shortcut",
