@@ -677,7 +677,8 @@ fn a_sync_is_additive_until_deletes_are_ticked_undoes_whole_and_rescans() {
     let op = call(&f, "compare.sync", json!({"withDeletes": true}))["op"]
         .as_u64()
         .unwrap();
-    assert!(f.wait_op(bb_app::OpId(op)).0);
+    let (ok, message) = f.wait_op(bb_app::OpId(op));
+    assert!(ok, "{message}");
     assert!(!f.root.join("r\\only-right.txt").exists());
     assert_eq!(
         "These folders match.",

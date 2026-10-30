@@ -32,6 +32,7 @@ use bb_core::undo::SyncRecord;
 use serde_json::{Value, json};
 
 use crate::app::{Inner, lock};
+use crate::config::Fakes;
 use crate::events::{AppEvent, Model};
 use crate::ids::{AppError, AppResult, OpId, PaneId, TabId};
 use crate::rows::Row;
@@ -774,7 +775,13 @@ impl Inner {
             preview,
             &transfer_planner,
             &delete_planner,
-            DeleteMode::Recycle,
+            // A run under the fakes (tests, the harness) holds what it removes in the staging folder:
+            // the real Recycle Bin is the user's, and a test must never put anything in it.
+            if self.config.fakes == Fakes::Harness {
+                DeleteMode::Staged
+            } else {
+                DeleteMode::Recycle
+            },
         );
         if !plans.has_work() {
             let why = plans.refused.first().cloned().unwrap_or_default();
