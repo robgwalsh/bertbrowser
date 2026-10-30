@@ -11,8 +11,8 @@
 //! edited this way. Never offered where a codec exists: the extension decides, and a codec always
 //! wins.
 //!
-//! TODO(port): the store itself (`IPropertyStore` opened `GPS_READWRITE` to ask `IsPropertyWritable`,
-//! values read through a shared store) belongs to bb-shell; this module holds the trait it
+//! The store itself (`IPropertyStore` opened `GPS_READWRITE` to ask `IsPropertyWritable`, values read
+//! through a shared store) is the C++ side's, in `property_host.cpp`; this module holds the trait it
 //! implements and the pure half that can be wrong without Windows being involved.
 
 use std::collections::BTreeMap;

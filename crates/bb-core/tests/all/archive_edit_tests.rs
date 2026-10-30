@@ -5,9 +5,9 @@
 use bb_core::archives::{
     ArchiveEdit, ArchiveEditExecutor, ArchiveEditOutcome, ArchiveEditPlan, ArchiveEditPlanner,
     ArchiveEditRejection, ArchiveReader, ArchiveType, CompressionType, LibraryArchiveReader,
-    validate_name,
 };
 use bb_core::cancel::CancelToken;
+use bb_core::rename::RenamePattern;
 use bb_test_support::archive_fixtures;
 use bb_test_support::archive_support::{TempRoot, write_archive, write_zip};
 
@@ -265,7 +265,7 @@ fn an_illegal_name_is_refused_in_the_rename_rules_own_words() {
 
     let rejected = plan.rejected.expect("rejected");
     assert_eq!(ArchiveEditRejection::InvalidName, rejected.reason);
-    assert_eq!(validate_name("b?.txt"), Some(rejected.message));
+    assert_eq!(RenamePattern::validate("b?.txt"), Some(rejected.message));
 }
 
 #[test]

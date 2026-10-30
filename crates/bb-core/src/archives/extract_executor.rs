@@ -16,9 +16,10 @@ use bb_paths::{file_name, fold_upper, split_last};
 
 use super::{
     ArchiveReadError, ArchiveReader, ExtractOutcome, ExtractPlan, ExtractProbe, FailedExtraction,
-    FileSystemExtractProbe, PauseGate, PlannedExtraction, ProgressCoalescer, ProgressSink,
+    FileSystemExtractProbe, PlannedExtraction,
 };
 use crate::cancel::{CancelToken, Cancelled};
+use crate::transfer::{PauseGate, ProgressCoalescer, TransferProgress};
 
 pub struct ExtractExecutor<'r, P: ExtractProbe = FileSystemExtractProbe> {
     reader: &'r dyn ArchiveReader,
@@ -46,7 +47,7 @@ impl<'r, P: ExtractProbe> ExtractExecutor<'r, P> {
         plan: &ExtractPlan,
         password: Option<&str>,
         cancel: &CancelToken,
-        progress: Option<ProgressSink<'_>>,
+        progress: Option<&mut dyn FnMut(TransferProgress)>,
         pause: Option<&PauseGate>,
     ) -> ExtractOutcome {
         if !plan.has_work() {
@@ -55,7 +56,7 @@ impl<'r, P: ExtractProbe> ExtractExecutor<'r, P> {
 
         let files: Vec<&PlannedExtraction> =
             plan.items.iter().filter(|i| !i.is_directory).collect();
-        let mut run = ProgressCoalescer::new(cancel, progress, files.len() as i32, pause);
+        let mut run = ProgressCoalescer::new(cancel.clone(), progress, files.len(), pause);
 
         // Everything this call brings into being, in the order it did, so a cancel can undo
         // exactly that much and nothing of what was already there.

@@ -96,7 +96,6 @@ impl Inner {
                                 if let Some(inner) = weak.upgrade() {
                                     inner.queue_clear();
                                     inner.gate.resume();
-                                    inner.extra.ops.archive_gate.resume();
                                     inner.update_busy();
                                     inner.hub.emit(AppEvent::UndoChanged);
                                 }
@@ -231,10 +230,8 @@ impl Inner {
     pub(crate) fn set_paused(&self, paused: bool) {
         if paused {
             self.gate.pause();
-            self.extra.ops.archive_gate.pause();
         } else {
             self.gate.resume();
-            self.extra.ops.archive_gate.resume();
         }
         if let Some(t) = lock(&self.extra.ops.tracker).as_mut() {
             t.set_paused(paused);

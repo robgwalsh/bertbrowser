@@ -4,9 +4,10 @@ use std::sync::atomic::{AtomicI32, Ordering};
 
 use bb_core::archives::{
     ArchiveIndex, ArchiveReadError, ArchiveReader, EntrySink, ExtractConflict, ExtractExecutor,
-    ExtractOutcome, ExtractPlanner, LibraryArchiveReader, TransferProgress,
+    ExtractOutcome, ExtractPlanner, LibraryArchiveReader,
 };
 use bb_core::cancel::{CancelToken, Cancelled};
+use bb_core::transfer::TransferProgress;
 use bb_test_support::archive_support::{TempRoot, write_zip};
 
 struct Fixture {
@@ -404,7 +405,7 @@ fn progress_reaches_the_total_and_is_monotonic() {
         .plan(&index, &zip, "", &[], &f.dest(), ExtractConflict::KeepBoth);
 
     let mut seen: Vec<i64> = Vec::new();
-    let mut progress = |p: &TransferProgress| seen.push(p.bytes_done);
+    let mut progress = |p: TransferProgress| seen.push(p.bytes_done);
 
     ExtractExecutor::new(&f.reader).execute(
         &plan,

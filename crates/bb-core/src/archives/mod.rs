@@ -19,7 +19,6 @@ mod index_builder;
 mod listing;
 mod models;
 mod probes;
-mod progress;
 mod reader;
 mod search_scanner;
 mod source_walk;
@@ -38,7 +37,7 @@ pub use edit_models::{
     AddFile, ArchiveEdit, ArchiveEditOutcome, ArchiveEditPlan, ArchiveEditRejection,
     ArchiveEditUndo, RejectedArchiveEdit,
 };
-pub use edit_planner::{ArchiveEditPlanner, validate_name};
+pub use edit_planner::ArchiveEditPlanner;
 pub use extract_executor::ExtractExecutor;
 pub use extract_models::{
     ExtractConflict, ExtractOutcome, ExtractPlan, ExtractRejection, FailedExtraction,
@@ -50,8 +49,7 @@ pub use formats::{ArchiveContainer, ArchiveFormat, ArchiveFormats};
 pub use index_builder::ArchiveIndexBuilder;
 pub use listing::{ArchiveContents, ArchiveEntry, ArchiveListing};
 pub use models::{ArchiveCapabilities, ArchiveFailure, ArchiveIndex, ArchiveNode, RawArchiveEntry};
-pub use probes::{ArchiveRenameProbe, RenameProbe};
-pub use progress::{PauseGate, ProgressCoalescer, ProgressSink, TransferProgress};
+pub use probes::ArchiveRenameProbe;
 pub use reader::{ArchiveReadError, ArchiveReader, EntrySink, LibraryArchiveReader};
 pub use search_scanner::ArchiveSearchScanner;
 pub use source_walk::{ArchiveSource, ArchiveSourceWalk};

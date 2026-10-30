@@ -16,6 +16,10 @@ use bb_core::delete::{
     DeleteExecutor, DeleteMode, DeleteOutcome, DeletePlanner, DeleteSource, FileSystemDeleteProbe,
 };
 use bb_core::fs::AccessDenied;
+use bb_core::transfer::{
+    FileCopier, FileSystemTransferProbe, ProgressFn, TransferError, TransferExecutor,
+    TransferOutcome, TransferPlanner, TransferVerb,
+};
 use bb_test_support::unique_temp_path;
 
 const ERROR_NOT_SAME_DEVICE: i32 = 0x11;
@@ -190,25 +194,80 @@ fn nothing_is_not() {
 }
 
 // --- the wiring, from Win32 up ---
-// TODO(port): re-point the two transfer tests at TransferExecutor's `FailedTransfer.access_denied`
-// once Transfer is ported; until then they pin the failures a copier reports, as the executor's
-// catch clause will see them. The three delete tests go through the real `DeleteExecutor`.
+// The two transfer tests hand `TransferExecutor` a copier that fails the way Windows does and read
+// `FailedTransfer.access_denied` off the outcome; the three delete tests go through the real
+// `DeleteExecutor`.
+
+/// A copier that fails every file with one error, so the executor's catch clause sees exactly the
+/// failure a test names.
+struct FailingCopier(fn() -> io::Error);
+
+impl FileCopier for FailingCopier {
+    fn copy(
+        &self,
+        _source: &str,
+        _destination: &str,
+        _progress: Option<ProgressFn<'_>>,
+        _cancel: &CancelToken,
+    ) -> Result<(), TransferError> {
+        Err(TransferError::Io((self.0)()))
+    }
+
+    fn move_file(
+        &self,
+        source: &str,
+        destination: &str,
+        progress: Option<ProgressFn<'_>>,
+        cancel: &CancelToken,
+    ) -> Result<(), TransferError> {
+        self.copy(source, destination, progress, cancel)
+    }
+}
+
+impl Fixture {
+    /// A copy of one file into a folder, through the real planner and an executor whose copier fails.
+    fn copy_failing(&self, copier: FailingCopier) -> TransferOutcome {
+        let source = self.file("payload", &["src", "a.txt"]);
+        let destination = self.path(&["dest"]);
+        std::fs::create_dir_all(&destination).unwrap();
+        let plan = TransferPlanner::default().plan(
+            &[source.to_string_lossy().into_owned()],
+            &destination.to_string_lossy(),
+            TransferVerb::Copy,
+        );
+        TransferExecutor::new(Box::new(FileSystemTransferProbe), Box::new(copier)).execute(
+            &plan,
+            None,
+            &CancelToken::none(),
+            None,
+            None,
+        )
+    }
+}
 
 #[test]
 fn a_transfer_windows_refuses_is_marked_as_such() {
     // A copier that reports the one failure an administrator token could fix.
-    let refusing = io::Error::new(
-        ErrorKind::PermissionDenied,
-        "Access to the path 'dest' is denied.",
-    );
-    assert!(AccessDenied::caused(Some(&refusing)));
+    let outcome = Fixture::new().copy_failing(FailingCopier(|| {
+        io::Error::new(
+            ErrorKind::PermissionDenied,
+            "Access to the path 'dest' is denied.",
+        )
+    }));
+
+    assert_eq!(outcome.failed.len(), 1, "{outcome:?}");
+    assert!(outcome.failed[0].access_denied);
 }
 
 #[test]
 fn a_transfer_that_failed_for_some_other_reason_is_not() {
     // A copier that fails for a reason no token would fix: the case that must never offer elevation.
-    let sulking = io::Error::from_raw_os_error(ERROR_DISK_FULL);
-    assert!(!AccessDenied::caused(Some(&sulking)));
+    let outcome = Fixture::new().copy_failing(FailingCopier(|| {
+        io::Error::from_raw_os_error(ERROR_DISK_FULL)
+    }));
+
+    assert_eq!(outcome.failed.len(), 1, "{outcome:?}");
+    assert!(!outcome.failed[0].access_denied);
 }
 
 #[test]

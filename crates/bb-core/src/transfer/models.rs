@@ -8,6 +8,7 @@ use std::io;
 use bb_paths::{PathKey, parent_key};
 
 use crate::FileTime;
+use crate::compare::{CompareEquality, CompareTolerance};
 use crate::fs::{AccessDenied, EntryStamp};
 
 /// What a drop does with its sources.
@@ -87,21 +88,10 @@ pub struct TransferClash {
     pub incoming_is_newer: bool,
 }
 
-/// FAT and exFAT round a write time to this.
-const FAT_GRANULARITY_TICKS: i64 = 2 * crate::time::TICKS_PER_SECOND;
-
 /// `CompareEquality.CompareTimes` at `CompareTolerance.Strict`: -1, 0 or +1, with zero meaning
 /// "the same instant as far as two-second granularity can tell".
-// TODO(port): extended when Compare is ported (the whole-hour `Loose` tolerance lives there).
 fn compare_times_strict(a: FileTime, b: FileTime) -> i32 {
-    let gap = a.ticks_since(b);
-    if gap.abs() <= FAT_GRANULARITY_TICKS {
-        0
-    } else if gap > 0 {
-        1
-    } else {
-        -1
-    }
+    CompareEquality::compare_times(a, b, CompareTolerance::STRICT)
 }
 
 impl TransferClash {

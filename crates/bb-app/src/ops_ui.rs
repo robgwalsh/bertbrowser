@@ -350,8 +350,6 @@ pub(crate) struct OpsUi {
     pub questions: std::sync::Arc<Questions>,
     /// Passwords given for archives this session.
     pub passwords: std::sync::Arc<crate::ops_arch::SessionPasswords>,
-    /// The archive executors' own gate, kept in step with the app's.
-    pub archive_gate: bb_core::archives::PauseGate,
     pub tracker: Mutex<Option<TransferTracker>>,
     pub records: Mutex<Vec<JobRecord>>,
     pub pose: Mutex<Option<Pose>>,
@@ -370,7 +368,6 @@ impl OpsUi {
         OpsUi {
             questions,
             passwords,
-            archive_gate: bb_core::archives::PauseGate::new(),
             tracker: Mutex::new(None),
             records: Mutex::new(Vec::new()),
             pose: Mutex::new(None),

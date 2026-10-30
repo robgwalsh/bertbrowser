@@ -18,7 +18,7 @@ use crate::columns::ColumnSetting;
 use crate::commands::Overrides;
 use crate::layout::SessionLayout;
 
-// TODO(port): the parsed AspectRatio type arrives with Models; the setting is its text form.
+// Stored as text, as the C# settings file has it; `AspectRatio::parse` reads it and never fails.
 /// 4:3, matching the shape most photos and video thumbnails already are.
 pub const DEFAULT_TILE_ASPECT_RATIO: &str = "4:3";
 

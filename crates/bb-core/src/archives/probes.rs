@@ -8,12 +8,7 @@
 //! anything else, so a planner holding one is not lying about the rest of the world.
 
 use super::{ArchiveIndex, ArchivePath};
-
-// TODO(merge): replaced by crate::rename::RenameProbe (C# IRenameProbe).
-pub trait RenameProbe {
-    fn directory_exists(&self, path: &str) -> bool;
-    fn file_exists(&self, path: &str) -> bool;
-}
+use crate::rename::RenameProbe;
 
 pub struct ArchiveRenameProbe<'a> {
     index: &'a ArchiveIndex,

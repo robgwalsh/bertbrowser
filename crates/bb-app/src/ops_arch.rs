@@ -1,9 +1,6 @@
 //! Extract, compress, edits to an archive's contents and shortcuts: the writes that are not a
 //! transfer but queue and report like one. Spec: ShellViewModel (PlanExtract, ExecuteExtractAsync,
 //! ExecuteCreateArchiveAsync, ArchiveEditAsync, CreateShortcutsAsync) and ShellLink.
-//!
-//! The archive executors take their own progress sink and gate (`archives::PauseGate`), a twin of
-//! the transfer ones until the two are merged, so a pause is mirrored onto `OpsUi::archive_gate`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -12,7 +9,6 @@ use bb_core::archives::{
     ArchiveBrowser, ArchiveCreator, ArchiveEdit, ArchiveEditExecutor, ArchiveEditPlanner,
     ArchiveFormats, ArchivePasswords, ArchivePath, ArchiveSourceWalk, ArchiveWriteFormat,
     CompressionLevel, ExtractConflict, ExtractExecutor, ExtractPlanner, LibraryArchiveReader,
-    TransferProgress as ArchiveProgress,
 };
 use bb_core::format;
 use bb_core::shortcuts::{ShortcutExecutor, ShortcutPlanner};
@@ -83,17 +79,6 @@ pub(crate) fn archive_of(path: &str) -> Option<ArchivePath> {
     }
     // The archive file itself is not "inside" it: deleting or renaming it is an ordinary file operation.
     ArchivePath::parse(path, |p| std::path::Path::new(p).is_file()).filter(|a| !a.is_root())
-}
-
-fn as_transfer(p: &ArchiveProgress) -> TransferProgress {
-    TransferProgress {
-        done: p.done.max(0) as usize,
-        total: p.total.max(0) as usize,
-        current_name: p.current_name.clone(),
-        bytes_done: p.bytes_done,
-        current_item_bytes: p.current_item_bytes,
-        current_item_total: p.current_item_total,
-    }
 }
 
 pub fn extract_conflict_of(word: &str) -> ExtractConflict {
@@ -195,13 +180,13 @@ impl Inner {
                     format::thousands(files as i64)
                 ));
                 let me = inner.clone();
-                let mut sink = move |p: &ArchiveProgress| me.tracker_apply(&as_transfer(p));
+                let mut sink = move |p: TransferProgress| me.tracker_apply(&p);
                 let outcome = ExtractExecutor::new(&*READER).execute(
                     &plan,
                     password.as_deref(),
                     cancel,
                     Some(&mut sink),
-                    Some(&inner.extra.ops.archive_gate),
+                    Some(&inner.gate),
                 );
                 inner.refresh_tabs_showing(std::slice::from_ref(&plan.destination_directory));
                 // Spec: ShellViewModel.DescribeExtract.
@@ -271,7 +256,7 @@ impl Inner {
                     format::thousands(collected.len() as i64)
                 ));
                 let me = inner.clone();
-                let mut sink = move |p: &ArchiveProgress| me.tracker_apply(&as_transfer(p));
+                let mut sink = move |p: TransferProgress| me.tracker_apply(&p);
                 let outcome = ArchiveCreator::new().create(
                     &target,
                     format_,
@@ -279,7 +264,7 @@ impl Inner {
                     &collected,
                     cancel,
                     Some(&mut sink),
-                    Some(&inner.extra.ops.archive_gate),
+                    Some(&inner.gate),
                 );
                 if let Some(dir) = bb_core::rename::paths::directory_name(&target) {
                     inner.refresh_tabs_showing(&[dir]);
@@ -340,12 +325,12 @@ impl Inner {
                 ));
                 inner.set_active_status(format!("Rewriting {}\u{2026}", file_name(&archive_file)));
                 let me = inner.clone();
-                let mut sink = move |p: &ArchiveProgress| me.tracker_apply(&as_transfer(p));
+                let mut sink = move |p: TransferProgress| me.tracker_apply(&p);
                 let outcome = ArchiveEditExecutor::new(&*READER).execute(
                     &plan,
                     cancel,
                     Some(&mut sink),
-                    Some(&inner.extra.ops.archive_gate),
+                    Some(&inner.gate),
                 );
                 inner.record(
                     ArchiveEditRecord::for_outcome(outcome.clone()).map(|r| Box::new(r) as _),

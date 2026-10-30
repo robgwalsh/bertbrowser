@@ -7,6 +7,7 @@
 use bb_paths::PathKey;
 
 use crate::archives::ArchivePath;
+use crate::transfer::{FileSystemTransferProbe, TransferProbe};
 
 /// The filesystem questions a comparison has to ask before it starts, injected so the containment
 /// rules can be tested against link layouts that are impractical to create.
@@ -76,9 +77,6 @@ impl CompareRefusal {
 }
 
 /// Real-filesystem [`CompareProbe`].
-// TODO(merge): `resolve_final_path` is delegated in C# to `Transfer.FileSystemTransferProbe` so
-// there is one definition of "where does this junction actually go"; swap this body for
-// `crate::transfer::FileSystemTransferProbe::resolve_final_path` once that lands.
 #[derive(Default)]
 pub struct FileSystemCompareProbe;
 
@@ -91,16 +89,8 @@ impl CompareProbe for FileSystemCompareProbe {
         std::fs::metadata(path).is_ok_and(|m| m.is_file())
     }
 
+    /// One definition of "where does this junction actually go": the transfer probe's.
     fn resolve_final_path(&self, path: &str) -> String {
-        match std::fs::canonicalize(path) {
-            Ok(resolved) => {
-                let s = resolved.to_string_lossy();
-                s.strip_prefix(r"\\?\UNC\")
-                    .map(|rest| format!(r"\\{rest}"))
-                    .or_else(|| s.strip_prefix(r"\\?\").map(str::to_string))
-                    .unwrap_or_else(|| s.into_owned())
-            }
-            Err(_) => path.to_string(),
-        }
+        FileSystemTransferProbe.resolve_final_path(path)
     }
 }

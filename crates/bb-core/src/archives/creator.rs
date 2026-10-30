@@ -18,10 +18,11 @@ use windows_sys::Win32::Storage::FileSystem::{
 
 use super::{
     ArchiveSource, ArchiveType, ArchiveWriteFormat, ArchiveWriter, CompressionLevel,
-    CompressionType, PauseGate, ProgressCoalescer, ProgressSink, WriterOptions,
+    CompressionType, WriterOptions,
 };
 use crate::FileTime;
 use crate::cancel::CancelToken;
+use crate::transfer::{PauseGate, ProgressCoalescer, TransferProgress};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreateArchiveOutcome {
@@ -57,11 +58,11 @@ impl ArchiveCreator {
         level: CompressionLevel,
         sources: &[ArchiveSource],
         cancel: &CancelToken,
-        progress: Option<ProgressSink<'_>>,
+        progress: Option<&mut dyn FnMut(TransferProgress)>,
         pause: Option<&PauseGate>,
     ) -> CreateArchiveOutcome {
         let partial = format!("{archive_path}{}", Self::PARTIAL_SUFFIX);
-        let mut run = ProgressCoalescer::new(cancel, progress, sources.len() as i32, pause);
+        let mut run = ProgressCoalescer::new(cancel.clone(), progress, sources.len(), pause);
         let mut failed: Vec<String> = Vec::new();
         let mut written = 0i32;
         let mut read = 0i64;

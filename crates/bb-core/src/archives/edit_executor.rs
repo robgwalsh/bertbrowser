@@ -23,11 +23,12 @@ use windows_sys::Win32::Storage::FileSystem::{
 use super::{
     ArchiveContainer, ArchiveEditOutcome, ArchiveEditPlan, ArchiveEditUndo, ArchiveFormat,
     ArchiveFormats, ArchiveReadError, ArchiveReader, ArchiveType, ArchiveWriter, CompressionType,
-    ExtractRules, PauseGate, ProgressCoalescer, ProgressSink, WriterOptions,
+    ExtractRules, WriterOptions,
 };
 use crate::FileTime;
 use crate::cancel::{CancelToken, Cancelled};
 use crate::fs::EntryStamp;
+use crate::transfer::{PauseGate, ProgressCoalescer, TransferProgress};
 
 pub struct ArchiveEditExecutor<'r> {
     reader: &'r dyn ArchiveReader,
@@ -62,7 +63,7 @@ impl<'r> ArchiveEditExecutor<'r> {
         &self,
         plan: &ArchiveEditPlan,
         cancel: &CancelToken,
-        progress: Option<ProgressSink<'_>>,
+        progress: Option<&mut dyn FnMut(TransferProgress)>,
         pause: Option<&PauseGate>,
     ) -> ArchiveEditOutcome {
         if !plan.has_work() {
@@ -71,7 +72,7 @@ impl<'r> ArchiveEditExecutor<'r> {
 
         let archive = plan.archive_file.as_str();
         let rewrite = Self::beside(archive, Self::REWRITE_MARKER);
-        let mut run = ProgressCoalescer::new(cancel, progress, 0, pause);
+        let mut run = ProgressCoalescer::new(cancel.clone(), progress, 0, pause);
 
         let result = (|| -> Result<ArchiveEditOutcome, Stop> {
             let written = self.build_replacement(plan, &rewrite, &mut run, cancel)?;

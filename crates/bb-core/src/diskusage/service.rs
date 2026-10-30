@@ -25,8 +25,8 @@ use crate::mft::NullMftIndex;
 
 /// The slice of the MFT index service disk usage asks: the two questions search asks, plus
 /// whether *any* volume is indexed, which the whole-PC scope needs.
-// TODO(port): folded into `mft::MftIndex` when Mft (M3) is ported; `IMftIndexService.AnyIndexed`
-// is the one member search did not need.
+// Narrower than `mft::MftIndex` on purpose: a test fakes three answers rather than a whole indexer,
+// and the app adapts the real index to it (`bb-app` `tools_disk`).
 pub trait DiskUsageIndex: Send + Sync {
     fn is_building(&self) -> bool;
     fn is_indexed(&self, path_key: &str) -> bool;
@@ -71,8 +71,7 @@ pub enum ArchiveEntries {
 
 /// The slice of the archive browser disk usage asks: whether a path is inside a container, and
 /// what files a folder inside one holds.
-// TODO(port): implemented over `ArchiveIndex` at M4, when the readers arrive; `IArchiveBrowser.
-// Resolve` and `ReadArchive(...).Find` are what these two stand in for.
+// Implemented over the archive browser by `ArchiveUsage` (`archives.rs`).
 pub trait DiskUsageArchives: Send + Sync {
     fn resolve(&self, path: &str) -> Option<ArchivePath>;
     fn files_under(

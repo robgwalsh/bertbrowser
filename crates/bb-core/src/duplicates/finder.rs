@@ -17,8 +17,8 @@ use crate::cancel::CancelToken;
 use crate::data;
 
 /// The slice of the MFT index service a duplicate scan asks.
-// TODO(port): fold into `crate::mft::MftIndex` when Mft (M3) is ported and that trait gains
-// `any_indexed`; until then the real service implements this alongside it.
+// Not `MftIndex` itself: a folder the app has just crawled into the index answers "complete" with no
+// indexer behind it, so the scan asks only these three questions.
 pub trait DuplicateIndexFacts: Sync {
     /// Whether any volume's initial enumeration is still running.
     fn is_building(&self) -> bool;

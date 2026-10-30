@@ -12,48 +12,12 @@ use std::collections::{HashMap, HashSet};
 
 use bb_paths::{file_name, fold_upper, split_last};
 
+use crate::rename::RenamePattern;
+
 use super::{
     AddFile, ArchiveEdit, ArchiveEditPlan, ArchiveEditRejection, ArchiveFormats, ArchiveIndex,
     ArchiveNode,
 };
-
-// TODO(merge): replaced by crate::rename::RenamePattern::validate (C# RenamePattern.Validate).
-// The rules a Windows file name has to pass, worded the way the rename dialog words them.
-pub fn validate_name(name: &str) -> Option<String> {
-    const MAX_NAME_LENGTH: usize = 255;
-    const RESERVED: &[&str] = &[
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-    ];
-
-    if name.trim().is_empty() {
-        return Some("Enter a name.".to_string());
-    }
-    if name.encode_utf16().count() > MAX_NAME_LENGTH {
-        return Some(format!(
-            "A name can be at most {MAX_NAME_LENGTH} characters."
-        ));
-    }
-    for c in name.chars() {
-        if c.is_control() {
-            return Some("A name can't contain control characters.".to_string());
-        }
-        if matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
-            return Some("A name can't contain any of  \\ / : * ? \" < > |".to_string());
-        }
-    }
-    if name.ends_with(['.', ' ']) {
-        return Some("A name can't end with a space or a period.".to_string());
-    }
-    let stem = match name.find('.') {
-        Some(dot) => &name[..dot],
-        None => name,
-    };
-    if RESERVED.iter().any(|r| r.eq_ignore_ascii_case(stem)) {
-        return Some(format!("'{stem}' is a name Windows reserves for a device."));
-    }
-    None
-}
 
 pub struct ArchiveEditPlanner;
 
@@ -177,7 +141,7 @@ impl ArchiveEditPlanner {
                         return Self::missing(entry_path);
                     };
 
-                    if let Some(problem) = validate_name(new_name) {
+                    if let Some(problem) = RenamePattern::validate(new_name) {
                         return ArchiveEditPlan::refused(
                             ArchiveEditRejection::InvalidName,
                             &problem,

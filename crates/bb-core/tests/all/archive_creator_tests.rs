@@ -2,9 +2,9 @@
 use bb_core::archives::{
     ArchiveCreator, ArchiveFormats, ArchiveReader, ArchiveSource, ArchiveSourceWalk,
     ArchiveWriteFormat, ArchiveWriteRules, CompressionLevel, CompressionType, LibraryArchiveReader,
-    TransferProgress,
 };
 use bb_core::cancel::CancelToken;
+use bb_core::transfer::TransferProgress;
 use bb_test_support::archive_support::TempRoot;
 use windows_sys::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, SetFileAttributesW};
 
@@ -205,7 +205,7 @@ fn a_cancelled_create_leaves_nothing_behind() {
     let cancel = CancelToken::new();
     let trip = cancel.clone();
     let mut seen = 0;
-    let mut progress = move |_: &TransferProgress| {
+    let mut progress = move |_: TransferProgress| {
         seen += 1;
         if seen > 3 {
             trip.cancel();
@@ -245,7 +245,7 @@ fn progress_reaches_the_total_and_is_monotonic() {
     let sources = f.collect("stuff", true);
 
     let mut seen: Vec<i64> = Vec::new();
-    let mut progress = |p: &TransferProgress| seen.push(p.bytes_done);
+    let mut progress = |p: TransferProgress| seen.push(p.bytes_done);
 
     f.creator.create(
         &f.root.path("p.zip"),
