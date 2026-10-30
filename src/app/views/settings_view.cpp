@@ -184,7 +184,7 @@ void SettingsView::build_chrome() {
 
 void SettingsView::arrange(Rect r) {
     bounds = r;
-    const float w = std::min(1024.0f, std::max(320.0f, r.width() - 48));
+    const float w = std::min(1280.0f, std::max(320.0f, r.width() - 48));
     const float h = std::max(200.0f, r.height() - 48);
     const float x = r.l + (r.width() - w) / 2, y = r.t + (r.height() - h) / 2;
     card_->measure_tree({w, h});
@@ -1551,7 +1551,7 @@ void SettingsView::page_keys(Widget& p) {
     auto* list = p.emplace<f::ItemList>();
     list->name = "KeyRows";
     list->automation_id = "KeyRows";  // the page is rebuilt by every change; focus comes back to the list through this
-    list->height = 340;
+    list->flex = 1;  // takes whatever height the card leaves under the filter row and above the recorder
     std::vector<f::ListEntry> entries;
     std::vector<std::wstring> ids;
     int sel = -1;

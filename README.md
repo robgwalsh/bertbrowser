@@ -4,9 +4,8 @@
 [![Unstable](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Frobgwalsh%2Fbertbrowser%2Freleases%2Ftags%2Funstable&query=%24.name&label=unstable&color=d29922)](https://github.com/robgwalsh/bertbrowser/releases/tag/unstable)
 [![Unstable build](https://img.shields.io/github/actions/workflow/status/robgwalsh/bertbrowser/unstable.yml?branch=main&label=build)](https://github.com/robgwalsh/bertbrowser/actions/workflows/unstable.yml)
 
-A [fast and memory-efficient](docs/performance.md) offline Windows 10/11 file browser. Written in rust, with a custom rendering layer in c++, for fastest possible native performance.
+A [very fast and memory efficient](docs/performance.md) Windows file browser. Written in rust, with a custom rendering layer in c++, for fastest possible native performance.
 
-- **Offline** - BertBrowser does not connect to the Internet except a startup check against [GitHub Releases](https://github.com/robgwalsh/bertbrowser/releases) for app updates.
 - **[Instant global search](docs/search-indexing.md)** - MFT indexing and USN journal tracking for fastest possible performance.
 - **Directory sizes** — Show total size on directories, just like files.
 - **Split panes with tabs** - Infinite pane splitting and tabs per pane.

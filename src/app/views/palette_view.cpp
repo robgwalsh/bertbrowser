@@ -15,11 +15,20 @@ namespace f = forms;
 namespace {
 constexpr float kCardWidth = 640.0f, kRowHeight = 30.0f;
 constexpr size_t kMaxRows = 12;
+
+// A Panel paints only its fill, so the card draws the edge that sets it apart from the folders behind.
+class CardPanel : public Panel {
+public:
+    void paint(PaintContext& pc) override {
+        Panel::paint(pc);
+        if (style.border != gfx::kNoToken) pc.stroke(bounds, style.border);
+    }
+};
 }  // namespace
 
 PaletteView::PaletteView(MainView& main, core::Core& core) : main_(main), core_(core) {
     flags.visible = false;
-    auto card = std::make_unique<Panel>();
+    auto card = std::make_unique<CardPanel>();
     card->name = "CommandPalette";
     card->pad = 10;
     card->style.bg = tok::OverlayBackground;

@@ -457,7 +457,7 @@ behavior - this table only says where.
   and re-running `pwsh tools/icons/build-icons.ps1` - never hand-edit `icons.gen.h` - then **look at
   it** in a harness capture. Drawn outlines from Fluent UI System Icons (MIT), not the Segoe font.
 - **Settings is a page of the main window, not a dialog, and it applies as you go.** It lies over
-  everything under the title bar, at most 1024 wide and centred over a scrim that dims the folders and
+  everything under the title bar, at most 1280 wide and centred over a scrim that dims the folders and
   takes their clicks (a click on it closes the page); Tab cycles inside the layer. Only app-level
   shortcuts fire meanwhile. There is no Save: `bb_settings_set` writes on a 400 ms debounce, driven by an
   *allowlist* of persisted properties so selecting a row writes nothing, flushed on Back and on window
