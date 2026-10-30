@@ -25,7 +25,7 @@ add_library(bbapp STATIC
 )
 target_include_directories(bbapp PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(bbapp PUBLIC
-  d2d1 dwrite d3d11 dxgi windowscodecs dwmapi
+  d2d1 dwrite d3d11 dxgi dcomp windowscodecs dwmapi
   shell32 ole32 oleaut32 uuid propsys shlwapi comctl32 imm32 uxtheme user32 gdi32
 )
 

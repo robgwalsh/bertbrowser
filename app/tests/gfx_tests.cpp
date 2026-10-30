@@ -223,3 +223,34 @@ TEST(a_loader_posts_once_when_it_is_done_whether_or_not_it_found_a_device) {
     CHECK(loader.take() == nullptr);  // taken once
     DestroyWindow(hwnd);
 }
+
+TEST(a_composition_chain_is_shown_by_its_first_present_and_a_second_can_stand_beside_it) {
+    HRESULT hr = E_FAIL;
+    auto dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = true}, &hr);
+    CHECK(dev != nullptr);
+    if (!dev) return;
+    HWND hwnd = CreateWindowExW(0, L"STATIC", L"", WS_POPUP, 0, 0, 120, 80, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    CHECK(hwnd != nullptr);
+    auto host = gfx::CompositionHost::create(hwnd);
+    CHECK(host != nullptr);
+    if (!host) return;
+    auto first = gfx::SwapChainSurface::create(*dev, hwnd, 120, 80, 96.0f, &hr, host.get());
+    CHECK(first != nullptr);
+    CHECK(first && SUCCEEDED(first->begin_draw()));
+    if (first) first->context()->Clear(D2D1::ColorF(0, 0, 1, 1));
+    CHECK(first && SUCCEEDED(first->end_draw(nullptr)));
+    // The case an HWND chain refuses (it has one per window): a second chain while the first is still up. Its
+    // first present replaces the first on screen, and only then does the first have to go.
+    auto second = gfx::SwapChainSurface::create(*dev, hwnd, 120, 80, 96.0f, &hr, host.get());
+    CHECK(second != nullptr);
+    CHECK(second && SUCCEEDED(second->begin_draw()));
+    if (second) second->context()->Clear(D2D1::ColorF(0, 1, 0, 1));
+    CHECK(second && SUCCEEDED(second->end_draw(nullptr)));
+    first.reset();
+    CHECK(second && SUCCEEDED(second->begin_draw()));
+    if (second) second->context()->Clear(D2D1::ColorF(1, 0, 0, 1));
+    CHECK(second && SUCCEEDED(second->end_draw(nullptr)));
+    second.reset();
+    host.reset();
+    DestroyWindow(hwnd);
+}

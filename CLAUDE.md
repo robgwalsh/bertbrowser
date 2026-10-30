@@ -150,10 +150,16 @@ behavior - this table only says where.
   own and **started only after the WARP one exists** (the two share a lock inside D3D, and started first the
   driver load held WARP up for its whole length). When it lands the window rebuilds exactly as after a device
   loss (`GfxDevice::adopt_hardware` bumps `generation()`; every surface rebuilds on the next `render()`
-  because a `Surface` remembers its generation). `~SwapChainSurface` flushes its own device's immediate
-  context: without it DXGI still counts the old chain and the new one on that HWND is refused with
-  `E_ACCESSDENIED`. The startup trace waits for `gfxSettled` before reading memory, since a snapshot taken
-  mid-load is mostly the driver. `BERTBROWSER_DEVICE=hardware` restores the old order for comparison.
+  because a `Surface` remembers its generation). **A window shows its swap chain through a DirectComposition
+  visual** (`gfx::CompositionHost`), not as the HWND's own: a chain is put on screen by its first present,
+  replacing the one before it in a single commit, and `Window::retired_` keeps the old surface alive until
+  the new one has presented. An HWND chain has to be destroyed before the next can exist, which left the
+  window blank for the whole first paint on the new device - the flash at ~240 ms. For the same reason the
+  first frame is painted *before* `show()` (`paint_first_frame`), not by the first `WM_PAINT`. Popups keep
+  HWND chains; `~SwapChainSurface` flushes its device's context, without which DXGI still counts the old HWND
+  chain and the next one is refused with `E_ACCESSDENIED`. The startup trace waits for `gfxSettled` before
+  reading memory, since a snapshot taken mid-load is mostly the driver. `BERTBROWSER_DEVICE=hardware`
+  restores the old order for comparison.
 - **The FFI is UI-thread only; the Rust event sink may only enqueue.** Every `bb_*` call comes from the
   UI thread and returns without blocking; results arrive as events. The sink runs on Rust threads and
   does one thing: `PostMessage(hwnd, WM_BB_EVENT, ...)`. Rust never re-enters C++ any other way. Every

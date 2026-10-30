@@ -63,6 +63,9 @@ public:
     // or it would not take it). A measurement marks when the drawing stopped changing.
     std::function<void(bool moved)> on_hardware_settled;
 
+    // Draws the first frame now, while the window is still hidden, so what appears is the window and not a blank
+    // one waiting for its first WM_PAINT (which on a software device is a visible 30 ms).
+    void paint_first_frame();
     void show();
     // Makes the client area this size (DIPs), keeping the window where it is.
     void set_client_size_dip(float w, float h);
@@ -113,7 +116,11 @@ private:
     HWND hwnd_ = nullptr;
     unsigned dpi_ = 96;
     ui::UiRoot root_;
+    // Declared before the surfaces, which it must outlive.
+    std::unique_ptr<gfx::CompositionHost> composition_;
     std::unique_ptr<gfx::Surface> surface_;
+    // The surface a new one replaced, kept until the new one has presented so the window is never empty between.
+    std::unique_ptr<gfx::Surface> retired_;
     gfx::BitmapSurface* bitmap_ = nullptr;
     bool tracking_leave_ = false;
     bool full_screen_ = false;

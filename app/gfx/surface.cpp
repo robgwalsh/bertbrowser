@@ -169,9 +169,25 @@ bool BitmapSurface::write_png(const std::wstring& path, const RECT* region) {
 
 // ---- SwapChainSurface ------------------------------------------------------------------------------
 
+std::unique_ptr<CompositionHost> CompositionHost::create(HWND hwnd) {
+    std::unique_ptr<CompositionHost> h(new CompositionHost());
+    // No rendering device: the visual only holds swap chains, which draw on whatever device made them.
+    if (FAILED(DCompositionCreateDevice(nullptr, IID_PPV_ARGS(&h->device_))) || !h->device_) return nullptr;
+    if (FAILED(h->device_->CreateTargetForHwnd(hwnd, TRUE, &h->target_)) || !h->target_) return nullptr;
+    if (FAILED(h->device_->CreateVisual(&h->visual_)) || !h->visual_) return nullptr;
+    if (FAILED(h->target_->SetRoot(h->visual_.Get()))) return nullptr;
+    return h;
+}
+
+void CompositionHost::attach(IDXGISwapChain1* chain) {
+    visual_->SetContent(chain);
+    device_->Commit();
+}
+
 std::unique_ptr<SwapChainSurface> SwapChainSurface::create(GfxDevice& dev, HWND hwnd, UINT w, UINT h, float dpi,
-                                                           HRESULT* hr_out) {
+                                                           HRESULT* hr_out, CompositionHost* host) {
     std::unique_ptr<SwapChainSurface> s(new SwapChainSurface(dev, std::max(w, 1u), std::max(h, 1u), dpi));
+    s->host_ = host;
     s->ctx_ = dev.create_context();
     s->d3d_ = dev.d3d();
     HRESULT hr = s->ctx_ ? S_OK : E_FAIL;
@@ -190,12 +206,17 @@ std::unique_ptr<SwapChainSurface> SwapChainSurface::create(GfxDevice& dev, HWND 
             desc.SampleDesc.Count = 1;
             desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
             desc.BufferCount = 2;
-            desc.Scaling = DXGI_SCALING_NONE;
             desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
             desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
-            hr = factory->CreateSwapChainForHwnd(dev.d3d(), hwnd, &desc, nullptr, nullptr, &s->chain_);
-            if (SUCCEEDED(hr)) {
-                factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_WINDOW_CHANGES);
+            if (host) {
+                desc.Scaling = DXGI_SCALING_STRETCH;  // the only one a composition chain takes
+                hr = factory->CreateSwapChainForComposition(dev.d3d(), &desc, nullptr, &s->chain_);
+            } else {
+                desc.Scaling = DXGI_SCALING_NONE;
+                hr = factory->CreateSwapChainForHwnd(dev.d3d(), hwnd, &desc, nullptr, nullptr, &s->chain_);
+                if (SUCCEEDED(hr)) {
+                    factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_WINDOW_CHANGES);
+                }
             }
         }
         if (SUCCEEDED(hr)) {
@@ -266,6 +287,10 @@ HRESULT SwapChainSurface::present(const RECT* dirty_px) {
     const HRESULT hr = chain_->Present1(0, 0, &params);
     first_present_ = false;
     ++presents_;
+    if (SUCCEEDED(hr) && host_ && !attached_) {
+        host_->attach(chain_.Get());  // the first frame is in the chain: now it replaces whatever was shown
+        attached_ = true;
+    }
     return hr;
 }
 

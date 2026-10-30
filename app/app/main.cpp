@@ -216,6 +216,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                             DestroyWindow(window.hwnd());
                         };
                     }
+                    window.paint_first_frame();  // the window appears with its content, not blank
                     if (maximize) ShowWindow(window.hwnd(), SW_SHOWMAXIMIZED);
                     else window.show();
                     mark(L"windowShown");

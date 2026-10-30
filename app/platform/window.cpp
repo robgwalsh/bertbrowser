@@ -91,6 +91,7 @@ Window::Window(gfx::Resources& res, const WindowOptions& options) : res_(res), o
     }
     // Make the client area exactly the asked size in pixels (the frame differs by chrome mode and DPI).
     set_client_size_dip(static_cast<float>(options_.width_dip), static_cast<float>(options_.height_dip));
+    if (!options_.parked) composition_ = gfx::CompositionHost::create(hwnd_);
     create_surface();
 }
 
@@ -129,8 +130,11 @@ Window::~Window() {
 }
 
 void Window::create_surface() {
-    surface_.reset();
+    // Shown through composition, the old surface stays on screen until the new one has presented (`render`
+    // lets it go). An HWND can hold only one swap chain, so without composition it goes first.
+    std::unique_ptr<gfx::Surface> previous = std::move(surface_);
     bitmap_ = nullptr;
+    if (!composition_) previous.reset();
     RECT rc{};
     GetClientRect(hwnd_, &rc);
     const UINT w = static_cast<UINT>(std::max<LONG>(rc.right, 1));
@@ -140,8 +144,10 @@ void Window::create_surface() {
         bitmap_ = b.get();
         surface_ = std::move(b);
     } else {
-        surface_ = gfx::SwapChainSurface::create(res_.dev, hwnd_, w, h, static_cast<float>(dpi_));
+        surface_ = gfx::SwapChainSurface::create(res_.dev, hwnd_, w, h, static_cast<float>(dpi_), nullptr,
+                                                 composition_.get());
     }
+    if (previous) retired_ = std::move(previous);
     if (surface_) {
         root_.layout({surface_->width_dip(), surface_->height_dip()});
     }
@@ -219,7 +225,16 @@ HRESULT Window::render() {
         hr = root_.paint(*surface_);
         in_render_ = false;
     }
+    if (SUCCEEDED(hr)) retired_.reset();  // the new surface is on screen: the one it replaced can go
     return hr;
+}
+
+void Window::paint_first_frame() {
+    if (SUCCEEDED(render()) && on_first_paint) {
+        auto first = std::move(on_first_paint);
+        on_first_paint = nullptr;
+        first();
+    }
 }
 
 void Window::set_frame_colors(bool dark, COLORREF border, COLORREF caption, COLORREF text) {
@@ -487,11 +502,7 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             PAINTSTRUCT ps;
             BeginPaint(hwnd_, &ps);
             EndPaint(hwnd_, &ps);
-            if (SUCCEEDED(render()) && on_first_paint) {
-                auto first = std::move(on_first_paint);
-                on_first_paint = nullptr;
-                first();
-            }
+            paint_first_frame();
             return 0;
         }
         case WM_SETCURSOR:

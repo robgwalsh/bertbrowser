@@ -5,6 +5,8 @@
 #pragma once
 #include "gfx/device.h"
 
+#include <dcomp.h>
+
 #include <string>
 #include <vector>
 
@@ -70,10 +72,29 @@ private:
     ComPtr<ID2D1Bitmap1> staging_;
 };
 
+// How a window shows swap chains that are not the HWND's own: a DirectComposition visual. A chain made for it
+// is put on screen by its first present, and that replaces the one before it in a single commit. So a window can
+// move from one device to another - WARP to the GPU - with the old picture up until the new one is ready,
+// where an HWND swap chain has to be destroyed first and leaves the window empty until the next one presents.
+class CompositionHost {
+public:
+    // Null where DirectComposition is not available; the window then keeps an HWND swap chain.
+    static std::unique_ptr<CompositionHost> create(HWND hwnd);
+    void attach(IDXGISwapChain1* chain);
+
+private:
+    CompositionHost() = default;
+    ComPtr<IDCompositionDevice> device_;
+    ComPtr<IDCompositionTarget> target_;
+    ComPtr<IDCompositionVisual> visual_;
+};
+
 class SwapChainSurface : public Surface {
 public:
+    // With `host`, the chain is a composition chain shown through it (and `hwnd` is not used); `host` must
+    // outlive the surface.
     static std::unique_ptr<SwapChainSurface> create(GfxDevice& dev, HWND hwnd, UINT w, UINT h, float dpi = 96.0f,
-                                                    HRESULT* hr = nullptr);
+                                                    HRESULT* hr = nullptr, CompositionHost* host = nullptr);
     // DXGI lets go of a swap chain only once its device's context has been flushed. Until then the window
     // still has one, and a new chain on it (after a move to another device) is refused as access denied.
     ~SwapChainSurface() override;
@@ -89,6 +110,8 @@ private:
 
     ComPtr<ID3D11Device> d3d_;  // the device the chain was made on, which may no longer be the process's
     ComPtr<IDXGISwapChain1> chain_;
+    CompositionHost* host_ = nullptr;
+    bool attached_ = false;  // shown yet: a composition chain is put on screen by its first present
     ComPtr<ID2D1Bitmap1> target_;
     bool first_present_ = true;
     UINT presents_ = 0;
