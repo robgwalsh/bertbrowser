@@ -36,13 +36,17 @@ impl StartupMarks {
     pub const WINDOW_SHOWN: &'static str = "windowShown";
     pub const CONTENT_RENDERED: &'static str = "contentRendered";
     pub const FIRST_LISTING: &'static str = "firstListing";
+    /// The window's drawing has stopped moving: it began on a software device and the GPU's took over
+    /// (`gfxHardware` is that moment), or there was none to take over. Native app only. The trace waits
+    /// for it before it reads memory, so the snapshot is the settled app and not one with a driver loading.
+    pub const GFX_SETTLED: &'static str = "gfxSettled";
 }
 
 /// The two moments a traced launch reads its own memory.
 pub struct StartupMemoryPoints;
 
 impl StartupMemoryPoints {
-    /// As it stood when the first listing was shown — what Task Manager would say.
+    /// As it stood once the first listing was shown and the drawing had settled — what Task Manager would say.
     pub const FIRST_LISTING: &'static str = "firstListing";
     /// The same moment after a full collection — what the app is actually holding, and the
     /// steadier of the two.

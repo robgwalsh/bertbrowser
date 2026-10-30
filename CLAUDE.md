@@ -144,6 +144,16 @@ behavior - this table only says where.
 - **Static CRT on both sides.** C++ is `/MT` (`CMAKE_MSVC_RUNTIME_LIBRARY`), Rust is
   `+crt-static` (`.cargo/config.toml`). They must match or the staticlib link yields duplicate CRT
   symbols and heap-crossing bugs. A side effect is no VC redistributable in `Setup.exe`.
+- **The window starts on WARP and moves to the GPU later** (`main.cpp`, `gfx::HardwareDeviceLoader`,
+  `Window::use_hardware_when_ready`). A hardware `D3D11CreateDevice` loads the GPU's driver and took ~180 ms
+  here, 80% of the time to first listing; WARP takes 8 ms. The hardware device is made on a thread of its
+  own and **started only after the WARP one exists** (the two share a lock inside D3D, and started first the
+  driver load held WARP up for its whole length). When it lands the window rebuilds exactly as after a device
+  loss (`GfxDevice::adopt_hardware` bumps `generation()`; every surface rebuilds on the next `render()`
+  because a `Surface` remembers its generation). `~SwapChainSurface` flushes its own device's immediate
+  context: without it DXGI still counts the old chain and the new one on that HWND is refused with
+  `E_ACCESSDENIED`. The startup trace waits for `gfxSettled` before reading memory, since a snapshot taken
+  mid-load is mostly the driver. `BERTBROWSER_DEVICE=hardware` restores the old order for comparison.
 - **The FFI is UI-thread only; the Rust event sink may only enqueue.** Every `bb_*` call comes from the
   UI thread and returns without blocking; results arrive as events. The sink runs on Rust threads and
   does one thing: `PostMessage(hwnd, WM_BB_EVENT, ...)`. Rust never re-enters C++ any other way. Every

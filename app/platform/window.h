@@ -55,6 +55,14 @@ public:
     unsigned dpi() const { return dpi_; }
     const WindowOptions& options() const { return options_; }
 
+    // The window starts on whatever device the resources hold (WARP). When `loader` has a hardware one, the
+    // window moves its drawing over to it: the same rebuild as after a device loss, once, at a quiet moment.
+    // `loader` must outlive the window.
+    void use_hardware_when_ready(gfx::HardwareDeviceLoader& loader);
+    // Called once the loader is done, with whether the window moved to the GPU's device (false: there was none,
+    // or it would not take it). A measurement marks when the drawing stopped changing.
+    std::function<void(bool moved)> on_hardware_settled;
+
     void show();
     // Makes the client area this size (DIPs), keeping the window where it is.
     void set_client_size_dip(float w, float h);
@@ -93,6 +101,7 @@ private:
     void on_size();
     void create_surface();
     void recover();
+    void adopt_hardware();
     void position_ime();
     void update_tick_timer();
     ui::Mods mouse_mods(WPARAM wp) const;
@@ -113,6 +122,8 @@ private:
     bool tick_running_ = false;
     bool reenabling_ = false;
     bool in_render_ = false;
+    gfx::HardwareDeviceLoader* loader_ = nullptr;
+    static constexpr UINT kHardwareReady = WM_APP + 40;
 };
 
 }  // namespace bb::platform

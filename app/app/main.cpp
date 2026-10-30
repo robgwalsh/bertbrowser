@@ -129,8 +129,20 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             return fail(L"Could not initialise the process (COM/DPI).");
         }
 
+        // Loading a GPU's driver takes ~200 ms and the first frame does not need it: start on WARP (8 ms), make
+        // the hardware device on a thread of its own and move the window over when it is ready. Setting
+        // BERTBROWSER_DEVICE=hardware waits for the GPU first, as the app did before.
+        wchar_t device_mode[16] = {};
+        GetEnvironmentVariableW(L"BERTBROWSER_DEVICE", device_mode, 16);
+        const bool hardware_first = std::wstring(device_mode) == L"hardware";
         HRESULT hr = S_OK;
-        auto dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = false, .video_support = true}, &hr);
+        std::unique_ptr<gfx::GfxDevice> dev;
+        if (!hardware_first) dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = true}, &hr);
+        // Only now: the two device creations share a lock inside D3D, and started first the GPU's driver load
+        // held WARP up for its whole length.
+        std::unique_ptr<gfx::HardwareDeviceLoader> hardware;
+        if (dev) hardware = std::make_unique<gfx::HardwareDeviceLoader>(true);
+        if (!dev) dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = false, .video_support = true}, &hr);
         if (!dev) dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = true}, &hr);
         if (!dev) {
             bb_launch_free(launch);
@@ -164,6 +176,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             if (!window.ok()) {
                 error = L"Could not create the window.";
             } else {
+                if (hardware && dev->is_warp()) {
+                    window.on_hardware_settled = [](bool moved) {
+                        if (moved) mark(L"gfxHardware");
+                        mark(L"gfxSettled");
+                    };
+                    window.use_hardware_when_ready(*hardware);
+                } else {
+                    mark(L"gfxSettled");  // drawing on the GPU from the start (or only ever on WARP)
+                }
                 // The first thing the window draws is the content having been rendered.
                 window.on_first_paint = [] { mark(L"contentRendered"); };
                 views::MainView view(core, window);

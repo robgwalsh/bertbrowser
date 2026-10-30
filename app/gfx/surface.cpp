@@ -173,6 +173,7 @@ std::unique_ptr<SwapChainSurface> SwapChainSurface::create(GfxDevice& dev, HWND 
                                                            HRESULT* hr_out) {
     std::unique_ptr<SwapChainSurface> s(new SwapChainSurface(dev, std::max(w, 1u), std::max(h, 1u), dpi));
     s->ctx_ = dev.create_context();
+    s->d3d_ = dev.d3d();
     HRESULT hr = s->ctx_ ? S_OK : E_FAIL;
     if (SUCCEEDED(hr)) {
         ComPtr<IDXGIAdapter> adapter;
@@ -205,6 +206,23 @@ std::unique_ptr<SwapChainSurface> SwapChainSurface::create(GfxDevice& dev, HWND 
         *hr_out = hr;
     }
     return SUCCEEDED(hr) ? std::move(s) : nullptr;
+}
+
+SwapChainSurface::~SwapChainSurface() {
+    if (ctx_) {
+        ctx_->SetTarget(nullptr);
+    }
+    target_.Reset();
+    chain_.Reset();
+    ctx_.Reset();
+    if (d3d_) {
+        ComPtr<ID3D11DeviceContext> immediate;
+        d3d_->GetImmediateContext(&immediate);
+        if (immediate) {
+            immediate->ClearState();
+            immediate->Flush();
+        }
+    }
 }
 
 HRESULT SwapChainSurface::build_target() {

@@ -49,7 +49,7 @@ How to read the native numbers next to the .NET ones in `csharp/docs/performance
 | Power plan | High performance |
 | Corpus | synthetic, scale 1 (100,000 rows) |
 | Job | default, counting-allocator toolchain |
-| Recorded | 2026-10-29 at `fe52238b8` (uncommitted changes) |
+| Recorded | 2026-10-30 at `f602d0b12` (uncommitted changes) |
 
 ### Tier A — Core micro-benchmarks (BenchmarkDotNet)
 
@@ -191,23 +191,25 @@ How to read the native numbers next to the .NET ones in `csharp/docs/performance
 
 | Mark | Median | p95 | Min | n |
 |---|---:|---:|---:|---:|
-| `startup.main` | 12.2 ms | 14.2 ms | 11.6 ms | 9 |
-| `startup.velopackDone` | 12.4 ms | 14.4 ms | 11.8 ms | 9 |
-| `startup.instanceClaimed` | 12.4 ms | 14.5 ms | 11.8 ms | 9 |
-| `startup.settingsLoaded` | 214 ms | 232 ms | 209 ms | 9 |
-| `startup.servicesBuilt` | 214 ms | 232 ms | 209 ms | 9 |
-| `startup.migrated` | 214 ms | 232 ms | 209 ms | 9 |
-| `startup.themeReady` | 214 ms | 232 ms | 209 ms | 9 |
-| `startup.windowBuilt` | 230 ms | 247 ms | 224 ms | 9 |
-| `startup.windowShown` | 234 ms | 251 ms | 228 ms | 9 |
-| `startup.firstListing` | 235 ms | 252 ms | 229 ms | 9 |
-| `startup.contentRendered` | 248 ms | 265 ms | 241 ms | 9 |
-| `startup.processLifetime` | 468 ms | 479 ms | 457 ms | 9 |
+| `startup.main` | 11.0 ms | 11.7 ms | 10.7 ms | 9 |
+| `startup.velopackDone` | 11.1 ms | 11.8 ms | 10.8 ms | 9 |
+| `startup.instanceClaimed` | 11.2 ms | 11.9 ms | 10.9 ms | 9 |
+| `startup.settingsLoaded` | 26.0 ms | 29.0 ms | 25.1 ms | 9 |
+| `startup.servicesBuilt` | 26.0 ms | 29.0 ms | 25.1 ms | 9 |
+| `startup.migrated` | 26.0 ms | 29.0 ms | 25.1 ms | 9 |
+| `startup.themeReady` | 26.0 ms | 29.0 ms | 25.1 ms | 9 |
+| `startup.windowBuilt` | 47.4 ms | 50.5 ms | 44.1 ms | 9 |
+| `startup.windowShown` | 49.7 ms | 52.8 ms | 46.4 ms | 9 |
+| `startup.firstListing` | 50.9 ms | 54.0 ms | 47.9 ms | 9 |
+| `startup.contentRendered` | 80.5 ms | 83.7 ms | 77.3 ms | 9 |
+| `startup.gfxHardware` | 242 ms | 251 ms | 235 ms | 9 |
+| `startup.gfxSettled` | 242 ms | 251 ms | 235 ms | 9 |
+| `startup.processLifetime` | 481 ms | 494 ms | 479 ms | 9 |
 
 | Memory snapshot | Managed heap | Private bytes | Working set | Peak working set | n |
 |---|---:|---:|---:|---:|---:|
-| `startup.memory.collected` | 9.29 MB | 74.2 MB | 56.9 MB | 56.9 MB | 9 |
-| `startup.memory.firstListing` | 9.29 MB | 74.2 MB | 56.9 MB | 56.9 MB | 9 |
+| `startup.memory.collected` | 25.4 MB | 86.8 MB | 76.6 MB | 99.7 MB | 9 |
+| `startup.memory.firstListing` | 36.4 MB | 86.8 MB | 76.6 MB | 99.7 MB | 9 |
 
 ## What the numbers do and do not mean
 

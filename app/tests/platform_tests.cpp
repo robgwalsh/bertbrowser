@@ -158,3 +158,47 @@ TEST(timer_service_drives_ticks) {
     rig.root.set_focus(nullptr);
     CHECK(!rig.root.has_timers());  // losing focus stops it
 }
+
+TEST(a_window_moves_to_the_hardware_device_when_it_is_ready_and_its_neighbour_follows) {
+    // Its own device: adopting one moves the generation, which the shared one's other tests must not see.
+    HRESULT hr = E_FAIL;
+    auto dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = true}, &hr);
+    CHECK(dev != nullptr);
+    if (!dev) return;
+    gfx::Resources res(*dev);
+    platform::WindowOptions o;
+    o.width_dip = 300;
+    o.height_dip = 200;
+    platform::Window main(res, o);
+    platform::Window neighbour(res, o);  // a tool window: it hears nothing, it only draws on the same device
+    CHECK(main.ok() && neighbour.ok());
+    main.root().set_content(std::make_unique<TextBlock>(L"on WARP"));
+    main.root().layout({main.surface().width_dip(), main.surface().height_dip()});
+    CHECK(SUCCEEDED(main.render()));
+    const uint32_t warp_generation = dev->generation();
+
+    gfx::HardwareDeviceLoader loader(false);
+    bool settled = false;
+    bool moved = false;
+    main.on_hardware_settled = [&](bool m) {
+        settled = true;
+        moved = m;
+    };
+    main.use_hardware_when_ready(loader);
+    for (int i = 0; i < 1000 && !settled; ++i) {
+        platform::pump_messages();
+        Sleep(10);
+    }
+    CHECK(settled);  // said so whether or not there was a GPU
+    if (!moved) return;  // no hardware adapter on this machine: nothing to move to
+
+    CHECK(!dev->is_warp());
+    CHECK(dev->generation() != warp_generation);
+    CHECK_EQ(main.surface().generation(), dev->generation());
+    CHECK(SUCCEEDED(main.render()));
+    // The neighbour still holds a swap chain of the old device until it next paints, and then follows.
+    CHECK(neighbour.surface().generation() != dev->generation());
+    neighbour.root().invalidate_all();
+    CHECK(SUCCEEDED(neighbour.render()));
+    CHECK_EQ(neighbour.surface().generation(), dev->generation());
+}

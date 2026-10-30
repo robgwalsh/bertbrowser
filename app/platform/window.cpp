@@ -154,6 +154,23 @@ void Window::recover() {
     root_.invalidate_all();
 }
 
+void Window::use_hardware_when_ready(gfx::HardwareDeviceLoader& loader) {
+    loader_ = &loader;
+    loader.notify(hwnd_, kHardwareReady);
+}
+
+void Window::adopt_hardware() {
+    if (!loader_) return;
+    Microsoft::WRL::ComPtr<ID3D11Device> d3d = loader_->take();
+    // Stay on WARP when there is nothing to move to or the device will not take it.
+    const bool moved = d3d && SUCCEEDED(res_.dev.adopt_hardware(std::move(d3d), loader_->video_support()));
+    if (moved) {
+        res_.on_device_recreated();
+        render();  // sees the surface is from an older generation, rebuilds it and paints everything
+    }
+    if (on_hardware_settled) on_hardware_settled(moved);
+}
+
 // Spec: PreviewPane.EnterFullScreen (a borderless window over the pane's monitor).
 void Window::set_full_screen(bool on) {
     if (on == full_screen_ || !hwnd_ || options_.parked || options_.offscreen) return;
@@ -186,6 +203,13 @@ void Window::show() {
 
 HRESULT Window::render() {
     if (!surface_) return E_FAIL;
+    // The device moved on (to hardware, or after a loss another window recovered from): the swap chain and the
+    // context belong to the old one.
+    if (surface_->generation() != res_.dev.generation()) {
+        create_surface();
+        if (!surface_) return E_FAIL;
+        root_.invalidate_all();
+    }
     in_render_ = true;
     HRESULT hr = root_.paint(*surface_);
     in_render_ = false;
@@ -350,6 +374,10 @@ LRESULT CALLBACK Window::static_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
 
 LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
     const bool chrome = options_.custom_chrome;
+    if (msg == kHardwareReady) {
+        adopt_hardware();
+        return 0;
+    }
     if (on_message && msg >= WM_APP && msg < 0xC000 && on_message(msg, wp, lp)) {
         return 0;
     }

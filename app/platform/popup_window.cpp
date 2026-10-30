@@ -88,6 +88,18 @@ RECT PopupWindow::screen_rect() const {
 
 HRESULT PopupWindow::render() {
     if (!surface_) return E_FAIL;
+    if (!parked_ && surface_->generation() != res_.dev.generation()) {
+        // The device moved on under an open window (WARP to hardware): its swap chain belongs to the old one.
+        RECT rc{};
+        GetClientRect(hwnd_, &rc);
+        const UINT w = static_cast<UINT>(std::max<LONG>(rc.right, 1));
+        const UINT h = static_cast<UINT>(std::max<LONG>(rc.bottom, 1));
+        surface_.reset();
+        surface_ = gfx::SwapChainSurface::create(res_.dev, hwnd_, w, h, static_cast<float>(dpi_));
+        if (!surface_) return E_FAIL;
+        root_.layout({surface_->width_dip(), surface_->height_dip()});
+        root_.invalidate_all();
+    }
     in_render_ = true;
     const HRESULT hr = root_.paint(*surface_);
     in_render_ = false;

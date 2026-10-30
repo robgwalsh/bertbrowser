@@ -19,6 +19,8 @@ public:
     UINT height_px() const { return h_; }
     float dpi() const { return dpi_; }
     float scale() const { return dpi_ / 96.0f; }
+    // The device generation this surface was made under; a window whose device moved on rebuilds it.
+    uint32_t generation() const { return generation_; }
     float width_dip() const { return static_cast<float>(w_) / scale(); }
     float height_dip() const { return static_cast<float>(h_) / scale(); }
 
@@ -30,7 +32,7 @@ public:
     virtual HRESULT resize(UINT w, UINT h) = 0;
 
 protected:
-    Surface(GfxDevice& dev, UINT w, UINT h, float dpi) : dev_(dev), w_(w), h_(h), dpi_(dpi) {}
+    Surface(GfxDevice& dev, UINT w, UINT h, float dpi) : dev_(dev), w_(w), h_(h), dpi_(dpi), generation_(dev.generation()) {}
     virtual ID2D1Bitmap1* target() = 0;
     virtual HRESULT present(const RECT* dirty_px) = 0;
 
@@ -38,6 +40,7 @@ protected:
     ComPtr<ID2D1DeviceContext> ctx_;
     UINT w_, h_;
     float dpi_;
+    uint32_t generation_;
 };
 
 class BitmapSurface : public Surface {
@@ -71,6 +74,9 @@ class SwapChainSurface : public Surface {
 public:
     static std::unique_ptr<SwapChainSurface> create(GfxDevice& dev, HWND hwnd, UINT w, UINT h, float dpi = 96.0f,
                                                     HRESULT* hr = nullptr);
+    // DXGI lets go of a swap chain only once its device's context has been flushed. Until then the window
+    // still has one, and a new chain on it (after a move to another device) is refused as access denied.
+    ~SwapChainSurface() override;
 
     HRESULT resize(UINT w, UINT h) override;
     UINT presents() const { return presents_; }
@@ -81,6 +87,7 @@ private:
     ID2D1Bitmap1* target() override { return target_.Get(); }
     HRESULT present(const RECT* dirty_px) override;
 
+    ComPtr<ID3D11Device> d3d_;  // the device the chain was made on, which may no longer be the process's
     ComPtr<IDXGISwapChain1> chain_;
     ComPtr<ID2D1Bitmap1> target_;
     bool first_present_ = true;

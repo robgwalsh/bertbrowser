@@ -144,3 +144,82 @@ TEST(swap_chain_presents_dirty_rects) {
     sc->context()->Clear(D2D1::ColorF(0, 0, 0));
     CHECK(SUCCEEDED(sc->end_draw(nullptr)));
 }
+
+// ---- moving from WARP to a hardware device ----------------------------------------------------------
+
+namespace {
+
+// A hardware device from the loader, or null on a machine with no adapter (a CI runner): the tests that need
+// one then have nothing to check and say nothing.
+Microsoft::WRL::ComPtr<ID3D11Device> hardware_or_null() {
+    gfx::HardwareDeviceLoader loader(false);
+    for (int i = 0; i < 1000 && !loader.finished(); ++i) Sleep(10);
+    return loader.take();
+}
+
+}  // namespace
+
+TEST(a_warp_device_adopts_a_hardware_one_and_draws_on_it) {
+    HRESULT hr = E_FAIL;
+    auto dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = true}, &hr);
+    CHECK(dev != nullptr);
+    auto hw = hardware_or_null();
+    if (!dev || !hw) return;
+    const uint32_t before = dev->generation();
+    CHECK(SUCCEEDED(dev->adopt_hardware(hw, false)));
+    CHECK(!dev->is_warp());
+    CHECK_EQ(dev->generation(), before + 1);
+    auto surf = gfx::BitmapSurface::create(*dev, 64, 48);
+    CHECK(surf != nullptr);
+    fill(*surf, D2D1::ColorF(1, 0, 0, 1), D2D1::RectF(8, 8, 24, 24));
+    CHECK_EQ(surf->pixel(10, 10), 0xFFFF0000u);
+    CHECK_EQ(surf->generation(), dev->generation());
+}
+
+TEST(a_window_gets_a_new_swap_chain_on_the_hardware_device) {
+    HRESULT hr = E_FAIL;
+    auto dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = true}, &hr);
+    CHECK(dev != nullptr);
+    auto hw = hardware_or_null();
+    if (!dev || !hw) return;
+    // A window nothing ever shows: the swap chain only needs the handle.
+    HWND hwnd = CreateWindowExW(0, L"STATIC", L"", WS_POPUP, 0, 0, 120, 80, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    CHECK(hwnd != nullptr);
+    auto first = gfx::SwapChainSurface::create(*dev, hwnd, 120, 80, 96.0f);
+    CHECK(first != nullptr);
+    CHECK(first && SUCCEEDED(first->begin_draw()));
+    if (first) first->context()->Clear(D2D1::ColorF(0, 0, 1, 1));
+    CHECK(first && SUCCEEDED(first->end_draw(nullptr)));
+    CHECK(SUCCEEDED(dev->adopt_hardware(hw, false)));
+    CHECK(first && first->generation() != dev->generation());  // what tells a window to rebuild
+    first.reset();  // the window lets go of the old chain, as it does before making the new one
+    auto second = gfx::SwapChainSurface::create(*dev, hwnd, 120, 80, 96.0f);
+    CHECK(second != nullptr);
+    CHECK(second && SUCCEEDED(second->begin_draw()));
+    if (second) second->context()->Clear(D2D1::ColorF(0, 1, 0, 1));
+    CHECK(second && SUCCEEDED(second->end_draw(nullptr)));
+    CHECK(second && second->generation() == dev->generation());
+    second.reset();
+    DestroyWindow(hwnd);
+}
+
+TEST(a_loader_posts_once_when_it_is_done_whether_or_not_it_found_a_device) {
+    gfx::HardwareDeviceLoader loader(false);
+    HWND hwnd = CreateWindowExW(0, L"STATIC", L"", WS_POPUP, 0, 0, 10, 10, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    CHECK(hwnd != nullptr);
+    constexpr UINT kMsg = WM_APP + 77;
+    loader.notify(hwnd, kMsg);
+    for (int i = 0; i < 1000 && !loader.finished(); ++i) Sleep(10);
+    CHECK(loader.finished());
+    MSG msg{};
+    int posted = 0;
+    for (int i = 0; i < 20; ++i) {
+        while (PeekMessageW(&msg, hwnd, kMsg, kMsg, PM_REMOVE)) ++posted;
+        Sleep(5);
+    }
+    CHECK_EQ(posted, 1);  // a machine with no adapter still has to say the drawing has settled
+    auto device = loader.take();
+    (void)device;
+    CHECK(loader.take() == nullptr);  // taken once
+    DestroyWindow(hwnd);
+}
