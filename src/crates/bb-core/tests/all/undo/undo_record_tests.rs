@@ -24,7 +24,7 @@ use bb_core::undo::{
 use bb_paths::PathKey;
 use bb_test_support::unique_temp_path;
 
-use crate::delete_executor_tests::FakeRecycleBin;
+use crate::delete::delete_executor_tests::FakeRecycleBin;
 
 struct Fixture {
     root: PathBuf,

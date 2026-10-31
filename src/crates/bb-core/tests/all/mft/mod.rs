@@ -1,0 +1,9 @@
+mod indexer_auto_start_task_tests;
+mod indexer_banner_rules_tests;
+mod mft_directory_size_builder_tests;
+mod mft_index_client_tests;
+mod mft_index_host_tests;
+mod mft_index_state_tests;
+mod mft_path_builder_tests;
+mod ntfs_parsing_tests;
+mod usn_record_parser_tests;

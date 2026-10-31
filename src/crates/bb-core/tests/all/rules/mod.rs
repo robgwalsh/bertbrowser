@@ -1,0 +1,4 @@
+mod flat_view_rules_tests;
+mod foreground_raise_rules_tests;
+mod saved_search_rules_tests;
+mod saved_workspace_rules_tests;

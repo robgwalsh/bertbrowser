@@ -1,0 +1,11 @@
+mod compare_equality_tests;
+mod compare_refusal_tests;
+mod compare_rules_tests;
+mod content_settlement_tests;
+mod file_compare_plan_tests;
+mod file_content_comparer_tests;
+mod folder_compare_agreement_tests;
+mod folder_comparer_tests;
+mod sync_overwrite_tests;
+mod sync_planner_tests;
+mod sync_runner_tests;

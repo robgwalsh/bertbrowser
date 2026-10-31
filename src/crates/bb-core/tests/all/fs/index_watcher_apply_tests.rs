@@ -136,7 +136,7 @@ fn created_file_hidden_state_is_relative_to_root() {
     std::fs::write(&visible, [0u8; 1]).unwrap();
     let secret = f.path("secret.txt");
     std::fs::write(&secret, [0u8; 1]).unwrap();
-    crate::index_crawler_tests::set_hidden(secret.as_ref());
+    crate::fs::index_crawler_tests::set_hidden(secret.as_ref());
 
     f.apply(FsChangeKind::Created, &visible, None);
     f.apply(FsChangeKind::Created, &secret, None);

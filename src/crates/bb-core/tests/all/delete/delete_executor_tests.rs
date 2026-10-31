@@ -21,7 +21,7 @@ use bb_core::delete::{
 };
 use bb_test_support::unique_temp_path;
 
-use crate::directory_removal_tests::try_create_junction;
+use crate::fs::directory_removal_tests::try_create_junction;
 
 const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
 

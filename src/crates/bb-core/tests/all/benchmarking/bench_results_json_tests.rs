@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use bb_core::benchmarking::{BenchEntry, BenchError, BenchResultsJson, ProcessStats, TimeStats};
 
-use crate::bench_compare_tests::{entry, set};
+use crate::benchmarking::bench_compare_tests::{entry, set};
 
 #[test]
 fn round_trips() {

@@ -1,0 +1,3 @@
+mod duplicate_rules_tests;
+mod duplicate_scanner_tests;
+mod file_system_file_hasher_tests;

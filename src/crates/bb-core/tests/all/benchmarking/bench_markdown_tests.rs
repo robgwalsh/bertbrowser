@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use bb_core::benchmarking::{BenchCompare, BenchEntry, BenchMarkdown, CompareOptions};
 
-use crate::bench_compare_tests::{entry, entry_in, set, snapshot, snapshot_in};
+use crate::benchmarking::bench_compare_tests::{entry, entry_in, set, snapshot, snapshot_in};
 
 #[test]
 fn render_compare_regressions_first_with_counts() {

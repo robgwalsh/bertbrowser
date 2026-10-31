@@ -47,7 +47,8 @@ against a scratch data directory. Exception: the user explicitly asking you to l
 - `src/crates/bb-paths` - `PathKey`, `UniquePath`, natural sort, glob text. No other deps.
 - `src/crates/bb-core` - everything pure or Win32-behind-a-trait: SQLite (rusqlite, bundled),
   search, executors, undo, metadata codecs, archives, the settings model. **The place for anything
-  testable**: tests are `src/crates/bb-core/tests/all/<name>_tests.rs`, real SQLite DBs and trees under `%TEMP%`.
+  testable**: tests are `src/crates/bb-core/tests/all/<module>/<name>_tests.rs` (`<module>` mirrors the `src` module
+  under test; one binary, `main.rs` + a `mod.rs` per folder), real SQLite DBs and trees under `%TEMP%`.
 - `src/crates/bb-shell` - shell/registry/COM services that are not painting (launcher, single
   instance, foreground, folder handler, updates, startup trace, index/elevation pipes).
 - `src/crates/bb-app` - orchestration (tabs, listings, operations queue, palette, settings pages,

@@ -9,7 +9,7 @@ use std::io;
 use bb_core::shortcuts::{ShortcutCreation, ShortcutExecutor, ShortcutPlan, ShortcutWriter};
 use bb_paths::PathKey;
 
-use crate::shortcut_planner_tests::FakeShortcutProbe;
+use crate::shortcuts::shortcut_planner_tests::FakeShortcutProbe;
 
 #[derive(Default)]
 struct FakeShortcutWriter {

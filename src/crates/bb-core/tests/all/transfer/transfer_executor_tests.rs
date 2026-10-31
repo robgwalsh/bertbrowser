@@ -22,7 +22,7 @@ use bb_core::transfer::{
 use bb_paths::PathKey;
 use bb_test_support::unique_temp_path;
 
-use crate::directory_removal_tests::try_create_junction;
+use crate::fs::directory_removal_tests::try_create_junction;
 
 struct Fixture {
     root: PathBuf,

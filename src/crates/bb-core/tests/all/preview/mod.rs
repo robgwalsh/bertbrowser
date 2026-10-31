@@ -1,0 +1,11 @@
+mod animation_timeline_tests;
+mod aspect_ratio_tests;
+mod gif_decoder_tests;
+mod gif_frame_compositor_tests;
+mod hex_preview_reader_tests;
+mod image_zoom_tests;
+mod media_playlist_tests;
+mod preview_classifier_tests;
+mod preview_metadata_tests;
+mod syntax_tokenizer_tests;
+mod text_preview_reader_tests;

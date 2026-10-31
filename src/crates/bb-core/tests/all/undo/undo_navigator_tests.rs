@@ -13,7 +13,7 @@ use bb_core::undo::{
     UndoNavigator, UndoStack,
 };
 
-use crate::undo_stack_tests::{FakeHandle, FakeRecord};
+use crate::undo::undo_stack_tests::{FakeHandle, FakeRecord};
 
 fn now() -> FileTime {
     FileTime::from_ymd_hms(2026, 9, 25, 12, 0, 0)

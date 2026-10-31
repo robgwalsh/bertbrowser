@@ -1,0 +1,10 @@
+mod archive_aware_file_system_service_tests;
+mod archive_creator_tests;
+mod archive_edit_tests;
+mod archive_index_builder_tests;
+mod archive_listing_tests;
+mod archive_path_tests;
+mod archive_reader_tests;
+mod archive_search_tests;
+mod encrypted_archive_tests;
+mod extract_executor_tests;

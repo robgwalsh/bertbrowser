@@ -125,7 +125,7 @@ fn crawl_emits_junction_but_does_not_descend() {
     f.create_file(r"real\inner.bin", 1);
     let junction = f.root.join("junction");
     assert!(
-        crate::directory_removal_tests::try_create_junction(&junction, &f.root.join("real")),
+        crate::fs::directory_removal_tests::try_create_junction(&junction, &f.root.join("real")),
         "junction was not created"
     );
 

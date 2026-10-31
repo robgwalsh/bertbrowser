@@ -1,0 +1,3 @@
+mod command_bar_edit_tests;
+mod command_bar_rules_tests;
+mod saved_command_bar_rules_tests;

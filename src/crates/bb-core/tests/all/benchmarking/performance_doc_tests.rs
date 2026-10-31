@@ -1,7 +1,7 @@
 // Port of tests/BertBrowser.Core.Tests/Benchmarking/PerformanceDocTests.cs.
 use bb_core::benchmarking::PerformanceDoc;
 
-use crate::bench_compare_tests::{entry, set_on};
+use crate::benchmarking::bench_compare_tests::{entry, set_on};
 
 #[test]
 fn render_starts_with_generated_header() {

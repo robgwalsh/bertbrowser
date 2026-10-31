@@ -1,0 +1,8 @@
+mod bookmark_repository_tests;
+mod bookmark_service_tests;
+mod change_log_repository_tests;
+mod dir_size_repository_tests;
+mod fs_index_repository_subtree_tests;
+mod fs_index_repository_tests;
+mod saved_search_repository_tests;
+mod saved_workspace_repository_tests;

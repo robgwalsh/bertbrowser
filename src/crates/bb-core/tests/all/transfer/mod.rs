@@ -1,0 +1,11 @@
+mod drag_out_contract_tests;
+mod drop_in_contract_tests;
+mod pause_gate_tests;
+mod right_drop_menu_rules_tests;
+mod transfer_estimator_tests;
+mod transfer_executor_tests;
+mod transfer_merge_expander_tests;
+mod transfer_planner_tests;
+mod transfer_queue_rules_tests;
+mod transfer_rate_tests;
+mod transfer_round_trip_tests;
