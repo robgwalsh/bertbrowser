@@ -10,9 +10,9 @@
 #include <algorithm>
 #include <cwctype>
 
-#include "views/json.h"
-#include "views/main_view.h"
-#include "views/tool_state.h"
+#include "views/bridge/json.h"
+#include "views/main/main_view.h"
+#include "views/tools/tool_state.h"
 
 namespace bbh {
 

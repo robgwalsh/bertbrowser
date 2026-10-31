@@ -61,6 +61,9 @@ against a scratch data directory. Exception: the user explicitly asking you to l
 - `src/app/{platform,gfx,ui,views,app}` - C++ static lib `bbapp` + `BertBrowser.exe` (WinMain only).
   `platform` = hwnd/loop/DPI/chrome; `gfx` = D3D11/D2D/DWrite, palette, text cache, icons; `ui` = widget
   tree and core widgets; `views` = main window, panes, dialogs, tool windows, shell-menu host.
+  Both are grouped in subfolders, includes rooted at `src/app` (`"ui/popups/menu.h"`): `ui/{core,controls,collections,popups}`,
+  `views/{bridge,main,chrome,panes,dialogs,tools,settings,shell}` (`bridge` = FFI + JSON models, the only layer on `bbcore.h`).
+  A table entry below that names only a bare file (`ops_dialogs.cpp`) lives in one of those `views` folders.
 - `harness` - `bb-harness.exe`: links `bbapp` + `bbcore_harness`, runs `tools/ui/*.bbs`.
 - `tools/{icons,parity}`, `bench/`, `docs/`, `include/bbcore.h` (generated).
 - `tools/ui/*.bbs` - the harness scripts, shared by the native harness and the C# one.
@@ -126,18 +129,18 @@ behavior - this table only says where.
 | Animated GIFs in the preview | `core/preview/animation/*`, `app/gif_player.rs`, ui: `image_view.cpp`, `tools/ui/gif.bbs` |
 | Archives (zip/7z/tar/rar) | `core/archives/*` (`archive_path`, `reader`, `index_builder`, `writer`, `edit_*`, `extract_*`) |
 | Commands / keyboard shortcuts | `core/commands/*` (`catalog`, `chord`, `keymap`, `verbs`), `app/commands.rs` (`why_not_now`), `app/keys.rs`, ui: `window.cpp` (key -> chord), `command_ui.cpp`, `tools/ui/{keys,keyboard,commands}.bbs` |
-| Menu bar / toolbars | `core/commandbars/*`, `app/bars.rs` (`CommandBarService`), ui: `ui/menu_bar.cpp`, `command_ui.cpp`, `tools/ui/command-bars.bbs` |
+| Menu bar / toolbars | `core/commandbars/*`, `app/bars.rs` (`CommandBarService`), ui: `ui/popups/menu_bar.cpp`, `command_ui.cpp`, `tools/ui/command-bars.bbs` |
 | Command palette | `core/commands/{palette,matcher,goto}.rs`, `app/palette.rs`, ui: `palette_view.cpp`, `tools/ui/palette.bbs` |
 | Settings page | `app/settings_svc.rs`, `core/settings/*`, ui: `settings_view.cpp`, `tools/ui/settings.bbs` |
 | Theming | `core/theming/*` (`catalog`, `resolver`, `system`), `app/themes.rs`, ui: `gfx/palette.cpp`, `gfx/tokens.h` |
 | App icon | `tools/icons/build-app-icon.ps1` -> `src/app/app/app.ico` |
 | Icons | `tools/icons/icons.txt` (the mapping) -> `src/app/gfx/icons.gen.h` (generated) via `build-icons.ps1` |
-| Columns (file list) | `core/columns/*`, `app/columns.rs`, ui: `shell_props.cpp` (shell property values), `ui/list_view.cpp` |
+| Columns (file list) | `core/columns/*`, `app/columns.rs`, ui: `shell_props.cpp` (shell property values), `ui/collections/list_view.cpp` |
 | Tabs / panes / layout | `app/tabs.rs`, `app/session.rs`, `app/api.rs`, `core/layout/*`, ui: `main_view.cpp` |
 | Flat branch view (Ctrl+B) | `FlatViewRules` in `core/rules.rs`, `SearchService::list_subtree` in `core/fs/search_service.rs`, `app/tabs.rs` |
-| Thumbnail tiles / scrolling | `ui/tile_view.cpp` (uniform tiles by arithmetic), `thumbs.cpp` (4-slot shell gate), `tools/ui/tiles.bbs` |
+| Thumbnail tiles / scrolling | `ui/collections/tile_view.cpp` (uniform tiles by arithmetic), `thumbs.cpp` (4-slot shell gate), `tools/ui/tiles.bbs` |
 | UI test harness | `harness/*` (`runner*.cpp`, `session.cpp`, `sandbox.cpp`, `crash.cpp`), `tools/ui/*.bbs`, `.claude/skills/verify` |
-| FFI | `include/bbcore.h` (generated), `bb-ffi/src/*`, `app/events.rs`, `src/app/views/model.h` (JSON models) |
+| FFI | `include/bbcore.h` (generated), `bb-ffi/src/*`, `app/events.rs`, `src/app/views/bridge/model.h` (JSON models) |
 | Benchmarks / performance evidence | `src/crates/bb-bench` (`run`, `ui`, `startup`, `compare`, `baseline`, `report`, `corpus`), `core/benchmarking/*`, `bench/baselines/<machine-key>.json`, `docs/performance.md` (generated), `tools/ui/bench-*.bbs`, `shell/startup_trace.rs`, `bench/README.md` |
 
 ## Native gotchas
@@ -194,7 +197,7 @@ behavior - this table only says where.
   handler, elevation, prompts, index) - keep that when adding a seam (`app/seams.rs`).
 - **Tool windows are windows, dialogs are cards.** Disk usage, duplicates, changes, checksums, file
   compare, history, transfer and the theme editor are modeless owned `platform::Window`s
-  (`MainView::is_tool_window`, `views/tool_window.cpp`) and never set "a dialog is up", so the
+  (`MainView::is_tool_window`, `views/tools/tool_window.cpp`) and never set "a dialog is up", so the
   folders stay live; everything else is a modal card in the `DialogLayer`. A run reports dialogs
   instead of opening them unless `live-dialogs on`.
 - **The product's confirm and notice seams park a worker on the window** (`Questions`,

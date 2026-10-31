@@ -12,8 +12,8 @@
 #include <cwctype>
 #include <fstream>
 
-#include "views/json.h"
-#include "views/main_view.h"
+#include "views/bridge/json.h"
+#include "views/main/main_view.h"
 
 namespace bbh {
 

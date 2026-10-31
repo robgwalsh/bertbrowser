@@ -2,7 +2,7 @@
 // launched (tools/BertBrowser.Harness/CannedShellMenuSource.cs). What a person's machine adds to the menu
 // differs from one to the next; a screenshot must not.
 #pragma once
-#include "views/shell_menu.h"
+#include "views/shell/shell_menu.h"
 
 namespace bbh {
 

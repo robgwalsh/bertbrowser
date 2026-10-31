@@ -7,7 +7,7 @@
 #pragma once
 #include "gfx/resources.h"
 #include "gfx/surface.h"
-#include "ui/popup.h"
+#include "ui/popups/popup.h"
 
 #include <memory>
 #include <vector>

@@ -4,7 +4,7 @@
 #pragma once
 #include "sandbox.h"
 #include "session.h"
-#include "ui/popup_layer.h"
+#include "ui/popups/popup_layer.h"
 
 #include <functional>
 #include <memory>

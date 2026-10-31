@@ -7,8 +7,8 @@
 #include "gfx/resources.h"
 #include "platform/application.h"
 #include "platform/window.h"
-#include "views/core.h"
-#include "views/main_view.h"
+#include "views/bridge/core.h"
+#include "views/main/main_view.h"
 
 #include <atomic>
 #include <memory>

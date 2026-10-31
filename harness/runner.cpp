@@ -11,8 +11,8 @@
 #include <fstream>
 #include <set>
 
-#include "views/folder_tree.h"
-#include "views/json.h"
+#include "views/main/folder_tree.h"
+#include "views/bridge/json.h"
 
 namespace bbh {
 

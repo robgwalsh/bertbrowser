@@ -11,13 +11,13 @@
 #include <filesystem>
 #include <fstream>
 
-#include "views/command_ui.h"
-#include "views/ops_menus.h"
-#include "views/dialogs.h"
-#include "views/forms.h"
-#include "views/json.h"
-#include "views/tool_state.h"
-#include "views/model.h"
+#include "views/chrome/command_ui.h"
+#include "views/dialogs/ops_menus.h"
+#include "views/dialogs/dialogs.h"
+#include "views/dialogs/forms.h"
+#include "views/bridge/json.h"
+#include "views/tools/tool_state.h"
+#include "views/bridge/model.h"
 
 namespace bbh {
 

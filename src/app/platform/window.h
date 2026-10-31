@@ -7,7 +7,7 @@
 #pragma once
 #include "gfx/resources.h"
 #include "gfx/surface.h"
-#include "ui/widget.h"
+#include "ui/core/widget.h"
 
 #include <functional>
 #include <stdexcept>

@@ -2,7 +2,7 @@
 // change the manifest and re-run the script. Artwork is Fluent UI System Icons, MIT licensed:
 // https://github.com/microsoft/fluentui-system-icons
 #pragma once
-#include "ui/controls.h"
+#include "ui/controls/controls.h"
 
 #include <cstring>
 

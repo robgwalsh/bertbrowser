@@ -5,12 +5,12 @@
 #include "platform/application.h"
 #include "platform/window.h"
 #include "test.h"
-#include "ui/controls.h"
-#include "ui/edit.h"
-#include "ui/layout.h"
-#include "ui/list_view.h"
-#include "ui/scroll.h"
-#include "ui/tree_view.h"
+#include "ui/controls/controls.h"
+#include "ui/controls/edit.h"
+#include "ui/core/layout.h"
+#include "ui/collections/list_view.h"
+#include "ui/core/scroll.h"
+#include "ui/collections/tree_view.h"
 
 #include <cstdlib>
 #include <memory>

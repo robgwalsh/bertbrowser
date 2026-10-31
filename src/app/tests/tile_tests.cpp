@@ -1,6 +1,6 @@
 #include "fixture.h"
-#include "ui/pickers.h"
-#include "ui/tile_view.h"
+#include "ui/controls/pickers.h"
+#include "ui/collections/tile_view.h"
 
 #include <algorithm>
 #include <map>

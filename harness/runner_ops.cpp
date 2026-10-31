@@ -13,11 +13,11 @@
 #include <cstdlib>
 #include <fstream>
 
-#include "views/json.h"
-#include "views/model.h"
-#include "views/file_drag.h"
-#include "views/ops.h"
-#include "views/shell_menu.h"
+#include "views/bridge/json.h"
+#include "views/bridge/model.h"
+#include "views/shell/file_drag.h"
+#include "views/bridge/ops.h"
+#include "views/shell/shell_menu.h"
 
 namespace bbh {
 

@@ -1,9 +1,9 @@
 #include "fixture.h"
 #include "gfx/icons.gen.h"
-#include "ui/inputs.h"
-#include "ui/menu_bar.h"
-#include "ui/pickers.h"
-#include "ui/tabs.h"
+#include "ui/controls/inputs.h"
+#include "ui/popups/menu_bar.h"
+#include "ui/controls/pickers.h"
+#include "ui/controls/tabs.h"
 
 #include <map>
 #include <string>

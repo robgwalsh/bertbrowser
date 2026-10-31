@@ -8,20 +8,20 @@ add_library(bbapp STATIC
   gfx/palette.cpp
   gfx/text_cache.cpp
   gfx/surface.cpp
-  ui/widget.cpp
-  ui/layout.cpp
-  ui/controls.cpp
-  ui/scroll.cpp
-  ui/edit.cpp
-  ui/list_view.cpp
-  ui/tree_view.cpp
-  ui/menu.cpp
-  ui/popup_layer.cpp
-  ui/menu_bar.cpp
-  ui/inputs.cpp
-  ui/tabs.cpp
-  ui/pickers.cpp
-  ui/tile_view.cpp
+  ui/core/widget.cpp
+  ui/core/layout.cpp
+  ui/controls/controls.cpp
+  ui/core/scroll.cpp
+  ui/controls/edit.cpp
+  ui/collections/list_view.cpp
+  ui/collections/tree_view.cpp
+  ui/popups/menu.cpp
+  ui/popups/popup_layer.cpp
+  ui/popups/menu_bar.cpp
+  ui/controls/inputs.cpp
+  ui/controls/tabs.cpp
+  ui/controls/pickers.cpp
+  ui/collections/tile_view.cpp
 )
 target_include_directories(bbapp PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(bbapp PUBLIC
@@ -32,40 +32,40 @@ target_link_libraries(bbapp PUBLIC
 # bbviews: the main window's view over the FFI. Separate from bbapp so the widget tests stay free of the
 # Rust core; the product and the harness link it.
 add_library(bbviews STATIC
-  views/core.cpp
-  views/chrome.cpp
-  views/command_ui.cpp
-  views/forms.cpp
-  views/settings_view.cpp
-  views/palette_view.cpp
-  views/sidebar.cpp
-  views/dialogs.cpp
-  views/thumbs.cpp
-  views/shell_icons.cpp
-  views/shell_props.cpp
-  views/folder_tree.cpp
-  views/pane_images.cpp
-  views/code_view.cpp
-  views/image_view.cpp
-  views/font_view.cpp
-  views/media_player.cpp
-  views/media_pane.cpp
-  views/preview_pane.cpp
-  views/metadata_pane.cpp
-  views/property_host.cpp
-  views/tool_widgets.cpp
-  views/tool_state.cpp
-  views/tool_dialogs.cpp
-  views/tool_window.cpp
-  views/file_pickers.cpp
-  views/tool_banner.cpp
-  views/main_view.cpp
-  views/ops_dialogs.cpp
-  views/ops_forms.cpp
-  views/file_drag.cpp
-  views/ops_menus.cpp
-  views/shell_menu_real.cpp
-  views/settings_ctxmenu.cpp
+  views/bridge/core.cpp
+  views/chrome/chrome.cpp
+  views/chrome/command_ui.cpp
+  views/dialogs/forms.cpp
+  views/settings/settings_view.cpp
+  views/chrome/palette_view.cpp
+  views/main/sidebar.cpp
+  views/dialogs/dialogs.cpp
+  views/shell/thumbs.cpp
+  views/shell/shell_icons.cpp
+  views/shell/shell_props.cpp
+  views/main/folder_tree.cpp
+  views/panes/pane_images.cpp
+  views/panes/code_view.cpp
+  views/panes/image_view.cpp
+  views/panes/font_view.cpp
+  views/panes/media_player.cpp
+  views/panes/media_pane.cpp
+  views/panes/preview_pane.cpp
+  views/panes/metadata_pane.cpp
+  views/panes/property_host.cpp
+  views/tools/tool_widgets.cpp
+  views/tools/tool_state.cpp
+  views/tools/tool_dialogs.cpp
+  views/tools/tool_window.cpp
+  views/dialogs/file_pickers.cpp
+  views/tools/tool_banner.cpp
+  views/main/main_view.cpp
+  views/dialogs/ops_dialogs.cpp
+  views/dialogs/ops_forms.cpp
+  views/shell/file_drag.cpp
+  views/dialogs/ops_menus.cpp
+  views/shell/shell_menu_real.cpp
+  views/settings/settings_ctxmenu.cpp
 )
 target_include_directories(bbviews PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 # Header and system libraries only: the Rust archive itself is linked by the executable, because the

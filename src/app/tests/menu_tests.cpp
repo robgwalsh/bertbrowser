@@ -1,7 +1,7 @@
 #include "fixture.h"
 #include "gfx/icons.gen.h"
 #include "platform/popup_window.h"
-#include "ui/menu_bar.h"
+#include "ui/popups/menu_bar.h"
 
 #include <string>
 #include <vector>
