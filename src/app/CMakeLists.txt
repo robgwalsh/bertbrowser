@@ -74,7 +74,15 @@ target_link_libraries(bbviews PUBLIC bbapp bbcore_abi mfplat mf mfuuid)
 
 # The product. Never launched to check UI work; the harness is the way to see the interface.
 add_executable(BertBrowser WIN32 app/main.cpp app/version.cpp app/app.rc)
-target_link_libraries(BertBrowser PRIVATE bbviews bbcore)
+target_link_libraries(BertBrowser PRIVATE bbviews bbcore delayimp)
+# Every DLL in the import table is loaded one after another before main runs. These are not needed for the first
+# frame, so they are loaded when first called. Not the drawing DLLs: the first frame waits for those wherever they
+# load, and delaying them only moved the time from before main to after it (measured: no change to the rows on
+# screen). Media Foundation is absent on the N editions of Windows; media_player.cpp checks for it, since a
+# delay-loaded DLL that is missing raises an exception at its first call.
+target_link_options(BertBrowser PRIVATE
+  /DELAYLOAD:MFPlat.dll /DELAYLOAD:PROPSYS.dll /DELAYLOAD:WS2_32.dll /DELAYLOAD:psapi.dll /DELAYLOAD:bcrypt.dll
+  /DELAYLOAD:shlwapi.dll /DELAYLOAD:oleaut32.dll)
 
 # The elevated helpers sit beside the app and are found there and nowhere else: what they are
 # started to do is the one thing that gets an administrator token.

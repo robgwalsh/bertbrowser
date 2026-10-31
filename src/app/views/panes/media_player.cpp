@@ -38,9 +38,18 @@ struct MediaPlayer::Impl {
     uint32_t tex_w = 0, tex_h = 0;
 };
 
+namespace {
+// The N editions of Windows ship without Media Foundation, and the product delay-loads it: calling into a DLL
+// that is not there raises an exception, so it is asked for by name first.
+bool g_media_foundation = false;
+}  // namespace
+
 MediaPlayer::MediaPlayer(gfx::GfxDevice& dev) : impl_(std::make_unique<Impl>()), dev_(dev) {
     static std::once_flag started;
-    std::call_once(started, [] { MFStartup(MF_VERSION); });
+    std::call_once(started, [] {
+        g_media_foundation = LoadLibraryW(L"mfplat.dll") != nullptr;
+        if (g_media_foundation) MFStartup(MF_VERSION);
+    });
 }
 
 MediaPlayer::~MediaPlayer() { close(); }
@@ -49,6 +58,10 @@ bool MediaPlayer::open(const std::wstring& path) {
     close();
     ready_ = failed_ = false;
     video_w_ = video_h_ = 0;
+    if (!g_media_foundation) {
+        failed_ = true;
+        return false;
+    }
     ID3D11Device* d3d = dev_.d3d();
     {
         ComPtr<ID3D10Multithread> mt;
