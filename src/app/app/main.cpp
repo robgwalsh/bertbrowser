@@ -8,6 +8,7 @@
 // A launch with BERTBROWSER_STARTUP_TRACE set is a measurement: the window is parked offscreen and
 // the core skips everything that acts on the machine (see bb_launch_serve).
 #include <windows.h>
+#include <dwmapi.h>
 #include <shellapi.h>
 
 #include <memory>
@@ -33,6 +34,11 @@ std::wstring data_dir() {
     std::wstring dir = env(L"BERTBROWSER_DATA_DIR");
     if (!dir.empty()) return dir;
     return env(L"USERPROFILE") + L"\\.bertbrowser";
+}
+
+void set_cloaked(HWND hwnd, bool on) {
+    const BOOL value = on ? TRUE : FALSE;
+    DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &value, sizeof(value));
 }
 
 int fail(const wchar_t* what) {
@@ -227,11 +233,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                             DestroyWindow(window.hwnd());
                         };
                     }
+                    // Maximised, it takes its real size out of sight: painted first and maximised after, the
+                    // first frame would be thrown away at once for another of the new size.
+                    if (maximize) {
+                        set_cloaked(window.hwnd(), true);
+                        ShowWindow(window.hwnd(), SW_SHOWMAXIMIZED);
+                    }
                     // The rows have usually landed by now, with the event that says so still queued. Painted
                     // without them the window would appear empty and need a second whole frame.
                     view.await_first_listing(25);
                     window.paint_first_frame();  // the window appears with its content, not blank
-                    if (maximize) ShowWindow(window.hwnd(), SW_SHOWMAXIMIZED);
+                    if (maximize) set_cloaked(window.hwnd(), false);
                     else window.show();
                     mark(L"windowShown");
                     // Only now: a driver loading holds locks the first frame would otherwise wait on (the two
