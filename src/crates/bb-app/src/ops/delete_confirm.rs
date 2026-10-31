@@ -94,7 +94,7 @@ impl Inner {
 
         // Inside an archive: no planner, no survey and no Recycle Bin. The container is rewritten
         // without the entries, and the whole original is what Undo puts back.
-        if crate::ops_arch::archive_of(&paths[0]).is_some() {
+        if crate::ops::arch::archive_of(&paths[0]).is_some() {
             let what = if paths.len() == 1 {
                 bb_paths::file_name(&paths[0]).to_string()
             } else {

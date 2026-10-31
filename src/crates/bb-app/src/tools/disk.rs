@@ -226,7 +226,7 @@ impl Inner {
         };
         let theme: ResolvedTheme = crate::app::lock(&self.extra.theme).resolved();
         let ramp = TreemapPalette::ramp(&theme, 12);
-        let can_go_up = root_opt.is_some_and(|p| crate::tabs::parent_path(p).is_some());
+        let can_go_up = root_opt.is_some_and(|p| crate::browse::tabs::parent_path(p).is_some());
         Ok(json!({
             "root": root,
             "rootDisplay": if root.is_empty() { "This PC" } else { root },

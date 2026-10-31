@@ -200,7 +200,7 @@ impl Inner {
         let last = active
             .and_then(|t| self.tab(t).ok())
             .map(|c| lock(&c).path.clone())
-            .filter(|p| !p.is_empty() && !crate::palette::is_hidden_dir(p));
+            .filter(|p| !p.is_empty() && !crate::commands::palette::is_hidden_dir(p));
         let mut s = lock(&self.settings);
         s.session = Some(layout);
         s.last_path = last;

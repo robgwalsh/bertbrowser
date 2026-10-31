@@ -32,10 +32,10 @@ use bb_core::undo::SyncRecord;
 use serde_json::{Value, json};
 
 use crate::app::{Inner, lock};
+use crate::browse::rows::Row;
 use crate::config::Fakes;
 use crate::events::{AppEvent, Model};
 use crate::ids::{AppError, AppResult, OpId, PaneId, TabId};
-use crate::rows::Row;
 
 /// What one tab of a comparison knows: which side it is, where that side starts, and the verdicts.
 pub(crate) struct TabCompare {
@@ -201,7 +201,7 @@ impl Inner {
         if let Some(why) = CompareRefusal::check(&left_root, &right_root, &FileSystemCompareProbe) {
             return Err(self.compare_refused(why));
         }
-        lock(&self.extra.ui).compare = Some(crate::misc::CompareState {
+        lock(&self.extra.ui).compare = Some(crate::services::shell::CompareState {
             left,
             right,
             differences_only: false,

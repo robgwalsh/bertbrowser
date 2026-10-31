@@ -53,6 +53,8 @@ against a scratch data directory. Exception: the user explicitly asking you to l
   instance, foreground, folder handler, updates, startup trace, index/elevation pipes).
 - `src/crates/bb-app` - orchestration (tabs, listings, operations queue, palette, settings pages,
   tool-window models, session). No UI; the FFI, the harness and tests call its `api`.
+  Folders: `api` (the public `impl App` surface), `browse`, `ops`, `tools`, `commands`, `side_pane`, `services`;
+  the spine (`app`, `events`, `ids`, `seams`, `session`, ...) stays at the top.
 - `src/crates/bb-ffi` - the C ABI staticlib `bbcore`; cbindgen reads this crate alone.
   `bb-ffi-harness` = the same ABI plus test fixtures (`bbcore_harness.lib`); `bb-test-support` = dev-dep fixtures.
 - `src/crates/bb-indexer`, `bb-elevator` - the two elevated exes (`requireAdministrator`). They link
@@ -91,54 +93,54 @@ behavior - this table only says where.
 | Path canonicalization | `bb-paths` (`key.rs` PathKey, `unique.rs`, `natural.rs`, `text.rs`) |
 | Database / migrations | `core/data/db.rs`, `core/data/migrations/NNN_*.sql` (`001_schema.sql` is the fresh baseline) |
 | Directory sizes | `core/mft/dir_size_builder.rs`, `core/data/dir_size.rs`, `docs/search-indexing.md` |
-| Move/copy/drag-drop/paste | `core/transfer/*` (`planner`, `executor`, `copier`, `drop_in`, `drag_out`), `app/ops.rs`, ui: `file_drag.cpp` (OLE drop source/target, clipboard) |
-| Undo / redo history | `core/undo/*` (`stack`, `navigator`, `record` + `*_record`, `host`, `held_size`), `core/transfer/redo.rs`, `core/delete/redo.rs`, `app/ops.rs`/`ops_api.rs`, ui: `ops_dialogs.cpp` (History window), `ops_menus.cpp` (title-bar split buttons), History page of `settings_view.cpp`, `tools/ui/undo-history.bbs` |
-| Queue / pause / resume | `core/transfer/pause_gate.rs`, `queue_rules.rs`, `progress.rs`, `app/ops.rs` + `ops_ui.rs`, ui: `ops_dialogs.cpp` (transfer window) |
-| Conflict resolution (per item) | `core/transfer/conflict_prompt.rs`, `app/seams.rs`, `app/ops_ui.rs`, ui: `ops_dialogs.cpp` (conflicts dialog) |
-| Merging a folder into a folder | `core/transfer/merge_expander.rs`, `models.rs` (`TransferClash`), `app/ops.rs` |
-| Right-drag verb menu | `core/transfer/right_drop_menu.rs`, `app/ops_api.rs`, ui: `file_drag.cpp`, `ops_menus.cpp` |
-| Shortcuts (`.lnk`) | `core/shortcuts/*`, `app/shell_link.rs` (the one writer, `IShellLink`) |
+| Move/copy/drag-drop/paste | `core/transfer/*` (`planner`, `executor`, `copier`, `drop_in`, `drag_out`), `app/ops/mod.rs`, ui: `file_drag.cpp` (OLE drop source/target, clipboard) |
+| Undo / redo history | `core/undo/*` (`stack`, `navigator`, `record` + `*_record`, `host`, `held_size`), `core/transfer/redo.rs`, `core/delete/redo.rs`, `app/ops/mod.rs`/`api/ops.rs`, ui: `ops_dialogs.cpp` (History window), `ops_menus.cpp` (title-bar split buttons), History page of `settings_view.cpp`, `tools/ui/undo-history.bbs` |
+| Queue / pause / resume | `core/transfer/pause_gate.rs`, `queue_rules.rs`, `progress.rs`, `app/ops/mod.rs` + `ops/ui.rs`, ui: `ops_dialogs.cpp` (transfer window) |
+| Conflict resolution (per item) | `core/transfer/conflict_prompt.rs`, `app/seams.rs`, `app/ops/ui.rs`, ui: `ops_dialogs.cpp` (conflicts dialog) |
+| Merging a folder into a folder | `core/transfer/merge_expander.rs`, `models.rs` (`TransferClash`), `app/ops/mod.rs` |
+| Right-drag verb menu | `core/transfer/right_drop_menu.rs`, `app/api/ops.rs`, ui: `file_drag.cpp`, `ops_menus.cpp` |
+| Shortcuts (`.lnk`) | `core/shortcuts/*`, `app/ops/shell_link.rs` (the one writer, `IShellLink`) |
 | Rename (incl. advanced/tokens) | `core/rename/*` (`pattern`, `planner`, `executor`, `rule`, `template`) |
-| Create new item / ShellNew | `core/newitem/*` (`shell_new_import`), `app/newitem.rs` |
+| Create new item / ShellNew | `core/newitem/*` (`shell_new_import`), `app/ops/newitem.rs` |
 | Delete / Recycle Bin | `core/delete/*` (`recycle_bin` = `IFileOperation` + restore over COM) |
-| Disk usage | `core/diskusage/*`, `app/tools_disk.rs`, ui: `tool_dialogs.cpp`, `tool_widgets.cpp` (treemap) |
+| Disk usage | `core/diskusage/*`, `app/tools/disk.rs`, ui: `tool_dialogs.cpp`, `tool_widgets.cpp` (treemap) |
 | Duplicate finder | `core/duplicates/*` |
-| Compare / sync two folders | `core/compare/*`, `app/compare_view.rs`, ui: `tool_banner.cpp` |
-| Compare two files by content | `core/compare/{file_content_comparer,file_compare_plan,content_settlement}.rs`, `core/diff/*`, `app/tools_filecompare.rs` |
-| Checksums (hash / verify) | `core/checksums/*`, `app/tools_checksum.rs`, ui: `tool_dialogs.cpp` |
-| Metadata editing (pictures, audio/video tags, documents, cover art, strip) | `core/metadata/*` (`fields`, `codec` + `codecs`, `jpeg`/`png`/`webp`/`tiff` over `exif` + `exif_fields`, `xmp`, `iptc`, `audio` + `audio_payload` + in-house `asf`, `zip_document` (`openxml`, `epub`), `planner`, `executor`), `core/fs/staged_replace.rs`, `core/undo/metadata_edit_record.rs`, `app/metadata_pane.rs`, ui: `metadata_pane.cpp`, `bb-test-support` (`metadata_fixtures*`), `tools/ui/metadata.bbs` |
+| Compare / sync two folders | `core/compare/*`, `app/tools/compare_view.rs`, ui: `tool_banner.cpp` |
+| Compare two files by content | `core/compare/{file_content_comparer,file_compare_plan,content_settlement}.rs`, `core/diff/*`, `app/tools/filecompare.rs` |
+| Checksums (hash / verify) | `core/checksums/*`, `app/tools/checksum.rs`, ui: `tool_dialogs.cpp` |
+| Metadata editing (pictures, audio/video tags, documents, cover art, strip) | `core/metadata/*` (`fields`, `codec` + `codecs`, `jpeg`/`png`/`webp`/`tiff` over `exif` + `exif_fields`, `xmp`, `iptc`, `audio` + `audio_payload` + in-house `asf`, `zip_document` (`openxml`, `epub`), `planner`, `executor`), `core/fs/staged_replace.rs`, `core/undo/metadata_edit_record.rs`, `app/side_pane/metadata_pane.rs`, ui: `metadata_pane.cpp`, `bb-test-support` (`metadata_fixtures*`), `tools/ui/metadata.bbs` |
 | Metadata for types with no codec (Windows' property handlers) | `core/metadata/property_fallback.rs`, ui: `property_host.cpp` (the COM side), `tools/ui/metadata.bbs` ("written by Windows") |
-| Side pane (none / preview / metadata) | `side_pane` in `app/tabs.rs` / `commands.rs`, ui: `main_view.cpp` (three-button selector), `preview_pane.cpp`, `metadata_pane.cpp` |
-| File dates (modified/created) | `core/timestamps/*`, `core/undo/timestamp_record.rs`, the two date rows of `app/metadata_pane.rs` |
+| Side pane (none / preview / metadata) | `side_pane` in `app/browse/tabs.rs` / `commands.rs`, ui: `main_view.cpp` (three-button selector), `preview_pane.cpp`, `metadata_pane.cpp` |
+| File dates (modified/created) | `core/timestamps/*`, `core/undo/timestamp_record.rs`, the two date rows of `app/side_pane/metadata_pane.rs` |
 | Rename from tags (`{artist}`, `{taken:...}`) | `core/rename/{template,pattern,metadata_fields}.rs` |
 | Search query language | `core/search/*`, `docs/search-indexing.md` |
 | Content search (`content:`) | `core/search/{node (the `content:` term),content_reader,content_scanner,content_text,snippet}.rs` |
-| Saved workspaces | `core/data/saved_workspace.rs`, `SavedWorkspaceRules` in `core/rules.rs`, `app/saved.rs`, ui: `sidebar.cpp`, Workspaces page of `settings_view.cpp` |
-| Saved searches | `core/data/saved_search.rs`, `SavedSearchRules` in `core/rules.rs`, `app/saved.rs`, ui: `dialogs.cpp`, `sidebar.cpp`, Saved searches page |
+| Saved workspaces | `core/data/saved_workspace.rs`, `SavedWorkspaceRules` in `core/rules.rs`, `app/services/saved.rs`, ui: `sidebar.cpp`, Workspaces page of `settings_view.cpp` |
+| Saved searches | `core/data/saved_search.rs`, `SavedSearchRules` in `core/rules.rs`, `app/services/saved.rs`, ui: `dialogs.cpp`, `sidebar.cpp`, Saved searches page |
 | Elevated MFT indexer | `src/crates/bb-indexer`, `core/mft/*` (`reader`, `volume_indexer`, `host`, `client`, `service`, `presence`), `core/ipc/{index_endpoint,index_protocol,indexer_presence_lock}.rs` |
-| Indexer banner / sign-in task | `core/mft/{banner_rules,autostart}.rs`, `app/index.rs`, `shell/indexing.rs` |
-| Change timeline ("What changed") | `core/changes/*`, `core/data/change_log.rs`, `app/tools_changes.rs`, History page of `settings_view.cpp` |
+| Indexer banner / sign-in task | `core/mft/{banner_rules,autostart}.rs`, `app/services/index.rs`, `shell/indexing.rs` |
+| Change timeline ("What changed") | `core/changes/*`, `core/data/change_log.rs`, `app/tools/changes.rs`, History page of `settings_view.cpp` |
 | Elevated file-op retry | `src/crates/bb-elevator`, `core/elevation/*`, `core/ipc/elevation_protocol.rs`, `shell/elevation.rs` |
-| Launching other programs | `shell/launcher.rs`, `app/launching.rs`, `core/launch/*`, `shell/run_as.rs` |
+| Launching other programs | `shell/launcher.rs`, `app/ops/launching.rs`, `core/launch/*`, `shell/run_as.rs` |
 | Shell context menu (7-Zip, Git, TortoiseSVN...) | `core/shellmenu/*` (`keys`, `rules`, `built_in`, `layout`, `separators`, `static_verb`), ui: `shell_menu_real.cpp` (hosts the handlers), `ops_menus.cpp` (composer), Context menu page `settings_ctxmenu.cpp`, `harness/canned_shell_menu.h`, `tools/ui/shellmenu.bbs` |
 | Startup / CLI / single instance | `core/cli/*`, `shell/single_instance.rs`, `core/ipc/instance_endpoint.rs`, `bb-ffi/src/startup.rs`, `app/requests.rs`, ui: `src/app/app/main.cpp` |
 | Foreground raise | `shell/foreground.rs`, `ForegroundRaiseRules` in `core/rules.rs` |
 | Default folder handler (shell) | `core/shell_integration/*`, `shell/folder_handler.rs` |
 | Updates / legacy data | `shell/updates.rs`, `core/updates/mod.rs` (`ReleaseChannel`), `core/settings/legacy.rs` |
-| Preview pane (incl. hex/raw) | `core/preview/*` (`classifier`, `text_reader`, `hex_reader`, `syntax`), `app/preview.rs`, ui: `preview_pane.cpp`, `code_view.cpp`, `image_view.cpp`, `font_view.cpp` |
+| Preview pane (incl. hex/raw) | `core/preview/*` (`classifier`, `text_reader`, `hex_reader`, `syntax`), `app/side_pane/preview.rs`, ui: `preview_pane.cpp`, `code_view.cpp`, `image_view.cpp`, `font_view.cpp` |
 | Video playback in the preview | `core/preview/playlist.rs`, ui: `media_player.cpp`, `media_pane.cpp` (Media Foundation `IMFMediaEngine`) |
-| Animated GIFs in the preview | `core/preview/animation/*`, `app/gif_player.rs`, ui: `image_view.cpp`, `tools/ui/gif.bbs` |
+| Animated GIFs in the preview | `core/preview/animation/*`, `app/side_pane/gif_player.rs`, ui: `image_view.cpp`, `tools/ui/gif.bbs` |
 | Archives (zip/7z/tar/rar) | `core/archives/*` (`archive_path`, `reader`, `index_builder`, `writer`, `edit_*`, `extract_*`) |
-| Commands / keyboard shortcuts | `core/commands/*` (`catalog`, `chord`, `keymap`, `verbs`), `app/commands.rs` (`why_not_now`), `app/keys.rs`, ui: `window.cpp` (key -> chord), `command_ui.cpp`, `tools/ui/{keys,keyboard,commands}.bbs` |
-| Menu bar / toolbars | `core/commandbars/*`, `app/bars.rs` (`CommandBarService`), ui: `ui/popups/menu_bar.cpp`, `command_ui.cpp`, `tools/ui/command-bars.bbs` |
-| Command palette | `core/commands/{palette,matcher,goto}.rs`, `app/palette.rs`, ui: `palette_view.cpp`, `tools/ui/palette.bbs` |
-| Settings page | `app/settings_svc.rs`, `core/settings/*`, ui: `settings_view.cpp`, `tools/ui/settings.bbs` |
-| Theming | `core/theming/*` (`catalog`, `resolver`, `system`), `app/themes.rs`, ui: `gfx/palette.cpp`, `gfx/tokens.h` |
+| Commands / keyboard shortcuts | `core/commands/*` (`catalog`, `chord`, `keymap`, `verbs`), `app/commands/mod.rs` (`why_not_now`), `app/commands/keys.rs`, ui: `window.cpp` (key -> chord), `command_ui.cpp`, `tools/ui/{keys,keyboard,commands}.bbs` |
+| Menu bar / toolbars | `core/commandbars/*`, `app/commands/bars.rs` (`CommandBarService`), ui: `ui/popups/menu_bar.cpp`, `command_ui.cpp`, `tools/ui/command-bars.bbs` |
+| Command palette | `core/commands/{palette,matcher,goto}.rs`, `app/commands/palette.rs`, ui: `palette_view.cpp`, `tools/ui/palette.bbs` |
+| Settings page | `app/services/settings.rs`, `core/settings/*`, ui: `settings_view.cpp`, `tools/ui/settings.bbs` |
+| Theming | `core/theming/*` (`catalog`, `resolver`, `system`), `app/services/themes.rs`, ui: `gfx/palette.cpp`, `gfx/tokens.h` |
 | App icon | `tools/icons/build-app-icon.ps1` -> `src/app/app/app.ico` |
 | Icons | `tools/icons/icons.txt` (the mapping) -> `src/app/gfx/icons.gen.h` (generated) via `build-icons.ps1` |
-| Columns (file list) | `core/columns/*`, `app/columns.rs`, ui: `shell_props.cpp` (shell property values), `ui/collections/list_view.cpp` |
-| Tabs / panes / layout | `app/tabs.rs`, `app/session.rs`, `app/api.rs`, `core/layout/*`, ui: `main_view.cpp` |
-| Flat branch view (Ctrl+B) | `FlatViewRules` in `core/rules.rs`, `SearchService::list_subtree` in `core/fs/search_service.rs`, `app/tabs.rs` |
+| Columns (file list) | `core/columns/*`, `app/browse/columns.rs`, ui: `shell_props.cpp` (shell property values), `ui/collections/list_view.cpp` |
+| Tabs / panes / layout | `app/browse/tabs.rs`, `app/session.rs`, `app/api/tabs.rs`, `core/layout/*`, ui: `main_view.cpp` |
+| Flat branch view (Ctrl+B) | `FlatViewRules` in `core/rules.rs`, `SearchService::list_subtree` in `core/fs/search_service.rs`, `app/browse/tabs.rs` |
 | Thumbnail tiles / scrolling | `ui/collections/tile_view.cpp` (uniform tiles by arithmetic), `thumbs.cpp` (4-slot shell gate), `tools/ui/tiles.bbs` |
 | UI test harness | `harness/*` (`runner*.cpp`, `session.cpp`, `sandbox.cpp`, `crash.cpp`), `tools/ui/*.bbs`, `.claude/skills/verify` |
 | FFI | `include/bbcore.h` (generated), `bb-ffi/src/*`, `app/events.rs`, `src/app/views/bridge/model.h` (JSON models) |

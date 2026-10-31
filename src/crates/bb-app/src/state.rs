@@ -6,13 +6,13 @@ use std::sync::{Arc, Mutex};
 use bb_core::data::Db;
 use bb_core::settings::{AppPaths, AppSettings};
 
-use crate::bars::{BarPage, BarsState};
+use crate::commands::bars::{BarPage, BarsState};
+use crate::commands::keys::KeyPage;
+use crate::commands::palette::PaletteModel;
 use crate::config::AppConfig;
-use crate::keys::KeyPage;
-use crate::misc::UiState;
-use crate::palette::PaletteModel;
-use crate::settings_svc::SaveState;
-use crate::themes::ThemeState;
+use crate::services::settings::SaveState;
+use crate::services::shell::UiState;
+use crate::services::themes::ThemeState;
 
 pub(crate) struct Extra {
     pub ui: Mutex<UiState>,
@@ -34,15 +34,15 @@ pub(crate) struct Extra {
     /// dozen files can reach the truncated case; a person never changes it.
     pub flat_cap: std::sync::atomic::AtomicUsize,
     /// The metadata pane of each tab, and the host's window onto the Windows property system.
-    pub metadata: crate::metadata_pane::MetadataState,
+    pub metadata: crate::side_pane::metadata_pane::MetadataState,
     /// The animated GIFs being played, by handle.
-    pub gifs: Mutex<std::collections::HashMap<u64, Arc<crate::gif_player::GifPlayer>>>,
+    pub gifs: Mutex<std::collections::HashMap<u64, Arc<crate::side_pane::gif_player::GifPlayer>>>,
     /// The tool windows' state: checksums, the file compare, the change timeline.
     pub tools: crate::tools::ToolsState,
     /// The operations UI: the transfer in flight, the queue, the questions a window answers.
-    pub ops: crate::ops_ui::OpsUi,
+    pub ops: crate::ops::ui::OpsUi,
     /// The delete the confirmation is asking about, and its survey.
-    pub delete: crate::delete_confirm::DeleteConfirm,
+    pub delete: crate::ops::delete_confirm::DeleteConfirm,
     /// Why the sign-in task did not change the last time it was asked to.
     pub autostart_warning: Mutex<String>,
     /// The New items page's "Import from Windows": whether one is reading, and what the last one said.
@@ -60,7 +60,7 @@ impl Extra {
         paths: &AppPaths,
         _config: &AppConfig,
         _db: &Arc<Db>,
-        ops: crate::ops_ui::OpsUi,
+        ops: crate::ops::ui::OpsUi,
     ) -> Extra {
         Extra {
             ui: Mutex::new(UiState::default()),
@@ -73,7 +73,7 @@ impl Extra {
             recents: Mutex::new(Vec::new()),
             last_thumbnail_scale: Mutex::new(0.3),
             machine_props: Mutex::new((Vec::new(), false)),
-            flat_cap: std::sync::atomic::AtomicUsize::new(crate::tabs::FLAT_ENTRY_CAP),
+            flat_cap: std::sync::atomic::AtomicUsize::new(crate::browse::tabs::FLAT_ENTRY_CAP),
             metadata: Default::default(),
             gifs: Default::default(),
             tools: Default::default(),

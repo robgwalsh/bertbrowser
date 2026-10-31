@@ -18,12 +18,12 @@ use bb_core::settings::{AppPaths, AppSettings};
 use bb_core::transfer::{PauseGate, TransferProgress};
 use bb_core::undo::UndoStack;
 
+use crate::browse::dirwatch::DirWatcher;
+use crate::browse::rows::Listing;
 use crate::config::{AppConfig, Fakes};
-use crate::dirwatch::DirWatcher;
 use crate::events::{AppEvent, EventHub, EventSink};
 use crate::ids::{AppError, AppResult, OpId, PaneId, TabId};
 use crate::pool::WorkerPool;
-use crate::rows::Listing;
 use crate::seams::{HarnessProbes, Seams};
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -102,7 +102,7 @@ pub(crate) struct TabData {
     pub columns: Option<Vec<ColumnSetting>>,
     pub columns_customized: bool,
     /// Shell-property values the host supplied, by row key.
-    pub props: HashMap<Arc<str>, crate::rows::RowProps>,
+    pub props: HashMap<Arc<str>, crate::browse::rows::RowProps>,
     /// The (modified, size) of a file when the host read its properties: a file written since is read again.
     pub prop_stamps: HashMap<Arc<str>, (i64, i64)>,
     /// The host has not yet looked at the property cells this listing needs.
@@ -120,7 +120,7 @@ pub(crate) struct TabData {
     pub preview_wrap: bool,
     pub preview_fit: bool,
     /// What the comparison on screen says about this tab's rows, while there is one.
-    pub compare: Option<Arc<crate::compare_view::TabCompare>>,
+    pub compare: Option<Arc<crate::tools::compare_view::TabCompare>>,
 }
 
 impl TabData {
@@ -349,8 +349,8 @@ impl App {
         let crawler = Arc::new(IndexCrawler::new(repository.clone()));
 
         let hub = EventHub::default();
-        let questions = Arc::new(crate::ops_ui::Questions::default());
-        let passwords = Arc::new(crate::ops_arch::SessionPasswords::default());
+        let questions = Arc::new(crate::ops::ui::Questions::default());
+        let passwords = Arc::new(crate::ops::arch::SessionPasswords::default());
         let (mut seams, probes) = match config.fakes {
             Fakes::Harness => {
                 let (seams, probes) = Seams::harness();
@@ -362,7 +362,7 @@ impl App {
             ),
         };
         if config.index_declined {
-            seams.index = crate::index::declined_index();
+            seams.index = crate::services::index::declined_index();
         }
         adjust(&mut seams);
         let watchers: Arc<dyn IndexWatcher> = match config.fakes {
@@ -431,7 +431,7 @@ impl App {
                 &paths,
                 &config,
                 &db,
-                crate::ops_ui::OpsUi::new(questions, passwords),
+                crate::ops::ui::OpsUi::new(questions, passwords),
             ),
             settings: Mutex::new(settings),
             settings_path,

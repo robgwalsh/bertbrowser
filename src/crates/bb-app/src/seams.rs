@@ -24,7 +24,7 @@ use bb_paths::PathKey;
 pub use bb_shell::LaunchRequest;
 
 use crate::events::EventHub;
-use crate::ops_ui::Questions;
+use crate::ops::ui::Questions;
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
@@ -345,7 +345,7 @@ impl Seams {
         seams.shell_new = Arc::new(SystemShellNew(
             data_dir.join(bb_core::settings::AppPaths::TEMPLATES_DIR_NAME),
         ));
-        seams.devices = Arc::new(crate::portable_devices::ShellPortableDevices);
+        seams.devices = Arc::new(crate::browse::portable_devices::ShellPortableDevices);
         seams.index = Arc::new(bb_shell::indexing::real_index_client(
             &data_dir.to_string_lossy(),
         ));
@@ -500,7 +500,7 @@ impl HarnessProbes {
     pub fn answer_named_conflicts(&self, answers: HashMap<String, ConflictResolution>) {
         *lock(&self.conflict_names) = answers
             .into_iter()
-            .map(|(k, v)| (crate::ops_ui::label_key(&k), v))
+            .map(|(k, v)| (crate::ops::ui::label_key(&k), v))
             .collect();
         *lock(&self.conflict_all) = None;
         *lock(&self.conflict_cancel) = false;
@@ -513,7 +513,7 @@ impl HarnessProbes {
 
     /// Notes a plan as the last one offered without asking.
     pub fn offer_conflicts(&self, plan: &TransferPlan) {
-        *lock(&self.conflict_model) = crate::ops_ui::conflict_model(plan, "Ctrl+Z");
+        *lock(&self.conflict_model) = crate::ops::ui::conflict_model(plan, "Ctrl+Z");
     }
 
     pub fn set_appearance(&self, appearance: SystemAppearance) {
@@ -564,8 +564,8 @@ impl AppConflictPrompt for HarnessProbes {
                 .filter_map(|t| {
                     let key = PathKey::canonicalize(&t.source_path).ok()?;
                     let by_name = named
-                        .get(&crate::ops_ui::label_key(&plan.label_for(t)))
-                        .or_else(|| named.get(&crate::ops_ui::label_key(t.name())))
+                        .get(&crate::ops::ui::label_key(&plan.label_for(t)))
+                        .or_else(|| named.get(&crate::ops::ui::label_key(t.name())))
                         .copied();
                     let answer = by_name
                         .or_else(|| posed.get(&key).copied())

@@ -8,9 +8,9 @@ use bb_core::rename::RenameRule;
 use serde_json::Value;
 
 use crate::app::{App, lock};
-use crate::gif_player::{GifOpenError, GifPlayer};
 use crate::ids::{AppError, AppResult, OpId, TabId};
-use crate::metadata_pane::{MetadataAction, ShellPropertyHost};
+use crate::side_pane::gif_player::{GifOpenError, GifPlayer};
+use crate::side_pane::metadata_pane::{MetadataAction, ShellPropertyHost};
 
 impl App {
     // ---- animated GIFs ----
@@ -19,7 +19,7 @@ impl App {
     /// Blocking (it reads the file), so call it from a worker.
     pub fn gif_open(&self, path: &str) -> Result<(u64, Arc<GifPlayer>), GifOpenError> {
         // Through the preview's own bounded read, so a GIF inside a zip plays as one on disk does.
-        let bytes = crate::preview::read_bounded(
+        let bytes = crate::side_pane::preview::read_bounded(
             &self.inner,
             path,
             bb_core::preview::PreviewClassifier::MAX_IMAGE_BYTES,

@@ -15,11 +15,11 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 
 use crate::app::{Inner, lock};
+use crate::browse::tabs::tab_title;
 use crate::commands::Ctx;
+use crate::commands::keys::CUSTOM_PREFIX;
 use crate::events::Model;
 use crate::ids::{AppError, AppResult, PaneId, TabId};
-use crate::keys::CUSTOM_PREFIX;
-use crate::tabs::tab_title;
 
 /// Two panes under comparison. The engine that fills it in is not part of this layer; the switch,
 /// its gates (no swapping panes, no moving tabs) and its state are.
@@ -106,7 +106,7 @@ impl Inner {
         let folder = if is_dir {
             path.to_string()
         } else {
-            crate::tabs::parent_path(path).ok_or(AppError::Stale)?
+            crate::browse::tabs::parent_path(path).ok_or(AppError::Stale)?
         };
         let pane = lock(&self.shell).active_pane;
         let tab = match how {

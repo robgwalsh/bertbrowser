@@ -6,6 +6,10 @@
 //! left to wonder. Spec: Core/Services/Commands, MainWindow.Commands, MainWindow.CommandBars
 //! (WhyNotNow).
 
+pub(crate) mod bars;
+pub(crate) mod keys;
+pub(crate) mod palette;
+
 use std::sync::Arc;
 
 use bb_core::archives::ArchiveFormats;
@@ -18,8 +22,8 @@ use bb_core::transfer::TransferVerb;
 use serde_json::{Value, json};
 
 use crate::app::{Inner, lock};
+use crate::browse::tabs::{SelectOp, parent_path};
 use crate::ids::{AppError, AppResult, PaneId, TabId};
-use crate::tabs::{SelectOp, parent_path};
 
 pub const SETTINGS_OPEN_REASON: &str = "Not while Settings is open.";
 pub const DIALOG_OPEN_REASON: &str = "Not while a dialog is open.";

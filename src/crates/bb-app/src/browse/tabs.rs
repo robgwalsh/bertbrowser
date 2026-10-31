@@ -20,11 +20,11 @@ use bb_core::search::SearchQuery;
 use bb_paths::PathKey;
 
 use crate::app::{Inner, TabCell, TabData, lock};
-use crate::dirwatch::DirWatcher;
+use crate::browse::dirwatch::DirWatcher;
+use crate::browse::rows::Row;
+use crate::browse::sort::SortSpec;
 use crate::events::AppEvent;
 use crate::ids::{AppError, AppResult, TabId};
-use crate::rows::Row;
-use crate::sort::SortSpec;
 
 /// How a gesture changes the selection. Indices are positions in the listing the caller holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1518,7 +1518,7 @@ enum Kind {
 /// Re-sorts the tab's rows in place (a new snapshot, same ids and selection).
 fn resort(t: &mut TabData) {
     let spec = t.sort_spec();
-    let mut rows: Vec<Arc<crate::rows::Row>> = t.listing.source_rows().to_vec();
+    let mut rows: Vec<Arc<crate::browse::rows::Row>> = t.listing.source_rows().to_vec();
     rows.sort_by(|a, b| spec.compare(a, b));
     t.version += 1;
     t.listing = t.make_listing(rows, t.is_flattened, t.is_flat_browse);

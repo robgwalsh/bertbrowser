@@ -8,6 +8,14 @@
 //! share the flag so Ctrl+Z cannot reach the previous record while one of them is running); a drop
 //! or paste queues behind the running job.
 
+pub(crate) mod arch;
+pub(crate) mod delete_confirm;
+pub(crate) mod launching;
+pub(crate) mod newitem;
+pub(crate) mod shell_link;
+pub(crate) mod ui;
+pub(crate) mod undo_host;
+
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock, Weak};
 
@@ -31,7 +39,7 @@ use bb_core::undo::{
 use crate::app::{Inner, Job, JobBody, OpState, UndoSummary, lock};
 use crate::events::AppEvent;
 use crate::ids::{AppError, AppResult, OpId};
-use crate::ops_ui::{JobMeta, TransferTracker};
+use crate::ops::ui::{JobMeta, TransferTracker};
 
 pub(crate) static RECYCLE_BIN: LazyLock<ShellRecycleBin> = LazyLock::new(ShellRecycleBin::new);
 pub(crate) static DELETE_PROBE: FileSystemDeleteProbe = FileSystemDeleteProbe;
@@ -569,10 +577,10 @@ impl Inner {
             return Err(AppError::Invalid("nothing to delete".into()));
         }
         // Inside a container a delete is a rewrite of it, held so it can be taken back.
-        if let Some(first) = crate::ops_arch::archive_of(&paths[0]) {
+        if let Some(first) = crate::ops::arch::archive_of(&paths[0]) {
             let mut edits = Vec::new();
             for p in &paths {
-                match crate::ops_arch::archive_of(p) {
+                match crate::ops::arch::archive_of(p) {
                     Some(a) if a.archive_file.eq_ignore_ascii_case(&first.archive_file) => {
                         edits.push(bb_core::archives::ArchiveEdit::remove(&a.entry_path));
                     }
@@ -716,7 +724,7 @@ impl Inner {
         if paths.is_empty() {
             return Err(AppError::Invalid("nothing to rename".into()));
         }
-        if let Some(a) = crate::ops_arch::archive_of(&paths[0]) {
+        if let Some(a) = crate::ops::arch::archive_of(&paths[0]) {
             if paths.len() != 1 {
                 return Err(AppError::Invalid(
                     "Entries inside an archive are renamed one at a time.".into(),
@@ -761,7 +769,10 @@ impl Inner {
                     let mut sources = sources.to_vec();
                     if uses_tags {
                         for s in &mut sources {
-                            s.tags = Some(crate::metadata_pane::tags_of(&s.path, s.is_directory));
+                            s.tags = Some(crate::side_pane::metadata_pane::tags_of(
+                                &s.path,
+                                s.is_directory,
+                            ));
                         }
                     }
                     RenamePlanner::local().plan(&sources, &rule)
@@ -918,7 +929,7 @@ impl Inner {
         let renames = RenameExecutor;
         // The plain host's executors, with an elevated second pass offered where Windows refuses part of
         // a step - as the forward operations do.
-        let host = crate::undo_host::AppUndoHost::new(
+        let host = crate::ops::undo_host::AppUndoHost::new(
             self,
             PlainUndoHost::without_archives(&transfers, &deletes, &renames),
         );

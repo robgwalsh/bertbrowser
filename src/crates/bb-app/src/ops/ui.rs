@@ -349,7 +349,7 @@ pub(crate) struct OpsUi {
     /// The questions a window answers; shared with the seams that ask them.
     pub questions: std::sync::Arc<Questions>,
     /// Passwords given for archives this session.
-    pub passwords: std::sync::Arc<crate::ops_arch::SessionPasswords>,
+    pub passwords: std::sync::Arc<crate::ops::arch::SessionPasswords>,
     pub tracker: Mutex<Option<TransferTracker>>,
     pub records: Mutex<Vec<JobRecord>>,
     pub pose: Mutex<Option<Pose>>,
@@ -363,7 +363,7 @@ pub(crate) struct OpsUi {
 impl OpsUi {
     pub(crate) fn new(
         questions: std::sync::Arc<Questions>,
-        passwords: std::sync::Arc<crate::ops_arch::SessionPasswords>,
+        passwords: std::sync::Arc<crate::ops::arch::SessionPasswords>,
     ) -> OpsUi {
         OpsUi {
             questions,

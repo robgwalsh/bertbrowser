@@ -399,7 +399,7 @@ impl Inner {
             CommandBarLists::SAVED_SEARCHES => self
                 .saved_searches()
                 .iter()
-                .map(|s| json!({ "id": s.name, "name": s.name, "detail": crate::saved::scope_column_text(s.scope), "tip": s.query }))
+                .map(|s| json!({ "id": s.name, "name": s.name, "detail": crate::services::saved::scope_column_text(s.scope), "tip": s.query }))
                 .collect(),
             CommandBarLists::BOOKMARKS => self
                 .bookmark_list()
@@ -731,7 +731,7 @@ impl Inner {
             }
             choices.push(choice);
         };
-        let mut commands: Vec<crate::keys::CommandRow> = CommandCatalog::all()
+        let mut commands: Vec<crate::commands::keys::CommandRow> = CommandCatalog::all()
             .iter()
             .map(|c| {
                 (

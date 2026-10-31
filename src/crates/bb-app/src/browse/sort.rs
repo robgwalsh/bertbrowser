@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use bb_core::columns::{ColumnCatalog, ColumnComparison, ColumnKind};
 use bb_paths::{fold_upper, natural_cmp};
 
-use crate::rows::Row;
+use crate::browse::rows::Row;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SortSpec {

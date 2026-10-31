@@ -5,6 +5,13 @@
 //!
 //! Every verb here blocks for as long as the files take. The host calls them from a worker.
 
+pub(crate) mod changes;
+pub(crate) mod checksum;
+pub(crate) mod compare_view;
+pub(crate) mod disk;
+pub(crate) mod duplicates;
+pub(crate) mod filecompare;
+
 use std::collections::HashSet;
 use std::sync::Mutex;
 
@@ -14,9 +21,9 @@ use serde_json::{Value, json};
 use crate::app::App;
 use crate::app::lock;
 use crate::ids::{AppError, AppResult};
-use crate::tools_changes::ChangesSession;
-use crate::tools_checksum::{ChecksumSession, parse_algorithms, write_checksum_file};
-use crate::tools_filecompare::FileCompareSession;
+use crate::tools::changes::ChangesSession;
+use crate::tools::checksum::{ChecksumSession, parse_algorithms, write_checksum_file};
+use crate::tools::filecompare::FileCompareSession;
 
 #[derive(Default)]
 pub(crate) struct ToolsState {
@@ -26,9 +33,9 @@ pub(crate) struct ToolsState {
     /// The last duplicate scan's groups, by path: what "never every copy" is checked against.
     pub(crate) duplicate_groups: Mutex<Vec<Vec<String>>>,
     /// The duplicate finder's scan and what it found.
-    pub(crate) duplicates: Mutex<crate::tools_duplicates::DuplicatesSession>,
+    pub(crate) duplicates: Mutex<crate::tools::duplicates::DuplicatesSession>,
     /// Disk usage's folder, read off the UI thread.
-    pub(crate) disk: Mutex<crate::tools_disk::DiskLoad>,
+    pub(crate) disk: Mutex<crate::tools::disk::DiskLoad>,
     /// The portable devices, once read: None until the first read lands.
     pub(crate) devices: Mutex<Option<Vec<crate::seams::PortableDevice>>>,
     devices_reading: std::sync::atomic::AtomicBool,
@@ -225,7 +232,9 @@ impl App {
             // ---- checksums ----
             "checksum.hash" => {
                 let selected = match args.get("algorithms").filter(|a| a.is_array()) {
-                    Some(list) => crate::tools_checksum::parse_algorithms(&strings(list).join(",")),
+                    Some(list) => {
+                        crate::tools::checksum::parse_algorithms(&strings(list).join(","))
+                    }
                     None => parse_algorithms(&lock(&inner.settings).checksum_algorithms),
                 };
                 // The old window's reading, if any, is not this one's.
@@ -343,14 +352,14 @@ impl App {
             // ---- disk usage ----
             "diskusage.model" => {
                 let path = args["path"].as_str().unwrap_or("");
-                crate::tools_disk::require_dir(path)?;
+                crate::tools::disk::require_dir(path)?;
                 inner.disk_usage_model(path)?
             }
             // `{path}`: reads it on a worker (a later load supersedes it), and says so with
             // `Model::DiskUsage`; `diskusage.state` is `{path, loading, model, error}`.
             "diskusage.load" => {
                 let path = args["path"].as_str().unwrap_or("");
-                crate::tools_disk::require_dir(path)?;
+                crate::tools::disk::require_dir(path)?;
                 inner.disk_usage_load(path.to_string());
                 inner.disk_usage_state()
             }
@@ -407,7 +416,7 @@ impl App {
                     .as_array()
                     .map(|a| a.iter().map(|x| x.as_f64().unwrap_or(0.0)).collect())
                     .unwrap_or_default();
-                crate::tools_disk::treemap_layout(
+                crate::tools::disk::treemap_layout(
                     &weights,
                     args["width"].as_f64().unwrap_or(0.0),
                     args["height"].as_f64().unwrap_or(0.0),
@@ -513,7 +522,7 @@ fn with_checksum(app: &App, change: impl FnOnce(&mut ChecksumSession)) -> AppRes
 }
 
 impl crate::app::Inner {
-    fn filecompare_run(self: &std::sync::Arc<Self>, job: crate::tools_filecompare::CompareJob) {
+    fn filecompare_run(self: &std::sync::Arc<Self>, job: crate::tools::filecompare::CompareJob) {
         self.hub.model(crate::events::Model::FileCompare);
         self.schedule(move |inner| {
             let (model, hunks) = FileCompareSession::compute(&job);

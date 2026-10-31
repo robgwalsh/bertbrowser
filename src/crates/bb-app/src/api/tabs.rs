@@ -12,10 +12,10 @@ use bb_core::transfer::TransferVerb;
 use serde_json::{Value, json};
 
 use crate::app::{App, Inner, lock};
+use crate::browse::rows::Listing;
+use crate::browse::tabs::{Crumb, SelectOp, breadcrumb, parent_path, tab_title};
 use crate::commands::CommandOutcome;
 use crate::ids::{AppError, AppResult, OpId, PaneId, TabId};
-use crate::rows::Listing;
-use crate::tabs::{Crumb, SelectOp, breadcrumb, parent_path, tab_title};
 
 /// A tab as a host paints its chrome from it.
 #[derive(Clone, Debug)]

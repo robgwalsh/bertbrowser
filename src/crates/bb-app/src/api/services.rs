@@ -13,7 +13,7 @@ use bb_core::theming::SystemAppearance;
 use serde_json::{Value, json};
 
 use crate::app::{App, lock};
-use crate::columns::PropSupply;
+use crate::browse::columns::PropSupply;
 use crate::commands::CommandOutcome;
 use crate::ids::{AppError, AppResult, OpId, PaneId, TabId};
 
@@ -735,7 +735,7 @@ impl App {
         text(&json!({
             "open": page.is_some(),
             "page": page,
-            "pages": crate::settings_svc::SETTINGS_PAGES.iter()
+            "pages": crate::services::settings::SETTINGS_PAGES.iter()
                 .map(|(id, name, icon)| json!({ "id": id, "name": name, "icon": icon }))
                 .collect::<Vec<_>>(),
             "problem": self.inner.settings_problem(),

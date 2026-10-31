@@ -21,7 +21,7 @@ use crate::app::{Inner, lock};
 use crate::commands::{CommandOutcome, SETTINGS_OPEN_REASON};
 use crate::events::Model;
 use crate::ids::{AppError, AppResult};
-use crate::settings_svc::SETTINGS_PAGES;
+use crate::services::settings::SETTINGS_PAGES;
 
 /// How many folders a typed path lists under it. A screenful: past that, typing another letter
 /// narrows faster than reading does.

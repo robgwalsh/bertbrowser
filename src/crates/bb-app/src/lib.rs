@@ -10,75 +10,44 @@
 //! Spec: src/BertBrowser.App/ViewModels/*, Services/Commands/*, Theming/*.
 
 mod api;
-mod api_ext;
 mod app;
-mod bars;
-mod columns;
+mod browse;
 mod commands;
-mod compare_view;
 mod config;
-mod delete_confirm;
-mod dirwatch;
 mod events;
-mod gif_player;
 mod ids;
-mod index;
-mod keys;
-mod launching;
-mod metadata_pane;
-mod misc;
-mod newitem;
 mod ops;
-mod ops_api;
-mod ops_arch;
-mod ops_ui;
-mod palette;
-mod panes_api;
 mod pool;
-mod portable_devices;
-mod preview;
-mod properties;
 mod requests;
-mod rows;
-mod saved;
 mod seams;
+mod services;
 mod session;
-mod settings_svc;
-mod shell_link;
-mod sort;
+mod side_pane;
 mod state;
-mod tabs;
-mod themes;
 mod tools;
-mod tools_changes;
-mod tools_checksum;
-mod tools_disk;
-mod tools_duplicates;
-mod tools_filecompare;
-mod undo_host;
 
-pub use api::TabInfo;
-pub use api_ext::parse_aspect;
+pub use api::services::parse_aspect;
+pub use api::tabs::TabInfo;
 pub use app::{App, OpState};
-pub use columns::{PropSupply, date as prop_date, words as prop_words};
+pub use browse::columns::{PropSupply, date as prop_date, words as prop_words};
+pub use browse::rows::{CELL_COLUMNS, Listing, Row, cell_index, stamp};
+pub use browse::sort::SortSpec;
+pub use browse::tabs::{Crumb, FLAT_ENTRY_CAP, SelectOp, breadcrumb, parent_path, tab_title};
 pub use commands::{
     CommandOutcome, CommandOwner, CommandState, DIALOG_OPEN_REASON, SETTINGS_OPEN_REASON,
     is_handled as command_is_handled, owner_of as command_owner,
 };
 pub use config::{AppConfig, Fakes};
 pub use events::{AppEvent, EventSink, Model};
-pub use gif_player::{GifOpenError, GifPlayer};
 pub use ids::{AppError, AppResult, OpId, PaneId, TabId};
-pub use launching::is_launch_command;
-pub use metadata_pane::{HostReading, HostValue, MetadataAction, ShellPropertyHost};
-pub use preview::{MODE_AUTO, MODE_GUESS, MODE_HEX, MODE_RAW};
+pub use ops::launching::is_launch_command;
 pub use requests::remaining_after_start;
-pub use rows::{CELL_COLUMNS, Listing, Row, cell_index, stamp};
 pub use seams::{
     AppConflictPrompt, ElevatedRunner, ElevationLauncher, HarnessProbes, LaunchRequest,
     NoElevation, ProcessLauncher, PushedAppearance, Seams, SystemAppearanceSource,
     SystemProcessLauncher, UserConfirm, UserNotice,
 };
-pub use settings_svc::{PAGE_KEYS, SETTINGS_PAGES};
-pub use sort::SortSpec;
-pub use tabs::{Crumb, FLAT_ENTRY_CAP, SelectOp, breadcrumb, parent_path, tab_title};
+pub use services::settings::{PAGE_KEYS, SETTINGS_PAGES};
+pub use side_pane::gif_player::{GifOpenError, GifPlayer};
+pub use side_pane::metadata_pane::{HostReading, HostValue, MetadataAction, ShellPropertyHost};
+pub use side_pane::preview::{MODE_AUTO, MODE_GUESS, MODE_HEX, MODE_RAW};

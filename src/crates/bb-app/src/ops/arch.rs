@@ -18,7 +18,7 @@ use bb_paths::{PathKey, file_name};
 
 use crate::app::{Inner, lock};
 use crate::ids::{AppError, AppResult, OpId};
-use crate::ops_ui::{JobMeta, TransferTracker};
+use crate::ops::ui::{JobMeta, TransferTracker};
 
 static READER: LazyLock<LibraryArchiveReader> = LazyLock::new(LibraryArchiveReader::default);
 
@@ -401,7 +401,7 @@ impl Inner {
                     inner.set_active_status(text.clone());
                     return (false, text);
                 }
-                let writer = crate::shell_link::ShellLinkWriter;
+                let writer = crate::ops::shell_link::ShellLinkWriter;
                 let outcome = ShortcutExecutor::local(&writer).execute(&plan);
                 // What was made is selected where it was made. Spec: ShellViewModel.CreateShortcutsAsync.
                 inner.select_many_after_refresh(&directory, outcome.created.clone());

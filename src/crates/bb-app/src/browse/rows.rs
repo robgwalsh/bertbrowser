@@ -280,7 +280,7 @@ impl Row {
                 .as_ref()
                 .map(|m| m.line.clone())
                 .unwrap_or_default(),
-            Some(ColumnCatalog::COMPARE_STATUS) => crate::compare_view::state_words(
+            Some(ColumnCatalog::COMPARE_STATUS) => crate::tools::compare_view::state_words(
                 self.compare.load(std::sync::atomic::Ordering::Relaxed),
             )
             .to_string(),

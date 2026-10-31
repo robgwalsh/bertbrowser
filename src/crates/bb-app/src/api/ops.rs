@@ -33,7 +33,7 @@ use serde_json::{Value, json};
 use crate::app::App;
 use crate::app::{Inner, lock};
 use crate::ids::{AppError, AppResult, TabId};
-use crate::ops_ui::parse_resolution;
+use crate::ops::ui::parse_resolution;
 
 fn invalid(text: impl Into<String>) -> AppError {
     AppError::Invalid(text.into())
@@ -349,7 +349,7 @@ impl Inner {
     }
 
     fn right_drop_json(&self, sources: &[String], destination: &str) -> Value {
-        let archive_dest = crate::ops_arch::archive_of(destination).is_some()
+        let archive_dest = crate::ops::arch::archive_of(destination).is_some()
             || (std::path::Path::new(destination).is_file()
                 && ArchiveFormats::is_archive_name(file_name(destination)));
         let virtual_sources = sources.iter().any(|s| ArchivePath::looks_virtual(s));
@@ -422,7 +422,8 @@ impl Inner {
                             .filter(|(when, _)| *when == s.modified)
                             .map(|(_, tags)| tags.clone());
                         let tags = hit.unwrap_or_else(|| {
-                            let read = crate::metadata_pane::tags_of(&s.path, s.is_directory);
+                            let read =
+                                crate::side_pane::metadata_pane::tags_of(&s.path, s.is_directory);
                             cache.insert(s.path.clone(), (s.modified, read.clone()));
                             read
                         });
@@ -623,7 +624,7 @@ impl App {
                 };
                 let sources = strings(&a["sources"]);
                 let dest = text(&a["destination"]);
-                let archive = crate::ops_arch::archive_of(dest).is_some()
+                let archive = crate::ops::arch::archive_of(dest).is_some()
                     || (std::path::Path::new(dest).is_file()
                         && ArchiveFormats::is_archive_name(file_name(dest)));
                 let ok = if archive {
@@ -851,7 +852,7 @@ impl App {
                     let index = bb_core::archives::ArchiveBrowser::read_archive(&*inner.fs, &file);
                     json!({
                         "archive": file,
-                        "entry": crate::ops_arch::archive_of(arg).map(|a| a.entry_path).unwrap_or_default(),
+                        "entry": crate::ops::arch::archive_of(arg).map(|a| a.entry_path).unwrap_or_default(),
                         "locked": index.failure == bb_core::archives::ArchiveFailure::PasswordRequired,
                         "refused": inner.extra.ops.passwords.was_refused(&file),
                     })
@@ -1022,19 +1023,19 @@ impl App {
                     &path,
                     &strings(&a["names"]),
                     text(&a["destination"]),
-                    crate::ops_arch::extract_conflict_of(text(&a["conflict"])),
+                    crate::ops::arch::extract_conflict_of(text(&a["conflict"])),
                 )?;
                 Ok(op_json(op))
             }
             "compress" => {
                 let a = parse(arg)?;
-                let format_ = crate::ops_arch::write_format_of(text(&a["format"]))
+                let format_ = crate::ops::arch::write_format_of(text(&a["format"]))
                     .ok_or_else(|| invalid("That is not a format this app can write."))?;
                 let op = inner.op_compress(
                     strings(&a["sources"]),
                     text(&a["target"]).to_string(),
                     format_,
-                    crate::ops_arch::level_of(text(&a["level"])),
+                    crate::ops::arch::level_of(text(&a["level"])),
                 )?;
                 Ok(op_json(op))
             }

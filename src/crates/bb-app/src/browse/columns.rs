@@ -23,9 +23,9 @@ use bb_paths::{PathKey, fold_upper};
 use serde_json::{Value, json};
 
 use crate::app::{Inner, TabData, lock};
+use crate::browse::rows::{CELL_COLUMNS, Listing, Row, RowProps, cell_index};
 use crate::events::{AppEvent, Model};
 use crate::ids::{AppError, AppResult, TabId};
-use crate::rows::{CELL_COLUMNS, Listing, Row, RowProps, cell_index};
 
 /// One answered cell.
 #[derive(Clone, Debug)]
