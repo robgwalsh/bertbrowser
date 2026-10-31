@@ -115,6 +115,7 @@ private:
     std::string page_;
     std::string signature_;
     std::wstring folder_handler_warning_;  // why the last change to the folder handler did not happen
+    std::wstring win_e_handler_warning_;   // why the last change to the Win+E handler did not happen
     bool dragging_pose_ = false;
     int menu_selected_ = -1;
     // The Context menu page's commands as typed, while the core holds them unwritten for a missing field: a

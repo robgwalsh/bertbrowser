@@ -23,7 +23,7 @@ use bb_core::cli::{CommandLine, CommandLineRequest};
 use bb_core::settings::LegacyData;
 use bb_shell::startup_trace::{self, StartupTrace};
 use bb_shell::updates::{self, UpdateOutcome};
-use bb_shell::{FolderHandlerRegistry, SingleInstance, foreground};
+use bb_shell::{FolderHandlerRegistry, SingleInstance, WinEHandlerRegistry, foreground};
 
 /// `argv[1..]`, from the wide command line the host parsed.
 unsafe fn args_of(argc: i32, argv: *const *const u16) -> Vec<String> {
@@ -64,6 +64,7 @@ pub unsafe extern "C" fn bb_startup(argc: i32, argv: *const *const u16) -> BbSta
         // hook runs inside the uninstall with a 30-second budget and touches nothing but the registry.
         updates::run_installer_hooks(args, || {
             FolderHandlerRegistry::system().try_unregister();
+            WinEHandlerRegistry::system().try_unregister();
         });
         trace.mark(StartupMarks::VELOPACK_DONE);
         Ok(())
@@ -226,6 +227,40 @@ pub unsafe extern "C" fn bb_folder_handler_set(open_here: bool) -> BbStatus {
     })
 }
 
+/// What Win+E opens on this machine, as JSON, in the same shape as `bb_folder_handler_state`. Reads
+/// the registry; free with `bb_str_free`. Product only: the harness never calls it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_win_e_handler_state(out_json: *mut BbOwnedStr) -> BbStatus {
+    guard(|| {
+        let handler = WinEHandlerRegistry::system();
+        let text = serde_json::json!({
+            "state": format!("{:?}", handler.state()),
+            "other": handler.other_program(),
+            "executable": handler.executable(),
+        })
+        .to_string();
+        *unsafe { out(out_json, "out_json")? } = BbOwnedStr::from_str(&text);
+        Ok(())
+    })
+}
+
+/// Makes Win+E open this app (`open_here`), or removes exactly what it registered. `BB_ERR` when the
+/// registry refused, in which case nothing is left half-written. Writes `HKEY_CURRENT_USER` only.
+/// Product only, and only ever on the user asking.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_win_e_handler_set(open_here: bool) -> BbStatus {
+    guard(|| {
+        if WinEHandlerRegistry::system().set(open_here) {
+            Ok(())
+        } else {
+            Err(
+                "The Win+E handler could not be changed: Windows refused the registry write."
+                    .into(),
+            )
+        }
+    })
+}
+
 /// Frees the launch and releases the per-user instance claim. Call it last, after the app.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_launch_free(launch: *mut BbLaunch) {
@@ -305,6 +340,7 @@ pub unsafe extern "C" fn bb_launch_serve(
                 // and the registration has gone stale (an install moved, a write interrupted
                 // part-way) put a live path back. Never creates one that is absent.
                 FolderHandlerRegistry::system().repair_if_stale();
+                WinEHandlerRegistry::system().repair_if_stale();
 
                 // A delete holds its items until the undo record is retired, which normally happens
                 // by the time the app closes. A crash leaves them behind, so sweep up anything a

@@ -197,10 +197,10 @@ fn listen(server: PipeServer, stopping: &AtomicBool, on_request: impl Fn(Command
         session.close();
 
         // One bad connection must not end the listener, or the app quietly stops answering for the
-        // rest of the session.
+        // rest of the session. A request with no targets still counts: a bare launch (the Start
+        // menu, Win+E) is asking for the window, and the receiver is what raises it.
         if let Ok(Some(line)) = line
             && let Some(request) = NavigationRequest::try_parse(&line)
-            && request.has_targets()
         {
             on_request(request);
         }
@@ -326,6 +326,23 @@ mod tests {
             .expect("the first copy was told");
         assert_eq!(asked.targets, got.targets);
         assert_eq!(asked.mode, got.mode);
+    }
+
+    #[test]
+    fn a_bare_second_launch_still_reaches_the_first_so_its_window_can_come_forward() {
+        let (key, dir) = rig("bare");
+        let first = SingleInstance::claim_as(&key, &dir);
+        let (tx, rx) = mpsc::channel();
+        let tx = Mutex::new(tx);
+        first.start_listening(move |r| {
+            let _ = tx.lock().unwrap().send(r);
+        });
+        let second = SingleInstance::claim_as(&key, &dir);
+        assert!(second.hand_off(&request(&[])));
+        let got = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the first copy was told");
+        assert!(!got.has_targets());
     }
 
     #[test]

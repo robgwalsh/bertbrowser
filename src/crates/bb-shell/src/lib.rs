@@ -20,9 +20,11 @@ pub mod shell_new;
 pub mod single_instance;
 pub mod startup_trace;
 pub mod updates;
+pub mod win_e_handler;
 
 pub use elevation::SystemElevation;
 pub use folder_handler::FolderHandlerRegistry;
 pub use launcher::{LaunchRequest, SystemLauncher};
 pub use registry::{Hive, MemoryRegistry, Registry, SystemRegistry};
 pub use single_instance::SingleInstance;
+pub use win_e_handler::WinEHandlerRegistry;

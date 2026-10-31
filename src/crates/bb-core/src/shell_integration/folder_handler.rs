@@ -44,7 +44,7 @@ pub struct ShellRegistryValue {
 }
 
 impl ShellRegistryValue {
-    fn new(key_path: &str, value_name: &str, data: &str) -> ShellRegistryValue {
+    pub(super) fn new(key_path: &str, value_name: &str, data: &str) -> ShellRegistryValue {
         ShellRegistryValue {
             key_path: key_path.to_string(),
             value_name: value_name.to_string(),
@@ -381,7 +381,7 @@ fn is_open_verb(verb: Option<&str>) -> bool {
 /// Path comparison through `PathKey` rather than string equality, so a registration differing only
 /// in casing is recognised as already correct and the self-heal does not rewrite it on every
 /// launch.
-fn same_path(a: &str, b: &str) -> bool {
+pub(super) fn same_path(a: &str, b: &str) -> bool {
     match (PathKey::canonicalize(a), PathKey::canonicalize(b)) {
         (Ok(a), Ok(b)) => a == b,
         _ => false,

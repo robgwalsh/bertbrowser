@@ -5,6 +5,7 @@
 mod folder_handler;
 mod run_as_verb_rules;
 mod shell_open_command;
+mod win_e_handler;
 
 pub use folder_handler::{
     FolderHandlerReading, FolderHandlerRegistration, FolderHandlerRules, FolderHandlerState,
@@ -12,6 +13,7 @@ pub use folder_handler::{
 };
 pub use run_as_verb_rules::{ElevatedOpen, ElevatedOpenKind, RunAsVerbRules};
 pub use shell_open_command::{ShellOpenCommand, ShellOpenCommandParser};
+pub use win_e_handler::{WinEHandlerReading, WinEHandlerRegistration, WinEHandlerRules};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellIntegrationError {

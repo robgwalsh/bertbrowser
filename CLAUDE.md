@@ -125,7 +125,7 @@ behavior - this table only says where.
 | Shell context menu (7-Zip, Git, TortoiseSVN...) | `core/shellmenu/*` (`keys`, `rules`, `built_in`, `layout`, `separators`, `static_verb`), ui: `shell_menu_real.cpp` (hosts the handlers), `ops_menus.cpp` (composer), Context menu page `settings_ctxmenu.cpp`, `harness/canned_shell_menu.h`, `tools/ui/shellmenu.bbs` |
 | Startup / CLI / single instance | `core/cli/*`, `shell/single_instance.rs`, `core/ipc/instance_endpoint.rs`, `bb-ffi/src/startup.rs`, `app/requests.rs`, ui: `src/app/app/main.cpp` |
 | Foreground raise | `shell/foreground.rs`, `ForegroundRaiseRules` in `core/rules.rs` |
-| Default folder handler (shell) | `core/shell_integration/*`, `shell/folder_handler.rs` |
+| Default folder handler, Win+E (shell) | `core/shell_integration/*` (`folder_handler`, `win_e_handler`), `shell/folder_handler.rs`, `shell/win_e_handler.rs` |
 | Updates / legacy data | `shell/updates.rs`, `core/updates/mod.rs` (`ReleaseChannel`), `core/settings/legacy.rs` |
 | Preview pane (incl. hex/raw) | `core/preview/*` (`classifier`, `text_reader`, `hex_reader`, `syntax`), `app/side_pane/preview.rs`, ui: `preview_pane.cpp`, `code_view.cpp`, `image_view.cpp`, `font_view.cpp` |
 | Video playback in the preview | `core/preview/playlist.rs`, ui: `media_player.cpp`, `media_pane.cpp` (Media Foundation `IMFMediaEngine`) |
@@ -284,6 +284,11 @@ behavior - this table only says where.
   screen; otherwise it flashes the taskbar button and does not even un-minimize. The hand-off is not a
   user gesture: the app is the registered handler for `Directory` and `Drive`, so *anything* that
   shell-opens a folder starts a second copy that grants its foreground rights over.
+- **Win+E is a separate, undocumented door from the folder handler.** An HKCU shadow of one shell CLSID's
+  `opennewwindow` verb (`WinEHandlerRegistration`), off until ticked. Its command is a bare launch, so the
+  single-instance listener must pass a request with no targets, or Win+E does nothing while the app is open.
+  It also catches `explorer.exe` with no arguments; naming a folder still opens Explorer. Like the folder
+  handler, the uninstall hook must remove it and the startup repair must cover it.
 - **Every shortcut is a `CommandCatalog` row, and there is one key dispatcher.** No per-control key
   handlers: the window turns the key into a `BbKeyChord` (C++), `bb_key_dispatch` /
   `KeymapRules::dispatch` says whose it is given what has focus (Rust), and the command registry runs it.

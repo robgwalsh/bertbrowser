@@ -1,3 +1,4 @@
 mod folder_handler_registration_tests;
 mod run_as_verb_rules_tests;
 mod shell_open_command_tests;
+mod win_e_handler_tests;

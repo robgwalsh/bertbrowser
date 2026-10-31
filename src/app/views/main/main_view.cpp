@@ -443,7 +443,7 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     {
         auto* grip = side->emplace<SideGrip>(
             [this](float wanted) {
-                side_width_ = std::clamp(wanted, 180.0f, std::max(180.0f, body_->bounds.width() - 140.0f));
+                side_width_ = std::clamp(wanted, 180.0f, std::max(180.0f, body_->bounds.width() * 0.9f));
                 side_pane_->width = side_width_;
                 body_->request_layout();
             },
@@ -601,7 +601,14 @@ TabView::~TabView() {
     if (preview_) preview_->set_active(false);
 }
 
-void TabView::arrange(Rect r) { DockPanel::arrange(r); }
+// The file list keeps at least a tenth of the pane; the remembered width is untouched, so a wider window gives it back.
+void TabView::arrange(Rect r) {
+    if (side_pane_) {
+        const float total = r.width();
+        side_pane_->width = std::min(side_width_, std::max(180.0f, total * 0.9f));
+    }
+    DockPanel::arrange(r);
+}
 
 Edit* TabView::global_search_box() const { return main_.title_search(); }
 
@@ -764,7 +771,7 @@ void TabView::mirror_selection_to_tree() {
 void TabView::fit_side_width() {
     if (!preview_) return;
     const float wanted = preview_->desired_width() + 16.0f;
-    side_width_ = std::clamp(wanted, 180.0f, std::max(180.0f, body_->bounds.width() - 140.0f));
+    side_width_ = std::clamp(wanted, 180.0f, std::max(180.0f, body_->bounds.width() * 0.9f));
     side_pane_->width = side_width_;
     body_->request_layout();
 }

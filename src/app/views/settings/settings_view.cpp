@@ -622,9 +622,19 @@ void SettingsView::page_general(Widget& p) {
     // scripted run never touches the machine's registry. Spec: SettingsViewModel.OnOpenFoldersHereChanged.
     if (main_.scripted()) {
         f::check(p, L"Open folders in BertBrowser instead of File Explorer", false, nullptr)->set_enabled(false);
+        f::check(p, L"Win+E opens BertBrowser", false, nullptr)->set_enabled(false);
         f::note(p, L"(Not read in a scripted run: it is the machine's registry.)");
         return;
     }
+    // A registered program's bare name, for naming it rather than quietly taking its place.
+    const auto program_name = [](const std::string& path) {
+        std::wstring name = core::wide(path);
+        const size_t slash = name.find_last_of(L"\\/");
+        if (slash != std::wstring::npos) name = name.substr(slash + 1);
+        const size_t dot = name.rfind(L'.');
+        if (dot != std::wstring::npos && dot > 0) name = name.substr(0, dot);
+        return name.empty() ? std::wstring(L"Another program") : name;
+    };
     BbOwnedStr o{};
     json::Value handler;
     if (bb_folder_handler_state(&o) == BB_OK) handler = json::parse(core::utf8(core::take(o)));
@@ -638,18 +648,33 @@ void SettingsView::page_general(Widget& p) {
         signature_.clear();
         sync();
     })->name = "OpenFoldersHere";
-    f::note(p, L"This PC and Control Panel keep opening in File Explorer, and so does a zip opened from Explorer \u2014 BertBrowser browses archives in its own window. So does anything that runs explorer.exe by name \u2014 Win+E, the taskbar icon, and some apps' \"Show in folder\".");
+    f::note(p, L"This PC and Control Panel keep opening in File Explorer, and so does a zip opened from Explorer \u2014 BertBrowser browses archives in its own window. So does anything that runs explorer.exe by name \u2014 the taskbar icon, and some apps' \"Show in folder\".");
     std::wstring warning = folder_handler_warning_;
     if (warning.empty() && state == "RegisteredToAnotherApp") {
-        // Naming the other program rather than quietly taking the verb over.
-        std::wstring other = core::wide(handler["other"].str());
-        const size_t slash = other.find_last_of(L"\\/");
-        if (slash != std::wstring::npos) other = other.substr(slash + 1);
-        const size_t dot = other.rfind(L'.');
-        if (dot != std::wstring::npos && dot > 0) other = other.substr(0, dot);
-        warning = (other.empty() ? std::wstring(L"Another program") : other) + L" currently opens folders. Turning this on will replace it.";
+        warning = program_name(handler["other"].str()) + L" currently opens folders. Turning this on will replace it.";
     }
     if (!warning.empty()) f::text(p, warning, tok::WarningForeground, 13.0f)->wrap = true;
+
+    f::gap(p, 6);
+    BbOwnedStr win_e_out{};
+    json::Value win_e;
+    if (bb_win_e_handler_state(&win_e_out) == BB_OK) win_e = json::parse(core::utf8(core::take(win_e_out)));
+    const std::string win_e_state = win_e["state"].str();
+    const bool win_e_ours = win_e_state == "RegisteredToThisApp" || win_e_state == "RegisteredToThisAppStale";
+    f::check(p, L"Win+E opens BertBrowser", win_e_ours, [this](bool v) {
+        win_e_handler_warning_ = bb_win_e_handler_set(v) == BB_OK
+                                     ? L""
+                                     : v ? L"Windows would not let BertBrowser take over Win+E."
+                                         : L"Windows would not let BertBrowser hand Win+E back to File Explorer.";
+        signature_.clear();
+        sync();
+    })->name = "OpenWinEHere";
+    f::note(p, L"So does running explorer.exe with no folder; naming a folder still opens File Explorer. If BertBrowser is already open, its window comes forward. Windows has no setting for this, so it relies on an undocumented registry key that an update could stop honouring.");
+    std::wstring win_e_warning = win_e_handler_warning_;
+    if (win_e_warning.empty() && win_e_state == "RegisteredToAnotherApp") {
+        win_e_warning = program_name(win_e["other"].str()) + L" currently opens on Win+E. Turning this on will replace it.";
+    }
+    if (!win_e_warning.empty()) f::text(p, win_e_warning, tok::WarningForeground, 13.0f)->wrap = true;
 }
 
 void SettingsView::page_appearance(Widget& p) {

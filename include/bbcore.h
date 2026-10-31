@@ -1156,6 +1156,15 @@ enum BbStatus bb_folder_handler_state(struct BbOwnedStr *out_json);
 // half-written. Writes `HKEY_CURRENT_USER` only. Product only, and only ever on the user's say-so.
 enum BbStatus bb_folder_handler_set(bool open_here);
 
+// What Win+E opens on this machine, as JSON, in the same shape as `bb_folder_handler_state`. Reads
+// the registry; free with `bb_str_free`. Product only: the harness never calls it.
+enum BbStatus bb_win_e_handler_state(struct BbOwnedStr *out_json);
+
+// Makes Win+E open this app (`open_here`), or removes exactly what it registered. `BB_ERR` when the
+// registry refused, in which case nothing is left half-written. Writes `HKEY_CURRENT_USER` only.
+// Product only, and only ever on the user asking.
+enum BbStatus bb_win_e_handler_set(bool open_here);
+
 // Frees the launch and releases the per-user instance claim. Call it last, after the app.
 void bb_launch_free(struct BbLaunch *launch);
 
