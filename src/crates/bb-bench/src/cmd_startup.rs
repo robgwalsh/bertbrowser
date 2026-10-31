@@ -23,12 +23,16 @@ use bb_core::benchmarking::{
     ProcessStats, RunInfo, StartupMarks, StartupMemory, StartupMemoryPoints, StartupTraceData,
     StartupTraceJson, TimeStats,
 };
+use bb_core::layout::{SessionLayout, SessionTab, SplitOrientation};
+use bb_core::settings::{AppPaths, AppSettings};
 
 use crate::args::{ArgList, Fail, unknown};
 use crate::{corpus, env};
 
 const DEFAULT_LAUNCHES: u32 = 10;
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(90);
+/// A million index rows: `--session`'s database, sized like a person's rather than like an empty one.
+const SESSION_DB_SCALE: u32 = 10;
 
 pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
     let mut launches = DEFAULT_LAUNCHES;
@@ -38,6 +42,7 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
     let mut machine_key: Option<String> = None;
     let mut allow_running = false;
     let mut affinity: Option<usize> = None;
+    let mut session = false;
 
     while let Some(arg) = args.next_arg() {
         match arg.as_str() {
@@ -48,6 +53,7 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
             "--machine-key" => machine_key = Some(args.value(&arg)?),
             "--allow-running" => allow_running = true,
             "--affinity" => affinity = Some(parse_affinity(&args.value(&arg)?)?),
+            "--session" => session = true,
             _ => return Err(unknown("startup", &arg)),
         }
     }
@@ -87,6 +93,16 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
     let corpus_root = corpus::default_root();
     let say = |line: &str| println!("{line}");
     let tree = corpus::ensure_tree(&corpus_root, 1, &say, false)?;
+    let session_db = if session {
+        Some(corpus::ensure_db(
+            &corpus_root,
+            SESSION_DB_SCALE,
+            &say,
+            false,
+        )?)
+    } else {
+        None
+    };
 
     let work = corpus_root.join("startup");
     let state = work.join("state");
@@ -108,7 +124,10 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
 
     for k in 0..launches {
         let trace_path = traces.join(format!("trace-{k:02}.json"));
-        let result = launch(&app, &tree.startup, &state, &trace_path);
+        // The discarded launch makes the data directory one this build owns (it would move the seeded
+        // files aside as an older version's otherwise), and only then is there a session to come back to.
+        let named = (session_db.is_none() || k == 0).then_some(tree.startup.as_path());
+        let result = launch(&app, named, &state, &trace_path);
         let (trace, lifetime_ms) = match result {
             Ok(r) => r,
             Err(e) => {
@@ -147,12 +166,26 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
         if k > 0 {
             kept.push((trace, lifetime_ms));
         }
+        if k == 0
+            && let Some(db) = &session_db
+        {
+            seed_session(&state, db, &tree)?;
+        }
+    }
+
+    // Closing saves what the window held. Had a launch fallen back to one pane, the numbers would still look
+    // fine and would be measuring the wrong thing.
+    if session_db.is_some() && failure.is_none() && !session_came_back(&state) {
+        failure = Some("the launches did not restore the seeded session".to_string());
     }
 
     let mut parameters: BTreeMap<String, String> = [
         ("launches", launches.to_string()),
         ("discarded", "1".to_string()),
-        ("startFolder", "Startup(500)".to_string()),
+        (
+            "startFolder",
+            if session { "session" } else { "Startup(500)" }.to_string(),
+        ),
         ("parked", "true".to_string()),
         (
             "app",
@@ -186,7 +219,14 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
                 parameters.insert("affinity".to_string(), format!("{mask:#x}"));
             }
             parameters.extend(page_fault_parameters(&kept));
-            entries_of(&kept, &parameters)?
+            let mut entries = entries_of(&kept, &parameters)?;
+            if session {
+                // Its own ids: a launch into a session is never compared with one into a named folder.
+                for entry in &mut entries {
+                    entry.id = entry.id.replacen("startup.", "startup.session.", 1);
+                }
+            }
+            entries
         }
     };
 
@@ -197,7 +237,12 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
         git: env::git(&repo.root),
         machine: env::machine(machine_key.as_deref()),
         run: RunInfo {
-            job: "startup".to_string(),
+            job: if session {
+                "startup-session"
+            } else {
+                "startup"
+            }
+            .to_string(),
             scale: 1,
             real: false,
             tiers: vec!["C".to_string()],
@@ -207,9 +252,13 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
         },
         benchmarks: entries,
     };
-    let out_path = out
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repo.results_dir().join("startup.json"));
+    let out_path = out.map(PathBuf::from).unwrap_or_else(|| {
+        repo.results_dir().join(if session {
+            "startup-session.json"
+        } else {
+            "startup.json"
+        })
+    });
     BenchResultsJson::write(&set, &out_path)?;
 
     println!();
@@ -220,6 +269,46 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
         let _ = std::fs::remove_dir_all(&work);
     }
     Ok(if failure.is_none() { 0 } else { 2 })
+}
+
+/// What a person comes back to: two panes, three tabs (one of them ten thousand files, showing in neither pane's
+/// front), and a database with an index in it. Every launch after this one restores it.
+fn seed_session(data_dir: &Path, db: &Path, tree: &corpus::TreePaths) -> Result<(), Fail> {
+    let tab = |path: &Path| SessionTab {
+        path: path.to_string_lossy().to_string(),
+        sort_by: None,
+        sort_descending: false,
+        is_flat: false,
+        columns: None,
+    };
+    let pane = |tabs: Vec<SessionTab>, active: bool| SessionLayout {
+        orientation: None,
+        children: None,
+        tabs: Some(tabs),
+        is_active_pane: active,
+        ..SessionLayout::default()
+    };
+    let paths = AppPaths::new(data_dir);
+    let mut settings = AppSettings::load(&paths.settings_path());
+    settings.session = Some(SessionLayout {
+        orientation: Some(SplitOrientation::Vertical),
+        children: Some(vec![
+            pane(vec![tab(&tree.startup), tab(&tree.flat)], true),
+            pane(vec![tab(&tree.deep)], false),
+        ]),
+        tabs: None,
+        ..SessionLayout::default()
+    });
+    settings
+        .save(&paths.settings_path())
+        .map_err(|e| Fail::Error(format!("the session could not be seeded: {e}")))?;
+    std::fs::copy(db, paths.db_path())?;
+    Ok(())
+}
+
+fn session_came_back(data_dir: &Path) -> bool {
+    let saved = AppSettings::load(&AppPaths::new(data_dir).settings_path()).session;
+    saved.is_some_and(|s| s.is_split())
 }
 
 /// A processor mask, in hex with or without its `0x`.
@@ -356,13 +445,13 @@ pub fn entries_of(
 
 fn launch(
     app: &Path,
-    start_folder: &Path,
+    start_folder: Option<&Path>,
     data_dir: &Path,
     trace_path: &Path,
 ) -> Result<(StartupTraceData, f64), String> {
     let clock = Instant::now();
     let mut child = Command::new(app)
-        .arg(start_folder)
+        .args(start_folder)
         .current_dir(app.parent().unwrap_or(Path::new(".")))
         .env("BERTBROWSER_DATA_DIR", data_dir)
         .env("BERTBROWSER_STARTUP_TRACE", trace_path)

@@ -55,6 +55,8 @@ bb-bench - measures the native BertBrowser and keeps the evidence.
               --app <exe>              default out/release/app/BertBrowser.exe
               --allow-running          measure even though a real BertBrowser is open
               --affinity <hex mask>    restrict the launches to these processors (F: four)
+              --session                come back to a saved session (two panes, three tabs) over a
+                                       million-row database, not a named folder over an empty one
               --out <file>             default bench-results/startup.json
               --machine-key <name>
   compare   --baseline <file> --current <file>
