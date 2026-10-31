@@ -227,7 +227,7 @@ HRESULT Window::render() {
     }
     if (SUCCEEDED(hr)) {
         retired_.reset();  // the new surface is on screen: the one it replaced can go
-        if (on_painted && on_painted()) on_painted = nullptr;
+        if (hr == S_OK && on_painted && on_painted()) on_painted = nullptr;  // S_FALSE: nothing was drawn
     }
     return hr;
 }

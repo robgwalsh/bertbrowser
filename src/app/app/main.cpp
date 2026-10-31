@@ -220,7 +220,6 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                     }
                     view.start(start, !asked);
                     mark(L"sessionStarted");
-                    view.enable_file_drag_drop();
                     mark(L"windowBuilt");
                     const bool maximize = !options.offscreen && restore_placement(window.hwnd(), app);
                     if (!options.offscreen) {
@@ -237,6 +236,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                     if (maximize) ShowWindow(window.hwnd(), SW_SHOWMAXIMIZED);
                     else window.show();
                     mark(L"windowShown");
+                    // About 7 ms to register, and nothing can be dropped on a window before it is up. Still ahead
+                    // of the message loop, so no gesture can arrive first.
+                    view.enable_file_drag_drop();
                     // Other launches are answered from here on, the rest of the command line is
                     // opened, and the background work (or, for a measurement, the trace) starts.
                     if (bb_launch_serve(launch, app, window.hwnd()) != BB_OK) error = core::last_error();
