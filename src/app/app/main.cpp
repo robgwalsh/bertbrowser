@@ -130,8 +130,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         }
         mark(L"comReady");
 
-        // Loading a GPU's driver takes ~200 ms and the first frame does not need it: start on WARP (8 ms), make
-        // the hardware device on a thread of its own and move the window over when it is ready. Setting
+        // Loading a GPU's driver takes ~200 ms and the first frame does not need it: start on WARP (8 ms), and once
+        // the window is up make the hardware device on a thread of its own and move over when it is ready. Setting
         // BERTBROWSER_DEVICE=hardware waits for the GPU first, as the app did before.
         wchar_t device_mode[16] = {};
         GetEnvironmentVariableW(L"BERTBROWSER_DEVICE", device_mode, 16);
@@ -139,10 +139,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         HRESULT hr = S_OK;
         std::unique_ptr<gfx::GfxDevice> dev;
         if (!hardware_first) dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = true}, &hr);
-        // Only now: the two device creations share a lock inside D3D, and started first the GPU's driver load
-        // held WARP up for its whole length.
+        const bool move_to_hardware = dev != nullptr;
         std::unique_ptr<gfx::HardwareDeviceLoader> hardware;
-        if (dev) hardware = std::make_unique<gfx::HardwareDeviceLoader>(true);
         if (!dev) dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = false, .video_support = true}, &hr);
         if (!dev) dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = true}, &hr);
         if (!dev) {
@@ -180,15 +178,6 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                 error = L"Could not create the window.";
             } else {
                 mark(L"windowCreated");
-                if (hardware && dev->is_warp()) {
-                    window.on_hardware_settled = [](bool moved) {
-                        if (moved) mark(L"gfxHardware");
-                        mark(L"gfxSettled");
-                    };
-                    window.use_hardware_when_ready(*hardware);
-                } else {
-                    mark(L"gfxSettled");  // drawing on the GPU from the start (or only ever on WARP)
-                }
                 // The first thing the window draws is the content having been rendered.
                 window.on_first_paint = [] { mark(L"contentRendered"); };
                 views::MainView view(core, window);
@@ -236,6 +225,18 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                     if (maximize) ShowWindow(window.hwnd(), SW_SHOWMAXIMIZED);
                     else window.show();
                     mark(L"windowShown");
+                    // Only now: a driver loading holds locks the first frame would otherwise wait on (the two
+                    // device creations share one inside D3D), and nothing on screen is waiting for it.
+                    if (move_to_hardware) {
+                        window.on_hardware_settled = [](bool moved) {
+                            if (moved) mark(L"gfxHardware");
+                            mark(L"gfxSettled");
+                        };
+                        hardware = std::make_unique<gfx::HardwareDeviceLoader>(true);
+                        window.use_hardware_when_ready(*hardware);
+                    } else {
+                        mark(L"gfxSettled");  // drawing on the GPU from the start (or only ever on WARP)
+                    }
                     // About 7 ms to register, and nothing can be dropped on a window before it is up. Still ahead
                     // of the message loop, so no gesture can arrive first.
                     view.enable_file_drag_drop();
