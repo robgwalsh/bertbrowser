@@ -331,6 +331,14 @@ typedef struct BbPropertyHost {
 extern "C" {
 #endif // __cplusplus
 
+// Starts counting the bytes Rust holds, for a measured run. First thing in `main`, since what was allocated
+// before it is not counted and its later free would be.
+void bb_allocator_start_counting(void);
+
+// The bytes Rust holds, after mimalloc has handed back what it can when `collect`. Zero unless
+// `bb_allocator_start_counting` was called.
+int64_t bb_allocator_held(bool collect);
+
 // The core version, as a view into static storage.
 struct BbStr bb_version(void);
 

@@ -53,6 +53,10 @@ pub unsafe extern "C" fn bb_startup(argc: i32, argv: *const *const u16) -> BbSta
     guard(|| {
         let trace = startup_trace::global();
         trace.mark(StartupMarks::MAIN);
+        if trace.enabled() {
+            start_counting_allocations();
+            trace.set_allocator_reader(allocator_held);
+        }
         let args = unsafe { args_of(argc, argv) };
         // Uninstalling deletes the whole install directory, so a folder-handler registration left
         // behind would point the Windows shell at an executable that is gone, and since it owns the
@@ -374,6 +378,23 @@ mod tests {
 
     fn wide(text: &str) -> Vec<u16> {
         text.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    #[test]
+    fn the_allocator_counts_what_rust_holds_once_asked() {
+        start_counting_allocations();
+        // Large enough to stand clear of whatever the tests beside this one allocate meanwhile.
+        const BLOCK: usize = 256 * 1024 * 1024;
+        let before = allocator_held(false);
+        let block: Vec<u8> = Vec::with_capacity(BLOCK);
+        let holding = allocator_held(false);
+        assert!(
+            holding - before > (BLOCK / 2) as i64,
+            "{before} -> {holding}"
+        );
+        drop(block);
+        let after = allocator_held(true);
+        assert!(holding - after > (BLOCK / 2) as i64, "{holding} -> {after}");
     }
 
     #[test]

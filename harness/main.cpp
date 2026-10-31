@@ -35,6 +35,7 @@ void remove_scratch_state(const bbh::Options& o) {
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
+    bb_allocator_start_counting();  // first: a `mem` reads it, and what came before is not counted
     SetConsoleOutputCP(CP_UTF8);
     // The settle loops poll with Sleep(1..5), which rounds up to the 15.6 ms timer tick unless something
     // raised the resolution; at the default, a measured step carried tens of milliseconds of the harness's

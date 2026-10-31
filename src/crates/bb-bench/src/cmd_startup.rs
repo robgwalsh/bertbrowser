@@ -429,7 +429,8 @@ pub fn entries_of(
             process: Some(ProcessStats {
                 working_set_bytes: median(readings.iter().map(|m| m.working_set_bytes)),
                 private_bytes: median(readings.iter().map(|m| m.private_bytes)),
-                heap_bytes: median(readings.iter().map(|m| m.heap_bytes)),
+                allocator_bytes: median(readings.iter().map(|m| m.allocator_bytes)),
+                process_heap_bytes: median(readings.iter().map(|m| m.process_heap_bytes)),
                 realized_rows: 0,
                 items: 0,
                 retained_thumbnails: 0,
@@ -512,7 +513,8 @@ mod tests {
                     StartupMemory {
                         working_set_bytes: working_set,
                         private_bytes: 2,
-                        heap_bytes: 3,
+                        allocator_bytes: 3,
+                        process_heap_bytes: 5,
                         peak_working_set_bytes: 4,
                     },
                 )]

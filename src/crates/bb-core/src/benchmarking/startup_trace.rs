@@ -66,8 +66,8 @@ pub struct StartupMemoryPoints;
 impl StartupMemoryPoints {
     /// As it stood once the first listing was shown and the drawing had settled — what Task Manager would say.
     pub const FIRST_LISTING: &'static str = "firstListing";
-    /// The same moment after a full collection — what the app is actually holding, and the
-    /// steadier of the two.
+    /// The same moment after the allocator has handed back what it can: nearer what the app is
+    /// actually holding, and the steadier of the two.
     pub const COLLECTED: &'static str = "collected";
 }
 
@@ -102,8 +102,10 @@ pub struct StartupTraceData {
 pub struct StartupMemory {
     pub working_set_bytes: i64,
     pub private_bytes: i64,
-    /// Bytes the global allocator holds.
-    pub heap_bytes: i64,
+    /// Bytes Rust holds, counted at its allocator: requested and not yet freed, without mimalloc's free pages.
+    pub allocator_bytes: i64,
+    /// Bytes in use in the Windows process heap: the C++ side and the system DLLs, never Rust.
+    pub process_heap_bytes: i64,
     pub peak_working_set_bytes: i64,
 }
 

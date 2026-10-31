@@ -28,7 +28,8 @@ fn round_trips() {
         process: Some(ProcessStats {
             working_set_bytes: 412_000_000,
             private_bytes: 380_000_000,
-            heap_bytes: 96_000_000,
+            allocator_bytes: 96_000_000,
+            process_heap_bytes: 12_000_000,
             realized_rows: 38,
             items: 10_000,
             retained_thumbnails: 0,
@@ -75,7 +76,8 @@ fn process_stats_peak_is_optional_so_an_older_baseline_still_reads() {
         process: Some(ProcessStats {
             working_set_bytes: 150_000_000,
             private_bytes: 70_000_000,
-            heap_bytes: 9_400_000,
+            allocator_bytes: 9_400_000,
+            process_heap_bytes: 1_200_000,
             realized_rows: 2,
             items: 2,
             retained_thumbnails: 0,
@@ -116,7 +118,7 @@ fn process_stats_peak_is_optional_so_an_older_baseline_still_reads() {
 #[test]
 fn serialize_is_camel_case_and_omits_nulls() {
     let json = BenchResultsJson::serialize(&set(vec![entry("a", 1.0, None)], false));
-    assert!(json.contains("\"schemaVersion\": 2"), "{json}");
+    assert!(json.contains("\"schemaVersion\": 3"), "{json}");
     assert!(json.contains("\"benchmarks\""), "{json}");
     assert!(!json.contains("\"memory\""), "{json}");
     assert!(!json.contains("\"error\""), "{json}");
@@ -126,10 +128,10 @@ fn serialize_is_camel_case_and_omits_nulls() {
 #[test]
 fn deserialize_wrong_schema_version_throws() {
     let json = BenchResultsJson::serialize(&set(vec![], false))
-        .replace("\"schemaVersion\": 2", "\"schemaVersion\": 3");
+        .replace("\"schemaVersion\": 3", "\"schemaVersion\": 4");
     let e = BenchResultsJson::deserialize(&json).expect_err("refused");
-    assert!(matches!(e, BenchError::SchemaVersion(3)));
-    assert!(e.to_string().contains("schema version 3"), "{e}");
+    assert!(matches!(e, BenchError::SchemaVersion(4)));
+    assert!(e.to_string().contains("schema version 4"), "{e}");
 }
 
 #[test]

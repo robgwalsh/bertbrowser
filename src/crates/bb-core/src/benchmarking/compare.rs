@@ -24,15 +24,15 @@ pub struct CompareOptions {
     pub gate_alloc: bool,
     /// Whether a benchmark present in the baseline but missing now is a failure.
     pub strict: bool,
-    /// A process snapshot whose heap grew by more than this is a regression.
+    /// A process snapshot whose Rust allocator or process heap grew by more than this is a regression.
+    /// One each because they see different code: Rust in the first, C++ and the system DLLs in the second.
     pub memory_threshold_pct: f64,
-    /// Heap growth smaller than this in absolute terms is never a regression.
+    /// Growth in either smaller than this in absolute terms is never a regression.
     pub memory_noise_floor_bytes: i64,
     /// Whether a bigger process counts towards `CompareReport::memory_regressed`. Off in CI.
     pub gate_memory: bool,
-    /// The same threshold for private bytes, and much the wider: measured over identical runs the
-    /// heap after a full collection repeats to a tenth of a megabyte, while private bytes — native
-    /// heaps, the rasteriser, memory not yet handed back — moved by ten megabytes in a hundred.
+    /// The same threshold for private bytes, and much the wider: over identical runs they moved by
+    /// ten megabytes in a hundred (the rasteriser, memory not yet handed back).
     pub private_bytes_threshold_pct: f64,
     /// The floor that goes with it.
     pub private_bytes_noise_floor_bytes: i64,
@@ -318,8 +318,8 @@ fn judge_alloc(
     (up, down, delta_pct)
 }
 
-/// A process snapshot against its baseline. The heap and private bytes are each judged against
-/// their own threshold and floor, and either one over is "up"; the reported delta is private
+/// A process snapshot against its baseline. The Rust allocator, the process heap and private bytes are
+/// each judged against their threshold and floor, and any one over is "up"; the reported delta is private
 /// bytes'. The working set is never judged — Windows trims it when it likes, so it says as much
 /// about the machine's afternoon as about the app.
 fn judge_process(
@@ -337,17 +337,24 @@ fn judge_process(
         o.private_bytes_threshold_pct,
         o.private_bytes_noise_floor_bytes,
     );
+    let allocator = moved(
+        was.allocator_bytes,
+        now.allocator_bytes,
+        o.memory_threshold_pct,
+        o.memory_noise_floor_bytes,
+    );
     let heap = moved(
-        was.heap_bytes,
-        now.heap_bytes,
+        was.process_heap_bytes,
+        now.process_heap_bytes,
         o.memory_threshold_pct,
         o.memory_noise_floor_bytes,
     );
     let delta_pct = (was.private_bytes > 0)
         .then(|| (now.private_bytes - was.private_bytes) as f64 / was.private_bytes as f64 * 100.0);
 
-    let up = private_bytes > 0 || heap > 0;
-    (up, !up && (private_bytes < 0 || heap < 0), delta_pct)
+    let up = private_bytes > 0 || allocator > 0 || heap > 0;
+    let down = private_bytes < 0 || allocator < 0 || heap < 0;
+    (up, !up && down, delta_pct)
 }
 
 /// +1 when `now` is over the threshold and the floor, -1 when it is under both, else 0.

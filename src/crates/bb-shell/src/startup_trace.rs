@@ -34,7 +34,12 @@ struct Inner {
     page_faults: BTreeMap<String, i64>,
     instance: String,
     flushed: bool,
+    allocator: Option<AllocatorReader>,
 }
+
+/// The bytes Rust holds, with the allocator handing back what it can first when asked. The host's to
+/// supply: the allocator is the staticlib's choice, and this crate's tests run without it.
+pub type AllocatorReader = fn(collect: bool) -> i64;
 
 pub struct StartupTrace {
     path: Option<PathBuf>,
@@ -68,6 +73,7 @@ impl StartupTrace {
                 page_faults: BTreeMap::new(),
                 instance: "unknown".to_string(),
                 flushed: false,
+                allocator: None,
             }),
         }
     }
@@ -102,6 +108,10 @@ impl StartupTrace {
             inner.marks.insert(name.to_string(), at);
             inner.page_faults.insert(name.to_string(), page_faults());
         }
+    }
+
+    pub fn set_allocator_reader(&self, reader: AllocatorReader) {
+        self.inner.lock().unwrap().allocator = Some(reader);
     }
 
     pub fn set_instance(&self, is_first: bool) {
@@ -139,11 +149,17 @@ impl StartupTrace {
         let Some(path) = &self.path else {
             return false;
         };
-        // After every mark is in, so the compaction it forces is on nobody's clock.
+        // After every mark is in, so what handing memory back costs is on nobody's clock.
+        let allocator = self.inner.lock().unwrap().allocator;
         let mut memory = BTreeMap::new();
-        memory.insert(StartupMemoryPoints::FIRST_LISTING.to_string(), snapshot());
-        compact_heap();
-        memory.insert(StartupMemoryPoints::COLLECTED.to_string(), snapshot());
+        memory.insert(
+            StartupMemoryPoints::FIRST_LISTING.to_string(),
+            snapshot(allocator, false),
+        );
+        memory.insert(
+            StartupMemoryPoints::COLLECTED.to_string(),
+            snapshot(allocator, true),
+        );
 
         let trace = {
             let inner = self.inner.lock().unwrap();
@@ -238,12 +254,14 @@ fn page_faults() -> i64 {
     i64::from(counters.PageFaultCount)
 }
 
-fn snapshot() -> StartupMemory {
+fn snapshot(allocator: Option<AllocatorReader>, collect: bool) -> StartupMemory {
     use windows_sys::Win32::System::ProcessStatus::{
         GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS_EX,
     };
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
+    // First: handing memory back is what the process's own counters are then to show.
+    let allocator_bytes = allocator.map_or(0, |read| read(collect));
     // SAFETY: a zeroed struct with its size set, as the call requires.
     let mut counters: PROCESS_MEMORY_COUNTERS_EX = unsafe { std::mem::zeroed() };
     counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32;
@@ -258,13 +276,15 @@ fn snapshot() -> StartupMemory {
     StartupMemory {
         working_set_bytes: counters.WorkingSetSize as i64,
         private_bytes: counters.PrivateUsage as i64,
-        heap_bytes: heap_committed(),
+        allocator_bytes,
+        process_heap_bytes: process_heap_in_use(),
         peak_working_set_bytes: counters.PeakWorkingSetSize as i64,
     }
 }
 
-/// Bytes committed in the process heap, which is what Rust's global allocator draws from on Windows.
-fn heap_committed() -> i64 {
+/// Bytes in use in the process heap: the C++ side and the Windows DLLs. Rust's allocations are not here,
+/// they are mimalloc's (`allocator_bytes`).
+fn process_heap_in_use() -> i64 {
     use windows_sys::Win32::System::Memory::{GetProcessHeap, HEAP_SUMMARY, HeapSummary};
 
     // SAFETY: a zeroed struct with its size set, as the call requires.
@@ -274,14 +294,7 @@ fn heap_committed() -> i64 {
     if unsafe { HeapSummary(GetProcessHeap(), 0, &mut summary) } == 0 {
         return 0;
     }
-    summary.cbCommitted as i64
-}
-
-/// The steadier of the two readings: what the app is actually holding once free blocks are returned.
-fn compact_heap() {
-    use windows_sys::Win32::System::Memory::{GetProcessHeap, HeapCompact};
-    // SAFETY: plain call on the process heap.
-    unsafe { HeapCompact(GetProcessHeap(), 0) };
+    summary.cbAllocated as i64
 }
 
 #[cfg(test)]
@@ -318,6 +331,7 @@ mod tests {
     fn a_complete_trace_is_written_once_in_the_schema_the_bench_tool_reads() {
         let path = scratch("write");
         let t = StartupTrace::new(Some(path.clone()), false);
+        t.set_allocator_reader(|collect| if collect { 2 } else { 1 });
         t.set_instance(true);
         t.mark(StartupMarks::MAIN);
         assert!(!t.finish_if_complete(), "neither mark is in yet");
@@ -347,6 +361,17 @@ mod tests {
         let memory = read.memory.unwrap();
         assert!(memory[StartupMemoryPoints::FIRST_LISTING].working_set_bytes > 0);
         assert!(memory[StartupMemoryPoints::COLLECTED].private_bytes > 0);
+        assert!(memory[StartupMemoryPoints::COLLECTED].process_heap_bytes > 0);
+        assert_eq!(
+            1,
+            memory[StartupMemoryPoints::FIRST_LISTING].allocator_bytes,
+            "read as it stood"
+        );
+        assert_eq!(
+            2,
+            memory[StartupMemoryPoints::COLLECTED].allocator_bytes,
+            "read after handing memory back"
+        );
         assert!(read.page_faults.unwrap()[StartupMarks::MAIN] > 0);
     }
 

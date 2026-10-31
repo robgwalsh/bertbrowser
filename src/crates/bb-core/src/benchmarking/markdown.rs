@@ -46,7 +46,7 @@ impl BenchMarkdown {
         );
         let _ = writeln!(
             sb,
-            " Process-memory gate {}: managed heap at {} over {}, private bytes at {} over {}.\n",
+            " Process-memory gate {}: Rust allocator and process heap at {} over {}, private bytes at {} over {}.\n",
             if options.gate_memory {
                 "on"
             } else {
@@ -93,25 +93,31 @@ impl BenchMarkdown {
         let snapshots: Vec<_> = ordered.iter().filter(|r| is_snapshot(r)).collect();
         if !snapshots.is_empty() {
             sb.push_str("\n### Process memory\n\n");
-            sb.push_str("| Snapshot | Tier | Private base | Private now | Δ | Managed base | Managed now | Δ | Working set base | Working set now | Status |\n");
-            sb.push_str("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|\n");
+            sb.push_str("| Snapshot | Tier | Private base | Private now | Δ | Allocator base | Allocator now | Δ | Process heap base | Process heap now | Δ | Working set base | Working set now | Status |\n");
+            sb.push_str("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|\n");
 
             for row in snapshots {
                 let was = row.baseline_process.as_ref();
                 let now = row.current_process.as_ref();
                 let _ = write!(
                     sb,
-                    "| `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | {}",
+                    "| `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {}",
                     row.id,
                     row.tier,
                     Self::bytes(was.map(|p| p.private_bytes)),
                     Self::bytes(now.map(|p| p.private_bytes)),
                     delta(row.memory_delta_pct),
-                    Self::bytes(was.map(|p| p.heap_bytes)),
-                    Self::bytes(now.map(|p| p.heap_bytes)),
+                    Self::bytes(was.map(|p| p.allocator_bytes)),
+                    Self::bytes(now.map(|p| p.allocator_bytes)),
                     delta(delta_pct(
-                        was.map(|p| p.heap_bytes),
-                        now.map(|p| p.heap_bytes)
+                        was.map(|p| p.allocator_bytes),
+                        now.map(|p| p.allocator_bytes)
+                    )),
+                    Self::bytes(was.map(|p| p.process_heap_bytes)),
+                    Self::bytes(now.map(|p| p.process_heap_bytes)),
+                    delta(delta_pct(
+                        was.map(|p| p.process_heap_bytes),
+                        now.map(|p| p.process_heap_bytes)
                     )),
                     Self::bytes(was.map(|p| p.working_set_bytes)),
                     Self::bytes(now.map(|p| p.working_set_bytes)),
@@ -150,7 +156,7 @@ impl BenchMarkdown {
 
             match tier {
                 "A" => {
-                    sb.push_str("| Benchmark | Median | p95 | Allocated/op | Gen0/kop | n |\n");
+                    sb.push_str("| Benchmark | Median | p95 | Allocated/op | Allocs/kop | n |\n");
                     sb.push_str("|---|---:|---:|---:|---:|---:|\n");
                     for e in by_id(members.iter().copied()) {
                         let _ = write!(sb, "| `{}` | ", e.id);
@@ -234,7 +240,7 @@ impl BenchMarkdown {
 
     pub(crate) fn tier_name(tier: &str) -> &str {
         match tier {
-            "A" => "Core micro-benchmarks (BenchmarkDotNet)",
+            "A" => "Core micro-benchmarks",
             "B" => "UI scenarios (offscreen harness)",
             "C" => "Startup of the real executable",
             other => other,
@@ -293,7 +299,7 @@ fn append_memory_table(sb: &mut String, tier: &[&BenchEntry], rows: bool) {
     sb.push('\n');
     let _ = writeln!(
         sb,
-        "| Memory snapshot | Managed heap | Private bytes | Working set | Peak working set |{}",
+        "| Memory snapshot | Rust allocator | Process heap | Private bytes | Working set | Peak working set |{}",
         if rows {
             " Items | Realized | n |"
         } else {
@@ -302,7 +308,7 @@ fn append_memory_table(sb: &mut String, tier: &[&BenchEntry], rows: bool) {
     );
     let _ = writeln!(
         sb,
-        "|---|---:|---:|---:|---:|{}",
+        "|---|---:|---:|---:|---:|---:|{}",
         if rows { "---:|---:|---:|" } else { "---:|" }
     );
 
@@ -310,9 +316,10 @@ fn append_memory_table(sb: &mut String, tier: &[&BenchEntry], rows: bool) {
         let p = e.process.as_ref().expect("filtered on process");
         let _ = write!(
             sb,
-            "| `{}` | {} | {} | {} | {} | ",
+            "| `{}` | {} | {} | {} | {} | {} | ",
             e.id,
-            BenchMarkdown::bytes(Some(p.heap_bytes)),
+            BenchMarkdown::bytes(Some(p.allocator_bytes)),
+            BenchMarkdown::bytes(Some(p.process_heap_bytes)),
             BenchMarkdown::bytes(Some(p.private_bytes)),
             BenchMarkdown::bytes(Some(p.working_set_bytes)),
             BenchMarkdown::bytes(p.peak_working_set_bytes)

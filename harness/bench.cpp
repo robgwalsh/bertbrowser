@@ -88,14 +88,15 @@ void Runner::time_verb(const std::wstring& rest) {
 Runner::MemorySample Runner::read_memory() {
     // What is held, not what is about to be: let the core's own queued events land first.
     s_.pump();
-    // The managed harness collects fully before it reads; the native analogue is dropping what is only
-    // cached. The layout LRU is bounded (4096 layouts, tens of MB of DirectWrite objects) and fills to its
-    // cap whatever the folder, so left in it would read as growth in a soak that is not one.
+    // Drop what is only cached. The layout LRU is bounded (4096 layouts, tens of MB of DirectWrite objects) and
+    // fills to its cap whatever the folder, so left in it would read as growth in a soak that is not one.
     s_.resources().layouts.clear();
     MemorySample m;
+    // Two heaps that share nothing. Rust's allocations are mimalloc's, and everything else is the process heap's.
+    m.allocator = static_cast<uint64_t>(bb_allocator_held(true));
     HEAP_SUMMARY hs{};
     hs.cb = sizeof(hs);
-    if (HeapSummary(GetProcessHeap(), 0, &hs)) m.managed = hs.cbAllocated;  // the native heap in use, our analogue of the managed heap
+    if (HeapSummary(GetProcessHeap(), 0, &hs)) m.process_heap = hs.cbAllocated;
     PROCESS_MEMORY_COUNTERS_EX pmc{};
     pmc.cb = sizeof(pmc);
     if (GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmc), sizeof(pmc))) {
@@ -118,7 +119,8 @@ void Runner::mem_verb(const std::wstring& rest) {
     const MemorySample m = read_memory();
     memory_[name] = m;
     const std::string body = "{\"kind\":\"mem\",\"name\":" + json_string(to_utf8(name)) +
-                             ",\"managedBytes\":" + std::to_string(m.managed) +
+                             ",\"allocatorBytes\":" + std::to_string(m.allocator) +
+                             ",\"processHeapBytes\":" + std::to_string(m.process_heap) +
                              ",\"workingSetBytes\":" + std::to_string(m.working_set) +
                              ",\"privateBytes\":" + std::to_string(m.private_bytes) +
                              ",\"peakWorkingSetBytes\":" + std::to_string(m.peak_working_set) +
@@ -129,7 +131,7 @@ void Runner::mem_verb(const std::wstring& rest) {
 }
 
 void Runner::assert_mem(const std::wstring& rest) {
-    const char* usage = "assert-mem wants '<managed|private|workingset> under <mb> [since <name>]'.";
+    const char* usage = "assert-mem wants '<allocator|heap|private|workingset> under <mb> [since <name>]'.";
     std::vector<std::wstring> parts;
     for (const auto& p : bb::core::split(require(rest, "assert-mem"), L' ')) {
         if (!p.empty()) parts.push_back(p);
@@ -143,10 +145,11 @@ void Runner::assert_mem(const std::wstring& rest) {
     for (auto& c : kind) c = static_cast<wchar_t>(towlower(c));
     uint64_t MemorySample::*field;
     const char* what;
-    if (kind == L"managed") { field = &MemorySample::managed; what = "native heap"; }
+    if (kind == L"allocator") { field = &MemorySample::allocator; what = "Rust allocator"; }
+    else if (kind == L"heap") { field = &MemorySample::process_heap; what = "process heap"; }
     else if (kind == L"private") { field = &MemorySample::private_bytes; what = "private bytes"; }
     else if (kind == L"workingset") { field = &MemorySample::working_set; what = "working set"; }
-    else throw FormatError("assert-mem: expected 'managed', 'private' or 'workingset', got '" + to_utf8(parts[0]) + "'.");
+    else throw FormatError("assert-mem: expected 'allocator', 'heap', 'private' or 'workingset', got '" + to_utf8(parts[0]) + "'.");
 
     constexpr double kMb = 1024.0 * 1024.0;
     char buf[160];

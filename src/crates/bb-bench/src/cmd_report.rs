@@ -25,11 +25,10 @@ $bench = "target\release\bb-bench.exe"
 How to read the native numbers next to the .NET ones in `docs/performance.md` of the `bertbrowser-csharp-archive` repository:
 
 - **Allocated/op** is exact: a counting global allocator sums the bytes requested by one operation, so it
-  does not vary between runs. **Gen0/kop** has no collector behind it here and reads *allocator calls per
-  thousand operations*.
-- **Managed heap** in the Tier B and C snapshots is the bytes the process heap holds (`HeapSummary` /
-  the global allocator), taken after the layout cache is dropped -- the native counterpart of "after a
-  full collection".
+  does not vary between runs. **Allocs/kop** is *allocator calls per thousand operations*, where the .NET
+  tables have Gen0/kop.
+- **Rust allocator** and **Process heap** in the Tier B and C snapshots together stand where the .NET tables
+  have "Managed heap", and neither is the same kind of number: see the end of this document.
 - The synthetic corpus has the same shape as the .NET one (100,000 rows under `Q:`, the same queries
   and sizes) but is cut from this crate's own random stream, so rows are the same kind of disk, not the
   same disk.

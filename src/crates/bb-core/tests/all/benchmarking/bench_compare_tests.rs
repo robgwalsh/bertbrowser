@@ -108,18 +108,18 @@ pub fn entry_full(
 }
 
 /// A process snapshot: the working set is twice the private bytes and the peak 10 MB over that.
-pub fn snapshot(id: &str, private_mb: f64, managed_mb: f64) -> BenchEntry {
-    snapshot_full(id, private_mb, managed_mb, "A", None)
+pub fn snapshot(id: &str, private_mb: f64, allocator_mb: f64) -> BenchEntry {
+    snapshot_full(id, private_mb, allocator_mb, "A", None)
 }
 
-pub fn snapshot_in(id: &str, private_mb: f64, managed_mb: f64, tier: &str) -> BenchEntry {
-    snapshot_full(id, private_mb, managed_mb, tier, None)
+pub fn snapshot_in(id: &str, private_mb: f64, allocator_mb: f64, tier: &str) -> BenchEntry {
+    snapshot_full(id, private_mb, allocator_mb, tier, None)
 }
 
 pub fn snapshot_full(
     id: &str,
     private_mb: f64,
-    managed_mb: f64,
+    allocator_mb: f64,
     tier: &str,
     working_set_mb: Option<f64>,
 ) -> BenchEntry {
@@ -135,7 +135,8 @@ pub fn snapshot_full(
         process: Some(ProcessStats {
             working_set_bytes: (working_set * MB) as i64,
             private_bytes: (private_mb * MB) as i64,
-            heap_bytes: (managed_mb * MB) as i64,
+            allocator_bytes: (allocator_mb * MB) as i64,
+            process_heap_bytes: (2.0 * MB) as i64,
             realized_rows: 5,
             items: 10,
             retained_thumbnails: 0,
@@ -328,7 +329,7 @@ fn alloc_down_reported_but_not_a_regression() {
 }
 
 #[test]
-fn managed_heap_judged_at_ten_percent_over_a_megabyte() {
+fn rust_allocator_judged_at_ten_percent_over_a_megabyte() {
     for (before, after, expected) in [
         (13.0, 13.9, CompareStatus::Same), // +0.9 MB: under the 1 MB floor, whatever the percentage
         (13.0, 14.2, CompareStatus::Same), // +1.2 MB clears the floor but is 9.2%
@@ -352,7 +353,18 @@ fn managed_heap_judged_at_ten_percent_over_a_megabyte() {
 }
 
 #[test]
-fn private_bytes_judged_looser_than_the_managed_heap() {
+fn a_process_heap_that_grows_is_up_though_the_allocator_never_saw_it() {
+    // A leak on the C++ side: the Rust allocator has no idea, which is why both are judged.
+    let was = snapshot("m", 100.0, 13.0);
+    let mut now = was.clone();
+    now.process.as_mut().unwrap().process_heap_bytes = (40.0 * 1024.0 * 1024.0) as i64;
+    let report = compare(vec![was], vec![now]);
+    assert_eq!(CompareStatus::MemoryUp, report.rows[0].status);
+    assert!(report.memory_regressed);
+}
+
+#[test]
+fn private_bytes_judged_looser_than_the_rust_allocator() {
     for (before, after, expected) in [
         (100.0, 112.0, CompareStatus::Same), // the spread measured between identical runs
         (100.0, 124.0, CompareStatus::Same), // over the 16 MB floor, under 25%
@@ -407,7 +419,7 @@ fn memory_gate_off_still_reports_memory_up() {
 
 #[test]
 fn memory_up_wins_over_a_shrinking_other_number() {
-    // Private bytes fell and the managed heap rose: the rise is the news.
+    // Private bytes fell and the Rust allocator rose: the rise is the news.
     let report = compare(
         vec![snapshot("m", 200.0, 13.0)],
         vec![snapshot("m", 100.0, 30.0)],

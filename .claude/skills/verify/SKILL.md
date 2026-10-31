@@ -569,11 +569,11 @@ time <name> <verb> [args][; <verb> [args]…]
                             `select` with `settle-preview` to time a preview as a person sees it
 repeat <n> <verb> [args][; <verb> [args]…]
                             the chain, n times — a soak. Owns the rest of its line, so not inside `time`
-mem [name]                  "MEM {json}": the managed/heap bytes, working set, private
+mem [name]                  "MEM {json}": the Rust allocator and process heap bytes, working set, private
                             bytes, peak working set, items, realized rows, retained thumbnails
-assert-mem managed|private|workingset under <mb> [since <name>]
+assert-mem allocator|heap|private|workingset under <mb> [since <name>]
                             a ceiling, or with `since` a budget on growth over an earlier `mem <name>`
-                            — the leak check: `mem before` · `repeat 25 …` · `assert-mem managed under 8 since before`
+                            — the leak check: `mem before` · `repeat 25 …` · `assert-mem allocator under 8 since before`, and `heap` for the C++ side
 settle-thumbnails [ms]      wait until no icon or thumbnail request is queued at the shell gates, then
                             settle — Settle deliberately does not wait for pictures; a tile scenario
                             says so when it needs to (prints "SETTLED-THUMBS <ms>")

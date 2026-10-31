@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use super::BenchError;
 use crate::FileTime;
 
-/// The schema this build writes and reads. Bumped when a field changes meaning: 2 is the native
-/// build, whose `heapBytes` is what the global allocator holds rather than a managed heap.
-pub const CURRENT_SCHEMA_VERSION: i32 = 2;
+/// The schema this build writes and reads. Bumped when a field changes meaning: 3 splits 2's
+/// `heapBytes`, which was only ever the process heap, into `allocatorBytes` and `processHeapBytes`.
+pub const CURRENT_SCHEMA_VERSION: i32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -161,9 +161,9 @@ pub struct AllocStats {
 }
 
 /// A snapshot of a process's memory: the harness's at a point in a scenario (Tier B), or the real
-/// executable's at its first listing (Tier C). Taken after a full collection unless the entry's id
-/// says otherwise, so the heap is what is *held*. `private_bytes` and `heap_bytes` are what the
-/// compare gates; the working set is the number Task Manager shows and is reported, but Windows
+/// executable's at its first listing (Tier C). Taken after mimalloc has handed back what it can unless
+/// the entry's id says otherwise. `allocator_bytes`, `process_heap_bytes` and `private_bytes`
+/// are what the compare gates; the working set is the number Task Manager shows and is reported, but Windows
 /// trims and grows it for its own reasons. `realized_rows`: Tier B, rows the list has built, or -1
 /// without a virtualizing panel; zero in Tier C. `peak_working_set_bytes`: the high-water mark a
 /// snapshot taken after the work cannot otherwise see; `None` in a file written before it was
@@ -173,8 +173,10 @@ pub struct AllocStats {
 pub struct ProcessStats {
     pub working_set_bytes: i64,
     pub private_bytes: i64,
-    /// Bytes the global allocator currently holds for the process.
-    pub heap_bytes: i64,
+    /// Bytes Rust holds, counted at its allocator: requested and not yet freed, without mimalloc's free pages.
+    pub allocator_bytes: i64,
+    /// Bytes in use in the Windows process heap: the C++ side and the system DLLs, never Rust.
+    pub process_heap_bytes: i64,
     pub realized_rows: i32,
     pub items: u32,
     pub retained_thumbnails: u32,

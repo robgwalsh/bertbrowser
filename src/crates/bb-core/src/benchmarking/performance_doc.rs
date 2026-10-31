@@ -54,7 +54,7 @@ impl PerformanceDoc {
             );
             let _ = writeln!(sb, "| RAM | {} GB |", set.machine.ram_gb);
             let _ = writeln!(sb, "| Windows build | {} |", set.machine.os_build);
-            let _ = writeln!(sb, "| .NET | {} |", set.machine.runtime);
+            let _ = writeln!(sb, "| Rust | {} |", set.machine.runtime);
             if let Some(plan) = &set.machine.power_plan {
                 let _ = writeln!(sb, "| Power plan | {plan} |");
             }
@@ -97,26 +97,30 @@ impl PerformanceDoc {
         }
 
         sb.push_str("## What the numbers do and do not mean\n\n");
-        sb.push_str("- **Tier A** is BenchmarkDotNet over `BertBrowser.Core` with a synthetic corpus unless marked real.\n");
+        sb.push_str("- **Tier A** is `bb-bench`'s own runner over `bb-core` with a synthetic corpus unless marked real.\n");
         sb.push_str("  Disk-reading benchmarks run against files the OS has cached, so they measure the code, not the disk.\n");
         sb.push_str("  `Allocated/op` is exact for pure code; benchmarks over SQLite, the thread pool or disk declare a\n");
         sb.push_str("  tolerance, which the compare tool honours.\n");
-        sb.push_str("- **Tier B** drives the real window offscreen under WPF's software rasteriser, parked outside every\n");
-        sb.push_str("  monitor at 1400×900. It is a regression signal for view-model and layout work, not the GPU path a\n");
+        sb.push_str("- **Tier B** drives the real window through the harness on WARP, the software rasteriser, parked outside\n");
+        sb.push_str("  every monitor at 1400×900. It is a regression signal for core and layout work, not the GPU path a\n");
         sb.push_str("  user sees. A `search.*` time includes the 200 ms typing debounce. Each scenario is a fresh process.\n");
         sb.push_str("- **Tier C** launches the built `BertBrowser.exe` against a scratch data directory and reads marks the\n");
         sb.push_str("  app writes under `BERTBROWSER_STARTUP_TRACE`. The window is parked offscreen and the post-window\n");
         sb.push_str("  side effects (index-helper attach, change-log policy, update check) are skipped, so the headline is\n");
         sb.push_str("  \"process start to the rows on screen\" (`listingPainted`), not \"to idle\". The first launch is discarded as cold.\n");
         sb.push_str("- **Memory** is three different measurements. Tier A's `Allocated/op` is what one call allocates. A\n");
-        sb.push_str("  Tier B *memory snapshot* is the harness process at a named point in a scenario, after a full\n");
-        sb.push_str("  collection, so the managed heap is what the app is holding rather than what is waiting to be\n");
-        sb.push_str("  collected; its working set and private bytes include the harness and the software rasteriser.\n");
+        sb.push_str("  Tier B *memory snapshot* is the harness process at a named point in a scenario, after dropping the\n");
+        sb.push_str("  text layout cache and asking the allocator to hand back what it can; its working set and private\n");
+        sb.push_str("  bytes include the harness and the software rasteriser. In both snapshot tables **Rust allocator** is\n");
+        sb.push_str("  the bytes Rust holds, counted at the allocator. **Process heap** is what is in use in the Windows\n");
+        sb.push_str("  heap: the C++ side and the system DLLs, never Rust. Neither contains the other, and **private bytes**\n");
+        sb.push_str("  contains both, the free pages allocators keep, and everything else.\n");
         sb.push_str("  `ui.memory.*` is the scenario written for this: idle, ten thousand rows, twenty thousand flat,\n");
         sb.push_str("  after leaving them, and after two soaks (25 navigations, 15 tabs opened and closed) that must not\n");
         sb.push_str("  grow. Tier C's `startup.memory.*` is the real executable reading itself with the first listing up:\n");
-        sb.push_str("  `firstListing` as it stood, which is what Task Manager shows, and `collected` after a full collection.\n");
-        sb.push_str("  A later run is held to the managed heap within 10% and private bytes within 25%; the working set is\n");
+        sb.push_str("  `firstListing` as it stood, which is what Task Manager shows, and `collected` after the allocator has\n");
+        sb.push_str("  handed back what it can. A later run is held to the Rust allocator and the process heap within 10% and\n");
+        sb.push_str("  private bytes within 25%; the working set is\n");
         sb.push_str("  reported and not judged, because Windows trims it for its own reasons.\n");
         sb.push_str("- Medians are reported because a single slow sample is the machine, not the code; p95 is nearest-rank.\n\n");
 

@@ -26,11 +26,10 @@ $bench = "target\release\bb-bench.exe"
 How to read the native numbers next to the .NET ones in `docs/performance.md` of the `bertbrowser-csharp-archive` repository:
 
 - **Allocated/op** is exact: a counting global allocator sums the bytes requested by one operation, so it
-  does not vary between runs. **Gen0/kop** has no collector behind it here and reads *allocator calls per
-  thousand operations*.
-- **Managed heap** in the Tier B and C snapshots is the bytes the process heap holds (`HeapSummary` /
-  the global allocator), taken after the layout cache is dropped -- the native counterpart of "after a
-  full collection".
+  does not vary between runs. **Allocs/kop** is *allocator calls per thousand operations*, where the .NET
+  tables have Gen0/kop.
+- **Rust allocator** and **Process heap** in the Tier B and C snapshots together stand where the .NET tables
+  have "Managed heap", and neither is the same kind of number: see the end of this document.
 - The synthetic corpus has the same shape as the .NET one (100,000 rows under `Q:`, the same queries
   and sizes) but is cut from this crate's own random stream, so rows are the same kind of disk, not the
   same disk.
@@ -45,15 +44,15 @@ How to read the native numbers next to the .NET ones in `docs/performance.md` of
 | CPU | AMD Ryzen 9 3900X 12-Core Processor, 24 logical cores |
 | RAM | 32 GB |
 | Windows build | 26200 |
-| .NET | 1.99.1 |
+| Rust | 1.99.1 |
 | Power plan | High performance |
 | Corpus | synthetic, scale 1 (100,000 rows) |
 | Job | default, counting-allocator toolchain |
-| Recorded | 2026-10-31 at `350dfc6b7` (uncommitted changes) |
+| Recorded | 2026-10-31 at `c616bc784` (uncommitted changes) |
 
-### Tier A — Core micro-benchmarks (BenchmarkDotNet)
+### Tier A — Core micro-benchmarks
 
-| Benchmark | Median | p95 | Allocated/op | Gen0/kop | n |
+| Benchmark | Median | p95 | Allocated/op | Allocs/kop | n |
 |---|---:|---:|---:|---:|---:|
 | `core.db.open` | 44.0 ns | 45.2 ns | 0 B | 0 | 15 |
 | `core.db.openwithoutpragmas` | 74.9 µs | 79.1 µs | 100 B | 2000 | 15 |
@@ -143,128 +142,144 @@ How to read the native numbers next to the .NET ones in `docs/performance.md` of
 
 | Scenario | Median | p95 | n |
 |---|---:|---:|---:|
-| `ui.flat-20k.flat.off` | 22.0 ms | 24.7 ms | 5 |
-| `ui.flat-20k.flat.on` | 288 ms | 305 ms | 5 |
-| `ui.flat-20k.flat.sort.name` | 18.9 ms | 20.8 ms | 5 |
-| `ui.flat-20k.flat.sort.size` | 18.8 ms | 21.4 ms | 5 |
-| `ui.listing-10k.back` | 33.4 ms | 34.8 ms | 5 |
-| `ui.listing-10k.list` | 35.3 ms | 38.3 ms | 5 |
-| `ui.listing-10k.refresh` | 32.3 ms | 33.7 ms | 5 |
-| `ui.listing-10k.up` | 16.1 ms | 16.3 ms | 5 |
-| `ui.preview.preview.code` | 174 ms | 175 ms | 5 |
-| `ui.preview.preview.hex2mb` | 268 ms | 294 ms | 5 |
-| `ui.preview.preview.png` | 181 ms | 184 ms | 5 |
-| `ui.preview.preview.text2mb` | 180 ms | 181 ms | 5 |
-| `ui.search-local.search.clear` | 14.8 ms | 16.6 ms | 5 |
-| `ui.search-local.search.ext` | 52.8 ms | 58.2 ms | 5 |
-| `ui.search-local.search.regex` | 56.4 ms | 74.3 ms | 5 |
-| `ui.search-local.search.word` | 52.8 ms | 61.1 ms | 5 |
-| `ui.sort-select-10k.select.all` | 13.3 ms | 14.4 ms | 5 |
-| `ui.sort-select-10k.select.files` | 20.6 ms | 21.7 ms | 5 |
-| `ui.sort-select-10k.select.invert` | 21.1 ms | 22.3 ms | 5 |
-| `ui.sort-select-10k.select.none` | 11.1 ms | 11.2 ms | 5 |
-| `ui.sort-select-10k.sort.first` | 15.1 ms | 15.5 ms | 5 |
-| `ui.sort-select-10k.sort.modified` | 15.7 ms | 16.8 ms | 5 |
-| `ui.sort-select-10k.sort.name` | 14.7 ms | 16.3 ms | 5 |
-| `ui.sort-select-10k.sort.size` | 14.4 ms | 15.3 ms | 5 |
-| `ui.sort-select-10k.sort.type` | 53.8 ms | 55.0 ms | 5 |
-| `ui.startup.startup.hosted` | 66.6 ms | 70.9 ms | 5 |
-| `ui.tabs-panes` | error: harness exit 2 on run 2; see C:\Users\Rob\AppData\Local\Temp\bertbrowser-bench-native\ui\20261028-76216\tabs-panes\2\harness.log | | |
-| `ui.tiles-5k` | error: harness exit 2 on run 1; see C:\Users\Rob\AppData\Local\Temp\bertbrowser-bench-native\ui\20261028-76216\tiles-5k\1\harness.log | | |
-| `ui.transfer-2k` | error: harness exit 2 on run 1; see C:\Users\Rob\AppData\Local\Temp\bertbrowser-bench-native\ui\20261028-76216\transfer-2k\1\harness.log | | |
+| `ui.flat-20k.flat.off` | 21.2 ms | 22.5 ms | 5 |
+| `ui.flat-20k.flat.on` | 281 ms | 284 ms | 5 |
+| `ui.flat-20k.flat.sort.name` | 17.4 ms | 17.4 ms | 5 |
+| `ui.flat-20k.flat.sort.size` | 17.6 ms | 17.8 ms | 5 |
+| `ui.listing-10k.back` | 33.8 ms | 33.9 ms | 5 |
+| `ui.listing-10k.list` | 39.4 ms | 41.8 ms | 5 |
+| `ui.listing-10k.refresh` | 32.7 ms | 33.8 ms | 5 |
+| `ui.listing-10k.up` | 16.3 ms | 16.3 ms | 5 |
+| `ui.preview.preview.code` | 175 ms | 175 ms | 5 |
+| `ui.preview.preview.hex2mb` | 242 ms | 288 ms | 5 |
+| `ui.preview.preview.png` | 177 ms | 178 ms | 5 |
+| `ui.preview.preview.text2mb` | 179 ms | 180 ms | 5 |
+| `ui.search-local.search.clear` | 18.8 ms | 19.3 ms | 5 |
+| `ui.search-local.search.ext` | 48.8 ms | 49.7 ms | 5 |
+| `ui.search-local.search.regex` | 50.5 ms | 77.7 ms | 5 |
+| `ui.search-local.search.word` | 58.5 ms | 60.8 ms | 5 |
+| `ui.sort-select-10k.select.all` | 15.3 ms | 16.5 ms | 5 |
+| `ui.sort-select-10k.select.files` | 22.6 ms | 23.2 ms | 5 |
+| `ui.sort-select-10k.select.invert` | 23.0 ms | 24.0 ms | 5 |
+| `ui.sort-select-10k.select.none` | 10.2 ms | 10.9 ms | 5 |
+| `ui.sort-select-10k.sort.first` | 14.0 ms | 14.0 ms | 5 |
+| `ui.sort-select-10k.sort.modified` | 13.9 ms | 14.4 ms | 5 |
+| `ui.sort-select-10k.sort.name` | 13.7 ms | 13.9 ms | 5 |
+| `ui.sort-select-10k.sort.size` | 13.9 ms | 14.0 ms | 5 |
+| `ui.sort-select-10k.sort.type` | 53.5 ms | 55.3 ms | 5 |
+| `ui.startup.startup.hosted` | 78.9 ms | 81.6 ms | 5 |
+| `ui.tabs-panes.pane.close` | 36.0 ms | 40.5 ms | 5 |
+| `ui.tabs-panes.pane.split` | 25.3 ms | 27.5 ms | 5 |
+| `ui.tabs-panes.pane.switch` | 20.9 ms | 21.0 ms | 5 |
+| `ui.tabs-panes.tab.close` | 13.9 ms | 13.9 ms | 5 |
+| `ui.tabs-panes.tab.new` | 24.1 ms | 25.1 ms | 5 |
+| `ui.tabs-panes.tab.switch` | 13.5 ms | 13.8 ms | 5 |
+| `ui.tiles-5k.tiles.back` | 17.2 ms | 17.8 ms | 5 |
+| `ui.tiles-5k.tiles.large` | 139 ms | 140 ms | 5 |
+| `ui.tiles-5k.tiles.on` | 141 ms | 143 ms | 5 |
+| `ui.tiles-5k.tiles.scroll` | 33.4 ms | 37.4 ms | 5 |
+| `ui.transfer-2k.copy.2k` | 1.17 s | 1.19 s | 5 |
+| `ui.transfer-2k.delete.2k` | 952 ms | 962 ms | 5 |
 
-| Memory snapshot | Managed heap | Private bytes | Working set | Peak working set | Items | Realized | n |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| `ui.flat-20k.flat` | 9.21 MB | 123 MB | 109 MB | 111 MB | 200 | 34 | 5 |
-| `ui.listing-10k.listing` | 9.48 MB | 85.9 MB | 69.6 MB | 70.4 MB | 10000 | 34 | 5 |
-| `ui.memory.flat-20k` | 9.67 MB | 145 MB | 116 MB | 118 MB | 20000 | 34 | 5 |
-| `ui.memory.idle` | 8.82 MB | 34.6 MB | 36.0 MB | 36.0 MB | 2 | 2 | 5 |
-| `ui.memory.listing-10k` | 9.15 MB | 61.4 MB | 49.0 MB | 49.4 MB | 10000 | 34 | 5 |
-| `ui.memory.released` | 8.69 MB | 145 MB | 116 MB | 118 MB | 2 | 2 | 5 |
-| `ui.memory.soak-navigate` | 9.44 MB | 77.1 MB | 70.9 MB | 130 MB | 2 | 2 | 5 |
-| `ui.memory.soak-tabs` | 8.73 MB | 86.9 MB | 73.2 MB | 130 MB | 2 | 2 | 5 |
-| `ui.preview.preview` | 10.6 MB | 66.9 MB | 56.5 MB | 57.8 MB | 10 | 10 | 5 |
-| `ui.search-local.search` | 11.8 MB | 74.7 MB | 52.8 MB | 56.5 MB | 200 | 34 | 5 |
-| `ui.sort-select-10k.sort` | 9.41 MB | 74.4 MB | 52.9 MB | 53.8 MB | 10000 | 34 | 5 |
+| Memory snapshot | Rust allocator | Process heap | Private bytes | Working set | Peak working set | Items | Realized | n |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `ui.flat-20k.flat` | 4.10 MB | 6.34 MB | 49.5 MB | 63.3 MB | 127 MB | 200 | 34 | 5 |
+| `ui.listing-10k.listing` | 10.8 MB | 6.39 MB | 52.3 MB | 62.8 MB | 84.3 MB | 10000 | 34 | 5 |
+| `ui.memory.flat-20k` | 20.1 MB | 6.49 MB | 68.7 MB | 79.3 MB | 128 MB | 20000 | 34 | 5 |
+| `ui.memory.idle` | 494 KB | 6.66 MB | 34.3 MB | 48.4 MB | 48.7 MB | 2 | 2 | 5 |
+| `ui.memory.listing-10k` | 10.7 MB | 6.43 MB | 49.6 MB | 59.3 MB | 63.1 MB | 10000 | 34 | 5 |
+| `ui.memory.released` | 1.26 MB | 6.51 MB | 52.3 MB | 61.6 MB | 128 MB | 2 | 2 | 5 |
+| `ui.memory.soak-navigate` | 1.27 MB | 6.58 MB | 48.6 MB | 65.0 MB | 128 MB | 2 | 2 | 5 |
+| `ui.memory.soak-tabs` | 1.27 MB | 6.60 MB | 60.4 MB | 63.0 MB | 128 MB | 2 | 2 | 5 |
+| `ui.preview.preview` | 538 KB | 8.65 MB | 40.5 MB | 57.0 MB | 63.7 MB | 10 | 10 | 5 |
+| `ui.search-local.search` | 4.33 MB | 8.38 MB | 68.4 MB | 64.5 MB | 69.4 MB | 200 | 34 | 5 |
+| `ui.sort-select-10k.sort` | 6.88 MB | 6.31 MB | 50.7 MB | 58.9 MB | 66.8 MB | 10000 | 34 | 5 |
+| `ui.tabs-panes.tabs` | 5.61 MB | 6.43 MB | 55.1 MB | 58.4 MB | 72.3 MB | 5000 | 34 | 5 |
+| `ui.tiles-5k.tiles` | 4.52 MB | 14.1 MB | 60.5 MB | 62.7 MB | 77.1 MB | 5000 | 34 | 5 |
+| `ui.transfer-2k.transfer` | 879 KB | 6.67 MB | 61.3 MB | 58.6 MB | 71.3 MB | 0 | 0 | 5 |
 
 ### Tier C — Startup of the real executable
 
 | Mark | Median | p95 | Min | n |
 |---|---:|---:|---:|---:|
-| `startup.main` | 10.5 ms | 11.0 ms | 10.1 ms | 20 |
-| `startup.session.main` | 10.6 ms | 11.3 ms | 10.1 ms | 20 |
-| `startup.velopackDone` | 10.7 ms | 11.3 ms | 10.3 ms | 20 |
-| `startup.instanceClaimed` | 10.8 ms | 11.4 ms | 10.4 ms | 20 |
-| `startup.session.velopackDone` | 10.8 ms | 11.5 ms | 10.3 ms | 20 |
-| `startup.session.instanceClaimed` | 10.9 ms | 11.5 ms | 10.3 ms | 20 |
-| `startup.session.comReady` | 12.5 ms | 13.3 ms | 11.7 ms | 20 |
-| `startup.comReady` | 12.5 ms | 13.0 ms | 12.0 ms | 20 |
-| `startup.session.settingsLoaded` | 13.4 ms | 14.2 ms | 12.7 ms | 20 |
-| `startup.settingsLoaded` | 13.5 ms | 14.0 ms | 12.9 ms | 20 |
-| `startup.session.migrated` | 15.0 ms | 15.7 ms | 14.1 ms | 20 |
-| `startup.migrated` | 15.0 ms | 15.4 ms | 14.4 ms | 20 |
-| `startup.session.servicesBuilt` | 15.8 ms | 16.6 ms | 15.1 ms | 20 |
-| `startup.servicesBuilt` | 15.9 ms | 16.4 ms | 15.2 ms | 20 |
-| `startup.session.themeReady` | 16.1 ms | 16.8 ms | 15.4 ms | 20 |
-| `startup.session.appCreated` | 16.1 ms | 16.9 ms | 15.4 ms | 20 |
-| `startup.themeReady` | 16.2 ms | 16.7 ms | 15.4 ms | 20 |
-| `startup.appCreated` | 16.2 ms | 16.8 ms | 15.5 ms | 20 |
-| `startup.session.deviceReady` | 24.2 ms | 26.4 ms | 22.6 ms | 20 |
-| `startup.deviceReady` | 24.4 ms | 25.5 ms | 23.3 ms | 20 |
-| `startup.session.windowCreated` | 29.4 ms | 31.5 ms | 27.9 ms | 20 |
-| `startup.windowCreated` | 29.5 ms | 30.8 ms | 28.3 ms | 20 |
-| `startup.session.mainViewBuilt` | 33.4 ms | 35.1 ms | 32.1 ms | 20 |
-| `startup.mainViewBuilt` | 33.5 ms | 34.7 ms | 31.8 ms | 20 |
-| `startup.session.listingLanded` | 34.7 ms | 36.6 ms | 33.3 ms | 20 |
-| `startup.listingLanded` | 35.5 ms | 36.7 ms | 33.9 ms | 20 |
-| `startup.sessionStarted` | 40.8 ms | 48.6 ms | 38.9 ms | 20 |
-| `startup.windowBuilt` | 40.8 ms | 48.6 ms | 39.0 ms | 20 |
-| `startup.session.sessionStarted` | 41.6 ms | 47.9 ms | 39.4 ms | 20 |
-| `startup.session.windowBuilt` | 41.6 ms | 47.9 ms | 39.4 ms | 20 |
-| `startup.listingPainted` | 70.3 ms | 80.2 ms | 67.7 ms | 20 |
-| `startup.contentRendered` | 70.3 ms | 80.2 ms | 67.7 ms | 20 |
-| `startup.windowShown` | 72.8 ms | 82.5 ms | 70.1 ms | 20 |
-| `startup.session.listingPainted` | 73.2 ms | 78.2 ms | 71.0 ms | 20 |
-| `startup.session.contentRendered` | 73.2 ms | 78.2 ms | 71.0 ms | 20 |
-| `startup.session.windowShown` | 76.0 ms | 81.1 ms | 73.9 ms | 20 |
-| `startup.firstListing` | 80.2 ms | 90.0 ms | 77.9 ms | 20 |
-| `startup.session.firstListing` | 83.5 ms | 96.7 ms | 81.7 ms | 20 |
-| `startup.gfxHardware` | 275 ms | 290 ms | 268 ms | 20 |
-| `startup.gfxSettled` | 275 ms | 290 ms | 268 ms | 20 |
-| `startup.session.gfxHardware` | 279 ms | 288 ms | 272 ms | 20 |
-| `startup.session.gfxSettled` | 279 ms | 288 ms | 272 ms | 20 |
-| `startup.processLifetime` | 518 ms | 528 ms | 507 ms | 20 |
-| `startup.session.processLifetime` | 528 ms | 533 ms | 517 ms | 20 |
+| `startup.main` | 10.3 ms | 10.7 ms | 9.68 ms | 20 |
+| `startup.session.main` | 10.4 ms | 10.7 ms | 9.60 ms | 20 |
+| `startup.velopackDone` | 10.5 ms | 10.9 ms | 9.86 ms | 20 |
+| `startup.instanceClaimed` | 10.6 ms | 11.0 ms | 9.94 ms | 20 |
+| `startup.session.velopackDone` | 10.6 ms | 10.9 ms | 9.78 ms | 20 |
+| `startup.session.instanceClaimed` | 10.7 ms | 10.9 ms | 9.86 ms | 20 |
+| `startup.comReady` | 12.2 ms | 12.6 ms | 11.3 ms | 20 |
+| `startup.session.comReady` | 12.3 ms | 12.6 ms | 11.3 ms | 20 |
+| `startup.settingsLoaded` | 13.1 ms | 13.6 ms | 12.2 ms | 20 |
+| `startup.session.settingsLoaded` | 13.3 ms | 13.7 ms | 12.2 ms | 20 |
+| `startup.migrated` | 14.6 ms | 15.2 ms | 13.7 ms | 20 |
+| `startup.session.migrated` | 14.7 ms | 15.4 ms | 13.6 ms | 20 |
+| `startup.servicesBuilt` | 15.5 ms | 16.1 ms | 14.6 ms | 20 |
+| `startup.session.servicesBuilt` | 15.6 ms | 16.4 ms | 14.4 ms | 20 |
+| `startup.themeReady` | 15.8 ms | 16.4 ms | 14.9 ms | 20 |
+| `startup.appCreated` | 15.8 ms | 16.4 ms | 14.9 ms | 20 |
+| `startup.session.themeReady` | 15.9 ms | 16.7 ms | 14.7 ms | 20 |
+| `startup.session.appCreated` | 15.9 ms | 16.8 ms | 14.8 ms | 20 |
+| `startup.deviceReady` | 23.9 ms | 27.5 ms | 22.5 ms | 20 |
+| `startup.session.deviceReady` | 23.9 ms | 28.4 ms | 22.1 ms | 20 |
+| `startup.session.windowCreated` | 28.8 ms | 33.3 ms | 27.0 ms | 20 |
+| `startup.windowCreated` | 28.9 ms | 32.6 ms | 27.4 ms | 20 |
+| `startup.session.mainViewBuilt` | 32.8 ms | 37.3 ms | 31.0 ms | 20 |
+| `startup.mainViewBuilt` | 32.9 ms | 36.6 ms | 31.4 ms | 20 |
+| `startup.session.listingLanded` | 34.0 ms | 38.4 ms | 32.1 ms | 20 |
+| `startup.listingLanded` | 34.9 ms | 38.8 ms | 33.5 ms | 20 |
+| `startup.sessionStarted` | 39.7 ms | 43.4 ms | 38.6 ms | 20 |
+| `startup.windowBuilt` | 39.7 ms | 43.4 ms | 38.6 ms | 20 |
+| `startup.session.sessionStarted` | 40.8 ms | 45.7 ms | 38.7 ms | 20 |
+| `startup.session.windowBuilt` | 40.8 ms | 45.7 ms | 38.7 ms | 20 |
+| `startup.listingPainted` | 68.9 ms | 72.6 ms | 66.9 ms | 20 |
+| `startup.contentRendered` | 68.9 ms | 72.6 ms | 66.9 ms | 20 |
+| `startup.windowShown` | 70.8 ms | 74.5 ms | 68.9 ms | 20 |
+| `startup.session.listingPainted` | 71.6 ms | 77.2 ms | 69.4 ms | 20 |
+| `startup.session.contentRendered` | 71.6 ms | 77.2 ms | 69.4 ms | 20 |
+| `startup.session.windowShown` | 74.3 ms | 79.8 ms | 72.0 ms | 20 |
+| `startup.firstListing` | 78.2 ms | 82.9 ms | 76.1 ms | 20 |
+| `startup.session.firstListing` | 81.6 ms | 88.0 ms | 79.2 ms | 20 |
+| `startup.gfxHardware` | 269 ms | 275 ms | 266 ms | 20 |
+| `startup.gfxSettled` | 269 ms | 275 ms | 266 ms | 20 |
+| `startup.session.gfxHardware` | 274 ms | 280 ms | 270 ms | 20 |
+| `startup.session.gfxSettled` | 274 ms | 280 ms | 270 ms | 20 |
+| `startup.processLifetime` | 515 ms | 529 ms | 500 ms | 20 |
+| `startup.session.processLifetime` | 520 ms | 540 ms | 509 ms | 20 |
 
-| Memory snapshot | Managed heap | Private bytes | Working set | Peak working set | n |
-|---|---:|---:|---:|---:|---:|
-| `startup.memory.collected` | 32.6 MB | 89.4 MB | 78.2 MB | 103 MB | 20 |
-| `startup.memory.firstListing` | 37.3 MB | 89.4 MB | 78.2 MB | 103 MB | 20 |
-| `startup.session.memory.collected` | 34.3 MB | 116 MB | 90.4 MB | 116 MB | 20 |
-| `startup.session.memory.firstListing` | 39.5 MB | 116 MB | 90.4 MB | 116 MB | 20 |
+| Memory snapshot | Rust allocator | Process heap | Private bytes | Working set | Peak working set | n |
+|---|---:|---:|---:|---:|---:|---:|
+| `startup.memory.collected` | 926 KB | 8.40 MB | 90.3 MB | 79.0 MB | 102 MB | 20 |
+| `startup.memory.firstListing` | 925 KB | 8.40 MB | 90.7 MB | 79.2 MB | 102 MB | 20 |
+| `startup.session.memory.collected` | 10.6 MB | 8.23 MB | 108 MB | 89.3 MB | 116 MB | 20 |
+| `startup.session.memory.firstListing` | 10.6 MB | 8.23 MB | 118 MB | 91.6 MB | 116 MB | 20 |
 
 ## What the numbers do and do not mean
 
-- **Tier A** is BenchmarkDotNet over `BertBrowser.Core` with a synthetic corpus unless marked real.
+- **Tier A** is `bb-bench`'s own runner over `bb-core` with a synthetic corpus unless marked real.
   Disk-reading benchmarks run against files the OS has cached, so they measure the code, not the disk.
   `Allocated/op` is exact for pure code; benchmarks over SQLite, the thread pool or disk declare a
   tolerance, which the compare tool honours.
-- **Tier B** drives the real window offscreen under WPF's software rasteriser, parked outside every
-  monitor at 1400×900. It is a regression signal for view-model and layout work, not the GPU path a
+- **Tier B** drives the real window through the harness on WARP, the software rasteriser, parked outside
+  every monitor at 1400×900. It is a regression signal for core and layout work, not the GPU path a
   user sees. A `search.*` time includes the 200 ms typing debounce. Each scenario is a fresh process.
 - **Tier C** launches the built `BertBrowser.exe` against a scratch data directory and reads marks the
   app writes under `BERTBROWSER_STARTUP_TRACE`. The window is parked offscreen and the post-window
   side effects (index-helper attach, change-log policy, update check) are skipped, so the headline is
   "process start to the rows on screen" (`listingPainted`), not "to idle". The first launch is discarded as cold.
 - **Memory** is three different measurements. Tier A's `Allocated/op` is what one call allocates. A
-  Tier B *memory snapshot* is the harness process at a named point in a scenario, after a full
-  collection, so the managed heap is what the app is holding rather than what is waiting to be
-  collected; its working set and private bytes include the harness and the software rasteriser.
+  Tier B *memory snapshot* is the harness process at a named point in a scenario, after dropping the
+  text layout cache and asking the allocator to hand back what it can; its working set and private
+  bytes include the harness and the software rasteriser. In both snapshot tables **Rust allocator** is
+  the bytes Rust holds, counted at the allocator. **Process heap** is what is in use in the Windows
+  heap: the C++ side and the system DLLs, never Rust. Neither contains the other, and **private bytes**
+  contains both, the free pages allocators keep, and everything else.
   `ui.memory.*` is the scenario written for this: idle, ten thousand rows, twenty thousand flat,
   after leaving them, and after two soaks (25 navigations, 15 tabs opened and closed) that must not
   grow. Tier C's `startup.memory.*` is the real executable reading itself with the first listing up:
-  `firstListing` as it stood, which is what Task Manager shows, and `collected` after a full collection.
-  A later run is held to the managed heap within 10% and private bytes within 25%; the working set is
+  `firstListing` as it stood, which is what Task Manager shows, and `collected` after the allocator has
+  handed back what it can. A later run is held to the Rust allocator and the process heap within 10% and
+  private bytes within 25%; the working set is
   reported and not judged, because Windows trims it for its own reasons.
 - Medians are reported because a single slow sample is the machine, not the code; p95 is nearest-rank.
 

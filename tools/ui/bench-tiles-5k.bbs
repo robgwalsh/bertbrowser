@@ -20,7 +20,7 @@ assert-realized under 200
 time tiles.back list-scroll 0; settle-thumbnails
 time tiles.large thumbnails 1; settle-thumbnails
 assert-realized under 200
-assert-mem managed under 400
+assert-mem heap under 400
 mem tiles
 thumbnails 0
 assert-not-launched

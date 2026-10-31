@@ -106,17 +106,24 @@ Three measurements, and they are not interchangeable:
 | Where | What | Read it as |
 |---|---|---|
 | Tier A allocations/op | Bytes one call allocates | Churn. Gated in CI. |
-| Tier B `mem <name>` -> `ui.<scenario>.<name>` | The harness process: heap, private bytes, working set, peak | What the app *holds* at that point. The OS numbers include the harness and the software rasteriser. |
+| Tier B `mem <name>` -> `ui.<scenario>.<name>` | The harness process: Rust allocator, process heap, private bytes, working set, peak | What the app *holds* at that point. The OS numbers include the harness and the software rasteriser. |
 | Tier C `startup.memory.firstListing` / `.collected` | The real `BertBrowser.exe` reading itself once the first listing is up | The number a user sees in Task Manager. |
+
+**Rust allocator** is the bytes Rust holds, counted at the allocator (`bb_allocator_held`, only under a measurement):
+requested and not yet freed, without mimalloc's free pages. Ask for nothing better from mimalloc: its counters want
+a stats build, and on Windows `mi_process_info`'s "commit" is the whole process's private bytes. **Process heap** is
+what is in use in the Windows heap: the C++ side and the system DLLs, and never Rust. Neither contains the other,
+and a leak shows in only one of them, so both are gated. Private bytes contains both, the free pages allocators
+keep and everything else, and is too loose to catch a small leak on its own.
 
 `tools/ui/bench-memory.bbs` is the scenario about memory and nothing else: idle, 10,000 rows, 20,000 flat,
 after leaving them, then two soaks - 25 navigations, 15 tabs opened and closed - each followed by
-`assert-mem managed under <mb> since <name>`, a budget on *growth* that fails the run on any machine. That
-is the leak check.
+`assert-mem allocator|heap under <mb> since <name>`, a budget on *growth* that fails the run on any machine.
+That is the leak check.
 
-`compare` puts snapshots in their own table and gates them locally (never in CI): the heap at 10% over
-1 MB, private bytes at 25% over 16 MB. The working set is reported, never judged. `--memory-threshold
-<pct>` moves the heap line; `--no-memory` reports without gating. A snapshot that grew on purpose is
+`compare` puts snapshots in their own table and gates them locally (never in CI): the Rust allocator and the
+process heap at 10% over 1 MB, private bytes at 25% over 16 MB. The working set is reported, never judged.
+`--memory-threshold <pct>` moves the 10% line; `--no-memory` reports without gating. A snapshot that grew on purpose is
 re-recorded like a slowdown: same commit, reason in the message.
 
 ## Real data

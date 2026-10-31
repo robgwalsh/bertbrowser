@@ -55,7 +55,8 @@ fn memory_round_trips_and_is_absent_from_an_older_trace() {
     let reading = StartupMemory {
         working_set_bytes: 96_000_000,
         private_bytes: 61_000_000,
-        heap_bytes: 9_500_000,
+        allocator_bytes: 9_500_000,
+        process_heap_bytes: 2_500_000,
         peak_working_set_bytes: 104_000_000,
     };
     let mut trace = trace("first", None);
@@ -65,7 +66,8 @@ fn memory_round_trips_and_is_absent_from_an_older_trace() {
     )]));
 
     let json = StartupTraceJson::serialize(&trace);
-    assert!(json.contains("\"heapBytes\": 9500000"), "{json}");
+    assert!(json.contains("\"allocatorBytes\": 9500000"), "{json}");
+    assert!(json.contains("\"processHeapBytes\": 2500000"), "{json}");
     assert_eq!(
         reading,
         StartupTraceJson::deserialize(&json)

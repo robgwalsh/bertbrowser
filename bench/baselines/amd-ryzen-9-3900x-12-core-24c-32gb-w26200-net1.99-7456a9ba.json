@@ -1,10 +1,10 @@
 {
-  "schemaVersion": 2,
-  "generatedUtc": 134378870159892155,
+  "schemaVersion": 3,
+  "generatedUtc": 134379304748725424,
   "tool": "bb-bench 2.0.0",
   "git": {
-    "sha": "350dfc6b7f6ab390a1059a2213666f53b9acd26f",
-    "branch": "rwalsh/faster-startup",
+    "sha": "c616bc784cf438d0c317483834490ec78f0f9273",
+    "branch": "main",
     "dirty": true
   },
   "machine": {
@@ -2086,21 +2086,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 16.14719,
-        "median": 16.197200000000002,
-        "p95": 16.7569,
-        "stdDev": 0.4207420949002524,
-        "min": 15.4908,
-        "max": 17.3015
+        "mean": 15.789385,
+        "median": 15.79855,
+        "p95": 16.444000000000003,
+        "stdDev": 0.46324078799032287,
+        "min": 14.9309,
+        "max": 16.7389
       }
     },
     {
@@ -2111,21 +2111,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 12.4935,
-        "median": 12.47385,
-        "p95": 13.0398,
-        "stdDev": 0.2983817794634745,
-        "min": 11.9935,
-        "max": 13.1071
+        "mean": 12.16308,
+        "median": 12.1505,
+        "p95": 12.6449,
+        "stdDev": 0.3896483659052498,
+        "min": 11.3407,
+        "max": 12.9317
       }
     },
     {
@@ -2136,21 +2136,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 71.42943499999998,
-        "median": 70.28265,
-        "p95": 80.2159,
-        "stdDev": 3.9747211962171503,
-        "min": 67.7256,
-        "max": 84.9349
+        "mean": 69.07432,
+        "median": 68.86359999999999,
+        "p95": 72.5593,
+        "stdDev": 1.8159932922435813,
+        "min": 66.8968,
+        "max": 73.6254
       }
     },
     {
@@ -2161,21 +2161,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 24.72273,
-        "median": 24.41935,
-        "p95": 25.5133,
-        "stdDev": 1.8768006012753116,
-        "min": 23.2686,
-        "max": 32.3252
+        "mean": 24.058765,
+        "median": 23.863999999999997,
+        "p95": 27.5205,
+        "stdDev": 1.4773937390856482,
+        "min": 22.4685,
+        "max": 28.296899999999997
       }
     },
     {
@@ -2186,21 +2186,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 81.39240500000001,
-        "median": 80.21549999999999,
-        "p95": 90.0425,
-        "stdDev": 4.01491225419947,
-        "min": 77.9098,
-        "max": 94.6705
+        "mean": 79.834375,
+        "median": 78.17335,
+        "p95": 82.86,
+        "stdDev": 6.879906366473845,
+        "min": 76.14200000000001,
+        "max": 108.0101
       }
     },
     {
@@ -2211,21 +2211,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 275.90031,
-        "median": 274.63559999999995,
-        "p95": 290.30539999999996,
-        "stdDev": 6.209188156857797,
-        "min": 267.88879999999995,
-        "max": 292.3777
+        "mean": 269.62913,
+        "median": 268.62895000000003,
+        "p95": 274.9917,
+        "stdDev": 3.159379410263984,
+        "min": 265.8601,
+        "max": 277.3529
       }
     },
     {
@@ -2236,21 +2236,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 275.90455000000003,
-        "median": 274.64,
-        "p95": 290.3104,
-        "stdDev": 6.209280671577118,
-        "min": 267.893,
-        "max": 292.38190000000003
+        "mean": 269.63318,
+        "median": 268.6323,
+        "p95": 274.99580000000003,
+        "stdDev": 3.159442248512269,
+        "min": 265.8646,
+        "max": 277.35720000000003
       }
     },
     {
@@ -2261,21 +2261,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 10.85334,
-        "median": 10.7759,
-        "p95": 11.3549,
-        "stdDev": 0.28620422300021703,
-        "min": 10.4261,
-        "max": 11.5098
+        "mean": 10.592325000000002,
+        "median": 10.55335,
+        "p95": 11.0392,
+        "stdDev": 0.3322315455648682,
+        "min": 9.9438,
+        "max": 11.2954
       }
     },
     {
@@ -2286,21 +2286,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 35.955915000000005,
-        "median": 35.49565,
-        "p95": 36.664100000000005,
-        "stdDev": 2.05253790048346,
-        "min": 33.902300000000004,
-        "max": 44.203199999999995
+        "mean": 35.238205,
+        "median": 34.8986,
+        "p95": 38.8123,
+        "stdDev": 1.6175642499156762,
+        "min": 33.5073,
+        "max": 39.9155
       }
     },
     {
@@ -2311,21 +2311,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 71.423675,
-        "median": 70.2771,
-        "p95": 80.2112,
-        "stdDev": 3.975116208413877,
-        "min": 67.72070000000001,
-        "max": 84.93069999999999
+        "mean": 69.06902,
+        "median": 68.85805,
+        "p95": 72.5539,
+        "stdDev": 1.8161352026530928,
+        "min": 66.8927,
+        "max": 73.6209
       }
     },
     {
@@ -2336,21 +2336,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 10.568705,
-        "median": 10.49625,
-        "p95": 11.0497,
-        "stdDev": 0.2822069872591653,
-        "min": 10.1473,
-        "max": 11.2251
+        "mean": 10.312794999999998,
+        "median": 10.2755,
+        "p95": 10.7379,
+        "stdDev": 0.3247156172390655,
+        "min": 9.6755,
+        "max": 11.0017
       }
     },
     {
@@ -2361,21 +2361,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 33.92754500000001,
-        "median": 33.4956,
-        "p95": 34.749900000000004,
-        "stdDev": 2.0334433274038286,
-        "min": 31.848800000000004,
-        "max": 42.0661
+        "mean": 33.20495000000001,
+        "median": 32.87765,
+        "p95": 36.6478,
+        "stdDev": 1.6220194983901692,
+        "min": 31.3789,
+        "max": 37.8997
       }
     },
     {
@@ -2386,21 +2386,22 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "process": {
-        "workingSetBytes": 81973248,
-        "privateBytes": 93773824,
-        "heapBytes": 34185216,
+        "workingSetBytes": 82792448,
+        "privateBytes": 94699520,
+        "allocatorBytes": 947893,
+        "processHeapBytes": 8811282,
         "realizedRows": 0,
         "items": 0,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 107675648
+        "peakWorkingSetBytes": 107476992
       }
     },
     {
@@ -2411,21 +2412,22 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "process": {
-        "workingSetBytes": 81963008,
-        "privateBytes": 93775872,
-        "heapBytes": 39159808,
+        "workingSetBytes": 83005440,
+        "privateBytes": 95092736,
+        "allocatorBytes": 947164,
+        "processHeapBytes": 8811282,
         "realizedRows": 0,
         "items": 0,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 107675648
+        "peakWorkingSetBytes": 107476992
       }
     },
     {
@@ -2436,21 +2438,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 14.959805,
-        "median": 15.04125,
-        "p95": 15.4425,
-        "stdDev": 0.3622039516698611,
-        "min": 14.3551,
-        "max": 15.8605
+        "mean": 14.591545,
+        "median": 14.5716,
+        "p95": 15.2203,
+        "stdDev": 0.4478245702986362,
+        "min": 13.703599999999998,
+        "max": 15.4756
       }
     },
     {
@@ -2461,21 +2463,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 516.812205,
-        "median": 518.049,
-        "p95": 528.2504,
-        "stdDev": 7.4504763179752596,
-        "min": 506.7523000000001,
-        "max": 528.9688
+        "mean": 516.7630800000001,
+        "median": 514.6982,
+        "p95": 529.4834000000001,
+        "stdDev": 10.450021745814691,
+        "min": 499.7506,
+        "max": 544.6273
       }
     },
     {
@@ -2486,21 +2488,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 15.840229999999996,
-        "median": 15.8986,
-        "p95": 16.4453,
-        "stdDev": 0.4011097134332775,
-        "min": 15.1778,
-        "max": 16.875999999999998
+        "mean": 15.473975,
+        "median": 15.495,
+        "p95": 16.1049,
+        "stdDev": 0.4582646992789902,
+        "min": 14.6002,
+        "max": 16.4104
       }
     },
     {
@@ -2511,21 +2513,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 16.316724999999998,
-        "median": 16.1109,
-        "p95": 16.8655,
-        "stdDev": 0.6816693563945565,
-        "min": 15.3985,
-        "max": 18.822000000000003
+        "mean": 15.972649999999998,
+        "median": 15.90715,
+        "p95": 16.7529,
+        "stdDev": 0.8459410832414924,
+        "min": 14.7501,
+        "max": 19.0592
       }
     },
     {
@@ -2536,21 +2538,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 12.548105,
-        "median": 12.47115,
-        "p95": 13.2534,
-        "stdDev": 0.5265558374699536,
-        "min": 11.6993,
-        "max": 14.4063
+        "mean": 12.289820000000002,
+        "median": 12.27805,
+        "p95": 12.5672,
+        "stdDev": 0.6328771907142146,
+        "min": 11.2716,
+        "max": 14.590700000000002
       }
     },
     {
@@ -2561,21 +2563,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 73.83554999999998,
-        "median": 73.17075,
-        "p95": 78.21719999999999,
-        "stdDev": 3.263373393236546,
-        "min": 71.0136,
-        "max": 85.4361
+        "mean": 72.52561499999999,
+        "median": 71.6208,
+        "p95": 77.1918,
+        "stdDev": 2.4026800946300715,
+        "min": 69.4175,
+        "max": 78.07979999999999
       }
     },
     {
@@ -2586,21 +2588,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 24.580035,
-        "median": 24.2203,
-        "p95": 26.416,
-        "stdDev": 1.6754536737615429,
-        "min": 22.6228,
-        "max": 31.001499999999997
+        "mean": 24.52295999999999,
+        "median": 23.87305,
+        "p95": 28.367599999999996,
+        "stdDev": 1.7788836071506962,
+        "min": 22.0563,
+        "max": 28.691000000000003
       }
     },
     {
@@ -2611,21 +2613,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 88.70006,
-        "median": 83.5018,
-        "p95": 96.6769,
-        "stdDev": 19.65553092781025,
-        "min": 81.7367,
-        "max": 170.9875
+        "mean": 86.76027500000001,
+        "median": 81.61760000000001,
+        "p95": 87.9863,
+        "stdDev": 19.55835200155449,
+        "min": 79.2396,
+        "max": 169.2295
       }
     },
     {
@@ -2636,21 +2638,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 279.49398,
-        "median": 278.66105,
-        "p95": 288.1107,
-        "stdDev": 3.9980758031833266,
-        "min": 272.114,
-        "max": 288.3352
+        "mean": 274.71135999999996,
+        "median": 274.05379999999997,
+        "p95": 280.41619999999995,
+        "stdDev": 3.37451669450214,
+        "min": 270.1458,
+        "max": 282.7975
       }
     },
     {
@@ -2661,21 +2663,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 279.49824,
-        "median": 278.6654,
-        "p95": 288.11469999999997,
-        "stdDev": 3.998018914070209,
-        "min": 272.1183,
-        "max": 288.3396
+        "mean": 274.71558,
+        "median": 274.05740000000003,
+        "p95": 280.4217,
+        "stdDev": 3.3746235402673115,
+        "min": 270.149,
+        "max": 282.8012
       }
     },
     {
@@ -2686,21 +2688,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 10.959230000000002,
-        "median": 10.8981,
-        "p95": 11.5381,
-        "stdDev": 0.4771101904062349,
-        "min": 10.3434,
-        "max": 12.72
+        "mean": 10.74529,
+        "median": 10.6981,
+        "p95": 10.9485,
+        "stdDev": 0.5950202030183515,
+        "min": 9.8599,
+        "max": 13.0028
       }
     },
     {
@@ -2711,21 +2713,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 35.062145,
-        "median": 34.691050000000004,
-        "p95": 36.57640000000001,
-        "stdDev": 1.6611485628529503,
-        "min": 33.309,
-        "max": 41.4692
+        "mean": 34.746635000000005,
+        "median": 34.02875,
+        "p95": 38.3672,
+        "stdDev": 1.816095347391152,
+        "min": 32.1204,
+        "max": 38.692
       }
     },
     {
@@ -2736,21 +2738,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 73.828685,
-        "median": 73.1639,
-        "p95": 78.2071,
-        "stdDev": 3.2631345555551174,
-        "min": 71.0081,
-        "max": 85.4299
+        "mean": 72.51979000000001,
+        "median": 71.61465,
+        "p95": 77.18620000000001,
+        "stdDev": 2.4023578012356723,
+        "min": 69.41120000000001,
+        "max": 78.073
       }
     },
     {
@@ -2761,21 +2763,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 10.685579999999998,
-        "median": 10.6217,
-        "p95": 11.2584,
-        "stdDev": 0.4773928334963609,
-        "min": 10.0785,
-        "max": 12.4482
+        "mean": 10.468095000000002,
+        "median": 10.4287,
+        "p95": 10.6571,
+        "stdDev": 0.5844928287120292,
+        "min": 9.6031,
+        "max": 12.6857
       }
     },
     {
@@ -2786,21 +2788,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 33.727715,
-        "median": 33.36945,
-        "p95": 35.094,
-        "stdDev": 1.66603768241803,
-        "min": 32.0927,
-        "max": 40.2024
+        "mean": 33.487915,
+        "median": 32.7949,
+        "p95": 37.285,
+        "stdDev": 1.806588563323586,
+        "min": 31.0208,
+        "max": 37.5168
       }
     },
     {
@@ -2811,21 +2813,22 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "process": {
-        "workingSetBytes": 94808064,
-        "privateBytes": 121991168,
-        "heapBytes": 35934208,
+        "workingSetBytes": 93646848,
+        "privateBytes": 112955392,
+        "allocatorBytes": 11089993,
+        "processHeapBytes": 8632976,
         "realizedRows": 0,
         "items": 0,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 121485312
+        "peakWorkingSetBytes": 121569280
       }
     },
     {
@@ -2836,21 +2839,22 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "process": {
-        "workingSetBytes": 94781440,
-        "privateBytes": 121991168,
-        "heapBytes": 41433088,
+        "workingSetBytes": 96012288,
+        "privateBytes": 124129280,
+        "allocatorBytes": 11089264,
+        "processHeapBytes": 8632976,
         "realizedRows": 0,
         "items": 0,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 121485312
+        "peakWorkingSetBytes": 121569280
       }
     },
     {
@@ -2861,21 +2865,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 15.11042,
-        "median": 14.9513,
-        "p95": 15.7236,
-        "stdDev": 0.6798398562200243,
-        "min": 14.1404,
-        "max": 17.6034
+        "mean": 14.76007,
+        "median": 14.72495,
+        "p95": 15.3993,
+        "stdDev": 0.842692278917618,
+        "min": 13.6121,
+        "max": 17.8872
       }
     },
     {
@@ -2886,21 +2890,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 525.9575299999999,
-        "median": 527.8102,
-        "p95": 533.2506,
-        "stdDev": 5.847391794196983,
-        "min": 516.6282,
-        "max": 538.8663
+        "mean": 522.42498,
+        "median": 520.0392999999999,
+        "p95": 539.8941000000001,
+        "stdDev": 9.163544350051916,
+        "min": 508.7153,
+        "max": 539.9201
       }
     },
     {
@@ -2911,21 +2915,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 16.010330000000003,
-        "median": 15.81225,
-        "p95": 16.5738,
-        "stdDev": 0.683011142777257,
-        "min": 15.1028,
-        "max": 18.5213
+        "mean": 15.65379,
+        "median": 15.57715,
+        "p95": 16.3803,
+        "stdDev": 0.8431333495704549,
+        "min": 14.4499,
+        "max": 18.7542
       }
     },
     {
@@ -2936,21 +2940,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 42.19865499999999,
-        "median": 41.61315,
-        "p95": 47.944,
-        "stdDev": 3.0765114415476646,
-        "min": 39.3862,
-        "max": 52.215
+        "mean": 41.526155,
+        "median": 40.78915,
+        "p95": 45.6802,
+        "stdDev": 2.0640167246045675,
+        "min": 38.6813,
+        "max": 46.3453
       }
     },
     {
@@ -2961,21 +2965,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 13.54592,
-        "median": 13.4468,
-        "p95": 14.1596,
-        "stdDev": 0.546147841561335,
-        "min": 12.6883,
-        "max": 15.4553
+        "mean": 13.247295,
+        "median": 13.28015,
+        "p95": 13.6551,
+        "stdDev": 0.655338373405598,
+        "min": 12.1744,
+        "max": 15.554100000000002
       }
     },
     {
@@ -2986,21 +2990,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 16.280309999999997,
-        "median": 16.076,
-        "p95": 16.8309,
-        "stdDev": 0.6821097387401899,
-        "min": 15.3623,
-        "max": 18.787
+        "mean": 15.933195000000005,
+        "median": 15.8644,
+        "p95": 16.7072,
+        "stdDev": 0.8456302915421634,
+        "min": 14.7158,
+        "max": 19.0231
       }
     },
     {
@@ -3011,21 +3015,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 10.877615,
-        "median": 10.81665,
-        "p95": 11.4556,
-        "stdDev": 0.4770142834394619,
-        "min": 10.2681,
-        "max": 12.6393
+        "mean": 10.66335,
+        "median": 10.61985,
+        "p95": 10.8675,
+        "stdDev": 0.5930694691713257,
+        "min": 9.7841,
+        "max": 12.9128
       }
     },
     {
@@ -3036,21 +3040,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 42.201625,
-        "median": 41.6165,
-        "p95": 47.9473,
-        "stdDev": 3.0766964913472408,
-        "min": 39.3887,
-        "max": 52.2184
+        "mean": 41.52906,
+        "median": 40.79185,
+        "p95": 45.6833,
+        "stdDev": 2.0640174472436814,
+        "min": 38.6847,
+        "max": 46.348200000000006
       }
     },
     {
@@ -3061,21 +3065,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 29.72704,
-        "median": 29.350050000000003,
-        "p95": 31.4971,
-        "stdDev": 1.6415415981070316,
-        "min": 27.917900000000003,
-        "max": 36.0393
+        "mean": 29.5588,
+        "median": 28.7871,
+        "p95": 33.3031,
+        "stdDev": 1.8749885964565507,
+        "min": 27.0082,
+        "max": 34.0554
       }
     },
     {
@@ -3086,21 +3090,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "18963",
-        "pageFaults.main": "2474",
-        "pageFaults.windowShown": "19019",
+        "pageFaults.listingPainted": "18944",
+        "pageFaults.main": "2470",
+        "pageFaults.windowShown": "19001",
         "parked": "true",
         "startFolder": "session"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 76.6665,
-        "median": 75.99295000000001,
-        "p95": 81.14940000000001,
-        "stdDev": 3.2565647420168653,
-        "min": 73.8808,
-        "max": 88.1904
+        "mean": 75.11703,
+        "median": 74.29955,
+        "p95": 79.848,
+        "stdDev": 2.3917115085447196,
+        "min": 72.0189,
+        "max": 80.579
       }
     },
     {
@@ -3111,21 +3115,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 41.85731500000001,
-        "median": 40.7996,
-        "p95": 48.62479999999999,
-        "stdDev": 3.9236918282973456,
-        "min": 38.9498,
-        "max": 56.3815
+        "mean": 40.20518,
+        "median": 39.7409,
+        "p95": 43.3833,
+        "stdDev": 1.6493578851368669,
+        "min": 38.5721,
+        "max": 44.9976
       }
     },
     {
@@ -3136,21 +3140,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 13.438594999999998,
-        "median": 13.47605,
-        "p95": 13.9685,
-        "stdDev": 0.3227988496604431,
-        "min": 12.85,
-        "max": 14.176
+        "mean": 13.111800000000002,
+        "median": 13.0814,
+        "p95": 13.6455,
+        "stdDev": 0.4222283318425307,
+        "min": 12.2086,
+        "max": 14.0139
       }
     },
     {
@@ -3161,21 +3165,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 16.106325,
-        "median": 16.1622,
-        "p95": 16.7184,
-        "stdDev": 0.40964684517662026,
-        "min": 15.4491,
-        "max": 17.1893
+        "mean": 15.751524999999996,
+        "median": 15.7601,
+        "p95": 16.4042,
+        "stdDev": 0.4623955846572568,
+        "min": 14.8931,
+        "max": 16.700400000000002
       }
     },
     {
@@ -3186,21 +3190,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 10.768485,
-        "median": 10.6936,
-        "p95": 11.2569,
-        "stdDev": 0.28331907672594553,
-        "min": 10.3455,
-        "max": 11.4205
+        "mean": 10.50898,
+        "median": 10.47235,
+        "p95": 10.9435,
+        "stdDev": 0.32990673578420543,
+        "min": 9.863,
+        "max": 11.2079
       }
     },
     {
@@ -3211,21 +3215,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 41.86011,
-        "median": 40.8026,
-        "p95": 48.6275,
-        "stdDev": 3.923700236001725,
-        "min": 38.9521,
-        "max": 56.3841
+        "mean": 40.207809999999995,
+        "median": 39.74345,
+        "p95": 43.3861,
+        "stdDev": 1.6494430421716362,
+        "min": 38.5746,
+        "max": 45.0001
       }
     },
     {
@@ -3236,21 +3240,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 29.861475,
-        "median": 29.45415,
-        "p95": 30.809599999999996,
-        "stdDev": 1.9656600034955456,
-        "min": 28.2996,
-        "max": 37.7717
+        "mean": 29.18222,
+        "median": 28.8996,
+        "p95": 32.6075,
+        "stdDev": 1.5898705232287251,
+        "min": 27.3913,
+        "max": 33.7997
       }
     },
     {
@@ -3261,21 +3265,21 @@
         "discarded": "1",
         "instance": "first",
         "launches": "21",
-        "pageFaults.listingPainted": "16655",
-        "pageFaults.main": "2472",
-        "pageFaults.windowShown": "16660",
+        "pageFaults.listingPainted": "16556",
+        "pageFaults.main": "2471",
+        "pageFaults.windowShown": "16560",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
       "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 73.92591000000002,
-        "median": 72.76660000000001,
-        "p95": 82.5279,
-        "stdDev": 3.9864371420183145,
-        "min": 70.06450000000001,
-        "max": 87.0654
+        "mean": 71.068575,
+        "median": 70.80385,
+        "p95": 74.5256,
+        "stdDev": 1.850123878035996,
+        "min": 68.8718,
+        "max": 75.74810000000001
       }
     },
     {
@@ -3289,13 +3293,14 @@
       },
       "n": 5,
       "process": {
-        "workingSetBytes": 113963008,
-        "privateBytes": 128913408,
-        "heapBytes": 9653367,
+        "workingSetBytes": 66330624,
+        "privateBytes": 51859456,
+        "allocatorBytes": 4298862,
+        "processHeapBytes": 6650872,
         "realizedRows": 34,
         "items": 200,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 116420608
+        "peakWorkingSetBytes": 133275648
       }
     },
     {
@@ -3310,12 +3315,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 22.53588,
-        "median": 21.9809,
-        "p95": 24.71,
-        "stdDev": 1.7170981791965187,
-        "min": 20.7834,
-        "max": 24.71
+        "mean": 20.90798,
+        "median": 21.1974,
+        "p95": 22.4558,
+        "stdDev": 1.212492458533248,
+        "min": 19.2408,
+        "max": 22.4558
       }
     },
     {
@@ -3330,12 +3335,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 289.50086,
-        "median": 287.8135,
-        "p95": 305.088,
-        "stdDev": 12.900739476983476,
-        "min": 276.1558,
-        "max": 305.088
+        "mean": 279.6781,
+        "median": 280.7238,
+        "p95": 284.1842,
+        "stdDev": 4.875577477078989,
+        "min": 271.9979,
+        "max": 284.1842
       }
     },
     {
@@ -3350,12 +3355,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 19.2253,
-        "median": 18.8628,
-        "p95": 20.8472,
-        "stdDev": 1.12148194367988,
-        "min": 18.2649,
-        "max": 20.8472
+        "mean": 17.18688,
+        "median": 17.3662,
+        "p95": 17.3989,
+        "stdDev": 0.2980110182526819,
+        "min": 16.7048,
+        "max": 17.3989
       }
     },
     {
@@ -3370,12 +3375,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 19.316,
-        "median": 18.83,
-        "p95": 21.4032,
-        "stdDev": 1.2118230584536662,
-        "min": 18.4124,
-        "max": 21.4032
+        "mean": 17.46908,
+        "median": 17.5793,
+        "p95": 17.8027,
+        "stdDev": 0.3737738581013928,
+        "min": 16.8782,
+        "max": 17.8027
       }
     },
     {
@@ -3390,12 +3395,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 33.6506,
-        "median": 33.4404,
-        "p95": 34.7969,
-        "stdDev": 1.0826541807059185,
-        "min": 32.3749,
-        "max": 34.7969
+        "mean": 33.58052,
+        "median": 33.821,
+        "p95": 33.9268,
+        "stdDev": 0.608374088863094,
+        "min": 32.4968,
+        "max": 33.9268
       }
     },
     {
@@ -3410,12 +3415,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 35.88168,
-        "median": 35.3437,
-        "p95": 38.3409,
-        "stdDev": 1.5083219523695848,
-        "min": 34.5758,
-        "max": 38.3409
+        "mean": 39.73974,
+        "median": 39.42,
+        "p95": 41.7718,
+        "stdDev": 1.1995432664143462,
+        "min": 38.7008,
+        "max": 41.7718
       }
     },
     {
@@ -3429,13 +3434,14 @@
       },
       "n": 5,
       "process": {
-        "workingSetBytes": 72953856,
-        "privateBytes": 90058752,
-        "heapBytes": 9945283,
+        "workingSetBytes": 65798144,
+        "privateBytes": 54865920,
+        "allocatorBytes": 11289120,
+        "processHeapBytes": 6705010,
         "realizedRows": 34,
         "items": 10000,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 73867264
+        "peakWorkingSetBytes": 88436736
       }
     },
     {
@@ -3450,12 +3456,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 32.58592,
-        "median": 32.2997,
-        "p95": 33.6699,
-        "stdDev": 0.998925909164438,
-        "min": 31.2191,
-        "max": 33.6699
+        "mean": 32.703379999999996,
+        "median": 32.6896,
+        "p95": 33.8243,
+        "stdDev": 0.7344508097891929,
+        "min": 31.8372,
+        "max": 33.8243
       }
     },
     {
@@ -3470,12 +3476,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 15.94406,
-        "median": 16.0721,
-        "p95": 16.2848,
-        "stdDev": 0.45182001173033504,
-        "min": 15.1741,
-        "max": 16.2848
+        "mean": 16.1877,
+        "median": 16.268,
+        "p95": 16.3381,
+        "stdDev": 0.21833160559112832,
+        "min": 15.8038,
+        "max": 16.3381
       }
     },
     {
@@ -3490,13 +3496,14 @@
       },
       "n": 5,
       "process": {
-        "workingSetBytes": 121249792,
-        "privateBytes": 152399872,
-        "heapBytes": 10143614,
+        "workingSetBytes": 83132416,
+        "privateBytes": 72081408,
+        "allocatorBytes": 21064723,
+        "processHeapBytes": 6800663,
         "realizedRows": 34,
         "items": 20000,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 123621376
+        "peakWorkingSetBytes": 133988352
       }
     },
     {
@@ -3511,13 +3518,14 @@
       },
       "n": 5,
       "process": {
-        "workingSetBytes": 37769216,
-        "privateBytes": 36270080,
-        "heapBytes": 9253254,
+        "workingSetBytes": 50765824,
+        "privateBytes": 35930112,
+        "allocatorBytes": 505460,
+        "processHeapBytes": 6983589,
         "realizedRows": 2,
         "items": 2,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 37769216
+        "peakWorkingSetBytes": 51105792
       }
     },
     {
@@ -3532,13 +3540,14 @@
       },
       "n": 5,
       "process": {
-        "workingSetBytes": 51347456,
-        "privateBytes": 64372736,
-        "heapBytes": 9593694,
+        "workingSetBytes": 62164992,
+        "privateBytes": 52031488,
+        "allocatorBytes": 11218475,
+        "processHeapBytes": 6737623,
         "realizedRows": 34,
         "items": 10000,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 51757056
+        "peakWorkingSetBytes": 66158592
       }
     },
     {
@@ -3553,13 +3562,14 @@
       },
       "n": 5,
       "process": {
-        "workingSetBytes": 121532416,
-        "privateBytes": 151703552,
-        "heapBytes": 9107546,
+        "workingSetBytes": 64598016,
+        "privateBytes": 54808576,
+        "allocatorBytes": 1326053,
+        "processHeapBytes": 6821907,
         "realizedRows": 2,
         "items": 2,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 123621376
+        "peakWorkingSetBytes": 133988352
       }
     },
     {
@@ -3574,13 +3584,14 @@
       },
       "n": 5,
       "process": {
-        "workingSetBytes": 74362880,
-        "privateBytes": 80842752,
-        "heapBytes": 9898364,
+        "workingSetBytes": 68202496,
+        "privateBytes": 50958336,
+        "allocatorBytes": 1332143,
+        "processHeapBytes": 6901607,
         "realizedRows": 2,
         "items": 2,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 136142848
+        "peakWorkingSetBytes": 133988352
       }
     },
     {
@@ -3595,13 +3606,14 @@
       },
       "n": 5,
       "process": {
-        "workingSetBytes": 76709888,
-        "privateBytes": 91152384,
-        "heapBytes": 9152102,
+        "workingSetBytes": 66031616,
+        "privateBytes": 63324160,
+        "allocatorBytes": 1333952,
+        "processHeapBytes": 6925249,
         "realizedRows": 2,
         "items": 2,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 136142848
+        "peakWorkingSetBytes": 133988352
       }
     },
     {
@@ -3613,13 +3625,14 @@
       },
       "n": 5,
       "process": {
-        "workingSetBytes": 59240448,
-        "privateBytes": 70201344,
-        "heapBytes": 11097639,
+        "workingSetBytes": 59797504,
+        "privateBytes": 42418176,
+        "allocatorBytes": 551029,
+        "processHeapBytes": 9071934,
         "realizedRows": 10,
         "items": 10,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 60641280
+        "peakWorkingSetBytes": 66822144
       }
     },
     {
@@ -3632,12 +3645,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 174.56716,
-        "median": 174.4877,
-        "p95": 175.2535,
-        "stdDev": 0.5395630899162791,
-        "min": 173.8885,
-        "max": 175.2535
+        "mean": 174.12118,
+        "median": 174.6695,
+        "p95": 175.1032,
+        "stdDev": 1.119476601809974,
+        "min": 172.426,
+        "max": 175.1032
       }
     },
     {
@@ -3650,12 +3663,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 272.32402,
-        "median": 267.7138,
-        "p95": 293.8907,
-        "stdDev": 13.197251066680504,
-        "min": 261.6283,
-        "max": 293.8907
+        "mean": 251.53988,
+        "median": 242.0412,
+        "p95": 288.1734,
+        "stdDev": 20.576772546174492,
+        "min": 240.0507,
+        "max": 288.1734
       }
     },
     {
@@ -3668,12 +3681,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 180.56848,
-        "median": 180.6048,
-        "p95": 183.6351,
-        "stdDev": 1.93622105581981,
-        "min": 178.6656,
-        "max": 183.6351
+        "mean": 176.84348,
+        "median": 177.2545,
+        "p95": 177.5263,
+        "stdDev": 0.8074586905842309,
+        "min": 175.5694,
+        "max": 177.5263
       }
     },
     {
@@ -3686,12 +3699,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 179.32886,
-        "median": 179.7122,
-        "p95": 180.68,
-        "stdDev": 1.1988559454746863,
-        "min": 177.8612,
-        "max": 180.68
+        "mean": 178.67094000000003,
+        "median": 178.5741,
+        "p95": 179.9676,
+        "stdDev": 1.0233845919301356,
+        "min": 177.6652,
+        "max": 179.9676
       }
     },
     {
@@ -3705,13 +3718,14 @@
       },
       "n": 5,
       "process": {
-        "workingSetBytes": 55353344,
-        "privateBytes": 78336000,
-        "heapBytes": 12414431,
+        "workingSetBytes": 67678208,
+        "privateBytes": 71729152,
+        "allocatorBytes": 4535851,
+        "processHeapBytes": 8791690,
         "realizedRows": 34,
         "items": 200,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 59199488
+        "peakWorkingSetBytes": 72728576
       }
     },
     {
@@ -3726,12 +3740,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 14.74332,
-        "median": 14.8252,
-        "p95": 16.6056,
-        "stdDev": 1.315989313026515,
-        "min": 13.1852,
-        "max": 16.6056
+        "mean": 17.9404,
+        "median": 18.799,
+        "p95": 19.3093,
+        "stdDev": 1.803235035983939,
+        "min": 15.0645,
+        "max": 19.3093
       }
     },
     {
@@ -3746,12 +3760,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 53.19658,
-        "median": 52.7669,
-        "p95": 58.184,
-        "stdDev": 4.068708015697366,
-        "min": 48.1521,
-        "max": 58.184
+        "mean": 48.91888,
+        "median": 48.8477,
+        "p95": 49.6509,
+        "stdDev": 0.4476225273598291,
+        "min": 48.4526,
+        "max": 49.6509
       }
     },
     {
@@ -3766,12 +3780,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 59.13414,
-        "median": 56.4483,
-        "p95": 74.271,
-        "stdDev": 9.793368992486702,
-        "min": 50.8721,
-        "max": 74.271
+        "mean": 55.85774,
+        "median": 50.5456,
+        "p95": 77.7384,
+        "stdDev": 12.516260375926988,
+        "min": 47.4664,
+        "max": 77.7384
       }
     },
     {
@@ -3786,12 +3800,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 53.88232000000001,
-        "median": 52.7761,
-        "p95": 61.1239,
-        "stdDev": 4.168446271933944,
-        "min": 50.3861,
-        "max": 61.1239
+        "mean": 58.298260000000006,
+        "median": 58.4614,
+        "p95": 60.7548,
+        "stdDev": 2.28373731808192,
+        "min": 55.3712,
+        "max": 60.7548
       }
     },
     {
@@ -3806,12 +3820,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 13.51464,
-        "median": 13.2774,
-        "p95": 14.3803,
-        "stdDev": 0.5938351985189158,
-        "min": 12.849,
-        "max": 14.3803
+        "mean": 15.59874,
+        "median": 15.3422,
+        "p95": 16.4926,
+        "stdDev": 0.7104156023061428,
+        "min": 14.7263,
+        "max": 16.4926
       }
     },
     {
@@ -3826,12 +3840,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 20.54438,
-        "median": 20.5947,
-        "p95": 21.6993,
-        "stdDev": 0.8974803825154062,
-        "min": 19.5864,
-        "max": 21.6993
+        "mean": 22.503359999999997,
+        "median": 22.5916,
+        "p95": 23.1972,
+        "stdDev": 0.5926037909092373,
+        "min": 21.5544,
+        "max": 23.1972
       }
     },
     {
@@ -3846,12 +3860,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 21.40654,
-        "median": 21.1274,
-        "p95": 22.3206,
-        "stdDev": 0.5305305250407363,
-        "min": 21.079,
-        "max": 22.3206
+        "mean": 22.89832,
+        "median": 23.0478,
+        "p95": 23.9536,
+        "stdDev": 0.8845988226309149,
+        "min": 21.5091,
+        "max": 23.9536
       }
     },
     {
@@ -3866,12 +3880,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 10.82818,
-        "median": 11.1268,
-        "p95": 11.2492,
-        "stdDev": 0.5121808684439512,
-        "min": 10.2318,
-        "max": 11.2492
+        "mean": 10.38858,
+        "median": 10.2429,
+        "p95": 10.8826,
+        "stdDev": 0.42705488757301424,
+        "min": 9.8473,
+        "max": 10.8826
       }
     },
     {
@@ -3885,13 +3899,14 @@
       },
       "n": 5,
       "process": {
-        "workingSetBytes": 55459840,
-        "privateBytes": 78041088,
-        "heapBytes": 9870963,
+        "workingSetBytes": 61759488,
+        "privateBytes": 53190656,
+        "allocatorBytes": 7216988,
+        "processHeapBytes": 6615096,
         "realizedRows": 34,
         "items": 10000,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 56455168
+        "peakWorkingSetBytes": 70037504
       }
     },
     {
@@ -3906,12 +3921,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 15.2259,
-        "median": 15.062,
-        "p95": 15.5246,
-        "stdDev": 0.27237375057079205,
-        "min": 15.0054,
-        "max": 15.5246
+        "mean": 13.94238,
+        "median": 14.0167,
+        "p95": 14.0353,
+        "stdDev": 0.15832001452753822,
+        "min": 13.6615,
+        "max": 14.0353
       }
     },
     {
@@ -3926,12 +3941,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 15.465159999999996,
-        "median": 15.6876,
-        "p95": 16.7888,
-        "stdDev": 1.0550384888713773,
-        "min": 14.3654,
-        "max": 16.7888
+        "mean": 13.9436,
+        "median": 13.8614,
+        "p95": 14.4373,
+        "stdDev": 0.3966364267184752,
+        "min": 13.4033,
+        "max": 14.4373
       }
     },
     {
@@ -3946,12 +3961,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 14.91166,
-        "median": 14.737,
-        "p95": 16.2583,
-        "stdDev": 0.9090150372793612,
-        "min": 13.7398,
-        "max": 16.2583
+        "mean": 13.61592,
+        "median": 13.7026,
+        "p95": 13.8668,
+        "stdDev": 0.24786035786305155,
+        "min": 13.2362,
+        "max": 13.8668
       }
     },
     {
@@ -3966,12 +3981,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 14.53056,
-        "median": 14.4389,
-        "p95": 15.3041,
-        "stdDev": 0.5141357777863744,
-        "min": 13.8867,
-        "max": 15.3041
+        "mean": 13.92118,
+        "median": 13.9209,
+        "p95": 14.0113,
+        "stdDev": 0.07685930002283363,
+        "min": 13.8053,
+        "max": 14.0113
       }
     },
     {
@@ -3986,12 +4001,12 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 53.77658,
-        "median": 53.7867,
-        "p95": 55.0369,
-        "stdDev": 0.8435296479673974,
-        "min": 52.7672,
-        "max": 55.0369
+        "mean": 53.54474,
+        "median": 53.4711,
+        "p95": 55.2571,
+        "stdDev": 1.249886252024561,
+        "min": 51.9222,
+        "max": 55.2571
       }
     },
     {
@@ -4004,16 +4019,16 @@
       "n": 5,
       "time": {
         "unit": "ms",
-        "mean": 65.813,
-        "median": 66.581,
-        "p95": 70.882,
-        "stdDev": 4.37784296200766,
-        "min": 59.014,
-        "max": 70.882
+        "mean": 75.6644,
+        "median": 78.857,
+        "p95": 81.577,
+        "stdDev": 6.2635106609632265,
+        "min": 67.898,
+        "max": 81.577
       }
     },
     {
-      "id": "ui.tabs-panes",
+      "id": "ui.tabs-panes.pane.close",
       "tier": "B",
       "parameters": {
         "dirs": "0",
@@ -4021,28 +4036,289 @@
         "renderMode": "Offscreen",
         "repeat": "5"
       },
-      "n": 0,
-      "error": "harness exit 2 on run 2; see C:\\Users\\Rob\\AppData\\Local\\Temp\\bertbrowser-bench-native\\ui\\20261028-76216\\tabs-panes\\2\\harness.log"
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 35.80496,
+        "median": 36.0065,
+        "p95": 40.4932,
+        "stdDev": 2.9891798269759557,
+        "min": 32.9857,
+        "max": 40.4932
+      }
     },
     {
-      "id": "ui.tiles-5k",
+      "id": "ui.tabs-panes.pane.split",
+      "tier": "B",
+      "parameters": {
+        "dirs": "0",
+        "files": "5000",
+        "renderMode": "Offscreen",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 25.78542,
+        "median": 25.3244,
+        "p95": 27.5031,
+        "stdDev": 1.013210176616875,
+        "min": 24.9494,
+        "max": 27.5031
+      }
+    },
+    {
+      "id": "ui.tabs-panes.pane.switch",
+      "tier": "B",
+      "parameters": {
+        "dirs": "0",
+        "files": "5000",
+        "renderMode": "Offscreen",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 20.692879999999995,
+        "median": 20.9359,
+        "p95": 21.0015,
+        "stdDev": 0.4091108798357721,
+        "min": 20.0618,
+        "max": 21.0015
+      }
+    },
+    {
+      "id": "ui.tabs-panes.tab.close",
+      "tier": "B",
+      "parameters": {
+        "dirs": "0",
+        "files": "5000",
+        "renderMode": "Offscreen",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 13.66444,
+        "median": 13.8719,
+        "p95": 13.8867,
+        "stdDev": 0.4134940846009773,
+        "min": 12.9309,
+        "max": 13.8867
+      }
+    },
+    {
+      "id": "ui.tabs-panes.tab.new",
+      "tier": "B",
+      "parameters": {
+        "dirs": "0",
+        "files": "5000",
+        "renderMode": "Offscreen",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 24.202900000000003,
+        "median": 24.0561,
+        "p95": 25.1016,
+        "stdDev": 0.564212154246964,
+        "min": 23.5557,
+        "max": 25.1016
+      }
+    },
+    {
+      "id": "ui.tabs-panes.tab.switch",
+      "tier": "B",
+      "parameters": {
+        "dirs": "0",
+        "files": "5000",
+        "renderMode": "Offscreen",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 13.22348,
+        "median": 13.528,
+        "p95": 13.8185,
+        "stdDev": 0.6061122437304829,
+        "min": 12.4025,
+        "max": 13.8185
+      }
+    },
+    {
+      "id": "ui.tabs-panes.tabs",
+      "tier": "B",
+      "parameters": {
+        "dirs": "0",
+        "files": "5000",
+        "renderMode": "Offscreen",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 61214720,
+        "privateBytes": 57737216,
+        "allocatorBytes": 5879671,
+        "processHeapBytes": 6737499,
+        "realizedRows": 34,
+        "items": 5000,
+        "retainedThumbnails": 0,
+        "peakWorkingSetBytes": 75825152
+      }
+    },
+    {
+      "id": "ui.tiles-5k.tiles",
       "tier": "B",
       "parameters": {
         "renderMode": "Offscreen",
         "repeat": "5"
       },
-      "n": 0,
-      "error": "harness exit 2 on run 1; see C:\\Users\\Rob\\AppData\\Local\\Temp\\bertbrowser-bench-native\\ui\\20261028-76216\\tiles-5k\\1\\harness.log"
+      "n": 5,
+      "process": {
+        "workingSetBytes": 65777664,
+        "privateBytes": 63426560,
+        "allocatorBytes": 4736970,
+        "processHeapBytes": 14756042,
+        "realizedRows": 34,
+        "items": 5000,
+        "retainedThumbnails": 0,
+        "peakWorkingSetBytes": 80879616
+      }
     },
     {
-      "id": "ui.transfer-2k",
+      "id": "ui.tiles-5k.tiles.back",
       "tier": "B",
       "parameters": {
         "renderMode": "Offscreen",
         "repeat": "5"
       },
-      "n": 0,
-      "error": "harness exit 2 on run 1; see C:\\Users\\Rob\\AppData\\Local\\Temp\\bertbrowser-bench-native\\ui\\20261028-76216\\transfer-2k\\1\\harness.log"
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 17.06946,
+        "median": 17.1884,
+        "p95": 17.777,
+        "stdDev": 0.7302258198667038,
+        "min": 16.2843,
+        "max": 17.777
+      }
+    },
+    {
+      "id": "ui.tiles-5k.tiles.large",
+      "tier": "B",
+      "parameters": {
+        "renderMode": "Offscreen",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 138.3647,
+        "median": 138.8051,
+        "p95": 140.2919,
+        "stdDev": 1.674381905360902,
+        "min": 136.3868,
+        "max": 140.2919
+      }
+    },
+    {
+      "id": "ui.tiles-5k.tiles.on",
+      "tier": "B",
+      "parameters": {
+        "renderMode": "Offscreen",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 140.7166,
+        "median": 140.5316,
+        "p95": 142.5638,
+        "stdDev": 1.766851291139122,
+        "min": 138.3588,
+        "max": 142.5638
+      }
+    },
+    {
+      "id": "ui.tiles-5k.tiles.scroll",
+      "tier": "B",
+      "parameters": {
+        "renderMode": "Offscreen",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 33.96298,
+        "median": 33.3915,
+        "p95": 37.4497,
+        "stdDev": 2.322510744216267,
+        "min": 31.2612,
+        "max": 37.4497
+      }
+    },
+    {
+      "id": "ui.transfer-2k.copy.2k",
+      "tier": "B",
+      "parameters": {
+        "dirs": "0",
+        "files": "2000",
+        "renderMode": "Offscreen",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 1168.18832,
+        "median": 1171.9744,
+        "p95": 1185.6478,
+        "stdDev": 15.523072129317695,
+        "min": 1150.5948,
+        "max": 1185.6478
+      }
+    },
+    {
+      "id": "ui.transfer-2k.delete.2k",
+      "tier": "B",
+      "parameters": {
+        "dirs": "0",
+        "files": "2000",
+        "renderMode": "Offscreen",
+        "repeat": "5"
+      },
+      "n": 5,
+      "time": {
+        "unit": "ms",
+        "mean": 946.53858,
+        "median": 951.6209,
+        "p95": 962.2344,
+        "stdDev": 14.608161973602291,
+        "min": 926.8517,
+        "max": 962.2344
+      }
+    },
+    {
+      "id": "ui.transfer-2k.transfer",
+      "tier": "B",
+      "parameters": {
+        "dirs": "0",
+        "files": "2000",
+        "renderMode": "Offscreen",
+        "repeat": "5"
+      },
+      "n": 5,
+      "process": {
+        "workingSetBytes": 61480960,
+        "privateBytes": 64327680,
+        "allocatorBytes": 900271,
+        "processHeapBytes": 6994635,
+        "realizedRows": 0,
+        "items": 0,
+        "retainedThumbnails": 0,
+        "peakWorkingSetBytes": 74739712
+      }
     }
   ]
 }

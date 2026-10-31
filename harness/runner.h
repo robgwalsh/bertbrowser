@@ -79,7 +79,7 @@ private:
     void settle_thumbnails();
     void install_bench_settle();
     struct MemorySample {
-        uint64_t managed = 0, working_set = 0, private_bytes = 0, peak_working_set = 0;
+        uint64_t allocator = 0, process_heap = 0, working_set = 0, private_bytes = 0, peak_working_set = 0;
         int64_t items = 0, realized = 0, retained_thumbnails = 0;
     };
     MemorySample read_memory();

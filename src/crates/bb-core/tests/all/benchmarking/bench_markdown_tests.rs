@@ -135,19 +135,23 @@ fn render_results_snapshots_get_their_own_table_under_the_tiers_timings() {
     assert!(!md.contains("| `ui.memory.idle` | —"), "{md}");
     // …but a row of its own, with the row counts only the harness knows.
     assert!(
-        md.contains("| Memory snapshot | Managed heap | Private bytes | Working set | Peak working set | Items | Realized | n |"),
+        md.contains("| Memory snapshot | Rust allocator | Process heap | Private bytes | Working set | Peak working set | Items | Realized | n |"),
         "{md}"
     );
     assert!(
-        md.contains("| `ui.memory.idle` | 9.00 MB | 70.0 MB | 140 MB | 150 MB | 10 | 5 | 5 |"),
+        md.contains(
+            "| `ui.memory.idle` | 9.00 MB | 2.00 MB | 70.0 MB | 140 MB | 150 MB | 10 | 5 | 5 |"
+        ),
         "{md}"
     );
     assert!(
-        md.contains("| Memory snapshot | Managed heap | Private bytes | Working set | Peak working set | n |"),
+        md.contains("| Memory snapshot | Rust allocator | Process heap | Private bytes | Working set | Peak working set | n |"),
         "{md}"
     );
     assert!(
-        md.contains("| `startup.memory.collected` | 8.00 MB | 60.0 MB | 120 MB | 130 MB | 5 |"),
+        md.contains(
+            "| `startup.memory.collected` | 8.00 MB | 2.00 MB | 60.0 MB | 120 MB | 130 MB | 5 |"
+        ),
         "{md}"
     );
 }

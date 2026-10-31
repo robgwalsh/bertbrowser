@@ -21,6 +21,8 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_UI_Wind
 # links `bbcore_harness.lib` (crate `bb-ffi-harness`), which turns this on.
 bb-test-support = { path = "../bb-test-support", optional = true }
 mimalloc = "0.1.52"
+# The same library mimalloc wraps, for handing memory back before a reading: bb_allocator_held.
+libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
 
 [features]
 default = []

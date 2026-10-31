@@ -163,8 +163,9 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
                     .map(|s| match s {
                         Sample::Time { name, ms } => format!("{name} {ms:.0} ms"),
                         Sample::Mem { name, process } => format!(
-                            "{name} {:.1}/{:.0} MB",
-                            process.heap_bytes as f64 / (1024.0 * 1024.0),
+                            "{name} {:.1}/{:.1}/{:.0} MB",
+                            process.allocator_bytes as f64 / (1024.0 * 1024.0),
+                            process.process_heap_bytes as f64 / (1024.0 * 1024.0),
                             process.private_bytes as f64 / (1024.0 * 1024.0)
                         ),
                     })
@@ -340,8 +341,7 @@ pub fn read_parameters(script: &Path) -> BTreeMap<String, String> {
     parameters
 }
 
-/// One line of the harness's `--bench-out` file. The harness keeps the C# names for the memory
-/// fields (`managedBytes`); `heapBytes` is accepted too, for a harness that renames it.
+/// One line of the harness's `--bench-out` file.
 pub fn parse_sample(line: &str) -> Result<Sample, String> {
     let v: serde_json::Value = serde_json::from_str(line).map_err(|e| format!("{e}: {line}"))?;
     let text = |key: &str| v.get(key).and_then(|x| x.as_str()).map(str::to_string);
@@ -361,7 +361,8 @@ pub fn parse_sample(line: &str) -> Result<Sample, String> {
         process: ProcessStats {
             working_set_bytes: need("workingSetBytes")?,
             private_bytes: need("privateBytes")?,
-            heap_bytes: int("heapBytes").map_or_else(|| need("managedBytes"), Ok)?,
+            allocator_bytes: need("allocatorBytes")?,
+            process_heap_bytes: need("processHeapBytes")?,
             realized_rows: need("realized")? as i32,
             items: need("items")? as u32,
             retained_thumbnails: need("retainedThumbnails")? as u32,
@@ -443,7 +444,8 @@ pub fn aggregate(
             let process = ProcessStats {
                 working_set_bytes: median(mems.iter().map(|m| m.working_set_bytes)),
                 private_bytes: median(mems.iter().map(|m| m.private_bytes)),
-                heap_bytes: median(mems.iter().map(|m| m.heap_bytes)),
+                allocator_bytes: median(mems.iter().map(|m| m.allocator_bytes)),
+                process_heap_bytes: median(mems.iter().map(|m| m.process_heap_bytes)),
                 realized_rows: median(mems.iter().map(|m| i64::from(m.realized_rows))) as i32,
                 items: median(mems.iter().map(|m| i64::from(m.items))) as u32,
                 retained_thumbnails: median(mems.iter().map(|m| i64::from(m.retained_thumbnails)))
@@ -484,12 +486,13 @@ mod tests {
             }
         );
         let mem = parse_sample(
-            r#"{"kind":"mem","name":"idle","managedBytes":100,"workingSetBytes":300,"privateBytes":200,"peakWorkingSetBytes":400,"items":0,"realized":-1,"retainedThumbnails":0}"#,
+            r#"{"kind":"mem","name":"idle","allocatorBytes":100,"processHeapBytes":150,"workingSetBytes":300,"privateBytes":200,"peakWorkingSetBytes":400,"items":0,"realized":-1,"retainedThumbnails":0}"#,
         )
         .unwrap();
         match mem {
             Sample::Mem { process, .. } => {
-                assert_eq!(process.heap_bytes, 100);
+                assert_eq!(process.allocator_bytes, 100);
+                assert_eq!(process.process_heap_bytes, 150);
                 assert_eq!(process.realized_rows, -1);
                 assert_eq!(process.peak_working_set_bytes, Some(400));
             }

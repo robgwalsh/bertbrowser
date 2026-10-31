@@ -192,8 +192,11 @@ behavior - this table only says where.
   is created without `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`: WARP refuses the flag.
 - **cargo gets a native-spelled target dir** (CMake `file(TO_NATIVE_PATH)`): forward slashes broke
   `embed-manifest` with LNK1104.
-- **mimalloc is the global allocator** of `bb-ffi` (measured twice as fast across Tier A). `bb-bench`
-  swaps in a counting allocator, so Rust allocation counts are deterministic.
+- **mimalloc is the global allocator** of `bb-ffi` (measured twice as fast across Tier A), so Rust's memory is
+  **not in the process heap** and `HeapSummary` cannot see it. `bb-bench` swaps in a counting allocator, so Rust
+  allocation counts are deterministic. `bb-ffi` wraps mimalloc to count the bytes Rust holds, only under a
+  measurement (`bb_allocator_start_counting`; off, one relaxed load per call): mimalloc cannot say, because
+  its counters want a stats build and on Windows `mi_process_info`'s "commit" is the whole process's private bytes.
 - **Single instance**: mutex `Local\BertBrowser.<sid>` decides who is first; the first copy listens on
   `instance.pipe` for the hand-off (`shell/single_instance.rs`, `core/ipc/instance_endpoint.rs`).
 - **Old C# data is moved, never deleted.** `LegacyData::migrate` (`core/settings/legacy.rs`) runs before
@@ -489,7 +492,8 @@ behavior - this table only says where.
   schema v2). Tier C's headline is `listingPainted`, not `firstListing` (which is only "nothing is loading"). Tier A is a hand-rolled runner over `bb-core` with a counting allocator, Tier B times whole
   scenarios through the harness (`tools/ui/bench-*.bbs`; the `time` verb wraps any verb), Tier C launches
   the real exe. **CI gates allocations only** (deterministic); time gates run locally at 15% over a noise
-  floor, and so does process memory (managed heap tight, private bytes loose). A deliberate slowdown
+  floor, and so does process memory (Rust allocator and process heap tight, each blind to the other's side;
+  private bytes loose). A deliberate slowdown
   re-records the baseline and regenerates `docs/performance.md` (`report`) in the same commit, with
   the reason in the message. Easy to undo: an allocation tolerance is for benchmarks over SQLite, threads
   or disk only - loosening a pure one defeats the gate; `settle-thumbnails` is a verb rather than part of
