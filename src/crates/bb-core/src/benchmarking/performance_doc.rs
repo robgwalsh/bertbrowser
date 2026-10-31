@@ -107,7 +107,7 @@ impl PerformanceDoc {
         sb.push_str("- **Tier C** launches the built `BertBrowser.exe` against a scratch data directory and reads marks the\n");
         sb.push_str("  app writes under `BERTBROWSER_STARTUP_TRACE`. The window is parked offscreen and the post-window\n");
         sb.push_str("  side effects (index-helper attach, change-log policy, update check) are skipped, so the headline is\n");
-        sb.push_str("  \"process start to first listing\", not \"to idle\". The first launch is discarded as cold.\n");
+        sb.push_str("  \"process start to the rows on screen\" (`listingPainted`), not \"to idle\". The first launch is discarded as cold.\n");
         sb.push_str("- **Memory** is three different measurements. Tier A's `Allocated/op` is what one call allocates. A\n");
         sb.push_str("  Tier B *memory snapshot* is the harness process at a named point in a scenario, after a full\n");
         sb.push_str("  collection, so the managed heap is what the app is holding rather than what is waiting to be\n");

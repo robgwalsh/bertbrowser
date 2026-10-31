@@ -23,7 +23,7 @@ this folder. The C# app's numbers, for comparison, are in the `bertbrowser-cshar
 |---|---|---|---|
 | A | `bb-core` code paths: search, index writes, planners, hashing, preview readers... | `bb-bench run`: a hand-rolled runner (`src/crates/bb-bench/src/suite.rs`) with a counting global allocator | ns, bytes allocated |
 | B | Whole UI scenarios: open a 10k folder, flat view, tiles, search, transfer, preview | The offscreen harness, `tools/ui/bench-*.bbs`, each scenario K times in a fresh process | ms, process memory |
-| C | Startup of the real `BertBrowser.exe` to first listing, and what it holds once there | N launches against a scratch data dir, marks and memory written by the app | ms, process memory |
+| C | Startup of the real `BertBrowser.exe` to the first frame showing the rows (`listingPainted`), and what it holds once there | N launches against a scratch data dir, marks and memory written by the app | ms, process memory |
 
 A Tier B script is an ordinary harness script with a few extra verbs: `time <name> <verb>[; <verb>...]`
 wraps any verb (or chain) under a stopwatch, `repeat <n> <verb>[; <verb>...]` runs one n times, `mem
@@ -35,6 +35,13 @@ Tier C refuses while a real BertBrowser is running: the single-instance claim is
 would be a "second" copy and measure a different path. `--allow-running` measures it anyway and records
 `instance=second`; do not commit that as a baseline. It is the one sanctioned launch of
 `BertBrowser.exe` - a window appears offscreen for a second per launch.
+
+`--session` comes back to a saved session (two panes, three tabs) over a million-row database instead of
+opening a named folder over an empty one, under its own `startup.session.*` ids, and fails if the session did
+not come back. `--affinity <hex mask>` restricts the launches to those processors: what parallel start-up buys
+depends on the core count, and a 24-thread machine hides it. A/B two builds with `--app`, alternating runs -
+another program's load moved these numbers by 20% in an afternoon, so a run against an old baseline says little
+about a small change. `pageFaults.*` in the entries' parameters are evidence, never gated.
 
 Every tier writes the `BenchResultSet` JSON in `bb-core/src/benchmarking` (schema v2). Only `bb-bench`
 writes it; the harness and the app emit raw samples it aggregates.
@@ -142,6 +149,7 @@ Results go to `bench-results/current.real.json` and baselines to `<key>.real.jso
 - Tier B renders through WARP into an offscreen bitmap, parked offscreen. It is a regression signal for
   core and layout work, not what a user's GPU sees.
 - Tier C skips the post-window side effects (index attach, change-log policy, update check) - the
-  change-log push would wipe your real change log from a scratch data dir - so it measures "to first
-  listing", not "to idle".
+  change-log push would wipe your real change log from a scratch data dir - so it measures "to the rows on
+  screen", not "to idle". `firstListing` is only "nothing is loading", polled from after `windowShown`; the
+  number a person sees is `listingPainted`.
 - Medians, not means. A single slow sample is the machine.

@@ -153,16 +153,22 @@ behavior - this table only says where.
   symbols and heap-crossing bugs. A side effect is no VC redistributable in `Setup.exe`.
 - **The window starts on WARP and moves to the GPU later** (`main.cpp`, `gfx::HardwareDeviceLoader`,
   `Window::use_hardware_when_ready`). A hardware `D3D11CreateDevice` loads the GPU's driver and took ~180 ms
-  here, 80% of the time to first listing; WARP takes 8 ms. The hardware device is made on a thread of its
-  own and **started only after the WARP one exists** (the two share a lock inside D3D, and started first the
-  driver load held WARP up for its whole length). When it lands the window rebuilds exactly as after a device
+  here, 80% of the time to first listing; WARP takes ~10 ms, on a thread of its own beside `bb_app_create`. The
+  hardware device is made on a thread of its own and **started only after the window is shown** (the two share a
+  lock inside D3D, and started first the driver load held WARP up for its whole length). When it lands the window rebuilds exactly as after a device
   loss (`GfxDevice::adopt_hardware` bumps `generation()`; every surface rebuilds on the next `render()`
   because a `Surface` remembers its generation). **A window shows its swap chain through a DirectComposition
   visual** (`gfx::CompositionHost`), not as the HWND's own: a chain is put on screen by its first present,
   replacing the one before it in a single commit, and `Window::retired_` keeps the old surface alive until
   the new one has presented. An HWND chain has to be destroyed before the next can exist, which left the
   window blank for the whole first paint on the new device - the flash at ~240 ms. For the same reason the
-  first frame is painted *before* `show()` (`paint_first_frame`), not by the first `WM_PAINT`. Popups keep
+  first frame is painted *before* `show()` (`paint_first_frame`), not by the first `WM_PAINT`, after
+  `await_first_listing` has taken in the rows (they land ~30 ms before it, and their event would otherwise wait for
+  the message loop and a second whole frame). A maximised window is cloaked and maximised first, so that one frame
+  is at its real size. **The first frame's ~30 ms is WARP's own first rasterisation**, about 7,000 page faults
+  against 1,500 for an identical second frame (~7 ms): warming it from a thread (any size of target, the same
+  device context, no WARP threading) and full LTO were all measured and moved nothing, and delay-loading the
+  drawing DLLs only moved time from before `main` to after it. Popups keep
   HWND chains; `~SwapChainSurface` flushes its device's context, without which DXGI still counts the old HWND
   chain and the next one is refused with `E_ACCESSDENIED`. The startup trace waits for `gfxSettled` before
   reading memory, since a snapshot taken mid-load is mostly the driver. `BERTBROWSER_DEVICE=hardware`
@@ -480,7 +486,7 @@ behavior - this table only says where.
   *underneath* it. A run poses all of this through the fake system appearance and starts pinned, so
   screenshots do not depend on the developer's own desktop.
 - **Three benchmark tiers write one schema, and only `bb-bench` writes it** (`core/benchmarking`,
-  schema v2). Tier A is a hand-rolled runner over `bb-core` with a counting allocator, Tier B times whole
+  schema v2). Tier C's headline is `listingPainted`, not `firstListing` (which is only "nothing is loading"). Tier A is a hand-rolled runner over `bb-core` with a counting allocator, Tier B times whole
   scenarios through the harness (`tools/ui/bench-*.bbs`; the `time` verb wraps any verb), Tier C launches
   the real exe. **CI gates allocations only** (deterministic); time gates run locally at 15% over a noise
   floor, and so does process memory (managed heap tight, private bytes loose). A deliberate slowdown

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 2,
-  "generatedUtc": 134378461286686678,
+  "generatedUtc": 134378870159892155,
   "tool": "bb-bench 2.0.0",
   "git": {
-    "sha": "508652ca6776442ed9646ecc832d26cf9259bd13",
-    "branch": "rwalsh/rustc++",
+    "sha": "350dfc6b7f6ab390a1059a2213666f53b9acd26f",
+    "branch": "rwalsh/faster-startup",
     "dirty": true
   },
   "machine": {
@@ -2079,25 +2079,103 @@
       }
     },
     {
+      "id": "startup.appCreated",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
+        "parked": "true",
+        "startFolder": "Startup(500)"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 16.14719,
+        "median": 16.197200000000002,
+        "p95": 16.7569,
+        "stdDev": 0.4207420949002524,
+        "min": 15.4908,
+        "max": 17.3015
+      }
+    },
+    {
+      "id": "startup.comReady",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
+        "parked": "true",
+        "startFolder": "Startup(500)"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 12.4935,
+        "median": 12.47385,
+        "p95": 13.0398,
+        "stdDev": 0.2983817794634745,
+        "min": 11.9935,
+        "max": 13.1071
+      }
+    },
+    {
       "id": "startup.contentRendered",
       "tier": "C",
       "parameters": {
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 59.56744444444444,
-        "median": 59.959500000000006,
-        "p95": 61.1843,
-        "stdDev": 1.1039986606775285,
-        "min": 57.6099,
-        "max": 61.1843
+        "mean": 71.42943499999998,
+        "median": 70.28265,
+        "p95": 80.2159,
+        "stdDev": 3.9747211962171503,
+        "min": 67.7256,
+        "max": 84.9349
+      }
+    },
+    {
+      "id": "startup.deviceReady",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
+        "parked": "true",
+        "startFolder": "Startup(500)"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 24.72273,
+        "median": 24.41935,
+        "p95": 25.5133,
+        "stdDev": 1.8768006012753116,
+        "min": 23.2686,
+        "max": 32.3252
       }
     },
     {
@@ -2107,19 +2185,22 @@
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 62.75995555555556,
-        "median": 63.2025,
-        "p95": 64.36840000000001,
-        "stdDev": 1.11642538948099,
-        "min": 60.6865,
-        "max": 64.36840000000001
+        "mean": 81.39240500000001,
+        "median": 80.21549999999999,
+        "p95": 90.0425,
+        "stdDev": 4.01491225419947,
+        "min": 77.9098,
+        "max": 94.6705
       }
     },
     {
@@ -2129,19 +2210,22 @@
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 233.0243444444444,
-        "median": 233.2342,
-        "p95": 234.2752,
-        "stdDev": 1.0388066712713089,
-        "min": 231.2275,
-        "max": 234.2752
+        "mean": 275.90031,
+        "median": 274.63559999999995,
+        "p95": 290.30539999999996,
+        "stdDev": 6.209188156857797,
+        "min": 267.88879999999995,
+        "max": 292.3777
       }
     },
     {
@@ -2151,19 +2235,22 @@
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 233.02677777777785,
-        "median": 233.2365,
-        "p95": 234.27749999999995,
-        "stdDev": 1.03867908395444,
-        "min": 231.23029999999997,
-        "max": 234.27749999999995
+        "mean": 275.90455000000003,
+        "median": 274.64,
+        "p95": 290.3104,
+        "stdDev": 6.209280671577118,
+        "min": 267.893,
+        "max": 292.38190000000003
       }
     },
     {
@@ -2173,19 +2260,72 @@
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 11.381477777777778,
-        "median": 11.4217,
-        "p95": 11.7894,
-        "stdDev": 0.26528144383737895,
-        "min": 11.0152,
-        "max": 11.7894
+        "mean": 10.85334,
+        "median": 10.7759,
+        "p95": 11.3549,
+        "stdDev": 0.28620422300021703,
+        "min": 10.4261,
+        "max": 11.5098
+      }
+    },
+    {
+      "id": "startup.listingLanded",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
+        "parked": "true",
+        "startFolder": "Startup(500)"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 35.955915000000005,
+        "median": 35.49565,
+        "p95": 36.664100000000005,
+        "stdDev": 2.05253790048346,
+        "min": 33.902300000000004,
+        "max": 44.203199999999995
+      }
+    },
+    {
+      "id": "startup.listingPainted",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
+        "parked": "true",
+        "startFolder": "Startup(500)"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 71.423675,
+        "median": 70.2771,
+        "p95": 80.2112,
+        "stdDev": 3.975116208413877,
+        "min": 67.72070000000001,
+        "max": 84.93069999999999
       }
     },
     {
@@ -2195,19 +2335,47 @@
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 11.194555555555556,
-        "median": 11.238,
-        "p95": 11.5895,
-        "stdDev": 0.2635303545661823,
-        "min": 10.8279,
-        "max": 11.5895
+        "mean": 10.568705,
+        "median": 10.49625,
+        "p95": 11.0497,
+        "stdDev": 0.2822069872591653,
+        "min": 10.1473,
+        "max": 11.2251
+      }
+    },
+    {
+      "id": "startup.mainViewBuilt",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
+        "parked": "true",
+        "startFolder": "Startup(500)"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 33.92754500000001,
+        "median": 33.4956,
+        "p95": 34.749900000000004,
+        "stdDev": 2.0334433274038286,
+        "min": 31.848800000000004,
+        "max": 42.0661
       }
     },
     {
@@ -2217,19 +2385,22 @@
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "process": {
-        "workingSetBytes": 81518592,
-        "privateBytes": 93102080,
-        "heapBytes": 33947648,
+        "workingSetBytes": 81973248,
+        "privateBytes": 93773824,
+        "heapBytes": 34185216,
         "realizedRows": 0,
         "items": 0,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 107831296
+        "peakWorkingSetBytes": 107675648
       }
     },
     {
@@ -2239,19 +2410,22 @@
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "process": {
-        "workingSetBytes": 81502208,
-        "privateBytes": 93102080,
-        "heapBytes": 40894464,
+        "workingSetBytes": 81963008,
+        "privateBytes": 93775872,
+        "heapBytes": 39159808,
         "realizedRows": 0,
         "items": 0,
         "retainedThumbnails": 0,
-        "peakWorkingSetBytes": 107831296
+        "peakWorkingSetBytes": 107675648
       }
     },
     {
@@ -2261,19 +2435,22 @@
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 25.68763333333333,
-        "median": 25.6501,
-        "p95": 26.4944,
-        "stdDev": 0.5217646859456849,
-        "min": 24.9323,
-        "max": 26.4944
+        "mean": 14.959805,
+        "median": 15.04125,
+        "p95": 15.4425,
+        "stdDev": 0.3622039516698611,
+        "min": 14.3551,
+        "max": 15.8605
       }
     },
     {
@@ -2283,19 +2460,22 @@
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 429.9910222222222,
-        "median": 489.6993,
-        "p95": 500.14309999999995,
-        "stdDev": 99.54173265204872,
-        "min": 297.0971,
-        "max": 500.14309999999995
+        "mean": 516.812205,
+        "median": 518.049,
+        "p95": 528.2504,
+        "stdDev": 7.4504763179752596,
+        "min": 506.7523000000001,
+        "max": 528.9688
       }
     },
     {
@@ -2305,19 +2485,647 @@
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 25.687477777777776,
-        "median": 25.65,
-        "p95": 26.4942,
-        "stdDev": 0.5217438111223208,
-        "min": 24.9322,
-        "max": 26.4942
+        "mean": 15.840229999999996,
+        "median": 15.8986,
+        "p95": 16.4453,
+        "stdDev": 0.4011097134332775,
+        "min": 15.1778,
+        "max": 16.875999999999998
+      }
+    },
+    {
+      "id": "startup.session.appCreated",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 16.316724999999998,
+        "median": 16.1109,
+        "p95": 16.8655,
+        "stdDev": 0.6816693563945565,
+        "min": 15.3985,
+        "max": 18.822000000000003
+      }
+    },
+    {
+      "id": "startup.session.comReady",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 12.548105,
+        "median": 12.47115,
+        "p95": 13.2534,
+        "stdDev": 0.5265558374699536,
+        "min": 11.6993,
+        "max": 14.4063
+      }
+    },
+    {
+      "id": "startup.session.contentRendered",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 73.83554999999998,
+        "median": 73.17075,
+        "p95": 78.21719999999999,
+        "stdDev": 3.263373393236546,
+        "min": 71.0136,
+        "max": 85.4361
+      }
+    },
+    {
+      "id": "startup.session.deviceReady",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 24.580035,
+        "median": 24.2203,
+        "p95": 26.416,
+        "stdDev": 1.6754536737615429,
+        "min": 22.6228,
+        "max": 31.001499999999997
+      }
+    },
+    {
+      "id": "startup.session.firstListing",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 88.70006,
+        "median": 83.5018,
+        "p95": 96.6769,
+        "stdDev": 19.65553092781025,
+        "min": 81.7367,
+        "max": 170.9875
+      }
+    },
+    {
+      "id": "startup.session.gfxHardware",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 279.49398,
+        "median": 278.66105,
+        "p95": 288.1107,
+        "stdDev": 3.9980758031833266,
+        "min": 272.114,
+        "max": 288.3352
+      }
+    },
+    {
+      "id": "startup.session.gfxSettled",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 279.49824,
+        "median": 278.6654,
+        "p95": 288.11469999999997,
+        "stdDev": 3.998018914070209,
+        "min": 272.1183,
+        "max": 288.3396
+      }
+    },
+    {
+      "id": "startup.session.instanceClaimed",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 10.959230000000002,
+        "median": 10.8981,
+        "p95": 11.5381,
+        "stdDev": 0.4771101904062349,
+        "min": 10.3434,
+        "max": 12.72
+      }
+    },
+    {
+      "id": "startup.session.listingLanded",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 35.062145,
+        "median": 34.691050000000004,
+        "p95": 36.57640000000001,
+        "stdDev": 1.6611485628529503,
+        "min": 33.309,
+        "max": 41.4692
+      }
+    },
+    {
+      "id": "startup.session.listingPainted",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 73.828685,
+        "median": 73.1639,
+        "p95": 78.2071,
+        "stdDev": 3.2631345555551174,
+        "min": 71.0081,
+        "max": 85.4299
+      }
+    },
+    {
+      "id": "startup.session.main",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 10.685579999999998,
+        "median": 10.6217,
+        "p95": 11.2584,
+        "stdDev": 0.4773928334963609,
+        "min": 10.0785,
+        "max": 12.4482
+      }
+    },
+    {
+      "id": "startup.session.mainViewBuilt",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 33.727715,
+        "median": 33.36945,
+        "p95": 35.094,
+        "stdDev": 1.66603768241803,
+        "min": 32.0927,
+        "max": 40.2024
+      }
+    },
+    {
+      "id": "startup.session.memory.collected",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "process": {
+        "workingSetBytes": 94808064,
+        "privateBytes": 121991168,
+        "heapBytes": 35934208,
+        "realizedRows": 0,
+        "items": 0,
+        "retainedThumbnails": 0,
+        "peakWorkingSetBytes": 121485312
+      }
+    },
+    {
+      "id": "startup.session.memory.firstListing",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "process": {
+        "workingSetBytes": 94781440,
+        "privateBytes": 121991168,
+        "heapBytes": 41433088,
+        "realizedRows": 0,
+        "items": 0,
+        "retainedThumbnails": 0,
+        "peakWorkingSetBytes": 121485312
+      }
+    },
+    {
+      "id": "startup.session.migrated",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 15.11042,
+        "median": 14.9513,
+        "p95": 15.7236,
+        "stdDev": 0.6798398562200243,
+        "min": 14.1404,
+        "max": 17.6034
+      }
+    },
+    {
+      "id": "startup.session.processLifetime",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 525.9575299999999,
+        "median": 527.8102,
+        "p95": 533.2506,
+        "stdDev": 5.847391794196983,
+        "min": 516.6282,
+        "max": 538.8663
+      }
+    },
+    {
+      "id": "startup.session.servicesBuilt",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 16.010330000000003,
+        "median": 15.81225,
+        "p95": 16.5738,
+        "stdDev": 0.683011142777257,
+        "min": 15.1028,
+        "max": 18.5213
+      }
+    },
+    {
+      "id": "startup.session.sessionStarted",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 42.19865499999999,
+        "median": 41.61315,
+        "p95": 47.944,
+        "stdDev": 3.0765114415476646,
+        "min": 39.3862,
+        "max": 52.215
+      }
+    },
+    {
+      "id": "startup.session.settingsLoaded",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 13.54592,
+        "median": 13.4468,
+        "p95": 14.1596,
+        "stdDev": 0.546147841561335,
+        "min": 12.6883,
+        "max": 15.4553
+      }
+    },
+    {
+      "id": "startup.session.themeReady",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 16.280309999999997,
+        "median": 16.076,
+        "p95": 16.8309,
+        "stdDev": 0.6821097387401899,
+        "min": 15.3623,
+        "max": 18.787
+      }
+    },
+    {
+      "id": "startup.session.velopackDone",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 10.877615,
+        "median": 10.81665,
+        "p95": 11.4556,
+        "stdDev": 0.4770142834394619,
+        "min": 10.2681,
+        "max": 12.6393
+      }
+    },
+    {
+      "id": "startup.session.windowBuilt",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 42.201625,
+        "median": 41.6165,
+        "p95": 47.9473,
+        "stdDev": 3.0766964913472408,
+        "min": 39.3887,
+        "max": 52.2184
+      }
+    },
+    {
+      "id": "startup.session.windowCreated",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 29.72704,
+        "median": 29.350050000000003,
+        "p95": 31.4971,
+        "stdDev": 1.6415415981070316,
+        "min": 27.917900000000003,
+        "max": 36.0393
+      }
+    },
+    {
+      "id": "startup.session.windowShown",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "18963",
+        "pageFaults.main": "2474",
+        "pageFaults.windowShown": "19019",
+        "parked": "true",
+        "startFolder": "session"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 76.6665,
+        "median": 75.99295000000001,
+        "p95": 81.14940000000001,
+        "stdDev": 3.2565647420168653,
+        "min": 73.8808,
+        "max": 88.1904
+      }
+    },
+    {
+      "id": "startup.sessionStarted",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
+        "parked": "true",
+        "startFolder": "Startup(500)"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 41.85731500000001,
+        "median": 40.7996,
+        "p95": 48.62479999999999,
+        "stdDev": 3.9236918282973456,
+        "min": 38.9498,
+        "max": 56.3815
       }
     },
     {
@@ -2327,19 +3135,22 @@
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 25.68677777777778,
-        "median": 25.6492,
-        "p95": 26.4935,
-        "stdDev": 0.5217410199940619,
-        "min": 24.9316,
-        "max": 26.4935
+        "mean": 13.438594999999998,
+        "median": 13.47605,
+        "p95": 13.9685,
+        "stdDev": 0.3227988496604431,
+        "min": 12.85,
+        "max": 14.176
       }
     },
     {
@@ -2349,19 +3160,22 @@
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 25.687844444444444,
-        "median": 25.6505,
-        "p95": 26.4948,
-        "stdDev": 0.5217702634088852,
-        "min": 24.9327,
-        "max": 26.4948
+        "mean": 16.106325,
+        "median": 16.1622,
+        "p95": 16.7184,
+        "stdDev": 0.40964684517662026,
+        "min": 15.4491,
+        "max": 17.1893
       }
     },
     {
@@ -2371,19 +3185,22 @@
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 11.304666666666668,
-        "median": 11.3462,
-        "p95": 11.7024,
-        "stdDev": 0.2636978763661172,
-        "min": 10.9385,
-        "max": 11.7024
+        "mean": 10.768485,
+        "median": 10.6936,
+        "p95": 11.2569,
+        "stdDev": 0.28331907672594553,
+        "min": 10.3455,
+        "max": 11.4205
       }
     },
     {
@@ -2393,19 +3210,47 @@
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 45.314977777777784,
-        "median": 45.3381,
-        "p95": 47.6222,
-        "stdDev": 1.3185256224072577,
-        "min": 43.3416,
-        "max": 47.6222
+        "mean": 41.86011,
+        "median": 40.8026,
+        "p95": 48.6275,
+        "stdDev": 3.923700236001725,
+        "min": 38.9521,
+        "max": 56.3841
+      }
+    },
+    {
+      "id": "startup.windowCreated",
+      "tier": "C",
+      "parameters": {
+        "app": "out\\release\\app\\BertBrowser.exe",
+        "discarded": "1",
+        "instance": "first",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
+        "parked": "true",
+        "startFolder": "Startup(500)"
+      },
+      "n": 20,
+      "time": {
+        "unit": "ms",
+        "mean": 29.861475,
+        "median": 29.45415,
+        "p95": 30.809599999999996,
+        "stdDev": 1.9656600034955456,
+        "min": 28.2996,
+        "max": 37.7717
       }
     },
     {
@@ -2415,19 +3260,22 @@
         "app": "out\\release\\app\\BertBrowser.exe",
         "discarded": "1",
         "instance": "first",
-        "launches": "10",
+        "launches": "21",
+        "pageFaults.listingPainted": "16655",
+        "pageFaults.main": "2472",
+        "pageFaults.windowShown": "16660",
         "parked": "true",
         "startFolder": "Startup(500)"
       },
-      "n": 9,
+      "n": 20,
       "time": {
         "unit": "ms",
-        "mean": 61.681766666666675,
-        "median": 62.1087,
-        "p95": 63.2719,
-        "stdDev": 1.1101033690607396,
-        "min": 59.700599999999994,
-        "max": 63.2719
+        "mean": 73.92591000000002,
+        "median": 72.76660000000001,
+        "p95": 82.5279,
+        "stdDev": 3.9864371420183145,
+        "min": 70.06450000000001,
+        "max": 87.0654
       }
     },
     {

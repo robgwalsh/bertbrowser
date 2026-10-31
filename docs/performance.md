@@ -49,7 +49,7 @@ How to read the native numbers next to the .NET ones in `docs/performance.md` of
 | Power plan | High performance |
 | Corpus | synthetic, scale 1 (100,000 rows) |
 | Job | default, counting-allocator toolchain |
-| Recorded | 2026-10-30 at `508652ca6` (uncommitted changes) |
+| Recorded | 2026-10-31 at `350dfc6b7` (uncommitted changes) |
 
 ### Tier A — Core micro-benchmarks (BenchmarkDotNet)
 
@@ -191,25 +191,57 @@ How to read the native numbers next to the .NET ones in `docs/performance.md` of
 
 | Mark | Median | p95 | Min | n |
 |---|---:|---:|---:|---:|
-| `startup.main` | 11.2 ms | 11.6 ms | 10.8 ms | 9 |
-| `startup.velopackDone` | 11.3 ms | 11.7 ms | 10.9 ms | 9 |
-| `startup.instanceClaimed` | 11.4 ms | 11.8 ms | 11.0 ms | 9 |
-| `startup.settingsLoaded` | 25.6 ms | 26.5 ms | 24.9 ms | 9 |
-| `startup.servicesBuilt` | 25.7 ms | 26.5 ms | 24.9 ms | 9 |
-| `startup.migrated` | 25.7 ms | 26.5 ms | 24.9 ms | 9 |
-| `startup.themeReady` | 25.7 ms | 26.5 ms | 24.9 ms | 9 |
-| `startup.windowBuilt` | 45.3 ms | 47.6 ms | 43.3 ms | 9 |
-| `startup.contentRendered` | 60.0 ms | 61.2 ms | 57.6 ms | 9 |
-| `startup.windowShown` | 62.1 ms | 63.3 ms | 59.7 ms | 9 |
-| `startup.firstListing` | 63.2 ms | 64.4 ms | 60.7 ms | 9 |
-| `startup.gfxHardware` | 233 ms | 234 ms | 231 ms | 9 |
-| `startup.gfxSettled` | 233 ms | 234 ms | 231 ms | 9 |
-| `startup.processLifetime` | 490 ms | 500 ms | 297 ms | 9 |
+| `startup.main` | 10.5 ms | 11.0 ms | 10.1 ms | 20 |
+| `startup.session.main` | 10.6 ms | 11.3 ms | 10.1 ms | 20 |
+| `startup.velopackDone` | 10.7 ms | 11.3 ms | 10.3 ms | 20 |
+| `startup.instanceClaimed` | 10.8 ms | 11.4 ms | 10.4 ms | 20 |
+| `startup.session.velopackDone` | 10.8 ms | 11.5 ms | 10.3 ms | 20 |
+| `startup.session.instanceClaimed` | 10.9 ms | 11.5 ms | 10.3 ms | 20 |
+| `startup.session.comReady` | 12.5 ms | 13.3 ms | 11.7 ms | 20 |
+| `startup.comReady` | 12.5 ms | 13.0 ms | 12.0 ms | 20 |
+| `startup.session.settingsLoaded` | 13.4 ms | 14.2 ms | 12.7 ms | 20 |
+| `startup.settingsLoaded` | 13.5 ms | 14.0 ms | 12.9 ms | 20 |
+| `startup.session.migrated` | 15.0 ms | 15.7 ms | 14.1 ms | 20 |
+| `startup.migrated` | 15.0 ms | 15.4 ms | 14.4 ms | 20 |
+| `startup.session.servicesBuilt` | 15.8 ms | 16.6 ms | 15.1 ms | 20 |
+| `startup.servicesBuilt` | 15.9 ms | 16.4 ms | 15.2 ms | 20 |
+| `startup.session.themeReady` | 16.1 ms | 16.8 ms | 15.4 ms | 20 |
+| `startup.session.appCreated` | 16.1 ms | 16.9 ms | 15.4 ms | 20 |
+| `startup.themeReady` | 16.2 ms | 16.7 ms | 15.4 ms | 20 |
+| `startup.appCreated` | 16.2 ms | 16.8 ms | 15.5 ms | 20 |
+| `startup.session.deviceReady` | 24.2 ms | 26.4 ms | 22.6 ms | 20 |
+| `startup.deviceReady` | 24.4 ms | 25.5 ms | 23.3 ms | 20 |
+| `startup.session.windowCreated` | 29.4 ms | 31.5 ms | 27.9 ms | 20 |
+| `startup.windowCreated` | 29.5 ms | 30.8 ms | 28.3 ms | 20 |
+| `startup.session.mainViewBuilt` | 33.4 ms | 35.1 ms | 32.1 ms | 20 |
+| `startup.mainViewBuilt` | 33.5 ms | 34.7 ms | 31.8 ms | 20 |
+| `startup.session.listingLanded` | 34.7 ms | 36.6 ms | 33.3 ms | 20 |
+| `startup.listingLanded` | 35.5 ms | 36.7 ms | 33.9 ms | 20 |
+| `startup.sessionStarted` | 40.8 ms | 48.6 ms | 38.9 ms | 20 |
+| `startup.windowBuilt` | 40.8 ms | 48.6 ms | 39.0 ms | 20 |
+| `startup.session.sessionStarted` | 41.6 ms | 47.9 ms | 39.4 ms | 20 |
+| `startup.session.windowBuilt` | 41.6 ms | 47.9 ms | 39.4 ms | 20 |
+| `startup.listingPainted` | 70.3 ms | 80.2 ms | 67.7 ms | 20 |
+| `startup.contentRendered` | 70.3 ms | 80.2 ms | 67.7 ms | 20 |
+| `startup.windowShown` | 72.8 ms | 82.5 ms | 70.1 ms | 20 |
+| `startup.session.listingPainted` | 73.2 ms | 78.2 ms | 71.0 ms | 20 |
+| `startup.session.contentRendered` | 73.2 ms | 78.2 ms | 71.0 ms | 20 |
+| `startup.session.windowShown` | 76.0 ms | 81.1 ms | 73.9 ms | 20 |
+| `startup.firstListing` | 80.2 ms | 90.0 ms | 77.9 ms | 20 |
+| `startup.session.firstListing` | 83.5 ms | 96.7 ms | 81.7 ms | 20 |
+| `startup.gfxHardware` | 275 ms | 290 ms | 268 ms | 20 |
+| `startup.gfxSettled` | 275 ms | 290 ms | 268 ms | 20 |
+| `startup.session.gfxHardware` | 279 ms | 288 ms | 272 ms | 20 |
+| `startup.session.gfxSettled` | 279 ms | 288 ms | 272 ms | 20 |
+| `startup.processLifetime` | 518 ms | 528 ms | 507 ms | 20 |
+| `startup.session.processLifetime` | 528 ms | 533 ms | 517 ms | 20 |
 
 | Memory snapshot | Managed heap | Private bytes | Working set | Peak working set | n |
 |---|---:|---:|---:|---:|---:|
-| `startup.memory.collected` | 32.4 MB | 88.8 MB | 77.7 MB | 103 MB | 9 |
-| `startup.memory.firstListing` | 39.0 MB | 88.8 MB | 77.7 MB | 103 MB | 9 |
+| `startup.memory.collected` | 32.6 MB | 89.4 MB | 78.2 MB | 103 MB | 20 |
+| `startup.memory.firstListing` | 37.3 MB | 89.4 MB | 78.2 MB | 103 MB | 20 |
+| `startup.session.memory.collected` | 34.3 MB | 116 MB | 90.4 MB | 116 MB | 20 |
+| `startup.session.memory.firstListing` | 39.5 MB | 116 MB | 90.4 MB | 116 MB | 20 |
 
 ## What the numbers do and do not mean
 
@@ -223,7 +255,7 @@ How to read the native numbers next to the .NET ones in `docs/performance.md` of
 - **Tier C** launches the built `BertBrowser.exe` against a scratch data directory and reads marks the
   app writes under `BERTBROWSER_STARTUP_TRACE`. The window is parked offscreen and the post-window
   side effects (index-helper attach, change-log policy, update check) are skipped, so the headline is
-  "process start to first listing", not "to idle". The first launch is discarded as cold.
+  "process start to the rows on screen" (`listingPainted`), not "to idle". The first launch is discarded as cold.
 - **Memory** is three different measurements. Tier A's `Allocated/op` is what one call allocates. A
   Tier B *memory snapshot* is the harness process at a named point in a scenario, after a full
   collection, so the managed heap is what the app is holding rather than what is waiting to be
