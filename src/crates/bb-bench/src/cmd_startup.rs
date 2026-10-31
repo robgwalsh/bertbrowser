@@ -37,6 +37,7 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
     let mut repo: Option<String> = None;
     let mut machine_key: Option<String> = None;
     let mut allow_running = false;
+    let mut affinity: Option<usize> = None;
 
     while let Some(arg) = args.next_arg() {
         match arg.as_str() {
@@ -46,6 +47,7 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
             "--repo" => repo = Some(args.value(&arg)?),
             "--machine-key" => machine_key = Some(args.value(&arg)?),
             "--allow-running" => allow_running = true,
+            "--affinity" => affinity = Some(parse_affinity(&args.value(&arg)?)?),
             _ => return Err(unknown("startup", &arg)),
         }
     }
@@ -69,6 +71,17 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
         println!(
             "# note: the index helper is running. A traced launch does not attach to it, but it is tailing the journal."
         );
+    }
+
+    // A child inherits this, which leaves nothing to race between starting it and restricting it.
+    if let Some(mask) = affinity {
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, SetProcessAffinityMask};
+        // SAFETY: a plain call on this process's own pseudo-handle.
+        if unsafe { SetProcessAffinityMask(GetCurrentProcess(), mask) } == 0 {
+            return Err(Fail::Usage(format!(
+                "--affinity {mask:#x} is not a mask of this machine's processors."
+            )));
+        }
     }
 
     let corpus_root = corpus::default_root();
@@ -169,6 +182,10 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
         }
         None => {
             parameters.insert("instance".to_string(), dominant_instance(&kept));
+            if let Some(mask) = affinity {
+                parameters.insert("affinity".to_string(), format!("{mask:#x}"));
+            }
+            parameters.extend(page_fault_parameters(&kept));
             entries_of(&kept, &parameters)?
         }
     };
@@ -203,6 +220,36 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
         let _ = std::fs::remove_dir_all(&work);
     }
     Ok(if failure.is_none() { 0 } else { 2 })
+}
+
+/// A processor mask, in hex with or without its `0x`.
+fn parse_affinity(text: &str) -> Result<usize, Fail> {
+    let digits = text.strip_prefix("0x").unwrap_or(text);
+    match usize::from_str_radix(digits, 16) {
+        Ok(mask) if mask != 0 => Ok(mask),
+        _ => Err(Fail::Usage(format!(
+            "--affinity wants a non-zero hex mask, not {text}."
+        ))),
+    }
+}
+
+/// The median fault count at the moments worth comparing. Parameters rather than entries: `compare`
+/// would judge an entry as a time, and how many pages a launch touches is evidence, not a gate.
+fn page_fault_parameters(kept: &[(StartupTraceData, f64)]) -> BTreeMap<String, String> {
+    [
+        StartupMarks::MAIN,
+        StartupMarks::WINDOW_SHOWN,
+        StartupMarks::LISTING_PAINTED,
+    ]
+    .into_iter()
+    .filter_map(|mark| {
+        let readings: Vec<i64> = kept
+            .iter()
+            .filter_map(|(t, _)| t.page_faults.as_ref().and_then(|m| m.get(mark)).copied())
+            .collect();
+        (!readings.is_empty()).then(|| (format!("pageFaults.{mark}"), median(readings).to_string()))
+    })
+    .collect()
 }
 
 fn dominant_instance(kept: &[(StartupTraceData, f64)]) -> String {
@@ -369,6 +416,7 @@ mod tests {
             indexer: "skipped".to_string(),
             side_effects_skipped: true,
             error: None,
+            page_faults: Some([("main".to_string(), first as i64)].into_iter().collect()),
             memory: Some(
                 [(
                     "firstListing".to_string(),
@@ -411,5 +459,14 @@ mod tests {
         let mem = entries.last().unwrap().process.as_ref().unwrap();
         assert_eq!(mem.working_set_bytes, 20);
         assert_eq!(dominant_instance(&kept), "first");
+        assert_eq!(page_fault_parameters(&kept)["pageFaults.main"], "200");
+    }
+
+    #[test]
+    fn an_affinity_is_a_non_zero_hex_mask() {
+        assert_eq!(0xF, parse_affinity("F").unwrap());
+        assert_eq!(0xF, parse_affinity("0xF").unwrap());
+        assert!(parse_affinity("0").is_err());
+        assert!(parse_affinity("all").is_err());
     }
 }

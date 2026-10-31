@@ -1699,6 +1699,17 @@ void MainView::start(const std::wstring& path, bool restore_session) {
     sync_overlays();
 }
 
+bool MainView::listing_in_view() {
+    TabView* tv = active_view();
+    if (!tv || !tv->adapter().listing()) return false;
+    try {
+        const BbTabState st = core_.tab_state(active_tab_);
+        return !st.is_loading && tv->adapter().listing()->version() == st.version;
+    } catch (const core::CoreError&) {
+        return false;
+    }
+}
+
 void MainView::apply_theme() {
     const std::vector<uint32_t> argb = core_.palette();
     if (argb.size() != gfx::tok::Count) {

@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering}
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 
+use bb_core::benchmarking::StartupMarks;
 use bb_core::cancel::CancelToken;
 use bb_core::columns::ColumnSetting;
 use bb_core::data::{Db, DirSizeRepository, FsIndexRepository};
@@ -337,6 +338,8 @@ impl App {
         std::fs::create_dir_all(paths.data_dir()).map_err(|e| invalid("data directory", &e))?;
         let settings_path = paths.settings_path();
         let mut settings = AppSettings::load(&settings_path);
+        let trace = bb_shell::startup_trace::global();
+        trace.mark(StartupMarks::SETTINGS_LOADED);
         // Pin the answer to "does the theme follow Windows" now: a later save has no file-loaded bit
         // to derive it from, and flipping a user's theme because of how we wrote their file is the
         // surprise this guards against.
@@ -345,6 +348,7 @@ impl App {
 
         let db = Arc::new(Db::new(paths.db_path()));
         db.migrate().map_err(|e| invalid("database", &e))?;
+        trace.mark(StartupMarks::MIGRATED);
         let repository = Arc::new(FsIndexRepository::new(db.clone()));
         let crawler = Arc::new(IndexCrawler::new(repository.clone()));
 
@@ -439,8 +443,10 @@ impl App {
             db,
             config,
         });
+        trace.mark(StartupMarks::SERVICES_BUILT);
         inner.rebuild_keymap();
         inner.theme_initialize();
+        trace.mark(StartupMarks::THEME_READY);
         inner.start_transfer_thread();
         inner.index_attach();
         Ok(App { inner })

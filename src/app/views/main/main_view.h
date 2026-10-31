@@ -291,6 +291,8 @@ public:
     uint64_t active_pane() const { return active_pane_; }
     TabView* tab_view(uint64_t tab);
     TabView* active_view() { return tab_view(active_tab_); }
+    // The active tab has finished loading and its view holds the rows that came of it.
+    bool listing_in_view();
     size_t pane_count() const { return pane_views_.size(); }
     size_t tab_count_in_active_pane() const;
     TabStrip* active_strip() const;

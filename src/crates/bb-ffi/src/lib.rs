@@ -549,19 +549,6 @@ unsafe fn build_app(
             config.machine_effects = !startup::trace().enabled();
         }
         let app = App::new(config)?;
-        if startup::trace().enabled() {
-            // The settings, services, migration and theme all happen inside App::new; one mark each
-            // keeps the schema the bench tool reads.
-            let t = startup::trace();
-            for mark in [
-                bb_core::benchmarking::StartupMarks::SETTINGS_LOADED,
-                bb_core::benchmarking::StartupMarks::SERVICES_BUILT,
-                bb_core::benchmarking::StartupMarks::MIGRATED,
-                bb_core::benchmarking::StartupMarks::THEME_READY,
-            ] {
-                t.mark(mark);
-            }
-        }
         let sink: SinkSlot = Arc::new(Mutex::new(None));
         {
             let sink = sink.clone();

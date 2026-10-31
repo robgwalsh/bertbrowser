@@ -128,6 +128,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             bb_launch_free(launch);
             return fail(L"Could not initialise the process (COM/DPI).");
         }
+        mark(L"comReady");
 
         // Loading a GPU's driver takes ~200 ms and the first frame does not need it: start on WARP (8 ms), make
         // the hardware device on a thread of its own and move the window over when it is ready. Setting
@@ -149,6 +150,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             return fail(L"No Direct3D device is available.");
         }
         gfx::Resources res(*dev);
+        mark(L"deviceReady");
 
         BbAppConfig cfg{};
         cfg.data_dir = core::s(dir);
@@ -159,6 +161,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             bb_launch_free(launch);
             return fail(why.c_str());
         }
+        mark(L"appCreated");
 
         {
             core::Core core(app);
@@ -176,6 +179,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             if (!window.ok()) {
                 error = L"Could not create the window.";
             } else {
+                mark(L"windowCreated");
                 if (hardware && dev->is_warp()) {
                     window.on_hardware_settled = [](bool moved) {
                         if (moved) mark(L"gfxHardware");
@@ -188,6 +192,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                 // The first thing the window draws is the content having been rendered.
                 window.on_first_paint = [] { mark(L"contentRendered"); };
                 views::MainView view(core, window);
+                mark(L"mainViewBuilt");
+                // The first frame to hold the rows, which need not be the first frame.
+                if (bb_trace_enabled()) {
+                    window.on_painted = [&view] {
+                        if (!view.listing_in_view()) return false;
+                        mark(L"listingPainted");
+                        return true;
+                    };
+                }
                 // A handler that throws says why in the status bar instead of taking the window with it.
                 platform::Window::on_unhandled = [app](const std::exception& e) {
                     bb_status_set(app, core::s(core::message_of(e)));
@@ -206,6 +219,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                         start = n ? std::wstring(profile, n) : std::wstring(L"C:\\");
                     }
                     view.start(start, !asked);
+                    mark(L"sessionStarted");
                     view.enable_file_drag_drop();
                     mark(L"windowBuilt");
                     const bool maximize = !options.offscreen && restore_placement(window.hwnd(), app);

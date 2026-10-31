@@ -31,6 +31,7 @@ struct Inner {
     clock_offset_ms: f64,
     process_start: FileTime,
     marks: BTreeMap<String, f64>,
+    page_faults: BTreeMap<String, i64>,
     instance: String,
     flushed: bool,
 }
@@ -64,6 +65,7 @@ impl StartupTrace {
                 clock_offset_ms: 0.0,
                 process_start: FileTime::default(),
                 marks: BTreeMap::new(),
+                page_faults: BTreeMap::new(),
                 instance: "unknown".to_string(),
                 flushed: false,
             }),
@@ -96,7 +98,10 @@ impl StartupTrace {
             + inner
                 .clock
                 .map_or(0.0, |c| c.elapsed().as_secs_f64() * 1000.0);
-        inner.marks.entry(name.to_string()).or_insert(at);
+        if !inner.marks.contains_key(name) {
+            inner.marks.insert(name.to_string(), at);
+            inner.page_faults.insert(name.to_string(), page_faults());
+        }
     }
 
     pub fn set_instance(&self, is_first: bool) {
@@ -107,13 +112,14 @@ impl StartupTrace {
         self.inner.lock().unwrap().marks.contains_key(name)
     }
 
-    /// Writes the trace once `contentRendered`, `firstListing` and `gfxSettled` are in. The last is why the
-    /// memory it reads is the settled app's: the window starts on a software device and the GPU's driver
-    /// loads behind it, and a snapshot taken while that loads is mostly the driver. True when this call
-    /// wrote it.
+    /// Writes the trace once `contentRendered`, `firstListing`, `listingPainted` and `gfxSettled` are in. The
+    /// last is why the memory it reads is the settled app's: the window starts on a software device and the
+    /// GPU's driver loads behind it, and a snapshot taken while that loads is mostly the driver. True when
+    /// this call wrote it.
     pub fn finish_if_complete(&self) -> bool {
         if !(self.has(StartupMarks::CONTENT_RENDERED)
             && self.has(StartupMarks::FIRST_LISTING)
+            && self.has(StartupMarks::LISTING_PAINTED)
             && self.has(StartupMarks::GFX_SETTLED))
         {
             return false;
@@ -150,6 +156,7 @@ impl StartupTrace {
                 side_effects_skipped: true,
                 error: error.map(str::to_string),
                 memory: Some(memory),
+                page_faults: Some(inner.page_faults.clone()),
             }
         };
         // A trace that cannot be written is a failed measurement, not a failed launch.
@@ -174,12 +181,8 @@ impl StartupTrace {
                 loop {
                     if self.has(StartupMarks::FIRST_LISTING) || first_listing() {
                         self.mark(StartupMarks::FIRST_LISTING);
-                        if self.has(StartupMarks::CONTENT_RENDERED)
-                            && self.has(StartupMarks::GFX_SETTLED)
-                        {
-                            if self.finish_if_complete() {
-                                on_written();
-                            }
+                        if self.finish_if_complete() {
+                            on_written();
                             return;
                         }
                     }
@@ -218,6 +221,21 @@ fn process_start() -> FileTime {
         return FileTime::now();
     }
     FileTime::from_parts(created.dwLowDateTime, created.dwHighDateTime)
+}
+
+/// How many page faults the process has taken: what a launch that touches less code has fewer of.
+fn page_faults() -> i64 {
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    // SAFETY: a zeroed struct with its size set, as the call requires.
+    let mut counters: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
+    counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    // SAFETY: `counters` is initialised and `cb` says how big it is.
+    unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) };
+    i64::from(counters.PageFaultCount)
 }
 
 fn snapshot() -> StartupMemory {
@@ -309,6 +327,8 @@ mod tests {
             "the first listing is still missing"
         );
         t.mark(StartupMarks::FIRST_LISTING);
+        assert!(!t.finish_if_complete(), "no frame has shown the rows yet");
+        t.mark(StartupMarks::LISTING_PAINTED);
         assert!(
             !t.finish_if_complete(),
             "the drawing has not settled: a driver may still be loading"
@@ -327,6 +347,7 @@ mod tests {
         let memory = read.memory.unwrap();
         assert!(memory[StartupMemoryPoints::FIRST_LISTING].working_set_bytes > 0);
         assert!(memory[StartupMemoryPoints::COLLECTED].private_bytes > 0);
+        assert!(read.page_faults.unwrap()[StartupMarks::MAIN] > 0);
     }
 
     #[test]
@@ -357,6 +378,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(30));
         assert!(rx.try_recv().is_err(), "content has not been drawn yet");
         t.mark(StartupMarks::CONTENT_RENDERED);
+        t.mark(StartupMarks::LISTING_PAINTED);
         std::thread::sleep(Duration::from_millis(30));
         assert!(rx.try_recv().is_err(), "the drawing has not settled yet");
         t.mark(StartupMarks::GFX_SETTLED);

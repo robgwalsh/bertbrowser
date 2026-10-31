@@ -82,6 +82,8 @@ public:
     std::function<void()> on_close;  // WM_CLOSE; default destroys the window
     // Called once, after the first paint has reached the surface (the content has been rendered).
     std::function<void()> on_first_paint;
+    // Asked after every paint that reached the surface, until it answers true.
+    std::function<bool()> on_painted;
     // Windows' light/dark, accent or high-contrast setting moved (WM_SETTINGCHANGE and friends).
     std::function<void()> on_system_settings_changed;
     // What is on the clipboard changed (WM_CLIPBOARDUPDATE, once the window listens for it).

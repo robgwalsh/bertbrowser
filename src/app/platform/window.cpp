@@ -225,7 +225,10 @@ HRESULT Window::render() {
         hr = root_.paint(*surface_);
         in_render_ = false;
     }
-    if (SUCCEEDED(hr)) retired_.reset();  // the new surface is on screen: the one it replaced can go
+    if (SUCCEEDED(hr)) {
+        retired_.reset();  // the new surface is on screen: the one it replaced can go
+        if (on_painted && on_painted()) on_painted = nullptr;
+    }
     return hr;
 }
 

@@ -17,6 +17,7 @@ fn trace(instance: &str, error: Option<&str>) -> StartupTraceData {
         side_effects_skipped: true,
         error: error.map(str::to_string),
         memory: None,
+        page_faults: None,
     }
 }
 
@@ -34,9 +35,11 @@ fn round_trips() {
         side_effects_skipped: true,
         error: None,
         memory: None,
+        page_faults: Some(BTreeMap::from([(StartupMarks::MAIN.to_string(), 900)])),
     };
 
     let back = StartupTraceJson::deserialize(&StartupTraceJson::serialize(&trace)).expect("back");
+    assert_eq!(trace.page_faults, back.page_faults);
 
     assert_eq!(trace.pid, back.pid);
     assert_eq!(trace.process_start_utc, back.process_start_utc);

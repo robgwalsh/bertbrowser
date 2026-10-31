@@ -17,6 +17,10 @@ impl StartupMarks {
     pub const MAIN: &'static str = "main";
     pub const VELOPACK_DONE: &'static str = "velopackDone";
     pub const INSTANCE_CLAIMED: &'static str = "instanceClaimed";
+    /// COM and OLE are up on the UI thread.
+    pub const COM_READY: &'static str = "comReady";
+    /// The Direct3D device, the Direct2D and DirectWrite factories and the resources over them.
+    pub const DEVICE_READY: &'static str = "deviceReady";
     /// The application resources loaded, on the UI thread.
     pub const APP_XAML_LOADED: &'static str = "appXamlLoaded";
     /// settings.json parsed — the composition root waits on it before anything else.
@@ -24,6 +28,16 @@ impl StartupMarks {
     pub const SERVICES_BUILT: &'static str = "servicesBuilt";
     pub const MIGRATED: &'static str = "migrated";
     pub const THEME_READY: &'static str = "themeReady";
+    /// The core has been built and handed back to the host.
+    pub const APP_CREATED: &'static str = "appCreated";
+    /// The window and its surface exist; nothing has been built inside it.
+    pub const WINDOW_CREATED: &'static str = "windowCreated";
+    /// The main view's widget tree has been built, before any tab.
+    pub const MAIN_VIEW_BUILT: &'static str = "mainViewBuilt";
+    /// The first tab (or the restored session) exists and its panes have been built.
+    pub const SESSION_STARTED: &'static str = "sessionStarted";
+    /// A worker has installed the first folder's rows. Nothing has shown them yet.
+    pub const LISTING_LANDED: &'static str = "listingLanded";
     /// The shell view model and the graph behind it resolved.
     pub const SHELL_BUILT: &'static str = "shellBuilt";
     /// The main window's own layout loaded, before any pane exists.
@@ -35,7 +49,11 @@ impl StartupMarks {
     pub const WINDOW_BUILT: &'static str = "windowBuilt";
     pub const WINDOW_SHOWN: &'static str = "windowShown";
     pub const CONTENT_RENDERED: &'static str = "contentRendered";
+    /// The active tab has a path and nothing is loading: what the harness waits on. Says nothing of the
+    /// screen, and is polled from after `windowShown`, so it can never be earlier than that.
     pub const FIRST_LISTING: &'static str = "firstListing";
+    /// A frame holding the first folder's rows has been presented. The headline: what a person sees.
+    pub const LISTING_PAINTED: &'static str = "listingPainted";
     /// The window's drawing has stopped moving: it began on a software device and the GPU's took over
     /// (`gfxHardware` is that moment), or there was none to take over. Native app only. The trace waits
     /// for it before it reads memory, so the snapshot is the settled app and not one with a driver loading.
@@ -59,7 +77,8 @@ impl StartupMemoryPoints {
 /// helper — `skipped` under a trace. `side_effects_skipped`: the post-window work (helper attach,
 /// change-log policy, update check, staging sweep) was left out, so the numbers describe "to first
 /// listing". `error`: a mark never came and the fallback flushed what there was. `memory`: by
-/// `StartupMemoryPoints` name; `None` in a trace written before it was recorded.
+/// `StartupMemoryPoints` name; `None` in a trace written before it was recorded. `page_faults`: the
+/// process's fault count as each mark was taken, by mark name; `None` likewise.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartupTraceData {
@@ -73,6 +92,8 @@ pub struct StartupTraceData {
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<BTreeMap<String, StartupMemory>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_faults: Option<BTreeMap<String, i64>>,
 }
 
 /// One reading of the real executable's memory, taken by the app itself.
