@@ -12,6 +12,7 @@
 
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "gfx/resources.h"
 #include "platform/application.h"
@@ -138,17 +139,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         const bool hardware_first = std::wstring(device_mode) == L"hardware";
         HRESULT hr = S_OK;
         std::unique_ptr<gfx::GfxDevice> dev;
-        if (!hardware_first) dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = true}, &hr);
-        const bool move_to_hardware = dev != nullptr;
         std::unique_ptr<gfx::HardwareDeviceLoader> hardware;
-        if (!dev) dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = false, .video_support = true}, &hr);
-        if (!dev) dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = true}, &hr);
-        if (!dev) {
-            bb_launch_free(launch);
-            return fail(L"No Direct3D device is available.");
+        // WARP and the core have nothing to do with each other, and the device takes the longer: each its own thread,
+        // the core on this one because the FFI is the UI thread's. The join hands the device over.
+        std::jthread warp_maker;
+        if (!hardware_first) {
+            warp_maker = std::jthread([&dev, &hr] { dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = true}, &hr); });
         }
-        gfx::Resources res(*dev);
-        mark(L"deviceReady");
 
         BbAppConfig cfg{};
         cfg.data_dir = core::s(dir);
@@ -160,6 +157,18 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             return fail(why.c_str());
         }
         mark(L"appCreated");
+
+        if (warp_maker.joinable()) warp_maker.join();
+        const bool move_to_hardware = dev != nullptr;
+        if (!dev) dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = false, .video_support = true}, &hr);
+        if (!dev) dev = gfx::GfxDevice::create(gfx::DeviceOptions{.warp = true}, &hr);
+        if (!dev) {
+            bb_app_destroy(app);
+            bb_launch_free(launch);
+            return fail(L"No Direct3D device is available.");
+        }
+        gfx::Resources res(*dev);
+        mark(L"deviceReady");
 
         {
             core::Core core(app);
