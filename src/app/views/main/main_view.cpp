@@ -1710,6 +1710,22 @@ bool MainView::listing_in_view() {
     }
 }
 
+void MainView::await_first_listing(DWORD budget_ms) {
+    const ULONGLONG deadline = GetTickCount64() + budget_ms;
+    const HWND hwnd = window_.hwnd();
+    for (;;) {
+        // Only the core's events: anything else would be the window running before it has been shown.
+        MSG msg;
+        while (PeekMessageW(&msg, hwnd, WM_BB_EVENT, WM_BB_EVENT, PM_REMOVE)) {
+            on_window_message(msg.message, msg.wParam, msg.lParam);
+        }
+        if (listing_in_view()) return;
+        const ULONGLONG now = GetTickCount64();
+        if (now >= deadline) return;
+        MsgWaitForMultipleObjectsEx(0, nullptr, static_cast<DWORD>(deadline - now), QS_POSTMESSAGE, 0);
+    }
+}
+
 void MainView::apply_theme() {
     const std::vector<uint32_t> argb = core_.palette();
     if (argb.size() != gfx::tok::Count) {

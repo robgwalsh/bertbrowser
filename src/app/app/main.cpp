@@ -230,6 +230,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                             DestroyWindow(window.hwnd());
                         };
                     }
+                    // The rows have usually landed by now, with the event that says so still queued. Painted
+                    // without them the window would appear empty and need a second whole frame.
+                    view.await_first_listing(25);
                     window.paint_first_frame();  // the window appears with its content, not blank
                     if (maximize) ShowWindow(window.hwnd(), SW_SHOWMAXIMIZED);
                     else window.show();
