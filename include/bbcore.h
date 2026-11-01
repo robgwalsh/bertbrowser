@@ -864,8 +864,15 @@ enum BbStatus bb_saved_default_name(struct BbApp *app,
 // Writes what the Settings page still holds. Called on Back and on window close.
 enum BbStatus bb_settings_flush(struct BbApp *app);
 
-// `{open, page, pages:[{id, name, icon}], problem}`.
+// `{open, page, pages:[{id, name, icon}], problem, query, searching,
+// results:[{page, pageName, icon, label}]}`.
 enum BbStatus bb_settings_page_state(struct BbApp *app, struct BbOwnedStr *out_json);
+
+// What is typed in the Settings page's search box; the page's state then carries the results.
+enum BbStatus bb_settings_page_search(struct BbApp *app, struct BbStr query);
+
+// Everything the search box can find, as `[{page, pageName, icon, label}]`.
+enum BbStatus bb_settings_search_index(struct BbApp *app, struct BbOwnedStr *out_json);
 
 // Opens the Settings page on `page` (a page id; empty: General). While it is up only app-wide
 // commands run.

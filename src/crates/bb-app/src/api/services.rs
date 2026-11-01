@@ -21,6 +21,11 @@ fn text(v: &Value) -> String {
     v.to_string()
 }
 
+fn settings_entry_json(e: &bb_core::settings::SettingsEntry) -> Value {
+    let (page_name, icon) = crate::services::settings::settings_page_info(e.page);
+    json!({ "page": e.page, "pageName": page_name, "icon": icon, "label": e.label })
+}
+
 fn on(arg: &str) -> bool {
     matches!(
         arg.trim().to_lowercase().as_str(),
@@ -729,9 +734,14 @@ impl App {
         self.inner.flush_settings();
     }
 
-    /// `{open, page, pages:[{id, name, icon}], problem}`.
+    /// `{open, page, pages:[{id, name, icon}], problem, query, searching,
+    /// results:[{page, pageName, icon, label}]}`. `searching` is whether the box holds more than
+    /// spaces; while it does, the results stand in for the page.
     pub fn settings_page_json(&self) -> String {
-        let page = lock(&self.inner.extra.ui).settings_page.clone();
+        let (page, query) = {
+            let ui = lock(&self.inner.extra.ui);
+            (ui.settings_page.clone(), ui.settings_query.clone())
+        };
         text(&json!({
             "open": page.is_some(),
             "page": page,
@@ -739,7 +749,27 @@ impl App {
                 .map(|(id, name, icon)| json!({ "id": id, "name": name, "icon": icon }))
                 .collect::<Vec<_>>(),
             "problem": self.inner.settings_problem(),
+            "searching": !query.trim().is_empty(),
+            "results": self.inner.settings_search_hits(&query).iter()
+                .map(|e| settings_entry_json(e))
+                .collect::<Vec<_>>(),
+            "query": query,
         }))
+    }
+
+    /// What is typed in the Settings page's search box.
+    pub fn settings_search(&self, query: &str) {
+        self.inner.settings_search(query);
+    }
+
+    /// Everything the search box can find, as `[{page, pageName, icon, label}]`.
+    pub fn settings_search_index_json(&self) -> String {
+        text(&json!(
+            bb_core::settings::SettingsIndex::ENTRIES
+                .iter()
+                .map(settings_entry_json)
+                .collect::<Vec<_>>()
+        ))
     }
 
     /// Opens the Settings page on `page` (empty: General). Only app-wide shortcuts run meanwhile.

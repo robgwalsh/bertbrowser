@@ -29,6 +29,64 @@ shot 08a-keyboard
 settings close
 shot 09-back-to-folders
 
+# --- The search box in the header. Everything it can find is really on its page. ---
+
+settings search-audit
+settings general
+field-type SettingsSearch hidden
+assert-list-row SettingsResults 0 Show hidden items
+assert-hidden SettingsNoResults
+shot 09a-search-results
+# Another name for a setting finds it, on whichever page is in front.
+field-type SettingsSearch dark mode
+assert-list-row SettingsResults 0 Match Windows light/dark
+field-type SettingsSearch zzzzqqq
+assert-visible SettingsNoResults
+shot 09b-search-nothing
+# Esc takes what is typed first and the page comes back; the next Esc would leave.
+window-key Esc
+assert-visible SettingsLayer
+assert-hidden SettingsNoResults
+assert-visible SettingsPages
+# Taking a result opens its page, ends the search and lights the row.
+field-type SettingsSearch retention
+list-activate SettingsResults Keep changes for
+assert-hidden SettingsResults
+assert-visible ChangeLogCount
+shot 09c-search-pointed-at-row
+# Far down a page: the row is scrolled to.
+field-type SettingsSearch win+e
+list-activate SettingsResults Win+E opens BertBrowser
+shot 09d-search-scrolled-to-row
+settings close
+assert-focus FileListView
+# The box has the keyboard as the page opens; Down and Enter take a result from it.
+settings general
+assert-focus SettingsSearch
+field-type SettingsSearch reset
+assert-list-row SettingsResults 0 Reset all
+assert-list-row SettingsResults 1 Reset to default
+window-key Down
+window-key Enter
+assert-hidden SettingsResults
+assert-visible BarReset
+# Any page in the list ends a search, the one in front too.
+field-type SettingsSearch hidden
+list-pick SettingsPages Menus and toolbars
+assert-hidden SettingsResults
+assert-visible BarReset
+field-type SettingsSearch hidden
+press SettingsSearchClear
+assert-hidden SettingsResults
+assert-focus SettingsSearch
+# Esc takes what is typed, the next one leaves, and the folders get the keyboard back.
+field-type SettingsSearch hidden
+window-key Esc
+assert-visible SettingsLayer
+window-key Esc
+assert-hidden SettingsLayer
+assert-focus FileListView
+
 # --- Live apply. There is no Save: a box ticked on the page reaches the folders once the page's
 # debounce has run, and leaving straight after a change still writes it (the flush on close). ---
 

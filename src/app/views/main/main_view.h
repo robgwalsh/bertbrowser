@@ -126,6 +126,7 @@ public:
     SearchField(std::function<void()> clear, std::function<void()> save);
     void arrange(ui::Rect r) override;
     void sync_buttons();  // shown while the box has text
+    bool can_save = true;  // false: only the clear button (what is typed is not a search of the folders)
     ui::Button* clear_button() const { return clear_; }
     ui::Button* save_button() const { return save_; }
     ui::Button* glyph() const { return glyph_; }
@@ -148,6 +149,8 @@ public:
     uint64_t tab() const { return tab_; }
     ui::ListView* list() const { return list_; }
     ui::TileView* tiles() const { return tiles_; }
+    // Whichever of the two is showing: where the keyboard goes when something over the folders is put away.
+    ui::Widget* rows() const { return tiles_on_ ? static_cast<ui::Widget*>(tiles_) : static_cast<ui::Widget*>(list_); }
     bool tiles_mode() const { return tiles_on_; }
     ListAdapter& adapter() { return adapter_; }
     ui::Edit* search_box() const { return search_; }

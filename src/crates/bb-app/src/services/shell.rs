@@ -49,6 +49,8 @@ pub(crate) struct CompareState {
 pub(crate) struct UiState {
     /// The Settings page is up, on this page.
     pub settings_page: Option<String>,
+    /// What is typed in the Settings page's search box.
+    pub settings_query: String,
     /// Modal dialogs up: the title bar stays live, everything about the folders does not.
     pub dialogs: u32,
     pub compare: Option<CompareState>,

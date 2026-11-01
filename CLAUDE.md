@@ -134,7 +134,7 @@ behavior - this table only says where.
 | Commands / keyboard shortcuts | `core/commands/*` (`catalog`, `chord`, `keymap`, `verbs`), `app/commands/mod.rs` (`why_not_now`), `app/commands/keys.rs`, ui: `window.cpp` (key -> chord), `command_ui.cpp`, `tools/ui/{keys,keyboard,commands}.bbs` |
 | Menu bar / toolbars | `core/commandbars/*`, `app/commands/bars.rs` (`CommandBarService`), ui: `ui/popups/menu_bar.cpp`, `command_ui.cpp`, `tools/ui/command-bars.bbs` |
 | Command palette | `core/commands/{palette,matcher,goto}.rs`, `app/commands/palette.rs`, ui: `palette_view.cpp`, `tools/ui/palette.bbs` |
-| Settings page | `app/services/settings.rs`, `core/settings/*`, ui: `settings_view.cpp`, `tools/ui/settings.bbs` |
+| Settings page (incl. its search box, `core/settings/search.rs`) | `app/services/settings.rs`, `core/settings/*`, ui: `settings_view.cpp`, `tools/ui/settings.bbs` |
 | Theming | `core/theming/*` (`catalog`, `resolver`, `system`), `app/services/themes.rs`, ui: `gfx/palette.cpp`, `gfx/tokens.h` |
 | App icon | `tools/icons/build-app-icon.ps1` -> `src/app/app/app.ico` |
 | Icons | `tools/icons/icons.txt` (the mapping) -> `src/app/gfx/icons.gen.h` (generated) via `build-icons.ps1` |
@@ -484,7 +484,10 @@ behavior - this table only says where.
   close. A command or new-file type with a missing field keeps its whole list unwritten and says so in a
   strip rather than jumping pages mid-typing; only leaving takes the user to it. Each value is re-pushed
   only when it moved - the change-log policy push wipes the log whenever recording is off, so calling it
-  on every keystroke elsewhere on the page is not harmless.
+  on every keystroke elsewhere on the page is not harmless. **A new setting needs a row in
+  `SettingsIndex::ENTRIES`** or the search box will not find it. Its label is the page's exact words and must
+  always be on the page (a row that comes and goes is a keyword on one that stays); `settings search-audit`
+  pins the rows that exist, but cannot notice a setting with no row.
 - **Matching Windows is the default only because there is no settings file.** `follow_system_theme ??
   !loaded_from_disk` - not `theme_id.is_none()`, which every existing user who never opened Settings also
   has. Initialize pins the answer on first run, or launch two finds a file and reads the null as "no". A

@@ -17,6 +17,7 @@ namespace bb::views {
 
 class MainView;
 class LeaveLayer;
+class SearchField;
 
 class SettingsView : public ui::Widget {
 public:
@@ -32,6 +33,8 @@ public:
 
     // ---- what the harness asks ----
     ui::CheckBox* find_check(const std::wstring& label);
+    // Whether the page in front shows these words, as the search box's "go to this row" looks for them.
+    bool shows_words(const std::wstring& words);
     // The Menus and toolbars page's rows / picker, as the page shows them.
     std::vector<std::wstring> bar_rows() const;
     std::vector<std::wstring> bar_choices() const;
@@ -49,9 +52,17 @@ public:
     void paint(ui::PaintContext& pc) override;
     bool on_mouse_down(const ui::MouseEvent& e) override;
     bool on_wheel(ui::Point, int, ui::Mods) override { return true; }
+    void on_timer(int id) override;
 
 private:
     void build_chrome();
+    // The search box in the header. What is typed lives in the core; while it holds more than spaces the
+    // results stand in for the page, and choosing one opens its page and points at the row.
+    void clear_search();
+    void page_results(ui::Widget& p);
+    void activate_result(int i);
+    void point_at(const std::wstring& words);
+    void end_flash();
     // Back to the folders. A list the page could not save is refused by the core, which brings its page to
     // the front; this then asks whether to leave anyway, and `then` runs once the page has really closed.
     void go_back(std::function<void()> then = nullptr);
@@ -127,6 +138,16 @@ private:
     std::string command_editing_;  // the id of the user's command whose editor is open, or empty
     ui::Widget* card_ = nullptr;
     LeaveLayer* leave_ = nullptr;  // the "leave anyway?" card, over the page
+    SearchField* search_ = nullptr;
+    bool searching_ = false;
+    bool built_results_ = false;  // the body holds results, not a page
+    std::wstring query_;
+    json::Value results_;
+    forms::ItemList* results_list_ = nullptr;
+    std::wstring pending_words_;  // a result was chosen: the words to point at once its page is built
+    ui::Widget* flash_ = nullptr;  // the row being pointed at, lit until the timer; forgotten with the page
+    decltype(ui::Style::bg) flash_was_{};
+    void select_nav_row();
     ui::StackPanel* nav_ = nullptr;
     ui::ScrollViewer* scroll_ = nullptr;
     ui::StackPanel* body_ = nullptr;

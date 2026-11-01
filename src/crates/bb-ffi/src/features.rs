@@ -876,7 +876,8 @@ pub unsafe extern "C" fn bb_settings_flush(app: *mut BbApp) -> BbStatus {
     })
 }
 
-/// `{open, page, pages:[{id, name, icon}], problem}`.
+/// `{open, page, pages:[{id, name, icon}], problem, query, searching,
+/// results:[{page, pageName, icon, label}]}`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_settings_page_state(
     app: *mut BbApp,
@@ -885,6 +886,27 @@ pub unsafe extern "C" fn bb_settings_page_state(
     guard(|| {
         let app = unsafe { app_of(app)? };
         unsafe { put(out_json, &app.app.settings_page_json()) }
+    })
+}
+
+/// What is typed in the Settings page's search box; the page's state then carries the results.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_settings_page_search(app: *mut BbApp, query: BbStr) -> BbStatus {
+    guard(|| {
+        unsafe { app_of(app)? }.app.settings_search(&text_of(query));
+        Ok(())
+    })
+}
+
+/// Everything the search box can find, as `[{page, pageName, icon, label}]`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_settings_search_index(
+    app: *mut BbApp,
+    out_json: *mut BbOwnedStr,
+) -> BbStatus {
+    guard(|| {
+        let app = unsafe { app_of(app)? };
+        unsafe { put(out_json, &app.app.settings_search_index_json()) }
     })
 }
 

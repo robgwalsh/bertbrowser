@@ -636,6 +636,16 @@ void Runner::install_ui() {
         source->on_mouse_up(e);
         s_.settle();
     };
+    // list-activate <List> <text> -- the row named <text> is taken, as a click or Enter on it would.
+    verbs_[L"list-activate"] = [this, find_row, item_list](const std::wstring& r) {
+        const auto [name, text] = split_first(require(r, "list-activate"));
+        auto* list = item_list(name);
+        const int row = find_row(*list, name, text);
+        if (!list->on_activate) throw AssertionError("'" + to_utf8(name) + "' has nothing to do when a row is activated.");
+        list->select(row);
+        list->on_activate(row);
+        s_.settle();
+    };
     // assert-list-row <List> <index> <text> -- row <index> of the list reads <text>.
     verbs_[L"assert-list-row"] = [this, row_words, item_list](const std::wstring& r) {
         const auto [name, tail] = split_first(require(r, "assert-list-row"));
@@ -923,6 +933,35 @@ void Runner::install_ui() {
             box->set_checked(state == L"on");
             if (box->on_toggle) box->on_toggle(state == L"on");
             s_.settle();
+            return;
+        }
+        // settings search-audit -- every page has something the search box finds, and shows every label the
+        // box would point at. Opens each page; the last one stays open.
+        if (p == L"search-audit") {
+            BbOwnedStr index_out{}, state_out{};
+            core::check(bb_settings_search_index(a, &index_out), "settings search-audit");
+            core::check(bb_settings_page_state(a, &state_out), "settings search-audit");
+            const auto index = bb::json::parse(to_utf8(core::take(index_out)));
+            const auto state = bb::json::parse(to_utf8(core::take(state_out)));
+            std::vector<std::string> problems;
+            for (size_t i = 0; i < state["pages"].size(); ++i) {
+                const std::string id = state["pages"][i]["id"].str();
+                core::check(bb_settings_page_open(a, core::s(core::wide(id))), "settings search-audit");
+                s_.settle();
+                s_.view().sync_overlays();
+                size_t found = 0;
+                for (size_t k = 0; k < index.size(); ++k) {
+                    if (index[k]["page"].str() != id) continue;
+                    ++found;
+                    if (!s_.view().settings()->shows_words(core::wide(index[k]["label"].str()))) problems.push_back(id + ": '" + index[k]["label"].str() + "'");
+                }
+                if (!found) problems.push_back(id + ": nothing indexed");
+            }
+            if (!problems.empty()) {
+                std::string all;
+                for (const std::string& problem : problems) all += (all.empty() ? "" : ", ") + problem;
+                throw AssertionError("The settings search index does not match the pages: " + all);
+            }
             return;
         }
         if (p == L"key") {

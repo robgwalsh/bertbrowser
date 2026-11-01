@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
+use bb_core::settings::{SettingsEntry, SettingsIndex};
 use serde_json::Value;
 
 use crate::app::{Inner, lock};
@@ -31,6 +32,18 @@ pub const SETTINGS_PAGES: [(&str, &str, &str); 13] = [
     ("command-bars", "Menus and toolbars", "Icon.Reorder"),
     ("keyboard", "Keyboard", "Icon.Keyboard"),
 ];
+
+/// The (name, icon) of a page by its id; empty for a page that does not exist.
+pub fn settings_page_info(id: &str) -> (&'static str, &'static str) {
+    SETTINGS_PAGES
+        .iter()
+        .find(|p| p.0 == id)
+        .map_or(("", ""), |p| (p.1, p.2))
+}
+
+fn settings_page_name(id: &str) -> &'static str {
+    settings_page_info(id).0
+}
 
 /// The settings keys the page writes. Everything else is written at once by the service that owns
 /// it, or is not a preference at all.
@@ -332,9 +345,30 @@ impl Inner {
                 lock(&self.extra.keys).cancel_capture();
             }
             ui.settings_page = Some(id.to_string());
+            // Opening a page is what ends a search, whether a result or the page list asked.
+            ui.settings_query.clear();
         }
         self.hub.model(crate::events::Model::SettingsPage);
         Ok(())
+    }
+
+    /// What is typed in the page's search box. Typing stops listening for a shortcut, or the
+    /// letters would be its answer.
+    pub(crate) fn settings_search(&self, query: &str) {
+        {
+            let mut ui = lock(&self.extra.ui);
+            if ui.settings_page.is_none() || ui.settings_query == query {
+                return;
+            }
+            lock(&self.extra.keys).cancel_capture();
+            ui.settings_query = query.to_string();
+        }
+        self.hub.model(crate::events::Model::SettingsPage);
+    }
+
+    /// The search box's results, or nothing when it is blank.
+    pub(crate) fn settings_search_hits(&self, query: &str) -> Vec<&'static SettingsEntry> {
+        SettingsIndex::find(query, settings_page_name)
     }
 
     /// Closes the page, flushing first. Err carries the problem that kept it open.
@@ -344,7 +378,11 @@ impl Inner {
         }
         self.settings_leave()?;
         lock(&self.extra.keys).cancel_capture();
-        lock(&self.extra.ui).settings_page = None;
+        {
+            let mut ui = lock(&self.extra.ui);
+            ui.settings_page = None;
+            ui.settings_query.clear();
+        }
         self.hub.model(crate::events::Model::SettingsPage);
         Ok(())
     }

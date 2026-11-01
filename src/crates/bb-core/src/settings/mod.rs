@@ -5,6 +5,7 @@ mod app_paths;
 mod app_settings;
 mod legacy;
 mod placeholders;
+mod search;
 
 pub use app_paths::{AppPaths, AppPathsError};
 pub use app_settings::{
@@ -15,3 +16,4 @@ pub use placeholders::{
     BarItem, ChecksumAlgorithm, CommandBarSet, CustomCommandDefinition, NewFileTemplate,
     RenameCase, RenameRule, RenameScope, SavedCommandBarSet, ThemeId, ToolbarSpec, UndoBudget,
 };
+pub use search::{SettingsEntry, SettingsIndex};

@@ -73,21 +73,22 @@ fn the_endpoint_is_the_prefix_and_the_sid() {
 
 /// The real thing, end to end: claiming the name makes it visible, a second claim is refused, and
 /// letting go makes it invisible again. This is what tells the app whether to raise a prompt, and
-/// what stops two helpers indexing at once.
+/// what stops two helpers indexing at once. Everyone's SID rather than this user's, whose name a real
+/// helper may well be holding, and one the descriptor still grants to an unelevated test run.
 #[test]
 fn a_claim_is_visible_until_it_is_released() {
-    let sid = IndexEndpoint::current_user_sid().unwrap();
+    let sid = "S-1-1-0";
     assert!(
-        !IndexerPresenceLock::is_held(&sid),
+        !IndexerPresenceLock::is_held(sid),
         "nothing should hold it before the test starts"
     );
 
     {
-        let claim = IndexerPresenceLock::try_acquire(&sid).unwrap();
+        let claim = IndexerPresenceLock::try_acquire(sid).unwrap();
         assert!(claim.is_some());
-        assert!(IndexerPresenceLock::is_held(&sid));
-        assert!(IndexerPresenceLock::try_acquire(&sid).unwrap().is_none());
+        assert!(IndexerPresenceLock::is_held(sid));
+        assert!(IndexerPresenceLock::try_acquire(sid).unwrap().is_none());
     }
 
-    assert!(!IndexerPresenceLock::is_held(&sid));
+    assert!(!IndexerPresenceLock::is_held(sid));
 }

@@ -162,9 +162,9 @@ impl Drop for LocalBlock {
 mod tests {
     use super::*;
 
-    /// A SID no account on this machine has, so a real helper running for the developer cannot be
-    /// the one holding the name.
-    const SID: &str = "S-1-5-21-424242-424242-424242-1001";
+    /// Authenticated Users: no helper runs under it, so a real one running for the developer cannot
+    /// be the one holding the name, and the descriptor still grants it to an unelevated test run.
+    const SID: &str = "S-1-5-11";
 
     #[test]
     fn the_sddl_grants_the_user_synchronise_only() {

@@ -1023,8 +1023,8 @@ void SearchField::sync_buttons() {
     const bool shown = !text().empty();
     if (clear_->flags.visible == shown) return;
     clear_->set_visible(shown);
-    save_->set_visible(shown);
-    inset_right = shown ? 44.0f : 0.0f;
+    save_->set_visible(shown && can_save);
+    inset_right = shown ? (can_save ? 44.0f : 22.0f) : 0.0f;
     arrange(bounds);
     invalidate();
 }

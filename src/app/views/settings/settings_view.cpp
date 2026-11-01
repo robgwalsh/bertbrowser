@@ -18,6 +18,9 @@ namespace f = forms;
 
 namespace {
 
+constexpr int kFlashTimer = 1;
+constexpr unsigned kFlashMs = 1500;
+
 // The Search index page's line about the helper, from `bb_index_state`.
 std::wstring indexer_line(const json::Value& st) {
     const std::wstring helper = core::wide(st["helperText"].str());
@@ -62,6 +65,52 @@ CheckBox* find_checkbox(Widget& w, const std::wstring& label) {
     }
     return nullptr;
 }
+
+// The widget that shows `words` as its whole text: what the search box's results point at.
+Widget* find_words(Widget& w, const std::wstring& words) {
+    bool here = false;
+    if (auto* t = dynamic_cast<TextBlock*>(&w)) here = core::iequals(t->text(), words);
+    else if (auto* c = dynamic_cast<CheckBox*>(&w)) here = core::iequals(c->text, words);
+    else if (auto* b = dynamic_cast<Button*>(&w)) here = core::iequals(b->text, words);
+    else if (auto* g = dynamic_cast<RadioGroup*>(&w)) {
+        here = std::any_of(g->items().begin(), g->items().end(), [&](const std::wstring& i) { return core::iequals(i, words); });
+    }
+    if (here) return &w;
+    for (const auto& c : w.children()) {
+        if (Widget* r = find_words(*c, words)) return r;
+    }
+    return nullptr;
+}
+
+// The strip over the page: the title at the left, the way back at the right, and the search box in the middle
+// of the whole card. On a narrow card the box gives way before it touches either, as the title bar's does.
+class TitleStrip : public Widget {
+public:
+    Widget* title = nullptr;
+    Widget* box = nullptr;
+    Widget* close = nullptr;
+    std::function<void()> on_press;
+
+    Size measure(Size avail) override { return fixed_or({avail.w, 44.0f}); }
+    void arrange(Rect r) override {
+        bounds = r;
+        constexpr float kPad = 8.0f, kGap = 8.0f, kBoxHeight = 28.0f, kNatural = 360.0f, kNarrowest = 160.0f;
+        const float close_l = r.r - kPad - close->width;
+        close->measure_tree({close->width, r.height() - 2 * kPad});
+        close->arrange(Rect{close_l, r.t + kPad, r.r - kPad, r.b - kPad});
+        const float title_r = r.l + kPad + title->measure_tree({kInf, r.height()}).w;
+        title->arrange(Rect{r.l + kPad, r.t, title_r, r.b});
+        float l = std::max((r.l + r.r - kNatural) / 2, title_r + kGap);
+        if (close_l - kGap - l < kNarrowest) l = std::max(title_r + kGap, close_l - kGap - kNarrowest);
+        const float box_r = std::max(l, std::min(l + kNatural, close_l - kGap));
+        const float top = r.t + (r.height() - kBoxHeight) / 2;
+        box->measure_tree({box_r - l, kBoxHeight});
+        box->arrange(Rect{l, top, box_r, top + kBoxHeight});
+    }
+    void on_inner_activity() override {
+        if (on_press) on_press();
+    }
+};
 
 // A row that turns the wheel over it into steps: the Columns page's width ("Scroll a width to change it"), Ctrl
 // for one DIP at a time. Spec: SettingsView.xaml.cs (ColumnWidth_Wheel).
@@ -129,17 +178,20 @@ void SettingsView::build_chrome() {
     card->style.border = tok::BorderDefault;
     card_ = add(std::move(card));
 
-    // The title, and the way back to the folders on the right, where the Settings button that opened the page
-    // sits. Spec: SettingsView.xaml (the title strip).
-    auto* strip = card_->emplace<DockPanel>();
+    // The title, the search box, and the way back to the folders on the right, where the Settings button that
+    // opened the page sits. Spec: SettingsView.xaml (the title strip).
+    auto* strip = card_->emplace<TitleStrip>();
     strip->name = "SettingsTitle";
     strip->dock = Dock::Top;
     strip->height = 44;
-    strip->pad = 8;
     strip->style.bg = tok::SurfaceBackground;
+    // Going to the header stops the Keyboard page listening: the next key is meant for what was pressed.
+    strip->on_press = [this] {
+        if (page_ == "keyboard") bb_keys_do(core_.app(), core::s(L"cancel"), core::s(L""));
+    };
     auto* close = strip->emplace<Button>();
+    strip->close = close;
     close->name = "SettingsClose";
-    close->dock = Dock::Right;
     close->icon = &icons::Dismiss;
     close->width = 32;
     close->style.bg = tok::SurfaceBackground;  // flat, as a toolbar button, until the pointer is on it
@@ -151,6 +203,23 @@ void SettingsView::build_chrome() {
     title->style.font.weight = 600;
     title->vcenter = true;
     title->wrap = true;
+    strip->title = title;
+    search_ = strip->emplace<SearchField>([this] {
+        clear_search();
+        if (root()) root()->set_focus(search_);
+    }, nullptr);
+    strip->box = search_;
+    search_->name = "SettingsSearch";
+    search_->clear_button()->name = "SettingsSearchClear";
+    search_->can_save = false;
+    search_->placeholder = L"Search settings";
+    search_->on_changed = [this](const std::wstring& text) {
+        search_->sync_buttons();
+        bb_settings_page_search(core_.app(), core::s(text));
+    };
+    search_->on_commit = [this] {
+        if (results_list_ && results_list_->selected >= 0) activate_result(results_list_->selected);
+    };
     auto* rule = card_->emplace<Widget>();
     rule->dock = Dock::Top;
     rule->height = 1;
@@ -328,8 +397,16 @@ bool SettingsView::preview_key(const KeyEvent& e) {
             return true;
         }
     }
+    // Up and Down in the box move through the results it is showing; Enter (its on_commit) takes the one lit.
+    if (results_list_ && bare && (e.vk == VK_UP || e.vk == VK_DOWN) && root() && root()->focused() == search_) {
+        const int last = static_cast<int>(results_list_->entries.size()) - 1;
+        results_list_->select(std::clamp(results_list_->selected + (e.vk == VK_UP ? -1 : 1), 0, last));
+        return true;
+    }
     if (e.vk == VK_ESCAPE && bare) {
-        go_back();
+        // What is typed goes first, and the next Esc goes back.
+        if (!search_->text().empty()) clear_search();
+        else go_back();
         return true;
     }
     return false;
@@ -441,12 +518,30 @@ void SettingsView::sync() {
     if (!now_open) {
         leave_->hide_card();
         if (was) {
+            // The box has the keyboard from the moment the page opens; a hidden one must not keep it.
+            if (root() && root()->focused() && holds(root()->focused())) {
+                if (TabView* tv = main_.active_view()) root()->set_focus(tv->rows());
+            }
+            search_->set_text(L"");
+            search_->sync_buttons();
             request_layout();
             invalidate();
         }
+        searching_ = false;
+        query_.clear();
+        results_ = json::Value();
+        pending_words_.clear();
         page_.clear();
         signature_.clear();
         return;
+    }
+    // Written only when it differs: the core has it as typed, unless something else ended the search.
+    query_ = core::wide(st["query"].str());
+    searching_ = st["searching"].boolean();
+    results_ = st["results"];
+    if (search_->text() != query_) {
+        search_->set_text(query_);
+        search_->sync_buttons();
     }
     if (pages_.size() != st["pages"].size() || !was) {
         pages_ = st["pages"];
@@ -458,19 +553,27 @@ void SettingsView::sync() {
         // original's view model did; otherwise it reads the saved list again.
         if (!was || st["problem"].str().empty()) new_types_loaded_ = false;
         refused_.clear();
-        for (size_t i = 0; i < nav_->children().size(); ++i) {
-            if (auto* list = dynamic_cast<f::ItemList*>(nav_->children()[i].get())) {
-                for (size_t k = 0; k < pages_.size(); ++k) {
-                    if (pages_[k]["id"].str() == page_) list->select(static_cast<int>(k));
-                }
-            }
-        }
         signature_.clear();
     }
+    select_nav_row();
     show_problem(core::wide(st["problem"].str()));
     rebuild_if_changed(false);
+    if (!was && root()) root()->set_focus(search_);
     request_layout();
     invalidate();
+}
+
+// The page in front, or none while results stand in for it, so a click on any page (this one too) ends the search.
+void SettingsView::select_nav_row() {
+    for (const auto& child : nav_->children()) {
+        auto* list = dynamic_cast<f::ItemList*>(child.get());
+        if (!list) continue;
+        int want = -1;
+        for (size_t k = 0; !searching_ && k < pages_.size(); ++k) {
+            if (pages_[k]["id"].str() == page_) want = static_cast<int>(k);
+        }
+        if (list->selected != want) list->select(want);
+    }
 }
 
 void SettingsView::build_nav(const json::Value& pages) {
@@ -497,7 +600,7 @@ void SettingsView::build_nav(const json::Value& pages) {
 
 void SettingsView::rebuild_if_changed(bool force) {
     // The signature is what the page will show: the models it draws from, as text.
-    std::string sig = page_;
+    std::string sig = searching_ ? "?" + core::utf8(query_) : page_;
     auto add = [&](const json::Value& v) {
         sig += "|";
         sig += std::to_string(v.size());
@@ -509,7 +612,9 @@ void SettingsView::rebuild_if_changed(bool force) {
         if (call(&o) != BB_OK) return std::string();
         return core::utf8(core::take(o));
     };
-    if (page_ == "command-bars") {
+    if (searching_) {
+        // The results depend on nothing but what is typed.
+    } else if (page_ == "command-bars") {
         sig += text_of([&](BbOwnedStr* o) { return bb_bars_query(app, core::s(L"page"), core::s(L""), o); });
     } else if (page_ == "keyboard") {
         sig += text_of([&](BbOwnedStr* o) { return bb_keys_page(app, o); });
@@ -545,11 +650,19 @@ void SettingsView::build_page() {
             if (auto* e = dynamic_cast<Edit*>(fw)) caret = e->caret();
         }
     }
-    const float keep_scroll = scroll_ ? scroll_->offset_y() : 0.0f;
+    // Results start from their top, and so does a page coming back from them.
+    const float keep_scroll = scroll_ && !searching_ && !built_results_ ? scroll_->offset_y() : 0.0f;
+    built_results_ = searching_;
     nudge_ = nullptr;
     nudge_for_ = nullptr;
+    results_list_ = nullptr;
+    if (flash_) {
+        if (root()) root()->stop_timer(this, kFlashTimer);
+        flash_ = nullptr;
+    }
     while (!body_->children().empty()) body_->remove_child(body_->children().front().get());
-    if (page_ == "general") page_general(*body_);
+    if (searching_) page_results(*body_);
+    else if (page_ == "general") page_general(*body_);
     else if (page_ == "appearance") page_appearance(*body_);
     else if (page_ == "preview") page_preview(*body_);
     else if (page_ == "search-index") page_search_index(*body_);
@@ -572,10 +685,98 @@ void SettingsView::build_page() {
         }
         root()->layout(root()->size());
     }
-    if (scroll_ && keep_scroll > 0) scroll_->scroll_to(0, keep_scroll);
+    if (scroll_) scroll_->scroll_to(0, keep_scroll);
+    if (!searching_ && !pending_words_.empty()) {
+        const std::wstring words = std::move(pending_words_);
+        pending_words_.clear();
+        point_at(words);
+    }
 }
 
 CheckBox* SettingsView::find_check(const std::wstring& label) { return find_checkbox(*body_, label); }
+
+bool SettingsView::shows_words(const std::wstring& words) { return find_words(*body_, words) != nullptr; }
+
+// ---- the search box's results ----------------------------------------------------------------------------------
+
+void SettingsView::clear_search() {
+    search_->set_text(L"");
+    search_->sync_buttons();
+    bb_settings_page_search(core_.app(), core::s(L""));
+}
+
+void SettingsView::page_results(Widget& p) {
+    if (results_.size() == 0) {
+        f::note(p, L"No settings match “" + query_ + L"”.")->name = "SettingsNoResults";
+        return;
+    }
+    auto* list = p.emplace<f::ItemList>();
+    list->name = "SettingsResults";
+    list->row_height = 34;
+    // The page scrolls, so the list is as tall as its rows and never scrolls by itself.
+    list->height = 34.0f * static_cast<float>(results_.size()) + 2;
+    list->activate_on_click = true;
+    std::vector<f::ListEntry> entries;
+    for (size_t i = 0; i < results_.size(); ++i) {
+        f::ListEntry e;
+        e.text = core::wide(results_[i]["label"].str());
+        e.detail = core::wide(results_[i]["pageName"].str());
+        e.icon = icon_for(results_[i]["icon"].str());
+        entries.push_back(std::move(e));
+    }
+    list->set_entries(std::move(entries), 0);
+    list->on_activate = [this](int i) { activate_result(i); };
+    results_list_ = list;
+}
+
+// Deferred: opening the page rebuilds the body, which holds the list whose handler this is.
+void SettingsView::activate_result(int i) {
+    if (i < 0 || static_cast<size_t>(i) >= results_.size()) return;
+    const std::wstring page = core::wide(results_[static_cast<size_t>(i)]["page"].str());
+    const std::wstring words = core::wide(results_[static_cast<size_t>(i)]["label"].str());
+    main_.defer([this, page, words] {
+        pending_words_ = words;
+        if (bb_settings_page_open(core_.app(), core::s(page)) != BB_OK) pending_words_.clear();
+    });
+}
+
+// Brings the row into view and lights it for a moment. A box or a button takes the keyboard too, so Space works
+// on it at once. A label a page no longer shows just leaves the page open at its top.
+void SettingsView::point_at(const std::wstring& words) {
+    if (!root()) return;
+    Widget* found = find_words(*body_, words);
+    if (!found) {
+        root()->set_focus(search_);
+        return;
+    }
+    // A label lights the row it names; anything else is the row itself.
+    Widget* row = found;
+    if (dynamic_cast<TextBlock*>(found)) {
+        if (auto* parent = dynamic_cast<StackPanel*>(found->parent()); parent && parent != body_ && parent->orientation == Orientation::Horizontal) row = parent;
+    }
+    const float top = row->bounds.t - body_->bounds.t;
+    if (top + row->bounds.height() > scroll_->viewport().height()) scroll_->scroll_to(0, std::max(0.0f, top - 24.0f));
+    const bool takes_keys = found->flags.focusable && found->flags.enabled;
+    root()->set_focus(takes_keys ? found : search_);
+    end_flash();
+    flash_ = row;
+    flash_was_ = row->style.bg;
+    row->style.bg = tok::ListSelectedBackground;
+    row->invalidate();
+    root()->start_timer(this, kFlashTimer, kFlashMs);
+}
+
+void SettingsView::end_flash() {
+    if (root()) root()->stop_timer(this, kFlashTimer);
+    if (!flash_) return;
+    flash_->style.bg = flash_was_;
+    flash_->invalidate();
+    flash_ = nullptr;
+}
+
+void SettingsView::on_timer(int id) {
+    if (id == kFlashTimer) end_flash();
+}
 
 void SettingsView::pose_column_drag(bool on) {
     dragging_pose_ = on;

@@ -1835,7 +1835,7 @@ fn a_new_file_type_needs_a_dotted_extension() {
 fn the_settings_page_lists_its_pages_and_selecting_one_writes_nothing() {
     let f = Fixture::with(|c| c.settings_debounce_ms = 0);
     let pages = json(&f.app.settings_page_json());
-    assert_eq!(12, pages["pages"].as_array().unwrap().len());
+    assert_eq!(13, pages["pages"].as_array().unwrap().len());
     assert_eq!(false, pages["open"]);
     let before = std::fs::metadata(f.data.join("settings.json"))
         .ok()
