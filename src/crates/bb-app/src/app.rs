@@ -833,6 +833,12 @@ impl Inner {
                 job.cancel.cancel();
             }
         }
+        // Nobody is left to press Resume, so a paused run is stopped, or the join below never returns.
+        // The gate is opened either way: a job just taken off the queue has no token to cancel yet.
+        if self.gate.is_paused() {
+            self.cancel_running();
+            self.gate.resume();
+        }
         self.queue.cv.notify_all();
         if let Some(thread) = lock(&self.transfer_thread).take()
             && thread.thread().id() != std::thread::current().id()

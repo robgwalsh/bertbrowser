@@ -29,6 +29,8 @@ concurrency:
 jobs:
   unstable:
     runs-on: windows-latest
+    # Runs take about 40 minutes at most. A hung test otherwise holds the queue for GitHub's 6 hours.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -132,6 +134,7 @@ jobs:
   bench:
     if: github.event_name != 'pull_request'
     runs-on: windows-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 

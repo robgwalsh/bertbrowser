@@ -112,11 +112,11 @@ fn a_running_transfer_can_be_cancelled_and_leaves_nothing_behind() {
             &out.to_string_lossy(),
         )
         .unwrap();
-    // It has started (and is held at its first file by the pause) once the queue shows it running.
+    // The strip offers Cancel once the run is under way, which is after the queue first shows it running:
+    // planning and estimating come in between. From here it is held at its first file by the pause.
     assert!(eventually(10_000, || {
-        query(&f, "queue", "")["jobs"][0]["state"] == "running"
+        query(&f, "queue", "")["canCancel"] == true
     }));
-    assert_eq!(true, query(&f, "queue", "")["canCancel"]);
     run(&f, "cancel-running", "");
     let (_, message) = f.wait_op(op);
     assert!(message.to_lowercase().contains("cancel"), "{message}");
@@ -125,6 +125,44 @@ fn a_running_transfer_can_be_cancelled_and_leaves_nothing_behind() {
         !f.app.is_paused(),
         "cancelling lets a paused run go, so it can notice"
     );
+}
+
+#[test]
+fn closing_the_app_stops_a_paused_transfer_rather_than_waiting_on_it_for_ever() {
+    let f = Fixture::new();
+    let out = f.root.join("Out");
+    std::fs::create_dir_all(&out).unwrap();
+    f.app.op_pause(true);
+    let op = f
+        .app
+        .op_copy(vec![f.path("photo.jpg")], &out.to_string_lossy())
+        .unwrap();
+    assert!(eventually(10_000, || {
+        query(&f, "queue", "")["canCancel"] == true
+    }));
+
+    // On a thread of its own, so what used to be a hang is a failure here rather than a stuck test.
+    let (done, finished) = std::sync::mpsc::channel();
+    let app = f.app.clone();
+    std::thread::spawn(move || {
+        app.shutdown();
+        let _ = done.send(());
+    });
+    let closed = finished.recv_timeout(std::time::Duration::from_secs(20));
+    f.app.op_pause(false);
+    assert!(
+        closed.is_ok(),
+        "shutdown is still waiting on the paused run"
+    );
+
+    // Shutdown joined the queue's thread, so the run has finished by now (and `wait_op` would wait for a
+    // queue that is gone to go quiet).
+    let Some(bb_app::OpState::Done { ok, message }) = f.app.op_state(op) else {
+        panic!("the run did not finish");
+    };
+    assert!(!ok);
+    assert!(message.to_lowercase().contains("cancel"), "{message}");
+    assert!(!out.join("photo.jpg").exists());
 }
 
 #[test]
