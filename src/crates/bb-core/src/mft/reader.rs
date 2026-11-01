@@ -100,7 +100,18 @@ impl<'a> MftReader<'a> {
     pub fn try_read_all(
         &self,
         cancel: &CancelToken,
+        on_record: impl FnMut(MftFileRecord),
+    ) -> Result<bool, ReadError> {
+        self.try_read_all_reporting(cancel, on_record, |_, _| {})
+    }
+
+    /// As `try_read_all`, also saying how far through the `$MFT` it is after each chunk: bytes done
+    /// and bytes in all. The total is the run list's, so it is known before the first chunk is read.
+    pub fn try_read_all_reporting(
+        &self,
+        cancel: &CancelToken,
         mut on_record: impl FnMut(MftFileRecord),
+        mut on_progress: impl FnMut(u64, u64),
     ) -> Result<bool, ReadError> {
         let mut boot = vec![0u8; 8192];
         self.volume.read_exact_at(0, &mut boot)?;
@@ -129,12 +140,19 @@ impl<'a> MftReader<'a> {
         let mut pending = vec![0u8; bytes_per_file_record];
         let mut pending_len = 0usize;
         let mut record_index: u64 = 0;
+        let total_bytes: u64 = mft_runs
+            .iter()
+            .map(|run| run.length_clusters as u64 * bytes_per_cluster as u64)
+            .sum();
+        let mut done_bytes: u64 = 0;
 
         for run in mft_runs {
             if run.start_lcn < 0 {
                 // Sparse hole in the $MFT (rare): advance the record counter past it.
-                record_index += (run.length_clusters as u64 * bytes_per_cluster as u64)
-                    / bytes_per_file_record as u64;
+                let bytes = run.length_clusters as u64 * bytes_per_cluster as u64;
+                record_index += bytes / bytes_per_file_record as u64;
+                done_bytes += bytes;
+                on_progress(done_bytes, total_bytes);
                 continue;
             }
             let mut clusters_left = run.length_clusters;
@@ -156,6 +174,8 @@ impl<'a> MftReader<'a> {
                 );
                 lcn += take;
                 clusters_left -= take;
+                done_bytes += bytes as u64;
+                on_progress(done_bytes, total_bytes);
             }
         }
         Ok(true)

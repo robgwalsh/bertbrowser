@@ -66,7 +66,7 @@ MediaPane::MediaPane(core::Core& core, uint64_t tab) : core_(core), tab_(tab) {
     volume_ = controls_->emplace<Slider>();
     volume_->name = "MediaVolume";
     volume_->automation_id = "MediaVolume";
-    volume_->width = 70;
+    volume_->width = 110;
     volume_->height = 28;
     volume_->min = 0;
     volume_->max = 1;
@@ -76,7 +76,14 @@ MediaPane::MediaPane(core::Core& core, uint64_t tab) : core_(core), tab_(tab) {
     volume_->tooltip = L"Volume";
     volume_->on_change = [this](double v, bool) {
         if (player_) player_->set_volume(v);
+        volume_pct_->set_text(std::to_wstring(static_cast<int>(std::lround(v * 100))) + L"%");
     };
+    volume_pct_ = controls_->emplace<TextBlock>();
+    volume_pct_->name = "MediaVolumePercent";
+    volume_pct_->width = 40;
+    volume_pct_->style.font.size = 11.0f;
+    volume_pct_->style.fg = tok::TextSecondary;
+    volume_pct_->set_text(L"100%");
 
     // ---- the picture: the poster until playing, then the frames ----
     screen_ = emplace<ImageView>();

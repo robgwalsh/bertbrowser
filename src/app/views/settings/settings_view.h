@@ -69,6 +69,7 @@ private:
     void page_preview(ui::Widget& p);
     void page_search_index(ui::Widget& p);
     void page_history(ui::Widget& p);
+    void page_undo(ui::Widget& p);
     void page_new_items(ui::Widget& p);
     // The New items page edits its own copy of the list, written back whole on every change, so typing in
     // the editor never rebuilds the page under the caret. Read from the core on arrival and after an import.

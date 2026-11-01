@@ -342,6 +342,14 @@ impl Inner {
                     self.state.clear_building(&message.argument);
                     self.announce();
                 }
+                IndexVerb::Progress => {
+                    // try_parse admitted only this shape, so this cannot fail.
+                    if let Some((drive, percent)) = IndexProtocol::parse_progress(&message.argument)
+                    {
+                        self.state.set_progress(drive, percent);
+                        self.announce();
+                    }
+                }
                 IndexVerb::Complete => {
                     self.state.mark_complete(&message.argument);
                     self.announce();
@@ -501,6 +509,10 @@ impl MftIndex for MftIndexClient {
 
     fn building_drives(&self) -> Vec<String> {
         self.inner.state.building_drives()
+    }
+
+    fn drive_progress(&self, drive: &str) -> Option<u8> {
+        self.inner.state.progress_of(drive)
     }
 
     fn completed_roots(&self) -> Vec<String> {

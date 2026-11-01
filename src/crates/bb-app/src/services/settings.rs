@@ -16,12 +16,13 @@ use crate::events::AppEvent;
 use crate::ids::{AppError, AppResult};
 
 /// The pages of the Settings page, in order: (id, title, icon).
-pub const SETTINGS_PAGES: [(&str, &str, &str); 12] = [
+pub const SETTINGS_PAGES: [(&str, &str, &str); 13] = [
     ("general", "General", "Icon.Settings"),
     ("appearance", "Appearance", "Icon.Appearance"),
     ("preview", "Preview", "Icon.PreviewPane"),
     ("search-index", "Search index", "Icon.Indexing"),
     ("history", "History", "Icon.Changes"),
+    ("undo", "Undo/Redo", "Icon.Undo"),
     ("new-items", "New items", "Icon.Add"),
     ("columns", "Columns", "Icon.Columns"),
     ("saved-searches", "Saved searches", "Icon.Search"),

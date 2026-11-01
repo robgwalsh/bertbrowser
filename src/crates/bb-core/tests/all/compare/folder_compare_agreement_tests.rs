@@ -260,6 +260,9 @@ impl MftIndex for AlwaysIndexed {
     fn building_drives(&self) -> Vec<String> {
         Vec::new()
     }
+    fn drive_progress(&self, _drive: &str) -> Option<u8> {
+        None
+    }
     fn completed_roots(&self) -> Vec<String> {
         Vec::new()
     }

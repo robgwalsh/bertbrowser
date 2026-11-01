@@ -37,6 +37,8 @@ pub enum IndexVerb {
     Shutdown,
     /// Helper → app: this drive letter's initial enumeration has begun.
     Building,
+    /// Helper → app: how far along this drive's build is: `C:42`, or `C:` for no longer known.
+    Progress,
     /// Helper → app: this root key's index is complete.
     Complete,
     /// Helper → app: this drive letter is no longer building, complete or not.
@@ -52,12 +54,13 @@ pub enum IndexVerb {
 }
 
 impl IndexVerb {
-    pub const ALL: [IndexVerb; 11] = [
+    pub const ALL: [IndexVerb; 12] = [
         IndexVerb::Hello,
         IndexVerb::Ready,
         IndexVerb::Start,
         IndexVerb::Shutdown,
         IndexVerb::Building,
+        IndexVerb::Progress,
         IndexVerb::Complete,
         IndexVerb::Idle,
         IndexVerb::Fatal,
@@ -74,6 +77,7 @@ impl IndexVerb {
             IndexVerb::Start => "Start",
             IndexVerb::Shutdown => "Shutdown",
             IndexVerb::Building => "Building",
+            IndexVerb::Progress => "Progress",
             IndexVerb::Complete => "Complete",
             IndexVerb::Idle => "Idle",
             IndexVerb::Fatal => "Fatal",
@@ -174,6 +178,7 @@ impl IndexProtocol {
         match verb {
             IndexVerb::Hello => is_acceptable_version(argument),
             IndexVerb::Building | IndexVerb::Idle => Self::is_acceptable_drive(argument),
+            IndexVerb::Progress => Self::parse_progress(argument).is_some(),
             IndexVerb::Complete => Self::is_acceptable_root_key(argument),
             IndexVerb::Fatal => Self::is_acceptable_status(argument),
             IndexVerb::Record => Self::is_acceptable_retention(argument),
@@ -201,6 +206,30 @@ impl IndexProtocol {
     /// A bare drive letter: "C", not "C:" and not a path.
     pub fn is_acceptable_drive(candidate: &str) -> bool {
         matches!(candidate.as_bytes(), [b'A'..=b'Z'])
+    }
+
+    /// What `Progress` carries: a bare drive letter, a colon, and a percentage if there is one.
+    pub fn format_progress(drive: &str, percent: Option<u8>) -> String {
+        match percent {
+            Some(percent) => format!("{drive}:{percent}"),
+            None => format!("{drive}:"),
+        }
+    }
+
+    /// Reads `format_progress` back, and nothing else: "C:42" or "C:", never "C:042" or "C:101".
+    pub fn parse_progress(argument: &str) -> Option<(&str, Option<u8>)> {
+        let (drive, percent) = argument.split_once(':')?;
+        if !Self::is_acceptable_drive(drive) {
+            return None;
+        }
+        if percent.is_empty() {
+            return Some((drive, None));
+        }
+        if !percent.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        let parsed: u8 = percent.parse().ok()?;
+        (parsed <= 100 && parsed.to_string() == percent).then_some((drive, Some(parsed)))
     }
 
     /// A canonical volume root, as `PathKey::canonicalize` produces: "C:\" and nothing else.

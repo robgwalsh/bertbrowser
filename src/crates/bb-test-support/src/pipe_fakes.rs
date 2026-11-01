@@ -344,6 +344,11 @@ impl ControllableIndexService {
         self.listeners.status_changed();
     }
 
+    pub fn report_progress(&self, drive: &str, percent: Option<u8>) {
+        self.state.set_progress(drive, percent);
+        self.listeners.status_changed();
+    }
+
     pub fn finish_building(&self, drive: &str, root_key: &str) {
         self.state.mark_complete(root_key);
         self.state.clear_building(drive);
@@ -384,6 +389,10 @@ impl MftIndex for ControllableIndexService {
 
     fn building_drives(&self) -> Vec<String> {
         self.state.building_drives()
+    }
+
+    fn drive_progress(&self, drive: &str) -> Option<u8> {
+        self.state.progress_of(drive)
     }
 
     fn completed_roots(&self) -> Vec<String> {

@@ -72,6 +72,7 @@ private:
     ui::Button *big_play_ = nullptr, *play_ = nullptr, *next_ = nullptr, *autoplay_ = nullptr, *loop_ = nullptr, *advance_ = nullptr,
                *fullscreen_ = nullptr;
     ui::TextBlock* time_ = nullptr;
+    ui::TextBlock* volume_pct_ = nullptr;
     ui::Slider *seek_ = nullptr, *volume_ = nullptr;
     ui::StackPanel* controls_ = nullptr;
     ui::DockPanel* transport_ = nullptr;

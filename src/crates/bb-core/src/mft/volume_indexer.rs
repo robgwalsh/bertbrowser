@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use bb_paths::{PathKey, fold_upper};
 
+use super::build_progress::{BuildPhase, BuildProgress};
 use super::dir_size_builder::MftDirectorySizeBuilder;
 use super::ntfs_layout::{NtfsLayout, u64_at};
 use super::path_builder::{DirCache, MftNode, MftPathBuilder, ResolvedDir, combine};
@@ -187,15 +188,22 @@ impl MftVolumeIndexer {
     /// Builds the index for the volume: raw `$MFT` first (names + sizes + dates + folder-size
     /// roll-up), falling back to the names-only USN enumeration if the raw read fails. On success
     /// the volume root is registered complete and the resident directory map is ready.
-    pub fn build_initial_index(&mut self, cancel: &CancelToken) -> Result<(), BuildError> {
+    /// `on_progress` hears each new whole percentage, None for no longer being able to say.
+    pub fn build_initial_index(
+        &mut self,
+        cancel: &CancelToken,
+        on_progress: &dyn Fn(Option<u8>),
+    ) -> Result<(), BuildError> {
         if self.handle.is_none() {
             return Ok(());
         }
         let crawled_utc = FileTime::now();
         let crawl_gen = crawled_utc.to_unix_millis();
 
-        if !self.build_from_raw_mft(cancel, crawl_gen)? {
+        let mut progress = BuildProgress::new(on_progress);
+        if !self.build_from_raw_mft(cancel, crawl_gen, &mut progress)? {
             cancel.check()?;
+            progress.unknown();
             self.build_from_usn_enum(cancel, crawl_gen)?;
         }
         cancel.check()?;
@@ -212,12 +220,17 @@ impl MftVolumeIndexer {
         &mut self,
         cancel: &CancelToken,
         crawl_gen: i64,
+        progress: &mut BuildProgress<'_>,
     ) -> Result<bool, BuildError> {
         let mut records: Vec<MftFileRecord> = Vec::new();
         {
             let handle = self.handle.as_deref().expect("open");
             let reader = MftReader::new(handle);
-            match reader.try_read_all(cancel, |rec| records.push(rec)) {
+            match reader.try_read_all_reporting(
+                cancel,
+                |rec| records.push(rec),
+                |done, total| progress.at(BuildPhase::Reading, done, total),
+            ) {
                 Ok(true) => {}
                 Ok(false) => return Ok(false),
                 Err(ReadError::Cancelled) => return Err(BuildError::Cancelled),
@@ -252,7 +265,7 @@ impl MftVolumeIndexer {
 
         let mut sizes = MftDirectorySizeBuilder::new();
         let mut rows: Vec<FsEntryRow> = Vec::with_capacity(Self::UPSERT_CHUNK);
-        for raw in &records {
+        for (index, raw) in records.iter().enumerate() {
             cancel.check()?;
             let rec = if raw.size >= 0 {
                 raw.clone()
@@ -277,14 +290,19 @@ impl MftVolumeIndexer {
                 if rows.len() >= Self::UPSERT_CHUNK {
                     self.repository.upsert_entries(&rows, crawl_gen)?;
                     rows.clear();
+                    progress.at(BuildPhase::Writing, index as u64 + 1, records.len() as u64);
                 }
             }
         }
         self.repository.upsert_entries(&rows, crawl_gen)?;
+        progress.at(BuildPhase::Writing, 1, 1);
 
         let results = sizes.build(&self.drive_root, computed_utc, &mut self.dirs);
+        let mut written = 0u64;
         for chunk in results.chunks(Self::UPSERT_CHUNK) {
             self.dir_size_repository.upsert_many(chunk)?;
+            written += chunk.len() as u64;
+            progress.at(BuildPhase::Sizes, written, results.len() as u64);
         }
         Ok(true)
     }

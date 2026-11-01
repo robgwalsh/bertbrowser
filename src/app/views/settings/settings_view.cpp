@@ -18,6 +18,12 @@ namespace f = forms;
 
 namespace {
 
+// The Search index page's line about the helper, from `bb_index_state`.
+std::wstring indexer_line(const json::Value& st) {
+    const std::wstring helper = core::wide(st["helperText"].str());
+    return L"Background indexer: " + (helper.empty() ? core::wide(st["status"].str()) : helper);
+}
+
 std::string json_quote(const std::wstring& w) {
     const std::string s = core::utf8(w);
     std::string out = "\"";
@@ -514,7 +520,12 @@ void SettingsView::rebuild_if_changed(bool force) {
     } else if (page_ == "columns") {
         sig += text_of([&](BbOwnedStr* o) { return bb_columns_defaults(app, o); });
     } else if (page_ == "search-index") {
-        sig += text_of([&](BbOwnedStr* o) { return bb_index_state(app, o); });
+        // Everything but the status line, which a build moves about once a second. It is written in place:
+        // a rebuild landing between a press and its release would lose the click.
+        const json::Value st = try_model([&](BbOwnedStr* o) { return bb_index_state(app, o); });
+        if (auto* line = dynamic_cast<TextBlock*>(body_->find("IndexerStatus"))) line->set_text(indexer_line(st));
+        sig += st["presence"].str() + "|" + st["autostartNote"].str();
+        for (const char* flag : {"canStart", "canStop", "autostart", "autostartCanChoose"}) sig += st[flag].boolean() ? "1" : "0";
     } else if (page_ == "new-items") {
         const json::Value st = try_model([&](BbOwnedStr* o) { return bb_new_types_state(app, o); });
         sig += (st["importing"].boolean() ? "importing|" : "idle|") + st["status"].str();
@@ -543,6 +554,7 @@ void SettingsView::build_page() {
     else if (page_ == "preview") page_preview(*body_);
     else if (page_ == "search-index") page_search_index(*body_);
     else if (page_ == "history") page_history(*body_);
+    else if (page_ == "undo") page_undo(*body_);
     else if (page_ == "new-items") page_new_items(*body_);
     else if (page_ == "columns") page_columns(*body_);
     else if (page_ == "saved-searches") page_saved(*body_, false);
@@ -578,39 +590,44 @@ void SettingsView::page_general(Widget& p) {
     bool_row(p, L"Show hidden items", "showHiddenItems");
     f::note(p, L"Show hidden files and folders in listings and search results");
     bool_row(p, L"Open archives as folders", "enterArchivesOnDoubleClick");
-    f::note(p, L"Double-clicking a zip, 7z, tar or rar walks into it. With this off they open in whichever program owns them \u2014 and the breadcrumb, Enter and typing the path still go in.");
+    f::note(p, L"Archives can be browsed like normal folders. When off, they will open in whichever program owns them.");
     f::check(p, L"Middle-click a drive/device to open a new panel", get("drivesOpenTarget").str() == "NewPanel",
              [this](bool v) { set_raw("drivesOpenTarget", v ? "\"NewPanel\"" : "\"NewTab\""); });
     f::note(p, L"Middle-clicking a drive or device in the DRIVES & DEVICES sidebar opens it in a new panel instead of a new tab. A plain click always opens a new tab.");
     const bool restore = get("restoreLastSession").boolean();
-    f::check(p, L"Restore last session on startup", restore, [this](bool v) {
-        set_bool("restoreLastSession", v);
+    auto* startup = f::radios(p, {L"Restore last session on startup", L"Start in directory"}, restore ? 0 : 1, [this](int i) {
+        set_bool("restoreLastSession", i == 0);
         signature_.clear();  // the folder box below follows it
     });
-    f::note(p, L"When off, the app always opens a single tab at the folder below instead of wherever the panes were left.");
-    auto* row = f::row(p);
-    const json::Value path = get("startupDefaultPath");
-    // Trimmed as it is kept: a path with a stray space on the end is not the folder it looks like.
-    auto trimmed = [](std::wstring t) {
-        while (!t.empty() && iswspace(t.back())) t.pop_back();
-        while (!t.empty() && iswspace(t.front())) t.erase(t.begin());
-        return t;
-    };
-    auto* e = f::field(*row, core::wide(path.str()), 380, [this, trimmed](const std::wstring& t) { set_text("startupDefaultPath", trimmed(t), true); },
-                       L"The folder BertBrowser opens in");
-    e->automation_id = "startupDefaultPath";
-    e->set_enabled(!restore);
-    auto* browse = f::button(*row, L"Browse\u2026", [this, e, trimmed] {
-        if (!main_.shows_dialogs()) return;
-        PickPath pick;
-        pick.title = L"Choose a startup folder";
-        pick.folder = e->text();
-        if (const auto chosen = pick_folder(main_.window().hwnd(), pick)) {
-            e->set_text(*chosen);
-            set_text("startupDefaultPath", trimmed(*chosen), true);
-        }
-    });
-    browse->set_enabled(!restore);
+    startup->orientation = Orientation::Horizontal;
+    if (restore) {
+        f::note(p, L"The app opens wherever the panes were left.");
+    } else {
+        f::note(p, L"The app always opens a single tab at the folder below instead of wherever the panes were left.");
+    }
+    if (!restore) {
+        auto* row = f::row(p);
+        const json::Value path = get("startupDefaultPath");
+        // Trimmed as it is kept: a path with a stray space on the end is not the folder it looks like.
+        auto trimmed = [](std::wstring t) {
+            while (!t.empty() && iswspace(t.back())) t.pop_back();
+            while (!t.empty() && iswspace(t.front())) t.erase(t.begin());
+            return t;
+        };
+        auto* e = f::field(*row, core::wide(path.str()), 380, [this, trimmed](const std::wstring& t) { set_text("startupDefaultPath", trimmed(t), true); },
+                           L"The folder BertBrowser opens in");
+        e->automation_id = "startupDefaultPath";
+        f::button(*row, L"Browse\u2026", [this, e, trimmed] {
+            if (!main_.shows_dialogs()) return;
+            PickPath pick;
+            pick.title = L"Choose a startup folder";
+            pick.folder = e->text();
+            if (const auto chosen = pick_folder(main_.window().hwnd(), pick)) {
+                e->set_text(*chosen);
+                set_text("startupDefaultPath", trimmed(*chosen), true);
+            }
+        });
+    }
     choice_row(p, L"Vertical scroll speed", "scrollSpeedMultiplier",
                {{L"1\u00d7 (normal)", "1"}, {L"1.5\u00d7", "1.5"}, {L"2\u00d7", "2"}, {L"2.5\u00d7", "2.5"}, {L"3\u00d7", "3"}, {L"3.5\u00d7", "3.5"},
                 {L"4\u00d7", "4"}, {L"4.5\u00d7", "4.5"}, {L"5\u00d7", "5"}, {L"5.5\u00d7", "5.5"}, {L"6\u00d7", "6"}});
@@ -797,7 +814,7 @@ void SettingsView::page_search_index(Widget& p) {
                L"and keeps running when BertBrowser closes.");
     auto* r = f::row(p);
     const std::wstring helper = core::wide(st["helperText"].str());
-    auto* t = f::text(*r, L"Background indexer: " + (helper.empty() ? core::wide(st["status"].str()) : helper));
+    auto* t = f::text(*r, indexer_line(st));
     t->flex = 1;
     t->name = "IndexerStatus";
     auto* start = f::button(*r, L"Start", [this] {
@@ -827,16 +844,14 @@ void SettingsView::page_search_index(Widget& p) {
 
 void SettingsView::page_history(Widget& p) {
     f::heading(p, L"History");
-    f::note(p, L"Features that remember what you did are off until you turn them on here, and each has a way to clear it.");
-    f::text(p, L"What changed", tok::TextSecondary, 14.0f, 600);
     bool_row(p, L"Record file changes", "recordFileChanges");
     f::note(p, L"Keeps a log of every file created, changed, deleted or renamed on every indexed drive, so the \"What changed\" window (" +
                    gesture_or(L"tools.changes", L"What changed here") +
-                   L") can show what an installer or a build just did. The log lives in BertBrowser's own database in your profile folder, readable by anything that can read your files \u2014 which is why it is off unless you turn it on. Turning it off deletes what was kept, straight away.");
+                   L") can show what an installer or a build just did.");
     // Nothing is kept while recording is off, so there is nothing to choose how long to keep.
     choice_row(p, L"Keep changes for", "fileChangeRetentionHours", {{L"1 hour", "1"}, {L"6 hours", "6"}, {L"24 hours", "24"}, {L"7 days", "168"}})
         ->set_enabled(get("recordFileChanges").boolean());
-    f::note(p, L"Older changes are dropped as new ones arrive. Whatever you pick, the log never grows past half a million rows.");
+    f::note(p, L"Maximum log size is 500,000 rows.");
     BbOwnedStr out{};
     int64_t recorded = 0;
     if (bb_tools(core_.app(), core::s(L"changes.count"), core::s(L"{}"), &out) == BB_OK) recorded = json::parse(core::utf8(core::take(out)))["count"].i64();
@@ -854,9 +869,10 @@ void SettingsView::page_history(Widget& p) {
     std::wstring digits = std::to_wstring(recorded);
     for (int at = static_cast<int>(digits.size()) - 3; at > 0; at -= 3) digits.insert(static_cast<size_t>(at), L",");
     f::text(*r, recorded == 1 ? L"1 change recorded" : digits + L" changes recorded", tok::TextMuted, 13.0f)->name = "ChangeLogCount";
-    f::note(p, L"Deletes the log straight away.");
-    f::gap(p, 6);
-    f::text(p, L"Undo", tok::TextSecondary, 14.0f, 600);
+}
+
+void SettingsView::page_undo(Widget& p) {
+    f::heading(p, L"Undo/Redo");
     choice_row(p, L"Keep up to", "undoMaxSteps", {{L"10 actions", "10"}, {L"25 actions", "25"}, {L"50 actions", "50"}, {L"100 actions", "100"}, {L"200 actions", "200"}},
                "50");
     choice_row(p, L"Hold up to this much set-aside data", "undoMaxHeldGigabytes",
@@ -915,11 +931,13 @@ void SettingsView::page_new_items(Widget& p) {
     f::heading(p, L"New file types");
     f::note(p, L"These appear on the New submenu of the file list and folder tree, in this order. A type with no template file makes an empty file. New \u25b8 Folder is always offered and is not listed here.");
     auto* cols = f::row(p, 12);
+    cols->flex = 1;
     auto* left = f::column(*cols, 6);
     left->width = 240;
     auto* list = left->emplace<f::ItemList>();
     list->name = "NewTypeRows";
     list->height = 300;
+    list->flex = 1;
     new_type_list_ = list;
     std::vector<f::ListEntry> entries;
     for (size_t i = 0; i < new_types_.size(); ++i) entries.emplace_back();
@@ -1029,7 +1047,7 @@ void SettingsView::page_columns(Widget& p) {
         main_.defer([this] { build_page(); });
     };
     f::heading(p, L"Columns");
-    f::note(p, L"The columns a new tab starts with, in order. A tab whose columns you have arranged by hand keeps its own; right-click a header in the list to change just that tab.");
+    f::note(p, L"The columns a new tab starts with, in order.");
     const json::Value st = try_model([&](BbOwnedStr* o) { return bb_columns_defaults(app, o); });
     const json::Value& cols = st["columns"];
     if (column_selected_ >= static_cast<int>(cols.size())) column_selected_ = static_cast<int>(cols.size()) - 1;
@@ -1037,6 +1055,7 @@ void SettingsView::page_columns(Widget& p) {
     list->name = "ColumnRows";
     list->row_height = 30;
     list->height = 30.0f * static_cast<float>(std::max<size_t>(4, std::min<size_t>(10, cols.size()))) + 4;
+    list->flex = 1;
     std::vector<f::ListEntry> entries;
     std::vector<std::wstring> ids;
     std::vector<bool> movable;
@@ -1163,6 +1182,7 @@ void SettingsView::page_saved(Widget& p, bool workspaces) {
     auto* list = p.emplace<tools::TableList>();
     list->name = workspaces ? "WorkspaceList" : "SavedSearchList";
     list->height = 220;
+    list->flex = 1;
     list->columns = {{L"Name", 100.0f, true},
                      {workspaces ? L"Layout" : L"Searches", 170.0f},
                      {L"Created", 130.0f},
@@ -1296,6 +1316,7 @@ void SettingsView::page_bars(Widget& p) {
 
     auto* cols = f::row(p, 14);
     cols->height = 520;
+    cols->flex = 1;
 
     // -- which bar, and the saved arrangements
     auto* left = cols->emplace<StackPanel>(Orientation::Vertical, 6.0f);

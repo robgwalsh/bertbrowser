@@ -34,6 +34,10 @@ impl MftIndex for NullMftIndex {
         Vec::new()
     }
 
+    fn drive_progress(&self, _drive: &str) -> Option<u8> {
+        None
+    }
+
     fn completed_roots(&self) -> Vec<String> {
         Vec::new()
     }

@@ -1,3 +1,4 @@
+mod build_progress_tests;
 mod indexer_auto_start_task_tests;
 mod indexer_banner_rules_tests;
 mod mft_directory_size_builder_tests;

@@ -23,6 +23,8 @@ fn every_verb_round_trips() {
         (IndexVerb::Pong, ""),
         (IndexVerb::Hello, "1"),
         (IndexVerb::Building, "C"),
+        (IndexVerb::Progress, "C:42"),
+        (IndexVerb::Progress, "C:"),
         (IndexVerb::Idle, "D"),
         (IndexVerb::Complete, r"C:\"),
         (
@@ -38,6 +40,50 @@ fn every_verb_round_trips() {
         assert_eq!(verb, parsed.verb, "{verb:?} {argument:?}");
         assert_eq!(argument, parsed.argument, "{verb:?} {argument:?}");
     }
+}
+
+#[test]
+fn progress_round_trips_with_and_without_a_number() {
+    for (drive, percent) in [
+        ("C", Some(0)),
+        ("D", Some(42)),
+        ("Z", Some(100)),
+        ("C", None),
+    ] {
+        let argument = IndexProtocol::format_progress(drive, percent);
+
+        assert_eq!(
+            Some((drive, percent)),
+            IndexProtocol::parse_progress(&argument),
+            "{argument:?}"
+        );
+    }
+}
+
+/// One way to write each value, like every other argument here.
+#[test]
+fn rejects_a_progress_that_is_not_a_drive_and_a_percentage() {
+    for argument in [
+        "",
+        "C",
+        "42",
+        ":42",
+        "c:42",
+        "CC:42",
+        "C:\\",
+        "C:\\WINDOWS",
+        "C:101",
+        "C:256",
+        "C:042",
+        "C:+4",
+        "C:-1",
+        "C: 4",
+        "C:4%",
+        "C:4:2",
+    ] {
+        rejects(&format!("IDX\tProgress\t{argument}"));
+    }
+    rejects("IDX\tProgress");
 }
 
 #[test]

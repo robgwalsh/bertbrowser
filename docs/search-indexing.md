@@ -148,8 +148,15 @@ real data.
 `MftIndexService::start` enumerates fixed NTFS volumes (`GetLogicalDrives` → `GetDriveTypeW` →
 `GetVolumeInformationW`) and gives each one its own background thread: build, then tail, for the
 life of the app. A volume that fails to open, has no usable journal, or throws mid-build is
-non-fatal — searches on it fall back to the crawler. `StatusText` drives the "Indexing C:…" note in
-the status bar, and `IndexRefreshed` lets an already-open search re-query once a volume lands.
+non-fatal — searches on it fall back to the crawler. `StatusText` drives the "Indexing C: 42%…" note
+in the status bar, and `IndexRefreshed` lets an already-open search re-query once a volume lands.
+
+That percentage is of the volume's `$MFT` records, not of its bytes or folders: the read knows its
+total from the run list and the two writes from the records it read, and `BuildPhase` gives each its
+span of one bar. It never says 100, because the drive leaves the line when it is done, and search
+still treats the volume as all or nothing until then. The names-only fallback has no total, so it
+shows no number. The helper sends one `Progress` per whole percent, and a new session hears the
+latest as part of the replay below.
 
 **This is why there is a separate elevated process.** Opening `\\.\C:` for raw reads needs an
 administrator token, and nothing else in BertBrowser does — so the app itself is `asInvoker` and

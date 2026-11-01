@@ -96,7 +96,11 @@ impl Inner {
             self.state.mark_building(drive);
             self.update_status();
 
-            match indexer.build_initial_index(&cancel) {
+            let on_progress = |percent: Option<u8>| {
+                self.state.set_progress(drive, percent);
+                self.update_status();
+            };
+            match indexer.build_initial_index(&cancel, &on_progress) {
                 Ok(()) if !cancel.is_cancelled() => {
                     self.state.mark_complete(indexer.root_key());
                     self.state.clear_building(drive);
@@ -173,6 +177,10 @@ impl MftIndex for MftIndexService {
 
     fn building_drives(&self) -> Vec<String> {
         self.inner.state.building_drives()
+    }
+
+    fn drive_progress(&self, drive: &str) -> Option<u8> {
+        self.inner.state.progress_of(drive)
     }
 
     fn completed_roots(&self) -> Vec<String> {

@@ -133,8 +133,8 @@ assert-history 0
 assert-cannot-undo
 assert-cannot-redo
 
-settings history
-shot 12-settings-history
+settings undo
+shot 12-settings-undo
 settings close
 
 echo undid and redid six kinds of step, to here and back, and released on the limits

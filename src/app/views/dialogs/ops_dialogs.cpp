@@ -796,9 +796,9 @@ std::unique_ptr<Widget> history_dialog(DialogContext& cx) {
     auto body = std::make_unique<LiveBody>(main, &MainView::on_undo_changed, fill);
     Card c = make_card(L"History", 640, std::move(body));
     core::Core* core = &main.core();
-    add_button(c, L"History settings…", [&main, close = cx.close] {
+    add_button(c, L"Undo/Redo settings…", [&main, close = cx.close] {
         close();
-        bb_settings_page_open(main.core().app(), core::s(L"history"));
+        bb_settings_page_open(main.core().app(), core::s(L"undo"));
         main.sync_overlays();
     }, false, 150);
     // Enabled live: the body refreshes on every change, the buttons are the card's own.

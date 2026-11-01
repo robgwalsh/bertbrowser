@@ -94,6 +94,78 @@ fn status_names_several_building_drives_in_order() {
 }
 
 #[test]
+fn status_says_how_far_along_a_drive_is() {
+    let state = MftIndexState::new();
+    state.mark_building("C");
+    state.set_progress("C", Some(42));
+
+    assert_eq!(Some(42), state.progress_of("C"));
+    assert_eq!("Indexing C: 42%…", state.format_status());
+}
+
+/// Each drive speaks for itself, so one that has not reported yet does not borrow another's number.
+#[test]
+fn status_gives_each_drive_its_own_number_or_none() {
+    let state = MftIndexState::new();
+    state.mark_building("C");
+    state.mark_building("D");
+    state.mark_building("E");
+    state.set_progress("C", Some(42));
+    state.set_progress("E", Some(7));
+
+    assert_eq!("Indexing C: 42%, D:, E: 7%…", state.format_status());
+}
+
+/// What a build falling back to the names-only path does: it can no longer say.
+#[test]
+fn progress_can_be_taken_back() {
+    let state = MftIndexState::new();
+    state.mark_building("C");
+    state.set_progress("C", Some(12));
+
+    state.set_progress("C", None);
+
+    assert_eq!(None, state.progress_of("C"));
+    assert_eq!("Indexing C:…", state.format_status());
+}
+
+/// A message arriving after `Idle` must not put a finished drive back on the status line for ever.
+#[test]
+fn progress_for_a_drive_not_building_does_not_start_it_building() {
+    let state = MftIndexState::new();
+
+    state.set_progress("C", Some(42));
+
+    assert!(!state.is_building());
+    assert_eq!(None, state.progress_of("C"));
+    assert_eq!("", state.format_status());
+}
+
+/// Building replays on every session; it must not wipe a number that is still true.
+#[test]
+fn being_told_a_drive_is_building_again_keeps_its_progress() {
+    let state = MftIndexState::new();
+    state.mark_building("C");
+    state.set_progress("C", Some(42));
+
+    state.mark_building("C");
+
+    assert_eq!(Some(42), state.progress_of("C"));
+}
+
+#[test]
+fn finishing_a_drive_forgets_its_progress() {
+    let state = MftIndexState::new();
+    state.mark_building("C");
+    state.set_progress("C", Some(99));
+
+    state.clear_building("C");
+    state.mark_building("C");
+
+    assert_eq!(None, state.progress_of("C"));
+}
+
+#[test]
 fn status_is_empty_once_every_drive_has_finished() {
     let state = MftIndexState::new();
     state.mark_building("C");

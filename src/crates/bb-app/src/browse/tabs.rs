@@ -109,9 +109,7 @@ pub fn tab_title(path: &str) -> String {
 }
 
 fn access_denied_message(path: &str) -> String {
-    format!(
-        "Access is denied. \"{path}\" needs administrator rights, which BertBrowser does not use \u{2014} the same folders are closed to File Explorer."
-    )
+    format!("Access is denied. \"{path}\" needs administrator rights.")
 }
 
 fn intern(t: &mut TabData, key: &Arc<str>) -> u64 {

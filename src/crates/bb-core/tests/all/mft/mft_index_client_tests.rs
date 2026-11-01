@@ -238,6 +238,34 @@ fn mirrors_building_and_idle_into_is_building_and_the_status_line() {
     assert_eq!("", client.status_text());
 }
 
+#[test]
+fn mirrors_progress_into_the_status_line() {
+    let (client, helper, _) = connected();
+
+    helper.send(IndexVerb::Building, "C");
+    helper.send(IndexVerb::Progress, "C:42");
+    eventually(
+        || client.status_text() == "Indexing C: 42%…",
+        "Progress should reach the status line",
+    );
+    assert_eq!(Some(42), client.drive_progress("C"));
+
+    helper.send(IndexVerb::Progress, "C:");
+    eventually(
+        || client.status_text() == "Indexing C:…",
+        "a build that can no longer say should stop saying",
+    );
+
+    helper.send(IndexVerb::Idle, "C");
+    eventually(|| !client.is_building(), "Idle should end the build");
+    helper.send(IndexVerb::Progress, "C:43");
+    helper.send(IndexVerb::Building, "D");
+    eventually(
+        || client.status_text() == "Indexing D:…",
+        "a late Progress should not bring a finished drive back",
+    );
+}
+
 struct Refreshed(Mutex<Vec<String>>);
 
 impl IndexListener for Refreshed {

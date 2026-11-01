@@ -117,7 +117,7 @@ behavior - this table only says where.
 | Content search (`content:`) | `core/search/{node (the `content:` term),content_reader,content_scanner,content_text,snippet}.rs` |
 | Saved workspaces | `core/data/saved_workspace.rs`, `SavedWorkspaceRules` in `core/rules.rs`, `app/services/saved.rs`, ui: `sidebar.cpp`, Workspaces page of `settings_view.cpp` |
 | Saved searches | `core/data/saved_search.rs`, `SavedSearchRules` in `core/rules.rs`, `app/services/saved.rs`, ui: `dialogs.cpp`, `sidebar.cpp`, Saved searches page |
-| Elevated MFT indexer | `src/crates/bb-indexer`, `core/mft/*` (`reader`, `volume_indexer`, `host`, `client`, `service`, `presence`), `core/ipc/{index_endpoint,index_protocol,indexer_presence_lock}.rs` |
+| Elevated MFT indexer | `src/crates/bb-indexer`, `core/mft/*` (`reader`, `volume_indexer`, `build_progress`, `host`, `client`, `service`, `presence`), `core/ipc/{index_endpoint,index_protocol,indexer_presence_lock}.rs` |
 | Indexer banner / sign-in task | `core/mft/{banner_rules,autostart}.rs`, `app/services/index.rs`, `shell/indexing.rs` |
 | Change timeline ("What changed") | `core/changes/*`, `core/data/change_log.rs`, `app/tools/changes.rs`, History page of `settings_view.cpp` |
 | Elevated file-op retry | `src/crates/bb-elevator`, `core/elevation/*`, `core/ipc/elevation_protocol.rs`, `shell/elevation.rs` |

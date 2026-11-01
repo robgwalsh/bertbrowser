@@ -3,10 +3,10 @@
 //! same questions (the real indexer and the client mirroring one in another process); both must
 //! answer `is_indexed` and word `status_text` identically, or search routing and the status bar
 //! disagree depending on which is wired up. Building is keyed by drive letter (what the caller
-//! works through) and completion by root key (what callers ask about). Spec:
-//! Core/Services/Mft/MftIndexState.cs.
+//! works through) and completion by root key (what callers ask about). A building drive may also
+//! have said how far along it is. Spec: Core/Services/Mft/MftIndexState.cs.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 use bb_paths::PathKey;
@@ -14,7 +14,8 @@ use bb_paths::PathKey;
 #[derive(Default)]
 pub struct MftIndexState {
     completed_roots: Mutex<BTreeSet<String>>,
-    building: Mutex<BTreeSet<String>>,
+    /// Drive letter to whole percent done, None until the build has said.
+    building: Mutex<BTreeMap<String, Option<u8>>>,
 }
 
 impl MftIndexState {
@@ -28,7 +29,7 @@ impl MftIndexState {
             .unwrap_or_else(|p| p.into_inner())
     }
 
-    fn building_set(&self) -> std::sync::MutexGuard<'_, BTreeSet<String>> {
+    fn building_set(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, Option<u8>>> {
         self.building.lock().unwrap_or_else(|p| p.into_inner())
     }
 
@@ -57,12 +58,25 @@ impl MftIndexState {
 
     /// The bare drive letters currently building, for a host relaying its state.
     pub fn building_drives(&self) -> Vec<String> {
-        self.building_set().iter().cloned().collect()
+        self.building_set().keys().cloned().collect()
     }
 
-    /// Marks `drive` (a bare letter) as building.
+    /// How far along `drive`'s build is; None if it has not said, or is not building.
+    pub fn progress_of(&self, drive: &str) -> Option<u8> {
+        self.building_set().get(drive).copied().flatten()
+    }
+
+    /// Marks `drive` (a bare letter) as building. Saying so twice keeps what it has reported.
     pub fn mark_building(&self, drive: &str) {
-        self.building_set().insert(drive.to_string());
+        self.building_set().entry(drive.to_string()).or_insert(None);
+    }
+
+    /// Records how far along `drive` is. A drive not building stays that way: this must not be what
+    /// brings one back, or a late message would leave the status line claiming an index in progress.
+    pub fn set_progress(&self, drive: &str, percent: Option<u8>) {
+        if let Some(slot) = self.building_set().get_mut(drive) {
+            *slot = percent;
+        }
     }
 
     /// Marks `drive` as no longer building, whether it finished or failed.
@@ -84,18 +98,17 @@ impl MftIndexState {
     /// The status-bar line for the current building set; empty when nothing is building. Ordered,
     /// so the line does not shuffle as threads finish in whatever order.
     pub fn format_status(&self) -> String {
-        let building: Vec<String> = self.building_set().iter().cloned().collect();
-        match building.len() {
-            0 => String::new(),
-            1 => format!("Indexing {}:…", building[0]),
-            _ => format!(
-                "Indexing {}…",
-                building
-                    .iter()
-                    .map(|d| format!("{d}:"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+        let drives: Vec<String> = self
+            .building_set()
+            .iter()
+            .map(|(drive, percent)| match percent {
+                Some(percent) => format!("{drive}: {percent}%"),
+                None => format!("{drive}:"),
+            })
+            .collect();
+        if drives.is_empty() {
+            return String::new();
         }
+        format!("Indexing {}…", drives.join(", "))
     }
 }

@@ -244,15 +244,15 @@ impl Inner {
         let index = &self.seams.index;
         let banner = self.index_banner();
         // A helper we cannot talk to, whether or not one is running. Spec: SettingsViewModel.ReadIndexerState.
-        let unreachable = index
-            .status_text()
-            .to_lowercase()
-            .contains("not responding");
+        let status = index.status_text();
+        let unreachable = status.to_lowercase().contains("not responding");
         let helper = match index.presence() {
-            IndexerPresence::Running if unreachable => "Running, but not responding.",
-            IndexerPresence::Running => "Running.",
-            IndexerPresence::NotRunning => "Not running.",
-            IndexerPresence::NotApplicable => "",
+            IndexerPresence::Running if unreachable => "Running, but not responding.".to_string(),
+            // The page covers the status bar, so a build in progress has to be said here as well.
+            IndexerPresence::Running if index.is_building() => format!("Running. {status}"),
+            IndexerPresence::Running => "Running.".to_string(),
+            IndexerPresence::NotRunning => "Not running.".to_string(),
+            IndexerPresence::NotApplicable => String::new(),
         };
         let task = self.seams.sign_in_task.state();
         let warning = lock(&self.extra.autostart_warning).clone();
@@ -276,7 +276,7 @@ impl Inner {
             "autostart": task == bb_core::mft::AutoStartState::On,
             "autostartCanChoose": self.seams.sign_in_task.can_choose(),
             "autostartNote": task_note,
-            "status": index.status_text(),
+            "status": status,
             "canRetry": index.can_retry(),
             "canStart": index.can_start(),
             "presence": presence_name(index.presence()),

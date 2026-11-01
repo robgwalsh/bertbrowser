@@ -12,7 +12,7 @@
 //! fired for those volumes before this app existed and will not fire again. `Ready` therefore means
 //! "I have told you everything I know", and is sent last.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -37,7 +37,8 @@ struct Session {
     /// change can fire at any moment, including while nothing is attached; dropping those is safe
     /// because the next session replays the whole picture.
     stream: Option<Arc<dyn IndexStream>>,
-    reported_building: HashSet<String>,
+    /// Each drive this app has been told is building, and the progress it was last told.
+    reported_building: HashMap<String, Option<u8>>,
 }
 
 struct Inner {
@@ -60,7 +61,7 @@ impl MftIndexHost {
                 index,
                 write_gate: Mutex::new(Session {
                     stream: None,
-                    reported_building: HashSet::new(),
+                    reported_building: HashMap::new(),
                 }),
                 started: AtomicBool::new(false),
             }),
@@ -150,9 +151,9 @@ impl Inner {
     }
 
     /// Brings a freshly attached app up to date on everything that happened before it existed.
-    /// The building set needs no code of its own: `status_changed` already diffs the service's
-    /// drives against `reported_building`, which the session just cleared, so one call announces
-    /// all of them and re-seeds the set.
+    /// The building set and its progress need no code of their own: `status_changed` already diffs
+    /// the service's drives against `reported_building`, which the session just cleared, so one call
+    /// announces all of them and re-seeds the map.
     fn replay(&self) {
         self.status_changed();
         for root in self.index.completed_roots() {
@@ -218,36 +219,40 @@ impl IndexListener for Inner {
         }
     }
 
-    /// Relays which drives are building, one message per change. The drives are sent, never the
-    /// status *text*: the client holds the same `MftIndexState` and formats the line with the same
-    /// function, so there is one place that decides how "Indexing C:, D:…" is worded.
+    /// Relays which drives are building and how far along, one message per change. The facts are
+    /// sent, never the status *text*: the client holds the same `MftIndexState` and formats the line
+    /// with the same function, so there is one place that decides how "Indexing C:, D:…" is worded.
     fn status_changed(&self) {
+        // Read and sent under the gate, so two status changes cannot interleave their lines on the
+        // wire, nor a volume thread send a percentage older than the one another just sent.
+        let mut session = self.session();
         // Anything the protocol would not carry is dropped here rather than tracked and then
         // silently never sent, which would leave this side believing it had reported it.
-        let current: HashSet<String> = self
+        let mut current: Vec<(String, Option<u8>)> = self
             .index
             .building_drives()
             .into_iter()
             .filter(|d| IndexProtocol::is_acceptable_drive(d))
+            .map(|d| {
+                let percent = self.index.drive_progress(&d);
+                (d, percent)
+            })
             .collect();
-
-        // Sent under the gate, like the C#, so two status changes cannot interleave their
-        // Building/Idle lines on the wire.
-        let mut session = self.session();
-        let mut added: Vec<String> = current
-            .iter()
-            .filter(|d| !session.reported_building.contains(*d))
-            .cloned()
-            .collect();
-        added.sort();
-        for drive in added {
-            session.reported_building.insert(drive.clone());
-            Self::send_locked(&session, &IndexMessage::new(IndexVerb::Building, &drive));
+        current.sort();
+        for (drive, percent) in &current {
+            let reported = session.reported_building.insert(drive.clone(), *percent);
+            if reported.is_none() {
+                Self::send_locked(&session, &IndexMessage::new(IndexVerb::Building, drive));
+            }
+            if reported.flatten() != *percent {
+                let argument = IndexProtocol::format_progress(drive, *percent);
+                Self::send_locked(&session, &IndexMessage::new(IndexVerb::Progress, &argument));
+            }
         }
         let mut removed: Vec<String> = session
             .reported_building
-            .iter()
-            .filter(|d| !current.contains(*d))
+            .keys()
+            .filter(|d| !current.iter().any(|(drive, _)| drive == *d))
             .cloned()
             .collect();
         removed.sort();

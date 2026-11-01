@@ -267,6 +267,7 @@ void SettingsView::page_context_menu(Widget& p) {
     }
     auto* cols = f::row(p, 14);
     cols->height = 430;
+    cols->flex = 1;
 
     // -- the menu, in order
     auto* left = cols->emplace<StackPanel>(Orientation::Vertical, 6.0f);

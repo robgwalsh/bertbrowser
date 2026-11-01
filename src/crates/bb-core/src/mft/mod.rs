@@ -10,6 +10,7 @@
 
 mod autostart;
 mod banner_rules;
+mod build_progress;
 mod client;
 mod dir_size_builder;
 pub mod fixtures;
@@ -30,6 +31,7 @@ use std::sync::{Arc, Mutex};
 
 pub use autostart::{AutoStartState, IndexerAutoStartTask};
 pub use banner_rules::{IndexerBanner, IndexerBannerRules};
+pub use build_progress::{BuildPhase, BuildProgress};
 pub use client::MftIndexClient;
 pub use dir_size_builder::MftDirectorySizeBuilder;
 pub use host::{IndexSessionEnd, MftIndexHost};
@@ -91,6 +93,9 @@ pub trait MftIndex: Send + Sync {
     /// The bare drive letters currently building, relayed exactly by the host so the client words
     /// the status line with the same function.
     fn building_drives(&self) -> Vec<String>;
+    /// How far along `drive`'s build is, as a whole percent of its `$MFT` records; None if nobody
+    /// can say, or it is not building.
+    fn drive_progress(&self, drive: &str) -> Option<u8>;
     /// Every volume root whose index is complete, replayed to an app that attached late.
     fn completed_roots(&self) -> Vec<String>;
     /// Whether there is a separate elevated helper, and whether it is running.

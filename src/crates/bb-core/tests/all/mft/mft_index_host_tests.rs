@@ -159,6 +159,72 @@ fn replays_drives_still_building() {
     assert!(joins(second));
 }
 
+#[test]
+fn relays_progress_after_the_building_it_belongs_to_and_only_when_it_moves() {
+    let index = Arc::new(ControllableIndexService::new());
+    let (thread, app) = hosted(index.clone());
+    app.receive();
+    app.receive();
+
+    index.begin_building("C");
+    index.report_progress("C", Some(5));
+    index.report_progress("C", Some(5));
+    index.report_progress("C", Some(6));
+    index.report_progress("C", None);
+    index.abandon_building("C");
+
+    assert_eq!(IndexVerb::Building, app.receive().unwrap().verb);
+    for argument in ["C:5", "C:6", "C:"] {
+        let progress = app.receive().unwrap();
+        assert_eq!(IndexVerb::Progress, progress.verb);
+        assert_eq!(argument, progress.argument);
+    }
+    assert_eq!(IndexVerb::Idle, app.receive().unwrap().verb);
+
+    app.close();
+    assert!(joins(thread));
+}
+
+/// An app opened mid-build has heard nothing, and the next percentage may be a long time coming.
+#[test]
+fn replays_the_progress_of_a_drive_still_building() {
+    let index = Arc::new(ControllableIndexService::new());
+    let host = Arc::new(MftIndexHost::new(index.clone()));
+    index.begin_building("D");
+    index.report_progress("D", Some(37));
+
+    let (thread, app, _) = hosted_session(host);
+
+    assert_eq!(IndexVerb::Hello, app.receive().unwrap().verb);
+    assert_eq!(IndexVerb::Building, app.receive().unwrap().verb);
+    let progress = app.receive().unwrap();
+    assert_eq!(IndexVerb::Progress, progress.verb);
+    assert_eq!("D:37", progress.argument);
+    assert_eq!(IndexVerb::Ready, app.receive().unwrap().verb);
+
+    app.close();
+    assert!(joins(thread));
+}
+
+/// Progress is the helper's to say. An app saying it back changes nothing here.
+#[test]
+fn ignores_progress_sent_by_the_app() {
+    let index = Arc::new(ControllableIndexService::new());
+    let (thread, app) = hosted(index.clone());
+    app.receive();
+    app.receive();
+
+    app.send(IndexVerb::Progress, "C:42");
+    app.send(IndexVerb::Ping, "");
+
+    assert_eq!(IndexVerb::Pong, app.receive().unwrap().verb);
+    assert!(!index.is_building());
+    assert_eq!(None, index.drive_progress("C"));
+
+    app.close();
+    assert!(joins(thread));
+}
+
 /// Losing the pipe ends the session, not the index. A second app must not start a second set of
 /// volume threads over the top of the ones already running.
 #[test]
