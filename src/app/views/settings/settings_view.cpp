@@ -858,7 +858,7 @@ void SettingsView::page_general(Widget& p) {
     if (bb_folder_handler_state(&o) == BB_OK) handler = json::parse(core::utf8(core::take(o)));
     const std::string state = handler["state"].str();
     const bool ours = state == "RegisteredToThisApp" || state == "RegisteredToThisAppStale";
-    f::check(p, L"Open folders in BertBrowser instead of File Explorer", ours, [this](bool v) {
+    f::check(p, L"Use BertBrowser when other apps open a file explorer", ours, [this](bool v) {
         folder_handler_warning_ = bb_folder_handler_set(v) == BB_OK
                                       ? L""
                                       : v ? L"Windows would not let BertBrowser register as the folder handler."
@@ -866,7 +866,6 @@ void SettingsView::page_general(Widget& p) {
         signature_.clear();
         sync();
     })->name = "OpenFoldersHere";
-    f::note(p, L"This PC and Control Panel keep opening in File Explorer, and so does a zip opened from Explorer \u2014 BertBrowser browses archives in its own window. So does anything that runs explorer.exe by name \u2014 the taskbar icon, and some apps' \"Show in folder\".");
     std::wstring warning = folder_handler_warning_;
     if (warning.empty() && state == "RegisteredToAnotherApp") {
         warning = program_name(handler["other"].str()) + L" currently opens folders. Turning this on will replace it.";
@@ -909,7 +908,6 @@ void SettingsView::page_appearance(Widget& p) {
         if (bb_theme_do(core_.app(), core::s(L"follow"), core::s(v ? L"on" : L"off"), &o) == BB_OK) bb_str_free(o);
     });
     follow->name = "FollowSystemTheme";
-    f::note(p, L"Switches theme when Windows does, without a restart. Turning on Windows high contrast switches to High Contrast Dark whatever is picked below, and turning it off comes back here.");
     const json::Value& available = th["available"];
     std::vector<std::wstring> names;
     std::vector<std::string> ids;
@@ -1011,8 +1009,7 @@ void SettingsView::page_preview(Widget& p) {
 void SettingsView::page_search_index(Widget& p) {
     f::heading(p, L"Search index");
     const json::Value st = try_model([&](BbOwnedStr* o) { return bb_index_state(core_.app(), o); });
-    f::note(p, L"Searching the whole PC reads the NTFS master file table, which needs administrator rights. A small helper does that "
-               L"and keeps running when BertBrowser closes.");
+    f::note(p, L"A helper process with administrator rights reads the NTFS master file table to index it for instant global search.");
     auto* r = f::row(p);
     const std::wstring helper = core::wide(st["helperText"].str());
     auto* t = f::text(*r, indexer_line(st));
@@ -1079,7 +1076,7 @@ void SettingsView::page_undo(Widget& p) {
     choice_row(p, L"Hold up to this much set-aside data", "undoMaxHeldGigabytes",
                {{L"1 GB", "1"}, {L"5 GB", "5"}, {L"10 GB", "10"}, {L"25 GB", "25"}, {L"50 GB", "50"}, {L"100 GB", "100"}}, "10");
     f::note(p, L"Undo history lasts for this session only; " + gesture_or(L"edit.undo-history", L"Undo history") +
-                   L" shows it. To make undo possible, BertBrowser holds on to what you replace or delete into its own holding folder, and an edited archive's original. When the history goes past either limit, the oldest actions are released and what they held is removed for good. The same happens when you clear the history or close BertBrowser. The action you would undo next is never released, however large it is. Items sent to the Recycle Bin stay there either way.");
+                   L" shows it.");
     auto* clear_undo = f::button(p, L"Clear the undo history now", [this] { main_.open_dialog(L"clear-undo"); });
     clear_undo->name = "ClearUndoHistory";
     clear_undo->width = 220;
@@ -1248,7 +1245,7 @@ void SettingsView::page_columns(Widget& p) {
         main_.defer([this] { build_page(); });
     };
     f::heading(p, L"Columns");
-    f::note(p, L"The columns a new tab starts with, in order.");
+    f::note(p, L"The columns a new tab starts with.");
     const json::Value st = try_model([&](BbOwnedStr* o) { return bb_columns_defaults(app, o); });
     const json::Value& cols = st["columns"];
     if (column_selected_ >= static_cast<int>(cols.size())) column_selected_ = static_cast<int>(cols.size()) - 1;
@@ -1351,8 +1348,6 @@ void SettingsView::page_columns(Widget& p) {
 
 void SettingsView::page_saved(Widget& p, bool workspaces) {
     f::heading(p, workspaces ? L"Workspaces" : L"Saved searches");
-    f::note(p, workspaces ? L"A workspace is your panes and tabs saved under a name, to switch back to in one click. Switching replaces the panes you have open."
-                          : L"A saved search keeps a query under a name, to run again in one click.");
     const json::Value st = try_model([&](BbOwnedStr* o) { return bb_saved_state(core_.app(), o); });
     const char* key = workspaces ? "workspacesPlacement" : "savedSearchesPlacement";
     const std::string cur = st[workspaces ? "workspacesPlacement" : "savedSearchesPlacement"].str();
