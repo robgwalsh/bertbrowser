@@ -87,6 +87,9 @@ public:
     const IconData* icon = nullptr;
     bool primary = false;  // the accent-filled one
     bool link = false;     // drawn as link text: no fill, no border, underlined under the pointer
+    // The toolbar look: no fill or border until the pointer is over it, as the title bar's buttons are.
+    bool flat = false;
+    float icon_px = 16.0f;  // the picture's side
     // What Enter presses in a dialog, when it is not the primary one: a destructive prompt keeps its
     // accent on the action and its default on Cancel, so a stray Enter backs out.
     bool is_default = false;

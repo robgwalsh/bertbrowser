@@ -71,6 +71,7 @@ pub const PAGE_KEYS: &[&str] = &[
     "undoMaxSteps",
     "undoMaxHeldGigabytes",
     "tileAspectRatio",
+    "iconSize",
     "customCommands",
     "showShellExtensions",
     "hiddenShellExtensions",

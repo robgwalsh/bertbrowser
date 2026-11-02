@@ -650,6 +650,16 @@ void Runner::install() {
         s_.settle();
     };
 
+    // icon-size Small|Compact|Medium|Large -- the Settings > General choice, applied as the page would.
+    verbs_[L"icon-size"] = [this](const std::wstring& r) {
+        const std::wstring size = require(r, "icon-size");
+        if (size != L"Small" && size != L"Compact" && size != L"Medium" && size != L"Large") {
+            throw FormatError("icon-size wants Small, Compact, Medium or Large.");
+        }
+        core::check(bb_settings_set(s_.core().app(), core::s(L"iconSize"), core::s(L"\"" + size + L"\"")), "icon-size");
+        s_.settle();
+    };
+
     // ---- writing ----
     verbs_[L"rename"] = [this](const std::wstring& r) {
         const std::wstring pattern = require(r, "rename");

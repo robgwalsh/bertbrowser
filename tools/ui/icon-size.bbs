@@ -1,0 +1,40 @@
+# The icon size setting and the folder search that is a button until it is wanted.
+# The header row's buttons are flat and as compact as the title bar's; the choice scales them all.
+
+tree .
+refresh
+assert-count 8
+
+# Folded: a magnifier button, no box.
+assert-visible SearchButton
+assert-hidden SearchBox
+shot 01-compact
+
+# Clicking it opens the box and hands it the keyboard; Esc on an empty box folds it back.
+press SearchButton
+assert-visible SearchBox
+assert-hidden SearchButton
+window-key Esc
+settle 300
+assert-hidden SearchBox
+assert-visible SearchButton
+
+# A search that is running keeps the box open, even once it has lost the keyboard.
+search report
+assert-visible SearchBox
+assert-hidden SearchButton
+clear-search
+assert-hidden SearchBox
+
+icon-size Small
+shot 02-small
+icon-size Medium
+shot 03-medium
+icon-size Large
+press SearchButton
+shot 04-large-open
+window-key Esc
+settle 300
+icon-size Compact
+shot 05-compact-again
+assert-not-launched

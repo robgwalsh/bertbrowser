@@ -9,7 +9,8 @@ mod search;
 
 pub use app_paths::{AppPaths, AppPathsError};
 pub use app_settings::{
-    AppSettings, DEFAULT_TILE_ASPECT_RATIO, DrivesOpenTarget, SectionPlacement, SettingsError,
+    AppSettings, DEFAULT_TILE_ASPECT_RATIO, DrivesOpenTarget, IconSize, SectionPlacement,
+    SettingsError,
 };
 pub use legacy::{DataDirEntry, LegacyData, LegacyFailure, LegacyMove, LegacyOutcome, LegacyPlan};
 pub use placeholders::{

@@ -7,8 +7,8 @@ use bb_core::changes::ChangeLogPolicy;
 use bb_core::columns::ColumnSetting;
 use bb_core::layout::SessionLayout;
 use bb_core::settings::{
-    AppSettings, ChecksumAlgorithm, CustomCommandDefinition, DrivesOpenTarget, RenameCase,
-    RenameRule, RenameScope, SectionPlacement,
+    AppSettings, ChecksumAlgorithm, CustomCommandDefinition, DrivesOpenTarget, IconSize,
+    RenameCase, RenameRule, RenameScope, SectionPlacement,
 };
 use bb_test_support::unique_temp_path;
 
@@ -52,6 +52,7 @@ fn the_defaults_are_the_c_sharp_defaults() {
     assert_eq!(None, s.undo_max_held_gigabytes);
     assert!(s.duplicate_skip_system_folders);
     assert_eq!("4:3", s.tile_aspect_ratio);
+    assert_eq!(IconSize::Compact, s.icon_size);
     assert!(s.custom_commands.is_empty());
     assert_eq!(None, s.key_bindings);
     assert!(s.palette_pins.is_empty());
@@ -208,6 +209,7 @@ fn the_round_trip_is_lossless() {
     s.undo_max_steps = Some(100);
     s.undo_max_held_gigabytes = Some(25);
     s.tile_aspect_ratio = "16:9".into();
+    s.icon_size = IconSize::Large;
     s.custom_commands.push(CustomCommandDefinition {
         id: "abc123".into(),
         show_in_menu: false,

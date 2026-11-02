@@ -158,7 +158,7 @@ void Button::click() {
 Size Button::measure(Size) {
     const D2D1_SIZE_F t = res().text.measure(text, style.font);
     float w = text.empty() ? 0.0f : std::ceil(t.width);
-    if (icon) w += 16.0f + (text.empty() ? 0.0f : 6.0f);
+    if (icon) w += icon_px + (text.empty() ? 0.0f : 6.0f);
     if (link) return fixed_or({w + 4.0f, 28.0f});
     return fixed_or({std::max(28.0f, w + 24.0f), 28.0f});
 }
@@ -190,16 +190,22 @@ void Button::paint(PaintContext& pc) {
         bg = primary ? tok::BorderFocus : tok::ButtonSecondaryHoverBackground;
     }
     if (style.bg != kNoToken && !hovered() && !pressed_) bg = style.bg;
-    pc.fill(bounds, bg);
-    pc.stroke(bounds, focused() ? tok::BorderFocus : (style.border != kNoToken ? style.border : tok::BorderDefault));
-    const Token fg = !flags.enabled ? tok::TextMuted : (primary ? tok::AccentForeground : style.fg);
+    if (flat) {
+        bg = pressed_ ? tok::ToolbarPressedBackground : hovered() && flags.enabled ? tok::ToolbarHoverBackground : kNoToken;
+        if (bg != kNoToken) pc.fill(bounds, bg);
+        if (focused()) pc.stroke(bounds, tok::BorderFocus);
+    } else {
+        pc.fill(bounds, bg);
+        pc.stroke(bounds, focused() ? tok::BorderFocus : (style.border != kNoToken ? style.border : tok::BorderDefault));
+    }
+    const Token fg = !flags.enabled ? tok::TextMuted : flat ? tok::ToolbarForeground : (primary ? tok::AccentForeground : style.fg);
     const D2D1_SIZE_F t = pc.res.text.measure(text, style.font);
     const float tw = text.empty() ? 0.0f : t.width;
-    const float iw = icon ? 16.0f : 0.0f;
+    const float iw = icon ? icon_px : 0.0f;
     const float total = tw + iw + (icon && tw > 0 ? 6.0f : 0.0f);
     float x = bounds.l + std::max(0.0f, (bounds.width() - total) / 2);
     if (icon) {
-        const Rect ir = Rect::xywh(x, bounds.t + (bounds.height() - 16.0f) / 2, 16.0f, 16.0f);
+        const Rect ir = Rect::xywh(x, bounds.t + (bounds.height() - icon_px) / 2, icon_px, icon_px);
         Icon::draw(pc, *icon, ir, fg, icon_geo_, icon_gen_);
         x += iw + 6.0f;
     }

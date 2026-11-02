@@ -42,6 +42,17 @@ pub enum SectionPlacement {
     Hidden,
 }
 
+/// How large the toolbar buttons and their icons are, in the title bar and on each folder's header
+/// row. `Compact` is what the title bar always was; one step down and two up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum IconSize {
+    Small,
+    #[default]
+    Compact,
+    Medium,
+    Large,
+}
+
 #[derive(Debug)]
 pub enum SettingsError {
     Io(std::io::Error),
@@ -192,6 +203,9 @@ pub struct AppSettings {
     /// hand-editing this cannot break the view.
     pub tile_aspect_ratio: String,
 
+    /// The size of toolbar buttons and icons. Compact (the default) is the title bar as it was.
+    pub icon_size: IconSize,
+
     pub custom_commands: Vec<CustomCommandDefinition>,
 
     /// Keyboard shortcuts the user has changed, by command id, each with the chords it now has.
@@ -331,6 +345,7 @@ impl Default for AppSettings {
             undo_max_held_gigabytes: None,
             duplicate_skip_system_folders: true,
             tile_aspect_ratio: DEFAULT_TILE_ASPECT_RATIO.to_string(),
+            icon_size: IconSize::default(),
             custom_commands: Vec::new(),
             key_bindings: None,
             palette_pins: Vec::new(),

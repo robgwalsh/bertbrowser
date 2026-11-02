@@ -138,6 +138,7 @@ behavior - this table only says where.
 | Theming | `core/theming/*` (`catalog`, `resolver`, `system`), `app/services/themes.rs`, ui: `gfx/palette.cpp`, `gfx/tokens.h` |
 | App icon | `tools/icons/build-app-icon.ps1` -> `src/app/app/app.ico` |
 | Icons | `tools/icons/icons.txt` (the mapping) -> `src/app/gfx/icons.gen.h` (generated) via `build-icons.ps1` |
+| Icon size (toolbar buttons) | `IconSize` in `core/settings/app_settings.rs`, ui: `ui/core/icon_size.h` (one global, read by `command_ui.cpp` and `TabView::apply_icon_size`), `MainView::sync_icon_size`, `tools/ui/icon-size.bbs` (also the folder search that is a button until clicked) |
 | Columns (file list) | `core/columns/*`, `app/browse/columns.rs`, ui: `shell_props.cpp` (shell property values), `ui/collections/list_view.cpp` |
 | Tabs / panes / layout | `app/browse/tabs.rs`, `app/session.rs`, `app/api/tabs.rs`, `core/layout/*`, ui: `main_view.cpp` |
 | Flat branch view (Ctrl+B) | `FlatViewRules` in `core/rules.rs`, `SearchService::list_subtree` in `core/fs/search_service.rs`, `app/browse/tabs.rs` |

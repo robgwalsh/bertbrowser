@@ -115,7 +115,7 @@ MenuItems build_menu_items(const MenuBuildEnv& env, const std::vector<BarRow>& r
 // ---- the toolbar --------------------------------------------------------------------------------------
 
 namespace {
-constexpr float kBtn = 32.0f, kSep = 9.0f, kPadX = 4.0f, kOverflowW = 28.0f, kIcon = 16.0f;
+constexpr float kSep = 9.0f, kPadX = 4.0f, kOverflowW = 28.0f;
 }
 
 // Whether a refresh finds a row exactly as it was, children and all.
@@ -131,7 +131,7 @@ static bool same_row(const BarRow& a, const BarRow& b) {
 }
 
 CommandToolbar::CommandToolbar(std::string which) : which_(std::move(which)) {
-    height = kHeight;
+    height = ui::icon_metrics().bar;
     flags.focusable = false;  // a button that took the focus would run its command against a list that just lost it
     style.bg = tok::ToolbarBackground;
 }
@@ -152,9 +152,17 @@ float CommandToolbar::item_width(const BarRow& r) const {
     }
     if (r.show_text) {
         const float t = std::ceil(res().text.measure(plain_caption(r.caption), gfx::FontSpec{}).width);
-        return 8.0f + (icon_for(r.icon) ? kIcon + 6.0f : 0.0f) + t + 8.0f;
+        return 8.0f + (icon_for(r.icon) ? ui::icon_metrics().icon + 6.0f : 0.0f) + t + 8.0f;
     }
-    return kBtn;
+    return ui::icon_metrics().button;
+}
+
+// The icon size setting moved: the bar's height and every button's width follow it.
+void CommandToolbar::apply_icon_size() {
+    height = ui::icon_metrics().bar;
+    laid_width_ = -1;
+    request_layout();
+    invalidate();
 }
 
 void CommandToolbar::update(const json::Value& model) {
@@ -217,7 +225,7 @@ void CommandToolbar::lay_out(float avail) {
 Size CommandToolbar::measure(Size) {
     float total = 2 * kPadX;
     for (const Item& it : items_) total += item_width(it.row);
-    return {width >= 0 ? width : total, kHeight};
+    return {width >= 0 ? width : total, ui::icon_metrics().bar};
 }
 
 void CommandToolbar::arrange(Rect r) {
@@ -283,10 +291,11 @@ void CommandToolbar::paint(PaintContext& pc) {
             pc.text(L"\u25BE", chevron_rect(i), small_font, fg, gfx::TextAlign::Center);
         }
         const IconData* icon = icon_for(r.icon);
-        float x = face.l + (r.show_text ? 8.0f : (face.width() - kIcon) / 2);
+        const float icon_px = ui::icon_metrics().icon;
+        float x = face.l + (r.show_text ? 8.0f : (face.width() - icon_px) / 2);
         if (icon) {
-            Icon::draw(pc, *icon, Rect::xywh(x, rc.t + (rc.height() - kIcon) / 2, kIcon, kIcon), fg, icon_geo_[i], icon_gen_[i]);
-            x += kIcon + 6.0f;
+            Icon::draw(pc, *icon, Rect::xywh(x, rc.t + (rc.height() - icon_px) / 2, icon_px, icon_px), fg, icon_geo_[i], icon_gen_[i]);
+            x += icon_px + 6.0f;
         }
         if (r.kind == "list" || r.kind == "placeholder") {
             pc.text(L"▾", Rect{x - 2, rc.t, rc.r, rc.b}, font, fg);

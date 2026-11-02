@@ -130,6 +130,11 @@ public:
     ui::Button* clear_button() const { return clear_; }
     ui::Button* save_button() const { return save_; }
     ui::Button* glyph() const { return glyph_; }
+    std::function<void()> on_blur;  // the folder box folds back into its button when it is left empty
+    void on_focus(bool f) override {
+        ui::Edit::on_focus(f);
+        if (!f && on_blur) on_blur();
+    }
 
 private:
     ui::Button* glyph_ = nullptr;
@@ -154,6 +159,12 @@ public:
     bool tiles_mode() const { return tiles_on_; }
     ListAdapter& adapter() { return adapter_; }
     ui::Edit* search_box() const { return search_; }
+    // The folder search is a magnifier button until it is wanted: this swaps it for the box (and, when asked,
+    // puts the keyboard in it with its text selected). It folds back once it is empty and has lost the focus.
+    void reveal_search(bool focus);
+    void collapse_search();
+    // The icon size setting moved: the header row height, buttons and pictures follow it.
+    void apply_icon_size();
     ui::Edit* global_search_box() const;  // the title bar's, which acts on the active tab
 
     // Esc in a search box: a search still running is stopped and keeps what it found; otherwise the box is
@@ -229,6 +240,7 @@ private:
     ui::Button *back_ = nullptr, *forward_ = nullptr, *up_ = nullptr, *refresh_ = nullptr;
     ui::Button* side_buttons_[3] = {nullptr, nullptr, nullptr};
     ui::Button* flat_button_ = nullptr;
+    ui::Button* search_button_ = nullptr;
     ui::Panel* path_bar_ = nullptr;
     BreadcrumbBar* crumbs_ = nullptr;
     PathEdit* path_ = nullptr;
@@ -423,6 +435,7 @@ public:
     void refresh_tool(const std::wstring& kind);
     void sync_devices(bool refresh);
     void sync_wheel_speed();
+    void sync_icon_size();
     void open_device(const std::wstring& path);
     // A card that says something and has an OK: what a refused plan reports (C#'s MessageDialog), raised on
     // the UI thread, unlike the notice seam a worker parks on.

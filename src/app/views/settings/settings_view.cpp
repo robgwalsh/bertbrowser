@@ -835,6 +835,9 @@ void SettingsView::page_general(Widget& p) {
     choice_row(p, L"Tile aspect ratio", "tileAspectRatio",
                {{L"1:1", "\"1:1\""}, {L"4:3", "\"4:3\""}, {L"3:2", "\"3:2\""}, {L"16:10", "\"16:10\""}, {L"16:9", "\"16:9\""}, {L"3:4", "\"3:4\""},
                 {L"2:3", "\"2:3\""}});
+    choice_row(p, L"Icon size", "iconSize",
+               {{L"Small", "\"Small\""}, {L"Compact", "\"Compact\""}, {L"Medium", "\"Medium\""}, {L"Large", "\"Large\""}});
+    f::note(p, L"The size of the toolbar buttons in the title bar and above each folder.");
     f::gap(p, 6);
     // Who opens folders is Windows' setting, so it is read from Windows each time rather than kept here, and a
     // scripted run never touches the machine's registry. Spec: SettingsViewModel.OnOpenFoldersHereChanged.

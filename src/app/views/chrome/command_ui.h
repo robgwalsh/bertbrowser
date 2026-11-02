@@ -2,6 +2,7 @@
 // menu items built from them, and the toolbar widget. The core decides what a row says, whether it is
 // enabled and what it prints beside it; this only draws it and tells the window which command was picked.
 #pragma once
+#include "ui/core/icon_size.h"
 #include "ui/popups/menu.h"
 #include "views/bridge/model.h"
 
@@ -46,7 +47,8 @@ ui::MenuItems build_menu_items(const MenuBuildEnv& env, const std::vector<BarRow
 // overflow button rather than being clipped.
 class CommandToolbar : public ui::Widget {
 public:
-    static constexpr float kHeight = 32.0f;
+    static float bar_height() { return ui::icon_metrics().bar; }
+    void apply_icon_size();
 
     struct Item {
         BarRow row;

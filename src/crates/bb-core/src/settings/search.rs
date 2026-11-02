@@ -73,6 +73,18 @@ impl SettingsIndex {
         ),
         entry(
             "general",
+            "Icon size",
+            &[
+                "toolbar",
+                "buttons",
+                "compact",
+                "larger",
+                "smaller",
+                "title bar",
+            ],
+        ),
+        entry(
+            "general",
             "Open folders in BertBrowser instead of File Explorer",
             &["default file manager", "folder handler", "replace explorer"],
         ),

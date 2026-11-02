@@ -289,9 +289,8 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     style.bg = tok::ListBackground;
     BbApp* app = core.app();
 
-    auto nav = std::make_unique<StackPanel>(Orientation::Horizontal, 6.0f);
-    nav->pad = 6;
-    nav->height = 42;
+    auto nav = std::make_unique<StackPanel>(Orientation::Horizontal, 2.0f);
+    nav->pad = 4;
     nav->dock = Dock::Top;
     nav->name = "NavBar";
     nav->style.bg = tok::ToolbarBackground;
@@ -300,7 +299,7 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     auto button = [&](const IconData& icon, std::function<void()> fn) {
         auto b = std::make_unique<Button>();
         b->icon = &icon;
-        b->width = 34;
+        b->flat = true;  // like the title bar buttons: no box until the pointer is over it
         b->on_click = std::move(fn);
         return nav_->add(std::move(b));
     };
@@ -343,8 +342,16 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     path_->on_cancel = [this] { end_path_edit(); };
     path_->on_blur = [this] { end_path_edit(); };
 
+    // The folder search starts as a button; a click on it opens the box. Spec: DirectoryTabView.xaml (SearchBox).
+    search_button_ = nav_->emplace<Button>();
+    search_button_->name = "SearchButton";
+    search_button_->icon = &icons::Search;
+    search_button_->flat = true;
+    search_button_->on_click = [this] { reveal_search(true); };
     auto save = [this] { main_.execute_command(L"search.save"); };
     search_ = nav_->emplace<SearchField>([this] { clear_search(false); }, save);
+    search_->set_visible(false);
+    search_->on_blur = [this] { collapse_search(); };
     search_->name = "SearchBox";
     search_->width = 280;  // Spec: DirectoryTabView.xaml (Width 280, MinWidth 150)
     search_->placeholder = L"Search this folder";
@@ -356,7 +363,7 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     // Spec: DirectoryTabView.xaml (FlatViewToggle).
     flat_button_ = nav_->emplace<Button>();
     flat_button_->name = "FlatViewToggle";
-    flat_button_->width = 34;
+    flat_button_->flat = true;
     flat_button_->icon = &icons::FlatView;
     flat_button_->on_click = [this] { main_.execute_command(L"view.flat"); };
     {
@@ -366,13 +373,14 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
         for (int i = 0; i < 3; ++i) {
             auto* b = nav_->emplace<Button>();
             b->name = names[i];
-            b->width = 34;
+            b->flat = true;
             b->icon = icons::find(icons_[i]);
             b->on_click = [this, app, i] { bb_tab_set_side_pane(app, tab_, static_cast<uint32_t>(i)); };
             side_buttons_[i] = b;
         }
     }
     add(std::move(nav));
+    apply_icon_size();
 
     // Activity: a listing or a search on its way. A fixed 3px strip either way, so nothing below it moves
     // when it comes and goes. Spec: DirectoryTabView.xaml (the activity indicator).
@@ -819,6 +827,7 @@ void TabView::refresh_tooltips() {
     refresh_->tooltip = gesture_tip(app, L"Refresh", L"nav.refresh");
     search_->tooltip = gesture_tip(app, L"Search this folder and everything under it", L"search.folder",
                                    L". Filters: ext: size: dm: path: is: re: in: content:, plus OR and !");
+    search_button_->tooltip = search_->tooltip;
     search_->glyph()->tooltip = filters_tip();
     static const wchar_t* ids[3] = {L"view.side-none", L"view.preview", L"view.metadata"};
     static const wchar_t* names[3] = {L"No side pane", L"Preview pane", L"Metadata pane"};
@@ -941,6 +950,8 @@ void TabView::reload_state() {
         const std::wstring local = st.is_global_search ? std::wstring() : text;
         if (search_->text() != local) search_->set_text(local);
         suppress_ = false;
+        if (local.empty()) collapse_search();
+        else reveal_search(false);
         if (gbox) main_.set_title_search_text(st.is_global_search ? text : std::wstring());
     }
     search_->sync_buttons();
@@ -994,6 +1005,35 @@ void TabView::clear_search(bool global) {
     main_.focus_file_list();
 }
 
+void TabView::reveal_search(bool focus) {
+    if (!search_->flags.visible) {
+        search_->set_visible(true);
+        search_button_->set_visible(false);
+        nav_->request_layout();
+    }
+    if (!focus || !root()) return;
+    root()->set_focus(search_);
+    search_->select(0, search_->text().size());  // a search box takes focus with its text selected
+}
+
+void TabView::collapse_search() {
+    if (!search_->flags.visible || !search_->text().empty() || search_->focused()) return;
+    search_->set_visible(false);
+    search_button_->set_visible(true);
+    nav_->request_layout();
+}
+
+void TabView::apply_icon_size() {
+    const ui::IconMetrics m = ui::icon_metrics();
+    nav_->height = m.bar + 4;  // the buttons keep 2 DIPs of air above and below, inside the row's own 4 of padding
+    for (Button* b : {back_, forward_, up_, refresh_, search_button_, flat_button_, side_buttons_[0], side_buttons_[1], side_buttons_[2]}) {
+        b->width = m.button;
+        b->height = m.height();
+        b->icon_px = m.icon;
+    }
+    nav_->request_layout();
+}
+
 SearchField::SearchField(std::function<void()> clear, std::function<void()> save) : Edit(false) {
     auto make = [this](const IconData& icon, const wchar_t* tip, std::function<void()> click) {
         auto* b = emplace<Button>();
@@ -1044,6 +1084,7 @@ void TabView::type_search(const std::wstring& text, bool global) {
         if (!text.empty()) search_->set_text(L"");
     } else {
         search_->set_text(text);
+        if (!text.empty()) reveal_search(false);
     }
     suppress_ = false;
     search_->sync_buttons();
@@ -1494,6 +1535,7 @@ MainView::MainView(core::Core& core, platform::Window& window)
     // After the sink, so the event that says the read landed cannot arrive before anyone listens.
     sync_devices(false);  // starts reading the portable devices; their rows join the drives when it lands
     sync_wheel_speed();
+    sync_icon_size();
 }
 
 MainView::~MainView() {
@@ -1603,6 +1645,7 @@ void MainView::handle(const BbEvent& e) {
             if (core::icontains(key, L"theme")) apply_theme();
             if (key == L"showHiddenItems") sync_tree_hidden();
             if (key == L"scrollSpeedMultiplier") sync_wheel_speed();
+            if (key == L"iconSize") sync_icon_size();
             if (key == L"tileAspectRatio") {
                 for (auto& kv : by_tab_) kv.second->reload_state();
             }
@@ -2127,6 +2170,7 @@ bool MainView::host_command(const std::wstring& id) {
     if (id == L"search.folder" || id == L"search.pc") {
         TabView* tv = active_view();
         if (!tv) return false;
+        if (id == L"search.folder") tv->reveal_search(false);  // the box is a button until it is wanted
         Widget* target = id == L"search.folder" ? static_cast<Widget*>(tv->search_box()) : static_cast<Widget*>(tv->global_search_box());
         if (!target) return false;
         window_.root().set_focus(target);
@@ -2460,7 +2504,7 @@ void MainView::sync_row_toolbars(const json::Value& state) {
             tb->on_context = [this](const BarRow& r, Rect anchor) { open_step_menu(r, anchor); };
             row_toolbars_.push_back(tb);
         }
-        rows_panel_->height = static_cast<float>(want) * CommandToolbar::kHeight;
+        rows_panel_->height = static_cast<float>(want) * CommandToolbar::bar_height();
         rows_panel_->set_visible(want > 0);
         browser_->request_layout();
     }
@@ -3030,6 +3074,23 @@ void MainView::open_device(const std::wstring& path) {
 void MainView::sync_wheel_speed() {
     BbOwnedStr o{};
     if (bb_settings_get(core_.app(), core::s(L"scrollSpeedMultiplier"), &o) == BB_OK) ui::set_wheel_multiplier(_wtof(core::take(o).c_str()));
+}
+
+// The toolbar buttons and their pictures: the title bar toolbar, any rows of toolbars under it, and each
+// folder header row all read the one size, so a change reaches every one of them.
+void MainView::sync_icon_size() {
+    BbOwnedStr o{};
+    if (bb_settings_get(core_.app(), core::s(L"iconSize"), &o) != BB_OK) return;
+    const ui::IconSize size = ui::parse_icon_size(json::parse(core::utf8(core::take(o))).str().c_str());
+    if (size == ui::g_icon_size) return;
+    ui::g_icon_size = size;
+    const ui::IconMetrics m = ui::icon_metrics();
+    title_->height = std::max(TitleBar::kHeight, m.bar);
+    title_toolbar_->apply_icon_size();
+    for (CommandToolbar* tb : row_toolbars_) tb->apply_icon_size();
+    rows_panel_->height = static_cast<float>(row_toolbars_.size()) * m.bar;
+    for (auto& kv : by_tab_) kv.second->apply_icon_size();
+    window_.root().request_layout();
 }
 
 size_t MainView::tree_pending() const { return (tree_provider_ ? tree_provider_->pending() : 0) + (devices_pending_ ? 1 : 0); }
