@@ -16,11 +16,11 @@ pub unsafe extern "C" fn bb_tools(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        let verb = unsafe { verb.to_string_lossy() };
-        let args = unsafe { args_json.to_string_lossy() };
+        let app = app_of(app)?;
+        let verb = verb.to_string_lossy();
+        let args = args_json.to_string_lossy();
         let json = app.app.tools(&verb, &args)?;
-        *unsafe { out(out_json, "out_json")? } = BbOwnedStr::from_str(&json);
+        *out(out_json, "out_json")? = BbOwnedStr::from_str(&json);
         Ok(())
     })
 }

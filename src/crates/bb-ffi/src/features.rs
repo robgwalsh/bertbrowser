@@ -11,12 +11,7 @@ use super::*;
 use bb_core::newitem::NewItemKind;
 
 fn text_of(s: BbStr) -> String {
-    unsafe { s.to_string_lossy() }
-}
-
-unsafe fn put(out_json: *mut BbOwnedStr, text: &str) -> Result<(), Fail> {
-    *unsafe { out(out_json, "out_json")? } = BbOwnedStr::from_str(text);
-    Ok(())
+    s.to_string_lossy()
 }
 
 fn kind_of(kind: u32) -> NewItemKind {
@@ -41,14 +36,14 @@ pub unsafe extern "C" fn bb_new_item_suggest(
     out_name: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let name = app.app.new_item_suggest_in(
             TabId(tab),
             &text_of(directory),
             kind_of(kind),
             &text_of(extension),
         )?;
-        unsafe { put(out_name, &name) }
+        put(out_name, &name)
     })
 }
 
@@ -64,14 +59,14 @@ pub unsafe extern "C" fn bb_new_item_plan(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let json = app.app.new_item_plan_in(
             TabId(tab),
             &text_of(directory),
             &text_of(name),
             kind_of(kind),
         )?;
-        unsafe { put(out_json, &json) }
+        put(out_json, &json)
     })
 }
 
@@ -87,14 +82,14 @@ pub unsafe extern "C" fn bb_new_item(
     out_op: *mut u64,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let op = app.app.new_item_in(
             TabId(tab),
             &text_of(directory),
             &text_of(name),
             kind_of(kind),
         )?;
-        if let Some(out_op) = unsafe { out_op.as_mut() } {
+        if let Some(out_op) = opt_mut(out_op) {
             *out_op = op.0;
         }
         Ok(())
@@ -104,7 +99,7 @@ pub unsafe extern "C" fn bb_new_item(
 /// Bytes in words, the way every size in the app is written ("1.4 MB", three decimals from GB up).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_byte_size(bytes: i64, out_text: *mut BbOwnedStr) -> BbStatus {
-    guard(|| unsafe { put(out_text, &bb_core::format::byte_size(bytes)) })
+    guard(|| put(out_text, &bb_core::format::byte_size(bytes)))
 }
 
 /// The size text the folder tree shows beside each of `paths_json` (a JSON array of folder paths), as a
@@ -117,16 +112,14 @@ pub unsafe extern "C" fn bb_tree_sizes(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let paths: Vec<String> = serde_json::from_str(&text_of(paths_json))
             .map_err(|e| bb_app::AppError::Invalid(format!("not a JSON list of paths: {e}")))?;
         let sizes = app.app.tree_sizes(&paths);
-        unsafe {
-            put(
-                out_json,
-                &serde_json::to_string(&sizes).unwrap_or_else(|_| "[]".into()),
-            )
-        }
+        put(
+            out_json,
+            &serde_json::to_string(&sizes).unwrap_or_else(|_| "[]".into()),
+        )
     })
 }
 
@@ -138,8 +131,8 @@ pub unsafe extern "C" fn bb_new_types_state(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.new_types_state_json()) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.new_types_state_json())
     })
 }
 
@@ -148,7 +141,7 @@ pub unsafe extern "C" fn bb_new_types_state(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_new_types_import(app: *mut BbApp) -> BbStatus {
     guard(|| {
-        unsafe { app_of(app)? }.app.new_types_import();
+        app_of(app)?.app.new_types_import();
         Ok(())
     })
 }
@@ -157,8 +150,8 @@ pub unsafe extern "C" fn bb_new_types_import(app: *mut BbApp) -> BbStatus {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_new_file_types(app: *mut BbApp, out_json: *mut BbOwnedStr) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.new_file_types_json()) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.new_file_types_json())
     })
 }
 
@@ -171,8 +164,8 @@ pub unsafe extern "C" fn bb_session_capture(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.session_capture_json()) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.session_capture_json())
     })
 }
 
@@ -187,18 +180,11 @@ pub unsafe extern "C" fn bb_layout_set_weights(
     n: u32,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        let path: &[u32] = if depth == 0 || path.is_null() {
-            &[]
-        } else {
-            unsafe { std::slice::from_raw_parts(path, depth as usize) }
-        };
-        let weights: &[f64] = if n == 0 || weights.is_null() {
-            &[]
-        } else {
-            unsafe { std::slice::from_raw_parts(weights, n as usize) }
-        };
-        Ok(app.app.layout_set_weights(path, weights)?)
+        let app = app_of(app)?;
+        Ok(app.app.layout_set_weights(
+            slice_of(path, depth as usize),
+            slice_of(weights, n as usize),
+        )?)
     })
 }
 
@@ -221,8 +207,8 @@ pub unsafe extern "C" fn bb_window_placement(
     out_placement: *mut BbWindowPlacement,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        let out_placement = unsafe { out(out_placement, "out_placement")? };
+        let app = app_of(app)?;
+        let out_placement = out(out_placement, "out_placement")?;
         let (bounds, maximized) = app.app.window_placement();
         let [left, top, width, height] = bounds.unwrap_or_default();
         *out_placement = BbWindowPlacement {
@@ -244,9 +230,8 @@ pub unsafe extern "C" fn bb_window_placement_set(
     placement: *const BbWindowPlacement,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        let p = unsafe { placement.as_ref() }
-            .ok_or_else(|| bb_app::AppError::Invalid("placement".into()))?;
+        let app = app_of(app)?;
+        let p = opt_ref(placement).ok_or_else(|| bb_app::AppError::Invalid("placement".into()))?;
         app.app
             .set_window_placement([p.left, p.top, p.width, p.height], p.maximized);
         Ok(())
@@ -256,7 +241,7 @@ pub unsafe extern "C" fn bb_window_placement_set(
 /// Writes the pane and tab arrangement into the settings now.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_session_save(app: *mut BbApp) -> BbStatus {
-    guard(|| Ok(unsafe { app_of(app)? }.app.session_save()?))
+    guard(|| Ok(app_of(app)?.app.session_save()?))
 }
 
 /// The launch rule: the saved session when asked for and usable, otherwise one tab at the startup
@@ -268,9 +253,9 @@ pub unsafe extern "C" fn bb_session_restore(
     out_tab: *mut u64,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let tab = app.app.session_restore(&text_of(fallback))?;
-        if let Some(out_tab) = unsafe { out_tab.as_mut() } {
+        if let Some(out_tab) = opt_mut(out_tab) {
             *out_tab = tab.0;
         }
         Ok(())
@@ -282,9 +267,9 @@ pub unsafe extern "C" fn bb_session_restore(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_session_roundtrip(app: *mut BbApp, out_rebuilt: *mut bool) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let rebuilt = app.app.session_roundtrip()?;
-        if let Some(out) = unsafe { out_rebuilt.as_mut() } {
+        if let Some(out) = opt_mut(out_rebuilt) {
             *out = rebuilt;
         }
         Ok(())
@@ -294,18 +279,14 @@ pub unsafe extern "C" fn bb_session_roundtrip(app: *mut BbApp, out_rebuilt: *mut
 /// Moves a tab to `index` within its pane (clamped).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_tab_move(app: *mut BbApp, tab: u64, index: u32) -> BbStatus {
-    guard(|| {
-        Ok(unsafe { app_of(app)? }
-            .app
-            .move_tab(TabId(tab), index as usize)?)
-    })
+    guard(|| Ok(app_of(app)?.app.move_tab(TabId(tab), index as usize)?))
 }
 
 /// Moves a tab into another pane, activating it there; a pane it empties closes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_tab_move_to_pane(app: *mut BbApp, tab: u64, pane: u64) -> BbStatus {
     guard(|| {
-        Ok(unsafe { app_of(app)? }
+        Ok(app_of(app)?
             .app
             .move_tab_to_pane(TabId(tab), PaneId(pane))?)
     })
@@ -314,14 +295,14 @@ pub unsafe extern "C" fn bb_tab_move_to_pane(app: *mut BbApp, tab: u64, pane: u6
 /// Exchanges the active pane's place with the next one's.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_pane_swap(app: *mut BbApp) -> BbStatus {
-    guard(|| Ok(unsafe { app_of(app)? }.app.swap_panes()?))
+    guard(|| Ok(app_of(app)?.app.swap_panes()?))
 }
 
 /// Gives every pane the same share of the space.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_pane_equalise(app: *mut BbApp) -> BbStatus {
     guard(|| {
-        unsafe { app_of(app)? }.app.equalise_panes();
+        app_of(app)?.app.equalise_panes();
         Ok(())
     })
 }
@@ -334,8 +315,8 @@ pub unsafe extern "C" fn bb_pane_equalise(app: *mut BbApp) -> BbStatus {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_command_list(app: *mut BbApp, out_json: *mut BbOwnedStr) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.command_list_json()) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.command_list_json())
     })
 }
 
@@ -347,12 +328,12 @@ pub unsafe extern "C" fn bb_command_state(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let state = app
             .app
             .command_state_json(&text_of(id))
             .ok_or_else(|| Fail::Err("unknown command".into()))?;
-        unsafe { put(out_json, &state) }
+        put(out_json, &state)
     })
 }
 
@@ -365,9 +346,9 @@ pub unsafe extern "C" fn bb_command_execute(
     out_needs_ui: *mut bool,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let outcome = app.app.command_execute(&text_of(id))?;
-        if let Some(out) = unsafe { out_needs_ui.as_mut() } {
+        if let Some(out) = opt_mut(out_needs_ui) {
             *out = outcome == bb_app::CommandOutcome::NeedsUi;
         }
         Ok(())
@@ -401,9 +382,9 @@ pub unsafe extern "C" fn bb_key_press(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let Some(chord) = chord_of(chord) else {
-            return unsafe { put(out_json, "{\"claimed\":false}") };
+            return put(out_json, "{\"claimed\":false}");
         };
         let mut state = FocusState::new(match focus.focus {
             BbFocusKind::BB_FOCUS_FILE_LIST => FocusKind::FileList,
@@ -417,7 +398,7 @@ pub unsafe extern "C" fn bb_key_press(
         state.content_blocked = focus.flags & BB_FOCUS_CONTENT_BLOCKED != 0;
         state.recording = focus.flags & BB_FOCUS_RECORDING != 0;
         let json = app.app.key_press(&chord, state, repeat);
-        unsafe { put(out_json, &json) }
+        put(out_json, &json)
     })
 }
 
@@ -431,8 +412,8 @@ pub unsafe extern "C" fn bb_keymap_set_chords(
     count: u32,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        let chords = unsafe { strings(chords, count) };
+        let app = app_of(app)?;
+        let chords = strings(chords, count);
         Ok(app.app.keymap_set_chords(&text_of(id), &chords)?)
     })
 }
@@ -441,7 +422,7 @@ pub unsafe extern "C" fn bb_keymap_set_chords(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_keymap_reset(app: *mut BbApp, id: BbStr) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let id = text_of(id);
         if id.is_empty() {
             app.app.keymap_reset_all()?;
@@ -460,8 +441,8 @@ pub unsafe extern "C" fn bb_keymap_gesture(
     out_text: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_text, &app.app.keymap_gesture(&text_of(id))) }
+        let app = app_of(app)?;
+        put(out_text, &app.app.keymap_gesture(&text_of(id)))
     })
 }
 
@@ -470,8 +451,8 @@ pub unsafe extern "C" fn bb_keymap_gesture(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_keys_page(app: *mut BbApp, out_json: *mut BbOwnedStr) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.keys_page_json()) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.keys_page_json())
     })
 }
 
@@ -479,11 +460,7 @@ pub unsafe extern "C" fn bb_keys_page(app: *mut BbApp, out_json: *mut BbOwnedStr
 /// `press <chord>`, `reassign`, `remove`, `reset`, `reset-all`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_keys_do(app: *mut BbApp, verb: BbStr, arg: BbStr) -> BbStatus {
-    guard(|| {
-        Ok(unsafe { app_of(app)? }
-            .app
-            .keys_do(&text_of(verb), &text_of(arg))?)
-    })
+    guard(|| Ok(app_of(app)?.app.keys_do(&text_of(verb), &text_of(arg))?))
 }
 
 // ---- the palette ----
@@ -492,7 +469,7 @@ pub unsafe extern "C" fn bb_keys_do(app: *mut BbApp, verb: BbStr, arg: BbStr) ->
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_palette_open(app: *mut BbApp, seed: BbStr) -> BbStatus {
     guard(|| {
-        unsafe { app_of(app)? }.app.palette_open(&text_of(seed));
+        app_of(app)?.app.palette_open(&text_of(seed));
         Ok(())
     })
 }
@@ -502,8 +479,8 @@ pub unsafe extern "C" fn bb_palette_open(app: *mut BbApp, seed: BbStr) -> BbStat
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_palette_state(app: *mut BbApp, out_json: *mut BbOwnedStr) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.palette_json()) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.palette_json())
     })
 }
 
@@ -518,9 +495,9 @@ pub unsafe extern "C" fn bb_palette_do(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let json = app.app.palette_do(&text_of(verb), &text_of(arg))?;
-        unsafe { put(out_json, &json) }
+        put(out_json, &json)
     })
 }
 
@@ -538,7 +515,7 @@ pub unsafe extern "C" fn bb_bars_query(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let arg = text_of(arg);
         let json = match text_of(what).as_str() {
             "state" => app.app.bars_state_json(),
@@ -549,7 +526,7 @@ pub unsafe extern "C" fn bb_bars_query(
             "page" => app.app.barpage_json(),
             other => return Err(Fail::Err(format!("unknown bars query '{other}'"))),
         };
-        unsafe { put(out_json, &json) }
+        put(out_json, &json)
     })
 }
 
@@ -559,7 +536,7 @@ pub unsafe extern "C" fn bb_bars_query(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_bars_do(app: *mut BbApp, verb: BbStr, arg: BbStr) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let (verb, arg) = (text_of(verb), text_of(arg));
         match verb.as_str() {
             "set-json" => app.app.bars_set_json(&arg)?,
@@ -583,11 +560,9 @@ pub unsafe extern "C" fn bb_bars_set_toolbar(
     show_text: i32,
 ) -> BbStatus {
     guard(|| {
-        Ok(unsafe { app_of(app)? }.app.bars_set_toolbar(
-            &text_of(target),
-            &text_of(tokens),
-            show_text,
-        )?)
+        Ok(app_of(app)?
+            .app
+            .bars_set_toolbar(&text_of(target), &text_of(tokens), show_text)?)
     })
 }
 
@@ -598,11 +573,7 @@ pub unsafe extern "C" fn bb_bars_set_toolbar(
 /// `remove-saved <name>`, `select-saved <name>`, `save <name>`, `rename-saved <old> to <new>`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_barpage_do(app: *mut BbApp, verb: BbStr, arg: BbStr) -> BbStatus {
-    guard(|| {
-        Ok(unsafe { app_of(app)? }
-            .app
-            .barpage_do(&text_of(verb), &text_of(arg))?)
-    })
+    guard(|| Ok(app_of(app)?.app.barpage_do(&text_of(verb), &text_of(arg))?))
 }
 
 // ---- columns and the property seam ----
@@ -616,8 +587,8 @@ pub unsafe extern "C" fn bb_columns_state(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.columns_json(TabId(tab))?) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.columns_json(TabId(tab))?)
     })
 }
 
@@ -632,7 +603,7 @@ pub unsafe extern "C" fn bb_columns_do(
     arg: BbStr,
 ) -> BbStatus {
     guard(|| {
-        Ok(unsafe { app_of(app)? }
+        Ok(app_of(app)?
             .app
             .columns_do(TabId(tab), &text_of(verb), &text_of(arg))?)
     })
@@ -647,8 +618,8 @@ pub unsafe extern "C" fn bb_columns_header_menu(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.columns_header_menu_json(TabId(tab))?) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.columns_header_menu_json(TabId(tab))?)
     })
 }
 
@@ -659,8 +630,8 @@ pub unsafe extern "C" fn bb_columns_defaults(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.columns_defaults_json()) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.columns_defaults_json())
     })
 }
 
@@ -673,7 +644,7 @@ pub unsafe extern "C" fn bb_columns_defaults_do(
     arg: BbStr,
 ) -> BbStatus {
     guard(|| {
-        Ok(unsafe { app_of(app)? }
+        Ok(app_of(app)?
             .app
             .columns_defaults_do(&text_of(verb), &text_of(arg))?)
     })
@@ -690,11 +661,11 @@ pub unsafe extern "C" fn bb_columns_candidates(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let json = app
             .app
             .columns_candidates_json(TabId(tab), &text_of(search))?;
-        unsafe { put(out_json, &json) }
+        put(out_json, &json)
     })
 }
 
@@ -705,7 +676,7 @@ pub unsafe extern "C" fn bb_columns_set_machine_properties(
     json: BbStr,
 ) -> BbStatus {
     guard(|| {
-        Ok(unsafe { app_of(app)? }
+        Ok(app_of(app)?
             .app
             .columns_set_machine_properties(&text_of(json))?)
     })
@@ -724,11 +695,11 @@ pub unsafe extern "C" fn bb_props_requests(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let json = app
             .app
             .prop_requests(TabId(tab), from as usize, count as usize)?;
-        unsafe { put(out_json, &json) }
+        put(out_json, &json)
     })
 }
 
@@ -738,7 +709,7 @@ pub unsafe extern "C" fn bb_props_requests(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_props_supply(app: *mut BbApp, tab: u64, json: BbStr) -> BbStatus {
     guard(|| {
-        Ok(unsafe { app_of(app)? }
+        Ok(app_of(app)?
             .app
             .prop_supply_json(TabId(tab), &text_of(json))?)
     })
@@ -753,8 +724,8 @@ pub unsafe extern "C" fn bb_tab_tile_state(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.tile_state_json(TabId(tab))?) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.tile_state_json(TabId(tab))?)
     })
 }
 
@@ -766,8 +737,8 @@ pub unsafe extern "C" fn bb_tab_tile_state(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_saved_state(app: *mut BbApp, out_json: *mut BbOwnedStr) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.saved_json()) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.saved_json())
     })
 }
 
@@ -784,7 +755,7 @@ pub unsafe extern "C" fn bb_saved_do(
     arg: BbStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let tab = (tab != 0).then_some(TabId(tab));
         Ok(app.app.saved_do(tab, &text_of(verb), &text_of(arg))?)
     })
@@ -803,11 +774,11 @@ pub unsafe extern "C" fn bb_select_pattern(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let json = app
             .app
             .select_pattern_json(TabId(tab), &text_of(pattern), select, apply)?;
-        unsafe { put(out_json, &json) }
+        put(out_json, &json)
     })
 }
 
@@ -822,16 +793,16 @@ pub unsafe extern "C" fn bb_save_name(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let json = app.app.save_name_json(&text_of(kind), &text_of(name))?;
-        unsafe { put(out_json, &json) }
+        put(out_json, &json)
     })
 }
 
 /// Whether `path` is bookmarked.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_is_bookmarked(app: *mut BbApp, path: BbStr) -> bool {
-    let Ok(app) = (unsafe { app_of(app) }) else {
+    let Ok(app) = app_of(app) else {
         return false;
     };
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -844,7 +815,7 @@ pub unsafe extern "C" fn bb_is_bookmarked(app: *mut BbApp, path: BbStr) -> bool 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_status_set(app: *mut BbApp, text: BbStr) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         app.app.set_status(&text_of(text));
         Ok(())
     })
@@ -859,9 +830,9 @@ pub unsafe extern "C" fn bb_saved_default_name(
     out_name: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let name = app.app.saved_default_name(TabId(tab), workspace)?;
-        unsafe { put(out_name, &name) }
+        put(out_name, &name)
     })
 }
 
@@ -871,7 +842,7 @@ pub unsafe extern "C" fn bb_saved_default_name(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_settings_flush(app: *mut BbApp) -> BbStatus {
     guard(|| {
-        unsafe { app_of(app)? }.app.settings_flush();
+        app_of(app)?.app.settings_flush();
         Ok(())
     })
 }
@@ -884,8 +855,8 @@ pub unsafe extern "C" fn bb_settings_page_state(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.settings_page_json()) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.settings_page_json())
     })
 }
 
@@ -893,7 +864,7 @@ pub unsafe extern "C" fn bb_settings_page_state(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_settings_page_search(app: *mut BbApp, query: BbStr) -> BbStatus {
     guard(|| {
-        unsafe { app_of(app)? }.app.settings_search(&text_of(query));
+        app_of(app)?.app.settings_search(&text_of(query));
         Ok(())
     })
 }
@@ -905,8 +876,8 @@ pub unsafe extern "C" fn bb_settings_search_index(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.settings_search_index_json()) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.settings_search_index_json())
     })
 }
 
@@ -914,19 +885,14 @@ pub unsafe extern "C" fn bb_settings_search_index(
 /// commands run.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_settings_page_open(app: *mut BbApp, page: BbStr) -> BbStatus {
-    guard(|| Ok(unsafe { app_of(app)? }.app.settings_open(&text_of(page))?))
+    guard(|| Ok(app_of(app)?.app.settings_open(&text_of(page))?))
 }
 
 /// Back: flushes, and refuses with `BB_ERR` (the reason in `bb_last_error`) while a list the page
 /// holds is still unwritable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_settings_page_close(app: *mut BbApp) -> BbStatus {
-    guard(|| {
-        unsafe { app_of(app)? }
-            .app
-            .settings_close()
-            .map_err(Fail::Err)
-    })
+    guard(|| app_of(app)?.app.settings_close().map_err(Fail::Err))
 }
 
 // ---- themes ----
@@ -936,8 +902,8 @@ pub unsafe extern "C" fn bb_settings_page_close(app: *mut BbApp) -> BbStatus {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_theme_state(app: *mut BbApp, out_json: *mut BbOwnedStr) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.theme_json()) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.theme_json())
     })
 }
 
@@ -954,11 +920,11 @@ pub unsafe extern "C" fn bb_duplicates_scan(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let json = app
             .app
-            .duplicates_scan(&unsafe { path.to_string_lossy() }, min_size_bytes)?;
-        unsafe { put(out_json, &json) }
+            .duplicates_scan(&path.to_string_lossy(), min_size_bytes)?;
+        put(out_json, &json)
     })
 }
 
@@ -966,7 +932,7 @@ pub unsafe extern "C" fn bb_duplicates_scan(
 /// the parser reads, so the help cannot advertise a key the parser does not implement.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_search_syntax_help(out_json: *mut BbOwnedStr) -> BbStatus {
-    guard(|| unsafe { put(out_json, &bb_app::App::search_syntax_json()) })
+    guard(|| put(out_json, &bb_app::App::search_syntax_json()))
 }
 
 /// Every colour token, for the theme editor: `[{key, group, name, description, core, argb,
@@ -974,8 +940,8 @@ pub unsafe extern "C" fn bb_search_syntax_help(out_json: *mut BbOwnedStr) -> BbS
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_theme_tokens(app: *mut BbApp, out_json: *mut BbOwnedStr) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.theme_tokens_json()) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.theme_tokens_json())
     })
 }
 
@@ -988,7 +954,7 @@ pub unsafe extern "C" fn bb_theme_set_system_appearance(
     high_contrast: bool,
 ) -> BbStatus {
     guard(|| {
-        unsafe { app_of(app)? }
+        app_of(app)?
             .app
             .theme_set_system_appearance(is_dark, high_contrast);
         Ok(())
@@ -1006,12 +972,12 @@ pub unsafe extern "C" fn bb_theme_do(
     out_result: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let result = app.app.theme_do(&text_of(verb), &text_of(arg))?;
         if out_result.is_null() {
             Ok(())
         } else {
-            unsafe { put(out_result, &result) }
+            put(out_result, &result)
         }
     })
 }
@@ -1022,8 +988,8 @@ pub unsafe extern "C" fn bb_theme_do(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_index_state(app: *mut BbApp, out_json: *mut BbOwnedStr) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        unsafe { put(out_json, &app.app.index_json()) }
+        let app = app_of(app)?;
+        put(out_json, &app.app.index_json())
     })
 }
 
@@ -1031,7 +997,7 @@ pub unsafe extern "C" fn bb_index_state(app: *mut BbApp, out_json: *mut BbOwnedS
 /// prompt), `retry`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_index_do(app: *mut BbApp, verb: BbStr) -> BbStatus {
-    guard(|| Ok(unsafe { app_of(app)? }.app.index_do(&text_of(verb))?))
+    guard(|| Ok(app_of(app)?.app.index_do(&text_of(verb))?))
 }
 
 // ---- what the host tells us about the window ----
@@ -1041,9 +1007,7 @@ pub unsafe extern "C" fn bb_index_do(app: *mut BbApp, verb: BbStr) -> BbStatus {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_ui_set_flag(app: *mut BbApp, name: BbStr, value: bool) -> BbStatus {
     guard(|| {
-        unsafe { app_of(app)? }
-            .app
-            .ui_set_flag(&text_of(name), value);
+        app_of(app)?.app.ui_set_flag(&text_of(name), value);
         Ok(())
     })
 }
@@ -1052,7 +1016,7 @@ pub unsafe extern "C" fn bb_ui_set_flag(app: *mut BbApp, name: BbStr, value: boo
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_ui_set_dialog_open(app: *mut BbApp, open: bool) -> BbStatus {
     guard(|| {
-        unsafe { app_of(app)? }.app.ui_set_dialog_open(open);
+        app_of(app)?.app.ui_set_dialog_open(open);
         Ok(())
     })
 }
@@ -1061,5 +1025,5 @@ pub unsafe extern "C" fn bb_ui_set_dialog_open(app: *mut BbApp, open: bool) -> B
 /// here; the comparison engine is not part of this layer.)
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_compare_toggle(app: *mut BbApp) -> BbStatus {
-    guard(|| Ok(unsafe { app_of(app)? }.app.compare_toggle()?))
+    guard(|| Ok(app_of(app)?.app.compare_toggle()?))
 }

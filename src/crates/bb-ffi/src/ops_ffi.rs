@@ -19,13 +19,11 @@ pub unsafe extern "C" fn bb_ops_query(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let text = app
             .app
-            .ops_query(&unsafe { what.to_string_lossy() }, &unsafe {
-                arg.to_string_lossy()
-            })?;
-        *unsafe { out(out_json, "out_json")? } = BbOwnedStr::from_str(&text);
+            .ops_query(&what.to_string_lossy(), &arg.to_string_lossy())?;
+        *out(out_json, "out_json")? = BbOwnedStr::from_str(&text);
         Ok(())
     })
 }
@@ -40,13 +38,11 @@ pub unsafe extern "C" fn bb_ops_do(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let text = app
             .app
-            .ops_do(&unsafe { verb.to_string_lossy() }, &unsafe {
-                arg.to_string_lossy()
-            })?;
-        if let Some(o) = unsafe { out_json.as_mut() } {
+            .ops_do(&verb.to_string_lossy(), &arg.to_string_lossy())?;
+        if let Some(o) = opt_mut(out_json) {
             *o = BbOwnedStr::from_str(&text);
         }
         Ok(())

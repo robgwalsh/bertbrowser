@@ -22,12 +22,7 @@ use bb_core::preview::ShellPropertyRow;
 use serde_json::{Value, json};
 
 fn text_of(s: BbStr) -> String {
-    unsafe { s.to_string_lossy() }
-}
-
-unsafe fn put(out_json: *mut BbOwnedStr, text: &str) -> Result<(), Fail> {
-    *unsafe { out(out_json, "out_json")? } = BbOwnedStr::from_str(text);
-    Ok(())
+    s.to_string_lossy()
 }
 
 // ---- the preview ----
@@ -44,7 +39,7 @@ pub unsafe extern "C" fn bb_preview_build(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let mode = match mode {
             1 => MODE_RAW,
             2 => MODE_HEX,
@@ -52,7 +47,7 @@ pub unsafe extern "C" fn bb_preview_build(
             _ => MODE_AUTO,
         };
         let json = app.app.preview_build(TabId(tab), mode)?;
-        unsafe { put(out_json, &json) }
+        put(out_json, &json)
     })
 }
 
@@ -65,7 +60,7 @@ pub unsafe extern "C" fn bb_preview_build_path(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let mode = match mode {
             1 => MODE_RAW,
             2 => MODE_HEX,
@@ -73,7 +68,7 @@ pub unsafe extern "C" fn bb_preview_build_path(
             _ => MODE_AUTO,
         };
         let json = app.app.preview_build_path(&text_of(path), mode);
-        unsafe { put(out_json, &json) }
+        put(out_json, &json)
     })
 }
 
@@ -91,7 +86,7 @@ pub unsafe extern "C" fn bb_gif_open(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let (handle, json) = match app.app.gif_open(&text_of(path)) {
             Ok((handle, player)) => (
                 handle,
@@ -116,10 +111,10 @@ pub unsafe extern "C" fn bb_gif_open(
                 },
             ),
         };
-        if let Some(out_handle) = unsafe { out_handle.as_mut() } {
+        if let Some(out_handle) = opt_mut(out_handle) {
             *out_handle = handle;
         }
-        unsafe { put(out_json, &json.to_string()) }
+        put(out_json, &json.to_string())
     })
 }
 
@@ -133,13 +128,13 @@ pub unsafe extern "C" fn bb_gif_ready(
     out_flags: *mut u32,
 ) -> BbStatus {
     guard(|| {
-        let player = unsafe { app_of(app)? }.app.gif(handle)?;
+        let player = app_of(app)?.app.gif(handle)?;
         let ready = player.ready();
         let flags = u32::from(player.is_complete()) | (u32::from(player.is_stopped()) << 1);
-        if let Some(r) = unsafe { out_ready.as_mut() } {
+        if let Some(r) = opt_mut(out_ready) {
             *r = ready as u32;
         }
-        if let Some(f) = unsafe { out_flags.as_mut() } {
+        if let Some(f) = opt_mut(out_flags) {
             *f = flags;
         }
         Ok(())
@@ -158,15 +153,13 @@ pub unsafe extern "C" fn bb_gif_frame(
     out_index: *mut u32,
 ) -> BbStatus {
     guard(|| {
-        let player = unsafe { app_of(app)? }.app.gif(handle)?;
+        let player = app_of(app)?.app.gif(handle)?;
         let (at, pixels) = player.frame_or_earlier(index as usize);
         if dst.is_null() || capacity < pixels.len() {
             return Err(Fail::Err(format!("a frame needs {} bytes", pixels.len())));
         }
-        unsafe { ptr::copy_nonoverlapping(pixels.as_ptr(), dst, pixels.len()) };
-        if let Some(i) = unsafe { out_index.as_mut() } {
-            *i = at as u32;
-        }
+        copy_to(&pixels, dst);
+        set_opt(out_index, at as u32);
         Ok(())
     })
 }
@@ -182,11 +175,11 @@ pub unsafe extern "C" fn bb_gif_position(
     out_until_next: *mut i64,
 ) -> BbStatus {
     guard(|| {
-        let player = unsafe { app_of(app)? }.app.gif(handle)?;
-        if let Some(f) = unsafe { out_frame.as_mut() } {
+        let player = app_of(app)?.app.gif(handle)?;
+        if let Some(f) = opt_mut(out_frame) {
             *f = player.frame_at(position_ms) as u32;
         }
-        if let Some(n) = unsafe { out_until_next.as_mut() } {
+        if let Some(n) = opt_mut(out_until_next) {
             *n = player.until_next_frame(position_ms);
         }
         Ok(())
@@ -201,8 +194,8 @@ pub unsafe extern "C" fn bb_gif_start_of(
     out_ms: *mut i64,
 ) -> BbStatus {
     guard(|| {
-        let player = unsafe { app_of(app)? }.app.gif(handle)?;
-        if let Some(m) = unsafe { out_ms.as_mut() } {
+        let player = app_of(app)?.app.gif(handle)?;
+        if let Some(m) = opt_mut(out_ms) {
             *m = player.start_of(frame as usize);
         }
         Ok(())
@@ -213,7 +206,7 @@ pub unsafe extern "C" fn bb_gif_start_of(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_gif_close(app: *mut BbApp, handle: u64) -> BbStatus {
     guard(|| {
-        unsafe { app_of(app)? }.app.gif_close(handle);
+        app_of(app)?.app.gif_close(handle);
         Ok(())
     })
 }
@@ -255,7 +248,10 @@ pub struct BbPropertyHost {
     >,
 }
 
+// SAFETY: the C++ host's callbacks are thread-safe by the contract on `BbPropertyHost` (the COM work
+// is marshalled to its own STA), and `user` is only ever handed back to them.
 unsafe impl Send for BbPropertyHost {}
+// SAFETY: as `Send`.
 unsafe impl Sync for BbPropertyHost {}
 
 struct CHost(BbPropertyHost);
@@ -275,6 +271,7 @@ impl ShellPropertyHost for CHost {
         };
         let path = units(path);
         let mut view = BbStr::EMPTY;
+        // SAFETY: `call` is the host's callback; `path` outlives the call and `view` is a valid out slot.
         if unsafe { call(self.0.user, BbStr::of(&path), &mut view) } != BbStatus::BB_OK {
             return Vec::new();
         }
@@ -302,6 +299,7 @@ impl ShellPropertyHost for CHost {
         let path = units(path);
         let names = units(&json!(canonicals).to_string());
         let mut view = BbStr::EMPTY;
+        // SAFETY: as in `details`; `path` and `names` outlive the call.
         let status = unsafe {
             call(
                 self.0.user,
@@ -366,9 +364,9 @@ impl ShellPropertyHost for CHost {
         let path = units(path);
         let body = units(&Value::Array(rows).to_string());
         let mut error = BbStr::EMPTY;
-        if unsafe { call(self.0.user, BbStr::of(&path), BbStr::of(&body), &mut error) }
-            == BbStatus::BB_OK
-        {
+        // SAFETY: as in `details`; `path` and `body` outlive the call.
+        let written = unsafe { call(self.0.user, BbStr::of(&path), BbStr::of(&body), &mut error) };
+        if written == BbStatus::BB_OK {
             Ok(())
         } else {
             let words = text_of(error);
@@ -385,7 +383,7 @@ impl ShellPropertyHost for CHost {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_set_property_host(app: *mut BbApp, host: BbPropertyHost) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let installed =
             host.details.is_some() || host.read_fields.is_some() || host.write_fields.is_some();
         app.app.set_shell_property_host(
@@ -402,11 +400,7 @@ pub unsafe extern "C" fn bb_set_property_host(app: *mut BbApp, host: BbPropertyH
 /// unless `force`: a refresh that changes neither must not wipe what is half typed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_metadata_load(app: *mut BbApp, tab: u64, force: bool) -> BbStatus {
-    guard(|| {
-        Ok(unsafe { app_of(app)? }
-            .app
-            .metadata_load(TabId(tab), force)?)
-    })
+    guard(|| Ok(app_of(app)?.app.metadata_load(TabId(tab), force)?))
 }
 
 /// The pane as JSON: `{title, summary, isBusy, isEmpty, files, fields, details, canHoldPicture,
@@ -419,8 +413,8 @@ pub unsafe extern "C" fn bb_metadata_model(
     out_json: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let model = unsafe { app_of(app)? }.app.metadata_model(TabId(tab))?;
-        unsafe { put(out_json, &model.to_string()) }
+        let model = app_of(app)?.app.metadata_model(TabId(tab))?;
+        put(out_json, &model.to_string())
     })
 }
 
@@ -433,22 +427,16 @@ pub unsafe extern "C" fn bb_metadata_set_text(
     text: BbStr,
 ) -> BbStatus {
     guard(|| {
-        Ok(unsafe { app_of(app)? }.app.metadata_set_text(
-            TabId(tab),
-            &text_of(id),
-            &text_of(text),
-        )?)
+        Ok(app_of(app)?
+            .app
+            .metadata_set_text(TabId(tab), &text_of(id), &text_of(text))?)
     })
 }
 
 /// Puts a box back to what the files hold.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_metadata_revert(app: *mut BbApp, tab: u64, id: BbStr) -> BbStatus {
-    guard(|| {
-        Ok(unsafe { app_of(app)? }
-            .app
-            .metadata_revert(TabId(tab), &text_of(id))?)
-    })
+    guard(|| Ok(app_of(app)?.app.metadata_revert(TabId(tab), &text_of(id))?))
 }
 
 /// A day chosen in a date box's calendar; the time already in the box is kept.
@@ -462,13 +450,9 @@ pub unsafe extern "C" fn bb_metadata_pick_date(
     day: u32,
 ) -> BbStatus {
     guard(|| {
-        Ok(unsafe { app_of(app)? }.app.metadata_pick_date(
-            TabId(tab),
-            &text_of(id),
-            year,
-            month,
-            day,
-        )?)
+        Ok(app_of(app)?
+            .app
+            .metadata_pick_date(TabId(tab), &text_of(id), year, month, day)?)
     })
 }
 
@@ -486,19 +470,17 @@ pub unsafe extern "C" fn bb_metadata_act(
     out_op: *mut u64,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let action = match action {
             0 => MetadataAction::Apply,
             1 => MetadataAction::RemoveLocation,
             2 => MetadataAction::RemoveAll,
             3 => MetadataAction::RemovePicture,
-            4 if !data.is_null() => MetadataAction::SetPicture(
-                unsafe { std::slice::from_raw_parts(data, len) }.to_vec(),
-            ),
+            4 if !data.is_null() => MetadataAction::SetPicture(slice_of(data, len).to_vec()),
             _ => return Err(Fail::Err("unknown metadata action".into())),
         };
         let op = app.app.metadata_act(TabId(tab), action)?;
-        if let Some(out_op) = unsafe { out_op.as_mut() } {
+        if let Some(out_op) = opt_mut(out_op) {
             *out_op = op.0;
         }
         Ok(())
@@ -516,15 +498,13 @@ pub unsafe extern "C" fn bb_metadata_picture(
     out_len: *mut usize,
 ) -> BbStatus {
     guard(|| {
-        let picture = unsafe { app_of(app)? }
+        let picture = app_of(app)?
             .app
             .metadata_picture(TabId(tab))
             .unwrap_or_default();
-        if let Some(l) = unsafe { out_len.as_mut() } {
-            *l = picture.len();
-        }
-        if !dst.is_null() && capacity >= picture.len() {
-            unsafe { ptr::copy_nonoverlapping(picture.as_ptr(), dst, picture.len()) };
+        set_opt(out_len, picture.len());
+        if capacity >= picture.len() {
+            copy_to(&picture, dst);
         }
         Ok(())
     })
@@ -543,12 +523,10 @@ pub unsafe extern "C" fn bb_preview_read(
     out_len: *mut usize,
 ) -> BbStatus {
     guard(|| {
-        let bytes = unsafe { app_of(app)? }.app.preview_read(&text_of(path))?;
-        if let Some(l) = unsafe { out_len.as_mut() } {
-            *l = bytes.len();
-        }
-        if !dst.is_null() && capacity >= bytes.len() {
-            unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), dst, bytes.len()) };
+        let bytes = app_of(app)?.app.preview_read(&text_of(path))?;
+        set_opt(out_len, bytes.len());
+        if capacity >= bytes.len() {
+            copy_to(&bytes, dst);
         }
         Ok(())
     })
@@ -564,8 +542,8 @@ pub unsafe extern "C" fn bb_compare_settle_start(
     n: u32,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        app.app.compare_settle_start(unsafe { strings(paths, n) });
+        let app = app_of(app)?;
+        app.app.compare_settle_start(strings(paths, n));
         Ok(())
     })
 }
@@ -580,9 +558,9 @@ pub unsafe extern "C" fn bb_compare_settle(
     out_identical: *mut u32,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        let identical = app.app.compare_settle(&unsafe { strings(paths, n) })?;
-        if let Some(o) = unsafe { out_identical.as_mut() } {
+        let app = app_of(app)?;
+        let identical = app.app.compare_settle(&strings(paths, n))?;
+        if let Some(o) = opt_mut(out_identical) {
             *o = identical as u32;
         }
         Ok(())
@@ -603,11 +581,11 @@ pub unsafe extern "C" fn bb_op_rename_rule(
     out_op: *mut u64,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let rule: bb_core::rename::RenameRule = serde_json::from_str(&text_of(rule_json))
             .map_err(|e| Fail::Err(format!("not a rename rule: {e}")))?;
-        let op = app.app.op_rename_rule(unsafe { strings(src, n) }, rule)?;
-        if let Some(out_op) = unsafe { out_op.as_mut() } {
+        let op = app.app.op_rename_rule(strings(src, n), rule)?;
+        if let Some(out_op) = opt_mut(out_op) {
             *out_op = op.0;
         }
         Ok(())
@@ -618,7 +596,7 @@ pub unsafe extern "C" fn bb_op_rename_rule(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_undo_clear(app: *mut BbApp) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         app.app.release_undo_history();
         // Said here and not in the release itself, which also runs when the window closes.
         // Spec: ShellViewModel.ClearUndoHistoryAsync.
@@ -750,8 +728,8 @@ pub unsafe extern "C" fn bb_preview_next_media(
     out_row: *mut i64,
 ) -> BbStatus {
     guard(|| {
-        let next = unsafe { app_of(app)? }.app.preview_next_media(TabId(tab))?;
-        if let Some(o) = unsafe { out_row.as_mut() } {
+        let next = app_of(app)?.app.preview_next_media(TabId(tab))?;
+        if let Some(o) = opt_mut(out_row) {
             *o = next.map_or(-1, i64::from);
         }
         Ok(())
@@ -768,11 +746,11 @@ pub unsafe extern "C" fn bb_metadata_peek(
     out_text: *mut BbOwnedStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         let value = app
             .app
             .metadata_peek(&text_of(path), &text_of(what))
             .map_err(Fail::Err)?;
-        unsafe { put(out_text, &value) }
+        put(out_text, &value)
     })
 }

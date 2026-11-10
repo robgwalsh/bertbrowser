@@ -26,22 +26,13 @@ use bb_shell::updates::{self, UpdateOutcome};
 use bb_shell::{FolderHandlerRegistry, SingleInstance, WinEHandlerRegistry, foreground};
 
 /// `argv[1..]`, from the wide command line the host parsed.
-unsafe fn args_of(argc: i32, argv: *const *const u16) -> Vec<String> {
-    if argv.is_null() || argc <= 1 {
+fn args_of(argc: i32, argv: *const *const u16) -> Vec<String> {
+    if argc <= 1 {
         return Vec::new();
     }
-    (1..argc as usize)
-        .map(|i| {
-            let p = unsafe { *argv.add(i) };
-            if p.is_null() {
-                return String::new();
-            }
-            let mut len = 0usize;
-            while unsafe { *p.add(len) } != 0 {
-                len += 1;
-            }
-            String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(p, len) })
-        })
+    slice_of(argv, argc as usize)[1..]
+        .iter()
+        .map(|&p| wide_cstr(p))
         .collect()
 }
 
@@ -57,7 +48,7 @@ pub unsafe extern "C" fn bb_startup(argc: i32, argv: *const *const u16) -> BbSta
             start_counting_allocations();
             trace.set_allocator_reader(allocator_held);
         }
-        let args = unsafe { args_of(argc, argv) };
+        let args = args_of(argc, argv);
         // Uninstalling deletes the whole install directory, so a folder-handler registration left
         // behind would point the Windows shell at an executable that is gone, and since it owns the
         // Directory and Drive open verbs, every folder double-click on the machine would fail. The
@@ -95,9 +86,9 @@ pub unsafe extern "C" fn bb_launch_claim(
     out_launch: *mut *mut BbLaunch,
 ) -> BbStatus {
     guard(|| {
-        let out_launch = unsafe { out(out_launch, "out_launch")? };
-        let args = unsafe { args_of(argc, argv) };
-        let data_dir = PathBuf::from(unsafe { data_dir.to_string_lossy() });
+        let out_launch = out(out_launch, "out_launch")?;
+        let args = args_of(argc, argv);
+        let data_dir = PathBuf::from(data_dir.to_string_lossy());
         let request = CommandLine::parse(&args);
 
         let instance = SingleInstance::claim(&data_dir);
@@ -131,16 +122,14 @@ pub unsafe extern "C" fn bb_launch_claim(
 /// True when a running copy took this launch's request: free the launch and exit.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_launch_handed_off(launch: *const BbLaunch) -> bool {
-    guard_value(false, || {
-        unsafe { launch.as_ref() }.is_some_and(|l| l.handed_off)
-    })
+    guard_value(false, || opt_ref(launch).is_some_and(|l| l.handed_off))
 }
 
 /// The folder the command line named for the window to open on, or empty. A view valid until
 /// `bb_launch_free`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_launch_start_path(launch: *const BbLaunch) -> BbStr {
-    guard_value(BbStr::EMPTY, || match unsafe { launch.as_ref() } {
+    guard_value(BbStr::EMPTY, || match opt_ref(launch) {
         Some(l) => BbStr::of(&l.start_path),
         None => BbStr::EMPTY,
     })
@@ -157,7 +146,7 @@ pub extern "C" fn bb_trace_enabled() -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_trace_mark(name: BbStr) {
     let _ = guard(|| {
-        startup_trace::global().mark(&unsafe { name.to_string_lossy() });
+        startup_trace::global().mark(&name.to_string_lossy());
         Ok(())
     });
 }
@@ -169,8 +158,8 @@ pub unsafe extern "C" fn bb_trace_mark(name: BbStr) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_launch_command(app: *mut BbApp, id: BbStr) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
-        Ok(app.app.launch_command(&unsafe { id.to_string_lossy() })?)
+        let app = app_of(app)?;
+        Ok(app.app.launch_command(&id.to_string_lossy())?)
     })
 }
 
@@ -182,12 +171,10 @@ pub unsafe extern "C" fn bb_launch_command_at(
     folder: BbStr,
 ) -> BbStatus {
     guard(|| {
-        let app = unsafe { app_of(app)? };
+        let app = app_of(app)?;
         Ok(app
             .app
-            .launch_command_at(&unsafe { id.to_string_lossy() }, &unsafe {
-                folder.to_string_lossy()
-            })?)
+            .launch_command_at(&id.to_string_lossy(), &folder.to_string_lossy())?)
     })
 }
 
@@ -205,7 +192,7 @@ pub unsafe extern "C" fn bb_folder_handler_state(out_json: *mut BbOwnedStr) -> B
             "executable": handler.executable(),
         })
         .to_string();
-        *unsafe { out(out_json, "out_json")? } = BbOwnedStr::from_str(&text);
+        *out(out_json, "out_json")? = BbOwnedStr::from_str(&text);
         Ok(())
     })
 }
@@ -239,7 +226,7 @@ pub unsafe extern "C" fn bb_win_e_handler_state(out_json: *mut BbOwnedStr) -> Bb
             "executable": handler.executable(),
         })
         .to_string();
-        *unsafe { out(out_json, "out_json")? } = BbOwnedStr::from_str(&text);
+        *out(out_json, "out_json")? = BbOwnedStr::from_str(&text);
         Ok(())
     })
 }
@@ -265,6 +252,7 @@ pub unsafe extern "C" fn bb_win_e_handler_set(open_here: bool) -> BbStatus {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_launch_free(launch: *mut BbLaunch) {
     if !launch.is_null() {
+        // SAFETY: a non-null launch came from `bb_startup`/`bb_launch_*` as a boxed `BbLaunch`, freed once.
         drop(unsafe { Box::from_raw(launch) });
     }
 }
@@ -286,8 +274,8 @@ pub unsafe extern "C" fn bb_launch_serve(
     hwnd: *mut c_void,
 ) -> BbStatus {
     guard(|| {
-        let launch = unsafe { launch.as_mut() }.ok_or("null launch")?;
-        let app = unsafe { app_of(app)? }.app.clone();
+        let launch = opt_mut(launch).ok_or("null launch")?;
+        let app = app_of(app)?.app.clone();
         let hwnd = hwnd as isize;
         let trace = startup_trace::global();
 
@@ -441,13 +429,13 @@ mod tests {
             wide(r"C:\Users\A B"),
         );
         let argv = [a.as_ptr(), b.as_ptr(), c.as_ptr()];
-        let args = unsafe { args_of(3, argv.as_ptr()) };
+        let args = args_of(3, argv.as_ptr());
         assert_eq!(
             vec!["--new-tab".to_string(), r"C:\Users\A B".to_string()],
             args
         );
-        assert!(unsafe { args_of(1, argv.as_ptr()) }.is_empty());
-        assert!(unsafe { args_of(0, std::ptr::null()) }.is_empty());
+        assert!(args_of(1, argv.as_ptr()).is_empty());
+        assert!(args_of(0, std::ptr::null()).is_empty());
     }
 
     #[test]
@@ -455,7 +443,9 @@ mod tests {
         // Not installed by Velopack and not a hook: nothing happens and the launch carries on.
         let program = wide(r"C:\app\BertBrowser.exe");
         let argv = [program.as_ptr()];
-        assert_eq!(BbStatus::BB_OK, unsafe { bb_startup(1, argv.as_ptr()) });
+        // SAFETY: `argv` is one valid, NUL-terminated wide string and `argc` is 1.
+        let status = unsafe { bb_startup(1, argv.as_ptr()) };
+        assert_eq!(BbStatus::BB_OK, status);
     }
 
     #[test]
