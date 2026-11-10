@@ -18,8 +18,8 @@ use super::{
     ArchiveReadError, ArchiveReader, ExtractOutcome, ExtractPlan, ExtractProbe, FailedExtraction,
     FileSystemExtractProbe, PlannedExtraction,
 };
-use crate::cancel::{CancelToken, Cancelled};
-use crate::transfer::{PauseGate, ProgressCoalescer, TransferProgress};
+use bb_base::cancel::{CancelToken, Cancelled};
+use bb_files::transfer::{PauseGate, ProgressCoalescer, TransferProgress};
 
 pub struct ExtractExecutor<'r, P: ExtractProbe = FileSystemExtractProbe> {
     reader: &'r dyn ArchiveReader,

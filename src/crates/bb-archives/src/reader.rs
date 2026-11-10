@@ -26,8 +26,8 @@ use super::{
     ArchiveCapabilities, ArchiveContainer, ArchiveFailure, ArchiveFormat, ArchiveFormats,
     ArchiveIndex, ArchiveIndexBuilder, RawArchiveEntry,
 };
-use crate::FileTime;
-use crate::cancel::{CancelToken, Cancelled};
+use bb_base::FileTime;
+use bb_base::cancel::{CancelToken, Cancelled};
 
 /// Why `read_entries` stopped short.
 #[derive(Debug)]

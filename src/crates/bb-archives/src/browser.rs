@@ -10,9 +10,9 @@
 use std::sync::Arc;
 
 use super::{ArchiveIndex, ArchivePath};
-use crate::cancel::CancelToken;
-use crate::data::SearchHit;
-use crate::search::SearchQuery;
+use bb_base::cancel::CancelToken;
+use bb_search::SearchHit;
+use bb_search::SearchQuery;
 
 pub trait ArchiveBrowser: Send + Sync {
     /// A real directory, or somewhere inside a readable archive. Opens the container, so it

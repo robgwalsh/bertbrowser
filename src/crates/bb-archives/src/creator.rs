@@ -20,9 +20,9 @@ use super::{
     ArchiveSource, ArchiveType, ArchiveWriteFormat, ArchiveWriter, CompressionLevel,
     CompressionType, WriterOptions,
 };
-use crate::FileTime;
-use crate::cancel::CancelToken;
-use crate::transfer::{PauseGate, ProgressCoalescer, TransferProgress};
+use bb_base::FileTime;
+use bb_base::cancel::CancelToken;
+use bb_files::transfer::{PauseGate, ProgressCoalescer, TransferProgress};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreateArchiveOutcome {

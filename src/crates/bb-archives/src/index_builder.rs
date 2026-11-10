@@ -49,7 +49,7 @@ impl ArchiveIndexBuilder {
                     ArchiveFailure::TooManyEntries,
                     &format!(
                         "This archive holds more than {} entries, which is more than can be browsed.",
-                        crate::format::thousands(max_entries as i64)
+                        bb_base::format::thousands(max_entries as i64)
                     ),
                 );
             }

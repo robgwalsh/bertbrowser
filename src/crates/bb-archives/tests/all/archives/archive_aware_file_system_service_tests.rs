@@ -3,12 +3,12 @@ use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use bb_core::FileTime;
-use bb_core::archives::{ArchiveAwareFileSystemService, ArchiveBrowser, LibraryArchiveReader};
-use bb_core::attributes::HIDDEN;
-use bb_core::fs::{DriveInfo, FileSystemService, LocalFileSystem, SubdirectoryPresence};
-use bb_core::models::FileEntry;
-use bb_test_support::archive_support::{TempRoot, write_zip};
+use bb_archive_fixtures::archive_support::{TempRoot, write_zip};
+use bb_archives::{ArchiveAwareFileSystemService, ArchiveBrowser, LibraryArchiveReader};
+use bb_base::FileTime;
+use bb_base::attributes::HIDDEN;
+use bb_files::fs::{DriveInfo, FileSystemService, LocalFileSystem, SubdirectoryPresence};
+use bb_files::models::FileEntry;
 
 /// Records what it was asked, and answers nothing.
 #[derive(Default)]

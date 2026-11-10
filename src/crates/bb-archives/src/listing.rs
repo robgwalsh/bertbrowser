@@ -7,7 +7,7 @@ use std::io::{Read, Seek};
 
 use bb_paths::fold_upper;
 
-use crate::FileTime;
+use bb_base::FileTime;
 
 /// One entry inside an archive. Nothing is extracted to produce it.
 #[derive(Clone, Debug, PartialEq, Eq)]

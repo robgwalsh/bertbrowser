@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use bb_paths::fold_upper;
 
-use crate::FileTime;
+use bb_base::FileTime;
 
 /// One entry as the container reported it, before any tree is built.
 #[derive(Clone, Debug, PartialEq, Eq)]

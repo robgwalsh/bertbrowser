@@ -11,10 +11,10 @@
 use bb_paths::{fold_upper, split_last};
 
 use super::{ArchiveIndex, ArchiveNode, ArchivePath};
-use crate::FileTime;
-use crate::cancel::{CancelToken, Cancelled};
-use crate::data::SearchHit;
-use crate::search::{SearchCandidate, SearchQuery};
+use bb_base::FileTime;
+use bb_base::cancel::{CancelToken, Cancelled};
+use bb_search::SearchHit;
+use bb_search::{SearchCandidate, SearchQuery};
 
 pub struct ArchiveSearchScanner;
 

@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::fs::EntryStamp;
+use bb_files::fs::EntryStamp;
 
 /// One change to make to a container's contents.
 #[derive(Clone, Debug, PartialEq, Eq)]

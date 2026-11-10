@@ -1,8 +1,8 @@
 // Port of tests/BertBrowser.Core.Tests/ArchiveIndexBuilderTests.cs.
-use bb_core::FileTime;
-use bb_core::archives::{
+use bb_archives::{
     ArchiveCapabilities, ArchiveFailure, ArchiveIndex, ArchiveIndexBuilder, RawArchiveEntry,
 };
+use bb_base::FileTime;
 
 fn file(key: &str) -> RawArchiveEntry {
     file_sized(key, 100, 40)

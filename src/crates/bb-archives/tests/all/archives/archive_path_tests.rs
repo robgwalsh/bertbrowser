@@ -1,5 +1,5 @@
 // Port of tests/BertBrowser.Core.Tests/ArchivePathTests.cs.
-use bb_core::archives::ArchivePath;
+use bb_archives::ArchivePath;
 
 /// Every path the tests below call an archive.
 fn real_zips(p: &str) -> bool {

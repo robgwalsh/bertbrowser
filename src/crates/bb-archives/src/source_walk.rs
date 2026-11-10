@@ -10,8 +10,8 @@ use std::os::windows::fs::MetadataExt;
 
 use bb_paths::file_name;
 
-use crate::attributes::{DIRECTORY, HIDDEN, REPARSE_POINT};
-use crate::cancel::{CancelToken, Cancelled};
+use bb_base::attributes::{DIRECTORY, HIDDEN, REPARSE_POINT};
+use bb_base::cancel::{CancelToken, Cancelled};
 
 /// One file that is going into a new archive, and the name it will have inside it.
 #[derive(Clone, Debug, PartialEq, Eq)]

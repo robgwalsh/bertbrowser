@@ -7,7 +7,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Read, Write};
 use std::os::windows::fs::OpenOptionsExt;
 
-use crate::FileTime;
+use bb_base::FileTime;
 
 /// The container kind a writer produces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

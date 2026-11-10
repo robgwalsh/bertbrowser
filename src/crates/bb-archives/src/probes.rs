@@ -8,7 +8,7 @@
 //! anything else, so a planner holding one is not lying about the rest of the world.
 
 use super::{ArchiveIndex, ArchivePath};
-use crate::rename::RenameProbe;
+use bb_files::rename::RenameProbe;
 
 pub struct ArchiveRenameProbe<'a> {
     index: &'a ArchiveIndex,

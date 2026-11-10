@@ -4,14 +4,14 @@
 // entries, while a 7z with its headers encrypted has nothing to list at all.
 use std::sync::Arc;
 
-use bb_core::archives::{
+use bb_archive_fixtures::archive_support::TempRoot;
+use bb_archives::{
     ArchiveAwareFileSystemService, ArchiveCache, ArchiveFailure, ArchiveLockedError,
     ArchivePasswords, ArchiveReader, LibraryArchiveReader,
 };
-use bb_core::cancel::CancelToken;
-use bb_core::fs::{FileSystemService, LocalFileSystem};
-use bb_test_support::archive_fixtures;
-use bb_test_support::archive_support::TempRoot;
+use bb_base::cancel::CancelToken;
+use bb_files::fs::{FileSystemService, LocalFileSystem};
+use bb_fixtures::archive_fixtures;
 
 struct Fixture {
     root: TempRoot,
@@ -30,12 +30,12 @@ impl Fixture {
         archive_fixtures::write_to(&self.root.root.join(name), base64)
     }
 
-    fn read(&self, path: &str, password: Option<&str>) -> bb_core::archives::ArchiveIndex {
+    fn read(&self, path: &str, password: Option<&str>) -> bb_archives::ArchiveIndex {
         self.reader.read(path, password, &CancelToken::none())
     }
 }
 
-fn names(index: &bb_core::archives::ArchiveIndex) -> Vec<String> {
+fn names(index: &bb_archives::ArchiveIndex) -> Vec<String> {
     index
         .children("")
         .expect("root")

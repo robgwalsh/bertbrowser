@@ -1,9 +1,9 @@
 // Port of tests/BertBrowser.Core.Tests/ArchiveSearchTests.cs.
-use bb_core::archives::{ArchiveReader, ArchiveSearchScanner, LibraryArchiveReader};
-use bb_core::cancel::CancelToken;
-use bb_core::data::SearchHit;
-use bb_core::search::{SearchQuery, SearchSyntax};
-use bb_test_support::archive_support::{TempRoot, write_zip};
+use bb_archive_fixtures::archive_support::{TempRoot, write_zip};
+use bb_archives::{ArchiveReader, ArchiveSearchScanner, LibraryArchiveReader};
+use bb_base::cancel::CancelToken;
+use bb_search::SearchHit;
+use bb_search::{SearchQuery, SearchSyntax};
 
 struct Fixture {
     root: TempRoot,

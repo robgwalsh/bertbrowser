@@ -12,6 +12,7 @@ test = false
 doctest = false
 
 [dependencies]
+bb-archives = { path = "../bb-archives" }
 bb-base = { path = "../bb-base" }
 bb-files = { path = "../bb-files" }
 bb-metadata = { path = "../bb-metadata" }
@@ -21,7 +22,6 @@ bb-paths = { path = "../bb-paths" }
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-fancy-regex.workspace = true
 windows-sys = { workspace = true, features = [
     "Wdk_System_SystemServices",
     "Win32_Foundation",
@@ -41,24 +41,7 @@ windows-sys = { workspace = true, features = [
     "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",
 ] }
-windows-core = "0.62"
 
-# COM: the Recycle Bin (IFileOperation and its progress sink, the bin folder's context menu).
-windows = { workspace = true, features = [
-    "Win32_Foundation",
-    "Win32_System_Com",
-    "Win32_UI_Shell",
-    "Win32_UI_Shell_Common",
-    "Win32_UI_WindowsAndMessaging",
-] }
-zip.workspace = true
-sevenz-rust2.workspace = true
-unrar.workspace = true
-tar.workspace = true
-flate2.workspace = true
-bzip2.workspace = true
-liblzma.workspace = true
-ruzstd.workspace = true
 bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
 
 [dev-dependencies]

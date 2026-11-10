@@ -1,11 +1,11 @@
 // Port of tests/BertBrowser.Core.Tests/ArchiveCreatorTests.cs.
-use bb_core::archives::{
+use bb_archive_fixtures::archive_support::TempRoot;
+use bb_archives::{
     ArchiveCreator, ArchiveFormats, ArchiveReader, ArchiveSource, ArchiveSourceWalk,
     ArchiveWriteFormat, ArchiveWriteRules, CompressionLevel, CompressionType, LibraryArchiveReader,
 };
-use bb_core::cancel::CancelToken;
-use bb_core::transfer::TransferProgress;
-use bb_test_support::archive_support::TempRoot;
+use bb_base::cancel::CancelToken;
+use bb_files::transfer::TransferProgress;
 use windows_sys::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, SetFileAttributesW};
 
 struct Fixture {
@@ -42,7 +42,7 @@ impl Fixture {
         format: ArchiveWriteFormat,
         level: CompressionLevel,
         sources: &[ArchiveSource],
-    ) -> bb_core::archives::CreateArchiveOutcome {
+    ) -> bb_archives::CreateArchiveOutcome {
         self.creator.create(
             target,
             format,

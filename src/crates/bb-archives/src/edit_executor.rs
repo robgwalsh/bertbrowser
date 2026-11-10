@@ -25,10 +25,10 @@ use super::{
     ArchiveFormats, ArchiveReadError, ArchiveReader, ArchiveType, ArchiveWriter, CompressionType,
     ExtractRules, WriterOptions,
 };
-use crate::FileTime;
-use crate::cancel::{CancelToken, Cancelled};
-use crate::fs::EntryStamp;
-use crate::transfer::{PauseGate, ProgressCoalescer, TransferProgress};
+use bb_base::FileTime;
+use bb_base::cancel::{CancelToken, Cancelled};
+use bb_files::fs::EntryStamp;
+use bb_files::transfer::{PauseGate, ProgressCoalescer, TransferProgress};
 
 pub struct ArchiveEditExecutor<'r> {
     reader: &'r dyn ArchiveReader,

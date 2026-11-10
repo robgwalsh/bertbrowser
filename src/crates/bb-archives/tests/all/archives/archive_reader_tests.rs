@@ -4,11 +4,11 @@
 // the failure behaviour: damaged bytes and a file that only claims to be an archive all have to
 // come back as an index carrying a message, because the whole browsing surface rests on that
 // never failing.
-use bb_core::archives::{
+use bb_archive_fixtures::archive_support::{TempRoot, write_archive, write_zip};
+use bb_archives::{
     ArchiveFailure, ArchiveReader, ArchiveType, CompressionType, LibraryArchiveReader,
 };
-use bb_core::cancel::CancelToken;
-use bb_test_support::archive_support::{TempRoot, write_archive, write_zip};
+use bb_base::cancel::CancelToken;
 
 struct Fixture {
     root: TempRoot,
@@ -37,7 +37,7 @@ impl Fixture {
         write_zip(&self.root.path(name), entries)
     }
 
-    fn read(&self, path: &str) -> bb_core::archives::ArchiveIndex {
+    fn read(&self, path: &str) -> bb_archives::ArchiveIndex {
         self.reader.read(path, None, &CancelToken::none())
     }
 
@@ -47,7 +47,7 @@ impl Fixture {
     }
 }
 
-fn names(index: &bb_core::archives::ArchiveIndex, dir: &str) -> Vec<String> {
+fn names(index: &bb_archives::ArchiveIndex, dir: &str) -> Vec<String> {
     index
         .children(dir)
         .expect("directory")

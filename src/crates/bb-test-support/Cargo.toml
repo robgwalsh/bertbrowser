@@ -12,6 +12,7 @@ test = false
 doctest = false
 
 [dependencies]
+bb-archive-fixtures = { path = "../bb-archive-fixtures" }
 bb-core = { path = "../bb-core" }
 bb-elevation = { path = "../bb-elevation" }
 bb-fixtures = { path = "../bb-fixtures" }

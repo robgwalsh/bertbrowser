@@ -16,13 +16,13 @@ use super::{
     ArchiveBrowser, ArchiveCache, ArchiveFailure, ArchiveIndex, ArchiveNode, ArchivePath,
     ArchiveReader, ArchiveSearchScanner,
 };
-use crate::FileTime;
-use crate::attributes::{DIRECTORY, NORMAL};
-use crate::cancel::CancelToken;
-use crate::data::SearchHit;
-use crate::fs::{DriveInfo, FileSystemService, SubdirectoryPresence};
-use crate::models::FileEntry;
-use crate::search::SearchQuery;
+use bb_base::FileTime;
+use bb_base::attributes::{DIRECTORY, NORMAL};
+use bb_base::cancel::CancelToken;
+use bb_files::fs::{DriveInfo, FileSystemService, SubdirectoryPresence};
+use bb_files::models::FileEntry;
+use bb_search::SearchHit;
+use bb_search::SearchQuery;
 
 /// Where the session's archive passwords are kept, if anywhere. A seam rather than a concrete
 /// type so the listing layer never holds secrets itself, and so a harness run can supply

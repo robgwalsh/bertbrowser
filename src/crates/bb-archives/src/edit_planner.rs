@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 use bb_paths::{file_name, fold_upper, split_last};
 
-use crate::rename::RenamePattern;
+use bb_files::rename::RenamePattern;
 
 use super::{
     AddFile, ArchiveEdit, ArchiveEditPlan, ArchiveEditRejection, ArchiveFormats, ArchiveIndex,
@@ -102,7 +102,7 @@ impl ArchiveEditPlanner {
                 ArchiveEditRejection::TooLarge,
                 &format!(
                     "Changing this archive would mean rewriting {}, which is more than this will do in one go.",
-                    crate::format::byte_size(archive_bytes)
+                    bb_base::format::byte_size(archive_bytes)
                 ),
             );
         }
