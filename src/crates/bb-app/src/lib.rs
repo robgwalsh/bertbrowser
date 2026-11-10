@@ -9,6 +9,9 @@
 //! harness must fake is a trait chosen at construction (`AppConfig::fakes`).
 //! Spec: src/BertBrowser.App/ViewModels/*, Services/Commands/*, Theming/*.
 
+#[macro_use]
+mod verb_enum;
+
 mod api;
 mod app;
 mod browse;
