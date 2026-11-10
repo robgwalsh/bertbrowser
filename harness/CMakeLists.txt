@@ -10,6 +10,10 @@ add_executable(bb-harness
   bench.cpp
   runner_bench.cpp
   runner_ui.cpp
+  runner_ui_util.cpp
+  runner_ui_keys.cpp
+  runner_ui_lists.cpp
+  runner_ui_session.cpp
   runner_panes.cpp
   runner_tools.cpp
   runner_ops.cpp

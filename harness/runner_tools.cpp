@@ -43,6 +43,14 @@ std::vector<std::wstring> words(const std::wstring& text) {
 }  // namespace
 
 void Runner::install_tools() {
+    install_tools_checksums();
+    install_tools_files();
+    install_tools_duplicates();
+    install_tools_changes();
+    install_tools_folders();
+}
+
+void Runner::install_tools_checksums() {
     auto call = [this](const char* verb, const std::string& args = {}) {
         try {
             return views::tool_call(s_.view(), verb, args);
@@ -119,7 +127,9 @@ void Runner::install_tools() {
         }
         throw AssertionError("The verify report holds no row named '" + to_utf8(parts[0]) + "'. It holds: " + have);
     };
+}
 
+void Runner::install_tools_files() {
     // ---- comparing two files ----
     // assert-compare-files <substring> -- the verdict strip's words.
     verbs_[L"assert-compare-files"] = [this](const std::wstring& r) {
@@ -137,7 +147,9 @@ void Runner::install_tools() {
             throw AssertionError("The verdict is '" + to_utf8(verdict) + "', which does not hold '" + to_utf8(want) + "'.");
         }
     };
+}
 
+void Runner::install_tools_duplicates() {
     // ---- the duplicate finder ----
     auto groups_of = [this]() -> const json::Value& {
         auto& d = s_.view().duplicates();
@@ -189,6 +201,16 @@ void Runner::install_tools() {
         if (!started) throw AssertionError("Nothing is ticked. Run 'duplicates-keep' first.");
         await_op(op);
     };
+}
+
+void Runner::install_tools_changes() {
+    auto call = [this](const char* verb, const std::string& args = {}) {
+        try {
+            return views::tool_call(s_.view(), verb, args);
+        } catch (const core::CoreError& e) {
+            throw AssertionError(e.what());
+        }
+    };
 
     // ---- the change timeline ----
     // changes-seed -- a dozen recorded changes under the sandbox, written through the repository the index helper
@@ -196,6 +218,16 @@ void Runner::install_tools() {
     verbs_[L"changes-seed"] = [this, call](const std::wstring&) {
         const json::Value r = call("changes.seed", "{\"root\":" + views::json_quote(sandbox_.root().wstring()) + "}");
         say("CHANGES " + std::to_string(static_cast<int64_t>(r["rows"].num())));
+    };
+}
+
+void Runner::install_tools_folders() {
+    auto call = [this](const char* verb, const std::string& args = {}) {
+        try {
+            return views::tool_call(s_.view(), verb, args);
+        } catch (const core::CoreError& e) {
+            throw AssertionError(e.what());
+        }
     };
 
     // ---- comparing two folders ----

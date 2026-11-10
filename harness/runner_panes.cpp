@@ -215,6 +215,17 @@ bb::views::MetadataPane* Runner::metadata_pane() {
 }
 
 void Runner::install_panes() {
+    install_panes_preview();
+    install_panes_gif();
+    install_panes_sidepane();
+    install_panes_fixtures();
+    install_panes_metadata();
+    install_panes_tags();
+    install_panes_content();
+    install_panes_compare();
+}
+
+void Runner::install_panes_preview() {
     // ---- the preview ----
     verbs_[L"preview-mode"] = [this](const std::wstring& r) {
         const std::wstring mode = lower(require(r, "preview-mode"));
@@ -242,7 +253,9 @@ void Runner::install_panes() {
         button->click();
         s_.settle();
     };
+}
 
+void Runner::install_panes_gif() {
     // ---- the animated GIF ----
     verbs_[L"gif-fixture"] = [this](const std::wstring& r) {
         const fs_::path root = sandbox_.require_inside(r.empty() ? L"Gif" : r, "gif-fixture");
@@ -306,7 +319,9 @@ void Runner::install_panes() {
             throw FormatError("assert-gif: expected 'none', 'playing', 'paused' or 'frame <n>', got '" + to_utf8(r) + "'.");
         }
     };
+}
 
+void Runner::install_panes_sidepane() {
     // ---- the side pane ----
     verbs_[L"side-pane"] = [this](const std::wstring& r) {
         const std::wstring what = lower(require(r, "side-pane"));
@@ -326,7 +341,9 @@ void Runner::install_panes() {
             throw AssertionError("the side pane is " + to_utf8(actual) + ", expected " + to_utf8(r) + ".");
         }
     };
+}
 
+void Runner::install_panes_fixtures() {
     // ---- fixtures ----
     auto fixture = [this](const char* verb, const char* kind, const wchar_t* fallback) {
         return [this, verb, kind, fallback](const std::wstring& r) {
@@ -339,7 +356,9 @@ void Runner::install_panes() {
     verbs_[L"media-fixture"] = fixture("media-fixture", "media", L".");
     verbs_[L"formats-fixture"] = fixture("formats-fixture", "formats", L".");
     verbs_[L"windows-fixture"] = fixture("windows-fixture", "windows", L".");
+}
 
+void Runner::install_panes_metadata() {
     // ---- the metadata pane ----
     verbs_[L"metadata-type"] = [this](const std::wstring& r) {
         views::MetadataPane* pane = metadata_pane();
@@ -458,7 +477,9 @@ void Runner::install_panes() {
             throw AssertionError("'" + to_utf8(name) + "' was " + to_utf8(which) + " " + actual + ", expected " + to_utf8(expected) + ".");
         }
     };
+}
 
+void Runner::install_panes_tags() {
     // ---- names from tags, and the history ----
     verbs_[L"rename-rule"] = [this](const std::wstring& r) {
         if (trim(r).empty()) throw FormatError("rename-rule needs key=value settings.");
@@ -503,7 +524,9 @@ void Runner::install_panes() {
         core::check(bb_undo_clear(s_.core().app()), "clear-undo-history");
         s_.settle();
     };
+}
 
+void Runner::install_panes_content() {
     // ---- content search ----
     verbs_[L"assert-match"] = [this](const std::wstring& r) {
         const auto [name, expected] = split_first(r);
@@ -520,7 +543,9 @@ void Runner::install_panes() {
             throw AssertionError("expected '" + to_utf8(name) + "' to have matched on a line containing '" + to_utf8(expected) + "', got '" + to_utf8(actual) + "'.");
         }
     };
+}
 
+void Runner::install_panes_compare() {
     // ---- comparing two panes ----
     verbs_[L"settle-content"] = [this](const std::wstring&) {
         std::vector<std::wstring> files;
