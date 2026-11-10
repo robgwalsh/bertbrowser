@@ -434,6 +434,17 @@ std::string Runner::state_json() {
 // ---- verbs ------------------------------------------------------------------------------------------
 
 void Runner::install() {
+    install_core_basics();
+    install_core_fixtures();
+    install_core_navigation();
+    install_core_selection();
+    install_core_tabs();
+    install_core_search();
+    install_core_writing();
+    install_core_readback();
+}
+
+void Runner::install_core_basics() {
     verbs_[L"echo"] = [this](const std::wstring& r) { say(r); };
     verbs_[L"sleep"] = [this](const std::wstring& r) {
         const auto start = Clock::now();
@@ -444,7 +455,9 @@ void Runner::install() {
         }
     };
     verbs_[L"settle"] = [this](const std::wstring& r) { s_.settle(r.empty() ? 0 : number(r, "settle")); };
+}
 
+void Runner::install_core_fixtures() {
     // ---- fixtures ----
     verbs_[L"tree"] = [this](const std::wstring& r) { say(L"# tree: " + sandbox_.populate(r.empty() ? L"." : r).wstring()); };
     verbs_[L"mkdir"] = [this](const std::wstring& r) { fs::create_directories(sandbox_.require_inside(require(r, "mkdir"), "mkdir")); };
@@ -482,7 +495,9 @@ void Runner::install() {
         out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
     };
     verbs_[L"sandbox"] = [this](const std::wstring&) { say(sandbox_.root().wstring()); };
+}
 
+void Runner::install_core_navigation() {
     // ---- navigation ----
     verbs_[L"go"] = [this](const std::wstring& r) {
         const fs::path path = sandbox_.resolve(require(r, "go"));
@@ -584,7 +599,9 @@ void Runner::install() {
         else s_.view().tree_view()->collapse(chain.back());
         s_.settle(200);
     };
+}
 
+void Runner::install_core_selection() {
     // ---- selection ----
     verbs_[L"select"] = [this](const std::wstring& r) { select_names(require(r, "select")); };
     verbs_[L"select-all"] = [this](const std::wstring&) {
@@ -595,7 +612,9 @@ void Runner::install() {
         core::check(bb_tab_select(s_.core().app(), tab(), BB_SELECT_CLEAR, nullptr, 0), "deselect");
         s_.settle();
     };
+}
 
+void Runner::install_core_tabs() {
     // ---- tabs and panes ----
     verbs_[L"newtab"] = [this](const std::wstring& r) {
         const std::wstring path = r.empty() ? s_.core().tab_text(tab(), BB_TEXT_PATH) : sandbox_.resolve(r).wstring();
@@ -630,7 +649,9 @@ void Runner::install() {
         core::check(bb_pane_activate(s_.core().app(), ids[static_cast<size_t>(index) - 1]), "pane");
         s_.settle();
     };
+}
 
+void Runner::install_core_search() {
     // ---- searching, flat, hidden ----
     verbs_[L"search"] = [this](const std::wstring& r) { search(r, false); };
     verbs_[L"gsearch"] = [this](const std::wstring& r) { search(r, true); };
@@ -659,7 +680,9 @@ void Runner::install() {
         core::check(bb_settings_set(s_.core().app(), core::s(L"iconSize"), core::s(L"\"" + size + L"\"")), "icon-size");
         s_.settle();
     };
+}
 
+void Runner::install_core_writing() {
     // ---- writing ----
     verbs_[L"rename"] = [this](const std::wstring& r) {
         const std::wstring pattern = require(r, "rename");
@@ -676,7 +699,9 @@ void Runner::install() {
     verbs_[L"copy"] = [this](const std::wstring& r) { transfer(r, false); };
     verbs_[L"undo"] = [this](const std::wstring&) { undo_step(1); };
     verbs_[L"redo"] = [this](const std::wstring&) { undo_step(-1); };
+}
 
+void Runner::install_core_readback() {
     // ---- reading back ----
     verbs_[L"shot"] = [this](const std::wstring& r) { shot(r); };
     verbs_[L"state"] = [this](const std::wstring&) { say("STATE " + state_json()); };

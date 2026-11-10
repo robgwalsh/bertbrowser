@@ -77,13 +77,17 @@ void release_denials() {
 }
 
 void Runner::install_ops() {
+    install_ops_queue();
+    install_ops_clashes();
+    install_ops_drag();
+    install_ops_archives();
+    install_ops_elevation();
+    install_ops_menus();
+    install_ops_history();
+}
+
+void Runner::install_ops_queue() {
     auto run = [this](const char* verb, const std::string& arg = {}) { return ops::run(s_.core(), verb, arg); };
-    auto query = [this](const char* what, const std::string& arg = {}) { return ops::query(s_.core(), what, arg); };
-    // An operation a verb started, waited out the way every other is.
-    auto started = [this](const bb::json::Value& v) {
-        if (!v["op"].is_null()) await_op(static_cast<uint64_t>(v["op"].i64()));
-        else s_.settle();
-    };
     auto fresh_queue = [this]() -> const bb::json::Value& {
         s_.pump();
         s_.view().sync_transfer();
@@ -171,6 +175,16 @@ void Runner::install_ops() {
     };
     verbs_[L"assert-paused"] = [paused](const std::wstring&) { paused(true); };
     verbs_[L"assert-not-paused"] = [paused](const std::wstring&) { paused(false); };
+}
+
+void Runner::install_ops_clashes() {
+    auto run = [this](const char* verb, const std::string& arg = {}) { return ops::run(s_.core(), verb, arg); };
+    auto query = [this](const char* what, const std::string& arg = {}) { return ops::query(s_.core(), what, arg); };
+    // An operation a verb started, waited out the way every other is.
+    auto started = [this](const bb::json::Value& v) {
+        if (!v["op"].is_null()) await_op(static_cast<uint64_t>(v["op"].i64()));
+        else s_.settle();
+    };
 
     // ---- clashes ----
     verbs_[L"conflict"] = [this, run](const std::wstring& r) {
@@ -243,6 +257,14 @@ void Runner::install_ops() {
         }
         throw AssertionError("no conflict row named '" + to_utf8(key) + "'.");
     };
+}
+
+void Runner::install_ops_drag() {
+    auto run = [this](const char* verb, const std::string& arg = {}) { return ops::run(s_.core(), verb, arg); };
+    auto started = [this](const bb::json::Value& v) {
+        if (!v["op"].is_null()) await_op(static_cast<uint64_t>(v["op"].i64()));
+        else s_.settle();
+    };
 
     // ---- right-drag, shortcuts ----
     verbs_[L"right-drop-menu"] = [this](const std::wstring& r) {
@@ -267,6 +289,16 @@ void Runner::install_ops() {
         std::error_code ec;
         fs::create_directories(target, ec);
         started(run("shortcut", "{\"sources\":" + ops::qa(srcs) + ",\"directory\":" + ops::q(target.wstring()) + "}"));
+    };
+}
+
+void Runner::install_ops_archives() {
+    auto run = [this](const char* verb, const std::string& arg = {}) { return ops::run(s_.core(), verb, arg); };
+    auto query = [this](const char* what, const std::string& arg = {}) { return ops::query(s_.core(), what, arg); };
+    // An operation a verb started, waited out the way every other is.
+    auto started = [this](const bb::json::Value& v) {
+        if (!v["op"].is_null()) await_op(static_cast<uint64_t>(v["op"].i64()));
+        else s_.settle();
     };
 
     // ---- archives ----
@@ -312,6 +344,15 @@ void Runner::install_ops() {
         run("unlock", "{\"tab\":" + std::to_string(tab()) + ",\"password\":" + ops::q(password) + "}");
         s_.settle();
     };
+}
+
+void Runner::install_ops_elevation() {
+    auto query = [this](const char* what, const std::string& arg = {}) { return ops::query(s_.core(), what, arg); };
+    // An operation a verb started, waited out the way every other is.
+    auto started = [this](const bb::json::Value& v) {
+        if (!v["op"].is_null()) await_op(static_cast<uint64_t>(v["op"].i64()));
+        else s_.settle();
+    };
 
     // ---- elevation ----
     verbs_[L"deny"] = [this](const std::wstring& r) {
@@ -353,6 +394,16 @@ void Runner::install_ops() {
         if (e["offers"].i64() > 0) {
             throw AssertionError("an administrator retry was offered for: " + e["last"]["operation"].str() + " (" + std::to_string(e["last"]["items"].size()) + " item(s))");
         }
+    };
+}
+
+void Runner::install_ops_menus() {
+    auto run = [this](const char* verb, const std::string& arg = {}) { return ops::run(s_.core(), verb, arg); };
+    auto query = [this](const char* what, const std::string& arg = {}) { return ops::query(s_.core(), what, arg); };
+    // An operation a verb started, waited out the way every other is.
+    auto started = [this](const bb::json::Value& v) {
+        if (!v["op"].is_null()) await_op(static_cast<uint64_t>(v["op"].i64()));
+        else s_.settle();
     };
 
     // ---- the right-click menus, as the Context menu page would have saved them ----
@@ -411,6 +462,16 @@ void Runner::install_ops() {
         const auto catalog = source->catalog();
         for (const auto& e : catalog) names += (names.empty() ? "" : ", ") + e.name;
         say("# the registry lists " + std::to_string(catalog.size()) + " extension(s): " + names);
+    };
+}
+
+void Runner::install_ops_history() {
+    auto run = [this](const char* verb, const std::string& arg = {}) { return ops::run(s_.core(), verb, arg); };
+    auto query = [this](const char* what, const std::string& arg = {}) { return ops::query(s_.core(), what, arg); };
+    // An operation a verb started, waited out the way every other is.
+    auto started = [this](const bb::json::Value& v) {
+        if (!v["op"].is_null()) await_op(static_cast<uint64_t>(v["op"].i64()));
+        else s_.settle();
     };
 
     // ---- the history ----
