@@ -15,7 +15,7 @@ pub(crate) mod filecompare;
 use std::collections::HashSet;
 use std::sync::Mutex;
 
-use bb_core::checksums::ChecksumAlgorithm;
+use bb_tools::checksums::ChecksumAlgorithm;
 use serde_json::{Value, json};
 
 use crate::app::App;
@@ -427,7 +427,7 @@ impl App {
     /// `{path}` -> `{algorithm}`: what a checksum file's name says it holds, or null for a
     /// name that is not one. A single one selected opens Verify rather than being hashed.
     fn tool_checksum_algorithm_of(&self, args: &Value) -> Value {
-        let a = bb_core::checksums::ChecksumAlgorithms::from_extension(args["path"].as_str());
+        let a = bb_tools::checksums::ChecksumAlgorithms::from_extension(args["path"].as_str());
         json!({ "algorithm": a.map(|a| a.name()) })
     }
 

@@ -8,15 +8,15 @@ use std::sync::{Arc, Mutex};
 
 use bb_core::cancel::CancelToken;
 use bb_core::delete::{DeleteOutcome, DeleteProgress, DeleteUndoResult};
-use bb_core::elevation::{
-    DeleteRetry, ElevatedOperationRunner, ElevatedRun, NewItemRetry, RenameRetry, TransferRetry,
-};
 use bb_core::mft::{MftIndex, NullMftIndex};
 use bb_core::newitem::NewItemOutcome;
 use bb_core::rename::RenameOutcome;
 use bb_core::transfer::{
     ConflictDefaults, ConflictResolution, Resolutions, TransferOutcome, TransferPlan,
     TransferProgress, TransferUndoResult,
+};
+use bb_elevation::{
+    DeleteRetry, ElevatedOperationRunner, ElevatedRun, NewItemRetry, RenameRetry, TransferRetry,
 };
 use bb_integration::launch::ExecutablePath;
 use bb_paths::PathKey;
@@ -343,7 +343,7 @@ impl Seams {
         ));
         seams.elevated = Arc::new(bb_shell::SystemElevation::new());
         seams.shell_new = Arc::new(SystemShellNew(
-            data_dir.join(bb_core::settings::AppPaths::TEMPLATES_DIR_NAME),
+            data_dir.join(bb_settings::AppPaths::TEMPLATES_DIR_NAME),
         ));
         seams.devices = Arc::new(crate::browse::portable_devices::ShellPortableDevices);
         seams.index = Arc::new(bb_shell::indexing::real_index_client(

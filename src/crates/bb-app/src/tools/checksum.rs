@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bb_core::cancel::CancelToken;
-use bb_core::checksums::{
+use bb_tools::checksums::{
     ChecksumAlgorithm, ChecksumAlgorithms, ChecksumCompare, ChecksumFile, ChecksumFileParse,
     ChecksumLine, ChecksumOutcome, ChecksumPath, ChecksumProgress, ChecksumRunner, ChecksumVerify,
     ChecksumVerifyState, FileSystemFileHasher,
@@ -306,7 +306,7 @@ impl ChecksumSession {
             return false;
         }
         self.running = false;
-        let by_path: HashMap<&str, &bb_core::checksums::ChecksumRow> =
+        let by_path: HashMap<&str, &bb_tools::checksums::ChecksumRow> =
             outcome.rows.iter().map(|r| (r.path.as_str(), r)).collect();
         let mut unread = 0usize;
         for row in self.rows.iter_mut() {

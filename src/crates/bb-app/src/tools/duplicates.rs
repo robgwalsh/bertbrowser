@@ -9,15 +9,15 @@ use std::time::{Duration, Instant};
 
 use bb_core::cancel::CancelToken;
 use bb_core::data::FsIndexRepository;
-use bb_core::duplicates::{
-    DuplicateFinder, DuplicateIndexFacts, DuplicateRules, DuplicateScanAvailability,
-    DuplicateScanPhase, DuplicateScanProgress, DuplicateScanRequest,
-    IndexedDuplicateCandidateSource, KeepStrategy,
-};
 use bb_core::format::{byte_size, thousands};
 use bb_core::fs::IndexCrawler;
 use bb_core::mft::MftIndex;
 use bb_paths::PathKey;
+use bb_tools::duplicates::{
+    DuplicateFinder, DuplicateIndexFacts, DuplicateRules, DuplicateScanAvailability,
+    DuplicateScanPhase, DuplicateScanProgress, DuplicateScanRequest,
+    IndexedDuplicateCandidateSource, KeepStrategy,
+};
 use serde_json::{Value, json};
 
 use crate::app::{Inner, lock};
@@ -90,7 +90,7 @@ impl DuplicateIndexFacts for Crawled {
     }
 }
 
-fn group_json(g: &bb_core::duplicates::DuplicateGroup) -> Value {
+fn group_json(g: &bb_tools::duplicates::DuplicateGroup) -> Value {
     json!({
         "sizeBytes": g.size_bytes,
         "hash": g.hash,
@@ -231,7 +231,7 @@ impl Inner {
             _ => false,
         };
         let candidates = IndexedDuplicateCandidateSource::new(&repo);
-        let hasher = bb_core::checksums::FileSystemFileHasher::new();
+        let hasher = bb_tools::checksums::FileSystemFileHasher::new();
         let request = DuplicateScanRequest {
             root_path: root.clone(),
             min_size_bytes: min,

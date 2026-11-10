@@ -1,7 +1,7 @@
 use crate::common;
 
 use bb_app::{AppError, AppEvent, SelectOp};
-use bb_core::commands::{FocusKind, FocusState, KeyChord};
+use bb_commands::commands::{FocusKind, FocusState, KeyChord};
 use bb_core::delete::DeleteMode;
 use bb_core::layout::SplitOrientation;
 use common::{Fixture, eventually};

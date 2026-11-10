@@ -1,0 +1,23 @@
+[package]
+name = "bb-undo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# Split out of bb-core: the session's undo/redo history and every record kind. Tests live in tests/all (one binary), never in src: see bb-core's Cargo.toml.
+test = false
+doctest = false
+
+[dependencies]
+bb-base = { path = "../bb-base" }
+bb-core = { path = "../bb-core" }
+bb-elevation = { path = "../bb-elevation" }
+bb-paths = { path = "../bb-paths" }
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
+
+[dev-dependencies]
+bb-metadata = { path = "../bb-metadata" }
+bb-test-support = { path = "../bb-test-support" }
+windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }

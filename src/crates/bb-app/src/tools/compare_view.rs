@@ -28,7 +28,7 @@ use bb_core::data::FsIndexRepository;
 use bb_core::delete::{DeleteMode, DeletePlanner};
 use bb_core::format::byte_size;
 use bb_core::transfer::{TransferExecutor, TransferPlanner};
-use bb_core::undo::SyncRecord;
+use bb_undo::SyncRecord;
 use serde_json::{Value, json};
 
 use crate::app::{Inner, lock};

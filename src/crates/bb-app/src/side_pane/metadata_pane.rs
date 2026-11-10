@@ -29,8 +29,8 @@ use bb_core::metadata::{
 };
 use bb_core::preview::{PreviewMetadata, ShellPropertyRow};
 use bb_core::timestamps::{TimestampChange, TimestampExecutor, TimestampPlanner};
-use bb_core::undo::{MetadataEditRecord, TimestampRecord};
 use bb_paths::file_name;
+use bb_undo::{MetadataEditRecord, TimestampRecord};
 use serde_json::{Value, json};
 
 use crate::app::{Inner, lock};

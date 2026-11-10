@@ -5,7 +5,7 @@
 use crate::common;
 
 use bb_app::{AppError, AppEvent, Model, PropSupply, prop_words};
-use bb_core::commands::{FocusKind, FocusState, KeyChord};
+use bb_commands::commands::{FocusKind, FocusState, KeyChord};
 use bb_core::newitem::NewItemKind;
 use bb_theming::SystemAppearance;
 use common::{Fixture, eventually};
@@ -269,7 +269,10 @@ fn every_catalogue_command_has_an_owner_and_a_state() {
     let f = Fixture::new();
     let list = json(&f.app.command_list_json());
     let list = list.as_array().unwrap();
-    assert_eq!(bb_core::commands::CommandCatalog::all().len(), list.len());
+    assert_eq!(
+        bb_commands::commands::CommandCatalog::all().len(),
+        list.len()
+    );
     assert!(
         list.iter()
             .any(|c| c["id"] == "file.rename" && c["owner"] == "ui")
@@ -285,7 +288,7 @@ fn every_catalogue_command_has_an_owner_and_a_state() {
 /// reach it. Each runs on a fresh window with one file selected, so the gate lets most through.
 #[test]
 fn every_core_command_has_a_handler() {
-    for c in bb_core::commands::CommandCatalog::all() {
+    for c in bb_commands::commands::CommandCatalog::all() {
         if bb_app::command_owner(c.id) != bb_app::CommandOwner::Core {
             continue;
         }

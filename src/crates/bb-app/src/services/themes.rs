@@ -12,7 +12,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use bb_core::settings::AppPaths;
+use bb_settings::AppPaths;
 use bb_theming::{
     ColorMap, ResolvedTheme, SystemAppearance, SystemThemeRules, ThemeCatalog, ThemeColor,
     ThemeDefinition, ThemeId, ThemeJson, ThemeResolver, ThemeToken, ids_equal,

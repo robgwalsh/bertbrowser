@@ -3,7 +3,7 @@
 //! page is open, and a page that wrote its own copy 400 ms later would put the old one back.
 //! Spec: KeymapService, SettingsViewModel.Keyboard.
 
-use bb_core::commands::{
+use bb_commands::commands::{
     Bindable, CommandCatalog, CommandContext, CommandMatcher, KeyChord, Keymap, KeymapRules,
     Overrides,
 };

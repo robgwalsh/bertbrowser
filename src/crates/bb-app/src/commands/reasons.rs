@@ -1,6 +1,6 @@
 //! The registry's answer for a command (`registry_why_not`), one small method per catalogue area.
 
-use bb_core::commands::FileVerb;
+use bb_commands::commands::FileVerb;
 use bb_core::transfer::TransferVerb;
 
 use super::{Ctx, NO_OTHER_PANE, WHILE_COMPARING, drive_root};

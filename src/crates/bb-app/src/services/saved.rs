@@ -313,10 +313,10 @@ impl Inner {
 
     pub(crate) fn saved_json(&self) -> Value {
         let settings = lock(&self.settings);
-        let placement = |p: bb_core::settings::SectionPlacement| match p {
-            bb_core::settings::SectionPlacement::Sidebar => "sidebar",
-            bb_core::settings::SectionPlacement::TitleBar => "titlebar",
-            bb_core::settings::SectionPlacement::Hidden => "hidden",
+        let placement = |p: bb_settings::SectionPlacement| match p {
+            bb_settings::SectionPlacement::Sidebar => "sidebar",
+            bb_settings::SectionPlacement::TitleBar => "titlebar",
+            bb_settings::SectionPlacement::Hidden => "hidden",
         };
         let (wp, sp) = (
             placement(settings.workspaces_placement),

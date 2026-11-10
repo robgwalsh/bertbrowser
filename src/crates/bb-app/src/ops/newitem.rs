@@ -195,20 +195,19 @@ impl Inner {
                 let mut outcome = NewItemExecutor.execute(&plan);
                 let mut elevated = String::new();
                 if let Some(retry) =
-                    bb_core::elevation::ElevatedRetry::retry_for_new_item(&plan, &outcome)
+                    bb_elevation::ElevatedRetry::retry_for_new_item(&plan, &outcome)
                 {
                     let item = format!("{}\\{}", plan.directory.trim_end_matches('\\'), plan.name);
                     let (second, note) = inner.elevate(
-                        bb_core::elevation::ElevationOperation::NewItem,
+                        bb_elevation::ElevationOperation::NewItem,
                         &[item],
                         false,
                         |runner| runner.run_new_item(&retry, &bb_core::cancel::CancelToken::new()),
                     );
                     elevated = note;
                     if let Some(second) = second {
-                        outcome = bb_core::elevation::ElevatedRetry::merge_new_item(
-                            &outcome, &retry, &second,
-                        );
+                        outcome =
+                            bb_elevation::ElevatedRetry::merge_new_item(&outcome, &retry, &second);
                     }
                 }
                 if let Some(created) = &outcome.created_path {

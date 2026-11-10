@@ -14,11 +14,11 @@ mod run;
 
 use std::sync::Arc;
 
-use bb_core::archives::ArchiveFormats;
-use bb_core::commands::{
+use bb_commands::commands::{
     CommandCatalog, CommandContext, FileVerb, FileVerbRules, FileVerbSnapshot, FileVerbState,
     FocusState, KeyChord, Keymap, KeymapRules,
 };
+use bb_core::archives::ArchiveFormats;
 use bb_core::layout::SplitOrientation;
 use bb_core::transfer::TransferVerb;
 use serde_json::{Value, json};
@@ -122,7 +122,7 @@ pub fn owner_of(id: &str) -> CommandOwner {
     }
 }
 
-pub(crate) fn build_keymap(overrides: Option<&bb_core::commands::Overrides>) -> Keymap {
+pub(crate) fn build_keymap(overrides: Option<&bb_commands::commands::Overrides>) -> Keymap {
     KeymapRules::resolve(&KeymapRules::catalog_bindables(), overrides)
 }
 
@@ -717,7 +717,7 @@ impl Inner {
 
     /// What Undo and Redo say they will do. Spec: ShellViewModel.Described.
     fn undo_caption(&self, command: &str, verb: &str, description: &str) -> String {
-        let what = format!("{verb} {}", bb_core::undo::UndoText::as_object(description));
+        let what = format!("{verb} {}", bb_undo::UndoText::as_object(description));
         match self.keymap_gesture(command) {
             g if g.is_empty() => {
                 let mut c = what.chars();

@@ -3,33 +3,23 @@
 
 mod archives;
 mod changes;
-mod checksums;
 mod cli;
 mod columns;
-mod commandbars;
-mod commands;
 mod compare;
 mod crate_layout_tests;
 mod data;
 mod delete;
 mod diff;
-mod diskusage;
-mod duplicates;
-mod elevation;
 mod fs;
 mod ipc;
 mod layout;
-mod metadata;
 mod mft;
 mod newitem;
 mod rename;
 mod rules;
 mod search;
-mod settings;
 mod shortcuts;
-mod timestamps;
 mod transfer;
-mod undo;
 mod updates;
 mod util;
 

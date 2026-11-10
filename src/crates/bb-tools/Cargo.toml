@@ -1,0 +1,32 @@
+[package]
+name = "bb-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# Split out of bb-core: checksums, the duplicate finder and disk usage. Tests live in tests/all (one binary), never in src: see bb-core's Cargo.toml.
+test = false
+doctest = false
+
+[dependencies]
+bb-base = { path = "../bb-base" }
+bb-core = { path = "../bb-core" }
+bb-paths = { path = "../bb-paths" }
+bb-theming = { path = "../bb-theming" }
+crc32fast.workspace = true
+md-5.workspace = true
+serde.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+windows-sys = { workspace = true, features = [
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+] }
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
+
+[dev-dependencies]
+bb-test-support = { path = "../bb-test-support" }
+windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }

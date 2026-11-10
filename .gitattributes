@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# cargo-hakari finds its section markers only in an LF file; a CRLF checkout breaks `cargo hakari generate`.
+src/crates/bb-workspace-hack/Cargo.toml text eol=lf

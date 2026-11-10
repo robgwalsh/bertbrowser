@@ -1357,7 +1357,7 @@ impl Inner {
         select: bool,
         apply: bool,
     ) -> AppResult<serde_json::Value> {
-        use bb_core::commands::{SelectionPattern, SelectionRow};
+        use bb_commands::commands::{SelectionPattern, SelectionRow};
         use bb_core::format::thousands;
         let rows: Vec<SelectionRow> = {
             let cell = self.tab(tab)?;

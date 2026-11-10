@@ -10,14 +10,14 @@ use std::sync::Arc;
 
 use bb_core::cancel::CancelToken;
 use bb_core::data::{DirSizeRepository, FsIndexRepository};
-use bb_core::diskusage::{
-    DiskUsageAvailability, DiskUsageIndex, DiskUsageNode, DiskUsageService, TreemapLayout,
-    TreemapPalette,
-};
 use bb_core::format::byte_size;
 use bb_core::fs::LocalFileSystem;
 use bb_core::mft::MftIndex;
 use bb_theming::{ResolvedTheme, ThemeToken};
+use bb_tools::diskusage::{
+    DiskUsageAvailability, DiskUsageIndex, DiskUsageNode, DiskUsageService, TreemapLayout,
+    TreemapPalette,
+};
 use serde_json::{Value, json};
 
 use crate::app::Inner;

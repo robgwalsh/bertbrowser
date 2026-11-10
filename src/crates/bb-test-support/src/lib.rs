@@ -10,6 +10,7 @@ use std::sync::Arc;
 use bb_core::data::Db;
 
 pub mod duplex;
+pub mod fake_recycle_bin;
 pub mod pipe_fakes;
 
 /// A migrated database in a temp file, deleted with its WAL and SHM on drop.

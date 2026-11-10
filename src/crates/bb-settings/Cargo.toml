@@ -1,0 +1,28 @@
+[package]
+name = "bb-settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# Split out of bb-core: the settings model, its file and its search index. Tests live in tests/all (one binary), never in src: see bb-core's Cargo.toml.
+test = false
+doctest = false
+
+[dependencies]
+bb-base = { path = "../bb-base" }
+bb-commands = { path = "../bb-commands" }
+bb-core = { path = "../bb-core" }
+bb-integration = { path = "../bb-integration" }
+bb-paths = { path = "../bb-paths" }
+bb-theming = { path = "../bb-theming" }
+bb-tools = { path = "../bb-tools" }
+bb-undo = { path = "../bb-undo" }
+serde.workspace = true
+serde_json.workspace = true
+windows-sys = { workspace = true, features = ["Win32_System_Com", "Win32_UI_Shell"] }
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
+
+[dev-dependencies]
+bb-test-support = { path = "../bb-test-support" }

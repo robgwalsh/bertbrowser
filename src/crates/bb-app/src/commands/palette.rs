@@ -7,11 +7,11 @@
 
 use std::sync::Arc;
 
-use bb_core::columns::{ColumnCatalog, ColumnLayoutRules};
-use bb_core::commands::{
+use bb_commands::commands::{
     CommandCatalog, CommandProminence, GoToRules, PaletteEntry, PaletteRow, PaletteRowKind,
     PaletteRules, PaletteState, PaletteSuggestions,
 };
+use bb_core::columns::{ColumnCatalog, ColumnLayoutRules};
 use bb_core::data::SavedSearchScope;
 use bb_core::layout::SplitOrientation;
 use bb_core::rules::SavedWorkspaceRules;
@@ -242,7 +242,7 @@ impl Inner {
             {
                 "in use".to_string()
             } else {
-                bb_core::commandbars::SavedCommandBarRules::shape_text(&saved.set)
+                bb_commands::commandbars::SavedCommandBarRules::shape_text(&saved.set)
             };
             items.push(PaletteItem {
                 entry,

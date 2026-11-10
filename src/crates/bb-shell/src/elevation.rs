@@ -10,15 +10,15 @@ use std::time::Duration;
 
 use bb_core::cancel::CancelToken;
 use bb_core::delete::{DeleteOutcome, DeleteProgress, DeleteUndoResult};
-use bb_core::elevation::{
-    DeleteRetry, ElevatedOperationRunner, ElevatedRun, ElevationClient, ElevationStream,
-    ElevationTransport, ElevationTransportFactory, NewItemRetry, RenameRetry, ShellExecuteLauncher,
-    TransferRetry,
-};
 use bb_core::ipc::{ElevatorArguments, IndexEndpoint};
 use bb_core::newitem::NewItemOutcome;
 use bb_core::rename::RenameOutcome;
 use bb_core::transfer::{TransferOutcome, TransferProgress, TransferUndoResult};
+use bb_elevation::{
+    DeleteRetry, ElevatedOperationRunner, ElevatedRun, ElevationClient, ElevationStream,
+    ElevationTransport, ElevationTransportFactory, NewItemRetry, RenameRetry, ShellExecuteLauncher,
+    TransferRetry,
+};
 
 use crate::indexing::beside_this_executable;
 use crate::pipe::{PeerCheck, PipeCreateError, PipeServer, PipeSession};
@@ -234,8 +234,8 @@ impl ElevatedOperationRunner for SystemElevation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bb_core::elevation::ElevationStatus;
     use bb_core::ipc::IndexEndpoint;
+    use bb_elevation::ElevationStatus;
 
     #[test]
     fn the_nonce_is_32_hex_digits_and_does_not_repeat() {

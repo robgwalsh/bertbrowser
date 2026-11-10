@@ -14,6 +14,11 @@ bb-core = { path = "../bb-core" }
 bb-benchmarking = { path = "../bb-benchmarking" }
 bb-integration = { path = "../bb-integration" }
 bb-theming = { path = "../bb-theming" }
+bb-commands = { path = "../bb-commands" }
+bb-elevation = { path = "../bb-elevation" }
+bb-settings = { path = "../bb-settings" }
+bb-tools = { path = "../bb-tools" }
+bb-undo = { path = "../bb-undo" }
 bb-paths = { path = "../bb-paths" }
 bb-shell = { path = "../bb-shell" }
 serde.workspace = true

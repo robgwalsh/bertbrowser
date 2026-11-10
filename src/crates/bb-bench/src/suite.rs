@@ -15,10 +15,8 @@ use std::sync::Arc;
 
 use bb_core::FileTime;
 use bb_core::cancel::CancelToken;
-use bb_core::checksums::{ChecksumAlgorithm, FileDigester, FileSystemFileHasher};
 use bb_core::data::{Db, DirSizeRepository, FsIndexRepository};
 use bb_core::delete::{DeleteMode, DeletePlanner, DeleteSource};
-use bb_core::duplicates::{DuplicateScanRequest, FileHasher};
 use bb_core::fs::FileSystemService;
 use bb_core::fs::{FileListDiff, LocalFileSystem};
 use bb_core::models::FileEntry;
@@ -30,6 +28,8 @@ use bb_core::preview::{
 use bb_core::rename::{RenamePlanner, RenameRule, RenameSource};
 use bb_core::search::{GlobText, SearchCandidate, SearchGrammar};
 use bb_core::transfer::{TransferMergeExpander, TransferPlanner, TransferVerb};
+use bb_tools::checksums::{ChecksumAlgorithm, FileDigester, FileSystemFileHasher};
+use bb_tools::duplicates::{DuplicateScanRequest, FileHasher};
 
 use crate::corpus::{self, RealConfig, TreePaths};
 use crate::fake_disk::FakeDisk;

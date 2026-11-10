@@ -8,6 +8,8 @@ publish.workspace = true
 [dependencies]
 bb-core = { path = "../bb-core" }
 bb-benchmarking = { path = "../bb-benchmarking" }
+bb-settings = { path = "../bb-settings" }
+bb-tools = { path = "../bb-tools" }
 mimalloc = "0.1.52"
 rusqlite.workspace = true
 serde.workspace = true

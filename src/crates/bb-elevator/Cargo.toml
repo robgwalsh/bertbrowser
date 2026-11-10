@@ -14,6 +14,7 @@ test = false
 [dependencies]
 bb-paths = { path = "../bb-paths" }
 bb-core = { path = "../bb-core" }
+bb-elevation = { path = "../bb-elevation" }
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Security",

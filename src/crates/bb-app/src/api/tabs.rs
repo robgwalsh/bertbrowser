@@ -4,8 +4,8 @@
 
 use std::sync::Arc;
 
+use bb_commands::commands::{FocusState, KeyChord};
 use bb_core::columns::ResolvedColumn;
-use bb_core::commands::{FocusState, KeyChord};
 use bb_core::delete::DeleteMode;
 use bb_core::layout::{NodeId, SplitOrientation};
 use bb_core::transfer::TransferVerb;

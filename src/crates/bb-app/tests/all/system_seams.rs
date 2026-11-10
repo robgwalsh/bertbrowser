@@ -9,12 +9,12 @@ use std::time::{Duration, Instant};
 use bb_app::{App, AppConfig, ElevationLauncher, LaunchRequest, OpState, Seams};
 use bb_core::cancel::CancelToken;
 use bb_core::delete::{DeleteOutcome, DeleteProgress, DeleteUndoResult};
-use bb_core::elevation::{
-    DeleteRetry, ElevatedOperationRunner, ElevatedRun, NewItemRetry, RenameRetry, TransferRetry,
-};
 use bb_core::newitem::{NewItemKind, NewItemOutcome};
 use bb_core::rename::RenameOutcome;
 use bb_core::transfer::{TransferOutcome, TransferProgress, TransferUndoResult};
+use bb_elevation::{
+    DeleteRetry, ElevatedOperationRunner, ElevatedRun, NewItemRetry, RenameRetry, TransferRetry,
+};
 use bb_test_support::unique_temp_path;
 
 /// Stands in for the helper: records what it was asked, answers with what the test says.

@@ -8,14 +8,14 @@ use bb_core::archives::ArchiveEditExecutor;
 use bb_core::cancel::CancelToken;
 use bb_core::compare::SyncRunner;
 use bb_core::delete::{DeleteExecutor, DeleteOutcome, DeletePlan, DeleteUndoResult};
-use bb_core::elevation::{Elevated, ElevatedRetry, ElevationOperation};
 use bb_core::metadata::MetadataEditExecutor;
 use bb_core::rename::{RenameExecutor, RenameOutcome, RenamePlan};
 use bb_core::timestamps::TimestampExecutor;
 use bb_core::transfer::{
     Resolutions, TransferExecutor, TransferOutcome, TransferPlan, TransferUndoResult, TransferVerb,
 };
-use bb_core::undo::{PlainUndoHost, ProgressSink, UndoHost};
+use bb_elevation::{Elevated, ElevatedRetry, ElevationOperation};
+use bb_undo::{PlainUndoHost, ProgressSink, UndoHost};
 
 use crate::app::Inner;
 

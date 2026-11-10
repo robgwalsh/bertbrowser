@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use bb_core::settings::{SettingsEntry, SettingsIndex};
+use bb_settings::{SettingsEntry, SettingsIndex};
 use serde_json::Value;
 
 use crate::app::{Inner, lock};
@@ -254,9 +254,8 @@ impl Inner {
                 return Err(AppError::Invalid(format!("unknown setting '{key}'")));
             }
             map.insert(key.to_string(), value);
-            let next: bb_core::settings::AppSettings =
-                serde_json::from_value(Value::Object(map))
-                    .map_err(|e| AppError::Invalid(format!("'{key}': {e}")))?;
+            let next: bb_settings::AppSettings = serde_json::from_value(Value::Object(map))
+                .map_err(|e| AppError::Invalid(format!("'{key}': {e}")))?;
             *settings = next;
         }
         if PAGE_KEYS.contains(&key) {

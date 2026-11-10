@@ -13,8 +13,8 @@ use bb_core::archives::{
 use bb_core::format;
 use bb_core::shortcuts::{ShortcutExecutor, ShortcutPlanner};
 use bb_core::transfer::{TransferEstimate, TransferProgress};
-use bb_core::undo::ArchiveEditRecord;
 use bb_paths::{PathKey, file_name};
+use bb_undo::ArchiveEditRecord;
 
 use crate::app::{Inner, lock};
 use crate::ids::{AppError, AppResult, OpId};

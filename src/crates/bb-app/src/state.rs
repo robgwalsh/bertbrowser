@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use bb_core::data::Db;
-use bb_core::settings::{AppPaths, AppSettings};
+use bb_settings::{AppPaths, AppSettings};
 
 use crate::commands::bars::{BarPage, BarsState};
 use crate::commands::keys::KeyPage;

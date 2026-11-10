@@ -5,8 +5,8 @@
 //! host re-reads one thing on `ModelChanged`; the `*_do` entries take a verb and its arguments so a
 //! page's whole vocabulary is one export.
 
+use bb_commands::commands::{FocusState, KeyChord};
 use bb_core::columns::ColumnValue;
-use bb_core::commands::{FocusState, KeyChord};
 use bb_core::data::SavedSearchScope;
 use bb_core::newitem::NewItemKind;
 use bb_theming::SystemAppearance;
@@ -21,7 +21,7 @@ fn text(v: &Value) -> String {
     v.to_string()
 }
 
-fn settings_entry_json(e: &bb_core::settings::SettingsEntry) -> Value {
+fn settings_entry_json(e: &bb_settings::SettingsEntry) -> Value {
     let (page_name, icon) = crate::services::settings::settings_page_info(e.page);
     json!({ "page": e.page, "pageName": page_name, "icon": icon, "label": e.label })
 }
@@ -689,11 +689,11 @@ impl App {
             ),
             "command-bars" => (
                 i.bars_current_name().unwrap_or_else(|| {
-                    bb_core::commandbars::SavedCommandBarRules::default_name(
+                    bb_commands::commandbars::SavedCommandBarRules::default_name(
                         bb_core::FileTime::now().to_local(),
                     )
                 }),
-                bb_core::commandbars::SavedCommandBarRules::validate(name, |_| false),
+                bb_commands::commandbars::SavedCommandBarRules::validate(name, |_| false),
                 i.bars_name_taken(name.trim(), None),
             ),
             other => return Err(AppError::Invalid(format!("unknown kind '{other}'"))),
@@ -765,7 +765,7 @@ impl App {
     /// Everything the search box can find, as `[{page, pageName, icon, label}]`.
     pub fn settings_search_index_json(&self) -> String {
         text(&json!(
-            bb_core::settings::SettingsIndex::ENTRIES
+            bb_settings::SettingsIndex::ENTRIES
                 .iter()
                 .map(settings_entry_json)
                 .collect::<Vec<_>>()
@@ -798,11 +798,11 @@ impl App {
     pub fn duplicates_scan(&self, root: &str, min_size_bytes: i64) -> AppResult<String> {
         use bb_core::cancel::CancelToken;
         use bb_core::data::FsIndexRepository;
-        use bb_core::duplicates::{
+        use bb_core::fs::IndexCrawler;
+        use bb_tools::duplicates::{
             DuplicateFinder, DuplicateIndexFacts, DuplicateRules, DuplicateScanRequest,
             IndexedDuplicateCandidateSource, KeepStrategy,
         };
-        use bb_core::fs::IndexCrawler;
 
         struct Facts;
         impl DuplicateIndexFacts for Facts {
@@ -824,7 +824,7 @@ impl App {
             .crawl(root, &none, None)
             .map_err(|e| invalid(&e))?;
         let candidates = IndexedDuplicateCandidateSource::new(&repo);
-        let hasher = bb_core::checksums::FileSystemFileHasher::new();
+        let hasher = bb_tools::checksums::FileSystemFileHasher::new();
         let request = DuplicateScanRequest {
             root_path: Some(root.to_string()),
             min_size_bytes,
@@ -884,7 +884,7 @@ impl App {
                 .iter()
                 .filter(|p| ticked.contains(&p.to_lowercase()))
                 .collect();
-            if bb_core::duplicates::DuplicateRules::can_remove(group.len(), chosen.len()) {
+            if bb_tools::duplicates::DuplicateRules::can_remove(group.len(), chosen.len()) {
                 out.extend(chosen.into_iter().cloned());
             }
         }

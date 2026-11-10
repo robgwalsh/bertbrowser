@@ -7,12 +7,12 @@
 //! while the settings page is open. Spec: CommandBarService, SettingsViewModel.CommandBars,
 //! MainWindow.CommandBars.
 
-use bb_core::commandbars::{
+use bb_commands::commandbars::{
     AccessKeys, BarCommandState, BarItem, BarItemKind, BarRow, BarRowKind, BarSource, BarTarget,
     BarTargetKind, CommandBarCaptions, CommandBarDefaults, CommandBarEdit, CommandBarLists,
     CommandBarRules, CommandBarSet, SavedCommandBarRules, SavedCommandBarSet, ToolbarSpec,
 };
-use bb_core::commands::{CommandCatalog, CommandMatcher};
+use bb_commands::commands::{CommandCatalog, CommandMatcher};
 use std::sync::Arc;
 
 use serde_json::{Value, json};

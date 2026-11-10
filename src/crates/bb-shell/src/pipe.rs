@@ -636,7 +636,7 @@ mod tests {
         let name = unique("medium");
         let server = PipeServer::create(&name, &sid(), 4096, 4096).unwrap();
         let _client = connect(&name);
-        let elevated = bb_core::elevation::elevated_process::can_elevate();
+        let elevated = bb_elevation::elevated_process::can_elevate();
         let got = server.accept(PeerCheck::Elevated, Duration::from_secs(2));
         // Only an elevated test run would be accepted.
         if !is_test_process_elevated() {

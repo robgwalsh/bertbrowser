@@ -24,14 +24,14 @@ use bb_core::cancel::CancelToken;
 use bb_core::delete::{
     DeleteExecutor, DeleteMode, DeletePlanner, DeleteSource, FileSystemDeleteProbe, ShellRecycleBin,
 };
-use bb_core::elevation::{ElevatedRetry, ElevationOperation};
 use bb_core::rename::{RenameExecutor, RenamePlanner, RenameRule, RenameSource};
 use bb_core::transfer::{
     DirectorySize, FileSystemTransferProbe, QueuedJobState, TransferEstimate, TransferEstimator,
     TransferExecutor, TransferMergeExpander, TransferPlanner, TransferProgress, TransferSizeSource,
     TransferVerb,
 };
-use bb_core::undo::{
+use bb_elevation::{ElevatedRetry, ElevationOperation};
+use bb_undo::{
     DeleteRecord, HeldFolderSizes, HeldSizeEstimator, PlainUndoHost, RenameRecord, TransferRecord,
     UndoDirection, UndoNavigator, UndoStack, UndoableRecord,
 };
@@ -966,7 +966,7 @@ impl Inner {
             if span.is_empty() {
                 return (false, "nothing to do".to_string());
             }
-            let described: Vec<(bb_core::undo::EntryId, String)> = undo
+            let described: Vec<(bb_undo::EntryId, String)> = undo
                 .entries()
                 .iter()
                 .map(|e| (e.id(), e.record().description().to_string()))
@@ -1014,11 +1014,11 @@ impl Inner {
         } else {
             ("Redone", "redo")
         };
-        let name_of = |id: &bb_core::undo::EntryId| {
+        let name_of = |id: &bb_undo::EntryId| {
             described
                 .iter()
                 .find(|(e, _)| e == id)
-                .map(|(_, d)| bb_core::undo::UndoText::as_object(d))
+                .map(|(_, d)| bb_undo::UndoText::as_object(d))
                 .unwrap_or_default()
         };
         let notes: String = result.notes.concat();

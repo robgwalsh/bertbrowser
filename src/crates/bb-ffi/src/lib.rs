@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use bb_app::{
     App, AppConfig, AppError, AppEvent, Fakes, Listing, OpId, OpState, PaneId, SelectOp, TabId,
 };
-use bb_core::commands::{ChordModifiers, FocusKind, FocusState, KeyChord};
+use bb_commands::commands::{ChordModifiers, FocusKind, FocusState, KeyChord};
 use bb_core::delete::DeleteMode;
 use bb_core::layout::SplitOrientation;
 

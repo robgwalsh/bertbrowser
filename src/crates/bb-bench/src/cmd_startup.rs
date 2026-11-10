@@ -24,7 +24,7 @@ use bb_benchmarking::{
 };
 use bb_core::FileTime;
 use bb_core::layout::{SessionLayout, SessionTab, SplitOrientation};
-use bb_core::settings::{AppPaths, AppSettings};
+use bb_settings::{AppPaths, AppSettings};
 
 use crate::args::{ArgList, Fail, unknown};
 use crate::{corpus, env};

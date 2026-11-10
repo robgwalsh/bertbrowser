@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::sync::{Arc, Condvar, Mutex};
 
-use bb_core::elevation::ElevationStream;
+use bb_elevation::ElevationStream;
 
 /// One direction: writes append, reads block until there is something or it is closed.
 struct Buffer {

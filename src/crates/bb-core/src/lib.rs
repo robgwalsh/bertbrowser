@@ -3,17 +3,11 @@
 
 pub mod archives;
 pub mod changes;
-pub mod checksums;
 pub mod columns;
-pub mod commandbars;
-pub mod commands;
 pub mod compare;
 pub mod data;
 pub mod delete;
 pub mod diff;
-pub mod diskusage;
-pub mod duplicates;
-pub mod elevation;
 pub mod fs;
 pub mod ipc;
 pub mod layout;
@@ -23,11 +17,9 @@ pub mod newitem;
 pub mod rename;
 pub mod rules;
 pub mod search;
-pub mod settings;
 pub mod shortcuts;
 pub mod timestamps;
 pub mod transfer;
-pub mod undo;
 pub mod updates;
 
 // The shared vocabulary lives in bb-base; re-exported at its old paths so nothing above notices.

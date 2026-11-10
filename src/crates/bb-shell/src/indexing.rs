@@ -12,12 +12,12 @@ use std::io;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use bb_core::elevation::elevated_process::{self, ProcessHandle, StartError};
 use bb_core::ipc::IndexEndpoint;
 use bb_core::mft::{
     IndexHostLaunchResult, IndexHostLauncher, IndexStream, IndexTransport, IndexTransportFactory,
     IndexerPresenceProbe, MftIndexClient, WindowsIndexerPresence,
 };
+use bb_elevation::elevated_process::{self, ProcessHandle, StartError};
 
 use crate::pipe::{PeerCheck, PipeCreateError, PipeServer, PipeSession};
 

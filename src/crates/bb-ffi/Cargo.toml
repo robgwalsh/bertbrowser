@@ -16,6 +16,8 @@ crate-type = ["staticlib", "rlib"]
 bb-app = { path = "../bb-app" }
 bb-core = { path = "../bb-core" }
 bb-benchmarking = { path = "../bb-benchmarking" }
+bb-commands = { path = "../bb-commands" }
+bb-settings = { path = "../bb-settings" }
 bb-theming = { path = "../bb-theming" }
 bb-shell = { path = "../bb-shell" }
 serde_json.workspace = true

@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use bb_benchmarking::StartupMarks;
 use bb_core::cli::{CommandLine, CommandLineRequest};
-use bb_core::settings::LegacyData;
+use bb_settings::LegacyData;
 use bb_shell::startup_trace::{self, StartupTrace};
 use bb_shell::updates::{self, UpdateOutcome};
 use bb_shell::{FolderHandlerRegistry, SingleInstance, WinEHandlerRegistry, foreground};

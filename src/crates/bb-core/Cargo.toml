@@ -13,10 +13,8 @@ doctest = false
 
 [dependencies]
 bb-base = { path = "../bb-base" }
-bb-integration = { path = "../bb-integration" }
 bb-metadata = { path = "../bb-metadata" }
 bb-preview = { path = "../bb-preview" }
-bb-theming = { path = "../bb-theming" }
 bb-paths = { path = "../bb-paths" }
 rusqlite.workspace = true
 serde.workspace = true
@@ -41,10 +39,6 @@ windows-sys = { workspace = true, features = [
     "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",
 ] }
-sha2.workspace = true
-crc32fast.workspace = true
-md-5.workspace = true
-sha1.workspace = true
 windows-core = "0.62"
 
 # COM: the Recycle Bin (IFileOperation and its progress sink, the bin folder's context menu).

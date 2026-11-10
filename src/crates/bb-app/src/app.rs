@@ -15,9 +15,9 @@ use bb_core::fs::{
     IndexCrawler, IndexWatcher, IndexWatcherService, LocalFileSystem, SearchService,
 };
 use bb_core::layout::{LayoutTree, NodeId, SplitOrientation};
-use bb_core::settings::{AppPaths, AppSettings};
 use bb_core::transfer::{PauseGate, TransferProgress};
-use bb_core::undo::UndoStack;
+use bb_settings::{AppPaths, AppSettings};
+use bb_undo::UndoStack;
 
 use crate::browse::dirwatch::DirWatcher;
 use crate::browse::rows::Listing;
@@ -312,7 +312,7 @@ pub(crate) struct Inner {
     pub transfer_progress: Mutex<Option<TransferProgress>>,
     pub transfer_thread: Mutex<Option<JoinHandle<()>>>,
     pub db: Arc<Db>,
-    pub keymap: Mutex<Arc<bb_core::commands::Keymap>>,
+    pub keymap: Mutex<Arc<bb_commands::commands::Keymap>>,
     /// The state of the services this layer owns beyond tabs and operations.
     pub extra: crate::state::Extra,
 }

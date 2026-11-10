@@ -46,12 +46,17 @@ name = "bb-app"
 version = "2.0.0"
 dependencies = [
  "bb-benchmarking",
+ "bb-commands",
  "bb-core",
+ "bb-elevation",
  "bb-integration",
  "bb-paths",
+ "bb-settings",
  "bb-shell",
  "bb-test-support",
  "bb-theming",
+ "bb-tools",
+ "bb-undo",
  "bb-workspace-hack",
  "serde",
  "serde_json",
@@ -75,6 +80,8 @@ version = "2.0.0"
 dependencies = [
  "bb-benchmarking",
  "bb-core",
+ "bb-settings",
+ "bb-tools",
  "bb-workspace-hack",
  "mimalloc",
  "rusqlite",
@@ -99,30 +106,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "bb-commands"
+version = "2.0.0"
+dependencies = [
+ "bb-base",
+ "bb-core",
+ "bb-integration",
+ "bb-paths",
+ "bb-workspace-hack",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bb-core"
 version = "2.0.0"
 dependencies = [
  "bb-base",
- "bb-integration",
  "bb-metadata",
  "bb-paths",
  "bb-preview",
  "bb-test-support",
- "bb-theming",
  "bb-workspace-hack",
  "bzip2",
- "crc32fast",
  "fancy-regex",
  "flate2",
  "liblzma",
- "md-5",
  "rusqlite",
  "ruzstd",
  "serde",
  "serde_json",
  "sevenz-rust2",
- "sha1",
- "sha2",
  "tar",
  "unrar",
  "windows",
@@ -132,10 +146,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bb-elevation"
+version = "2.0.0"
+dependencies = [
+ "bb-base",
+ "bb-core",
+ "bb-paths",
+ "bb-test-support",
+ "bb-workspace-hack",
+ "serde",
+ "serde_json",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "bb-elevator"
 version = "2.0.0"
 dependencies = [
  "bb-core",
+ "bb-elevation",
  "bb-paths",
  "bb-workspace-hack",
  "embed-manifest",
@@ -148,8 +177,10 @@ version = "2.0.0"
 dependencies = [
  "bb-app",
  "bb-benchmarking",
+ "bb-commands",
  "bb-core",
  "bb-ffi",
+ "bb-settings",
  "bb-shell",
  "bb-test-support",
  "bb-theming",
@@ -235,11 +266,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "bb-settings"
+version = "2.0.0"
+dependencies = [
+ "bb-base",
+ "bb-commands",
+ "bb-core",
+ "bb-integration",
+ "bb-paths",
+ "bb-test-support",
+ "bb-theming",
+ "bb-tools",
+ "bb-undo",
+ "bb-workspace-hack",
+ "serde",
+ "serde_json",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "bb-shell"
 version = "2.0.0"
 dependencies = [
  "bb-benchmarking",
  "bb-core",
+ "bb-elevation",
  "bb-integration",
  "bb-test-support",
  "bb-workspace-hack",
@@ -262,6 +313,7 @@ version = "2.0.0"
 dependencies = [
  "base64",
  "bb-core",
+ "bb-elevation",
  "bb-fixtures",
  "bb-paths",
  "bb-workspace-hack",
@@ -275,6 +327,38 @@ dependencies = [
  "bb-workspace-hack",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "bb-tools"
+version = "2.0.0"
+dependencies = [
+ "bb-base",
+ "bb-core",
+ "bb-paths",
+ "bb-test-support",
+ "bb-theming",
+ "bb-workspace-hack",
+ "crc32fast",
+ "md-5",
+ "serde",
+ "sha1",
+ "sha2",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "bb-undo"
+version = "2.0.0"
+dependencies = [
+ "bb-base",
+ "bb-core",
+ "bb-elevation",
+ "bb-metadata",
+ "bb-paths",
+ "bb-test-support",
+ "bb-workspace-hack",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

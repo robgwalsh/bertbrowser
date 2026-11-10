@@ -1,6 +1,6 @@
 //! The one place this app starts another program on the user's behalf (`ShellExecuteExW`). The
 //! elevated helpers are the only other thing started, and they are started by
-//! `bb_core::elevation::elevated_process`; a test in this crate fails if any other source file in
+//! `bb_elevation::elevated_process`; a test in this crate fails if any other source file in
 //! the product mentions a way to start a process.
 //! Spec: App/Services/ProcessLauncher.cs.
 //!
@@ -324,7 +324,7 @@ mod tests {
 
     /// The rule the whole module exists for: a single process-start call site. Everything that
     /// starts a program goes through `SystemLauncher`; the elevated helpers go through
-    /// `bb_core::elevation::elevated_process`; and the product's other source files never name a
+    /// `bb_elevation::elevated_process`; and the product's other source files never name a
     /// way to start one.
     #[test]
     fn nothing_else_in_the_product_starts_a_process() {
@@ -391,8 +391,8 @@ mod tests {
         let allowed = [
             "bb-shell\\src\\launcher.rs",
             "bb-shell/src/launcher.rs",
-            "bb-core\\src\\elevation\\launcher.rs",
-            "bb-core/src/elevation/launcher.rs",
+            "bb-elevation\\src\\launcher.rs",
+            "bb-elevation/src/launcher.rs",
         ];
         let strays: Vec<&String> = found
             .iter()

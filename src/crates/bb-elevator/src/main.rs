@@ -19,8 +19,8 @@ use std::time::Duration;
 
 use bb_core::cancel::CancelToken;
 use bb_core::delete::ShellRecycleBin;
-use bb_core::elevation::{ElevationHost, ElevationStream};
 use bb_core::ipc::{ElevatorArguments, IndexEndpoint, PipeIdentity, PipeOwner};
+use bb_elevation::{ElevationHost, ElevationStream};
 use bb_paths::PathKey;
 
 use pipe::PipeStream;

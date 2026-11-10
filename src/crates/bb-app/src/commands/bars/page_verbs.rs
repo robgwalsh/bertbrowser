@@ -3,10 +3,10 @@
 
 use std::sync::Arc;
 
-use bb_core::commandbars::{
+use bb_commands::commandbars::{
     BarItem, BarTarget, BarTargetKind, CommandBarEdit, CommandBarLists, CommandBarSet,
 };
-use bb_core::commands::CommandCatalog;
+use bb_commands::commands::CommandCatalog;
 
 use super::target_of;
 use crate::app::{Inner, lock};

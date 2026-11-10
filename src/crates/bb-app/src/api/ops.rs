@@ -10,7 +10,6 @@ use std::collections::HashMap;
 
 use bb_core::FileTime;
 use bb_core::archives::{ArchiveFormats, ArchivePath};
-use bb_core::elevation::{ElevatedOperationRunner, ElevatedRun, ElevationOperation};
 use bb_core::format;
 use bb_core::rename::{
     RenamePart, RenamePattern, RenamePlanner, RenameRule, RenameSource, RenameTemplate,
@@ -18,12 +17,13 @@ use bb_core::rename::{
 use bb_core::transfer::{
     RightDropContext, RightDropMenuRules, RightDropVerb, TransferPlanner, TransferVerb,
 };
-use bb_core::undo::{StepVerdict, UndoBudget, UndoKind};
+use bb_elevation::{ElevatedOperationRunner, ElevatedRun, ElevationOperation};
 use bb_integration::shellmenu::{
     BuiltInMenuItems, BuiltInMenuPlaces, MenuLayoutRules, MenuPlacementKind, MenuSeparatorRules,
     MenuSlot,
 };
 use bb_paths::{PathKey, file_name};
+use bb_undo::{StepVerdict, UndoBudget, UndoKind};
 use serde_json::{Value, json};
 
 use crate::app::{Inner, lock};
@@ -154,7 +154,7 @@ impl Inner {
         model
     }
 
-    fn history_json_of(&self, undo: &bb_core::undo::UndoStack) -> Value {
+    fn history_json_of(&self, undo: &bb_undo::UndoStack) -> Value {
         let now = FileTime::now();
         let cursor = undo.cursor();
         let entries = undo.entries();
@@ -175,7 +175,7 @@ impl Inner {
             };
             let (badge, problem) = match (entry.last_report(), entry.last_direction()) {
                 (Some(report), Some(direction)) => {
-                    let undo_dir = direction == bb_core::undo::UndoDirection::Undo;
+                    let undo_dir = direction == bb_undo::UndoDirection::Undo;
                     let badge = match report.verdict() {
                         StepVerdict::Failed => {
                             if undo_dir {
@@ -255,7 +255,7 @@ impl Inner {
                 "isNextUndo": next_undo == Some(entry.id()),
                 "isNextRedo": next_redo == Some(entry.id()),
                 "whenText": format::relative_time(entry.changed_utc(), now),
-                "itemsText": bb_core::undo::UndoText::items(record.item_count()),
+                "itemsText": bb_undo::UndoText::items(record.item_count()),
                 "heldText": held_text,
                 "badge": badge,
                 "problem": problem,
@@ -285,8 +285,7 @@ impl Inner {
         } else {
             let mut t = format!(
                 "{} released to stay within the limits",
-                bb_core::undo::UndoText::items(undo.released_count())
-                    .replace("item", "older action")
+                bb_undo::UndoText::items(undo.released_count()).replace("item", "older action")
             );
             if undo.released_bytes() > 0 {
                 t.push_str(&format!(
