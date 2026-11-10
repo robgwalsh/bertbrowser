@@ -57,6 +57,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bb-base"
+version = "2.0.0"
+dependencies = [
+ "bb-paths",
+ "bb-workspace-hack",
+ "serde",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "bb-bench"
 version = "2.0.0"
 dependencies = [
@@ -74,6 +84,7 @@ dependencies = [
 name = "bb-core"
 version = "2.0.0"
 dependencies = [
+ "bb-base",
  "bb-paths",
  "bb-test-support",
  "bb-workspace-hack",

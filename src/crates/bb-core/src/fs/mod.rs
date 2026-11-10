@@ -5,22 +5,17 @@
 //! FileSystemWalker,IndexCrawler,IndexWatcherService,SearchService,ReadOnlyFile,StagedReplace,
 //! DirectoryRemoval,AccessDenied,EntryStamp,FileListDiff}.cs.
 
-mod access_denied;
 mod directory_removal;
-mod entry_stamp;
 mod file_list_diff;
 mod file_system_service;
 mod index_crawler;
 mod index_watcher;
 mod known_folders;
-mod read_only_file;
 mod search_service;
-mod staged_replace;
 mod walker;
 
-pub use access_denied::AccessDenied;
+pub use bb_base::fs::{AccessDenied, EntryStamp, ReadOnlyFile, StagedReplace};
 pub use directory_removal::DirectoryRemoval;
-pub use entry_stamp::EntryStamp;
 pub use file_list_diff::{FileListChanges, FileListDiff};
 pub use file_system_service::{
     DriveInfo, DriveType, FileSystemService, LocalFileSystem, SubdirectoryPresence,
@@ -28,7 +23,5 @@ pub use file_system_service::{
 pub use index_crawler::IndexCrawler;
 pub use index_watcher::{ChangeApplier, FsChange, FsChangeKind, IndexWatcher, IndexWatcherService};
 pub use known_folders::KnownFolders;
-pub use read_only_file::ReadOnlyFile;
 pub use search_service::{SearchProgress, SearchService, is_held_path};
-pub use staged_replace::StagedReplace;
 pub use walker::{FileSystemWalker, WalkEntry, WalkError};

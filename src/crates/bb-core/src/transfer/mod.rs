@@ -13,15 +13,14 @@ mod estimator;
 mod executor;
 mod merge_expander;
 mod models;
-mod pause_gate;
 mod planner;
 mod probe;
-mod progress;
 mod queue_rules;
 mod rate;
 mod redo;
 mod right_drop_menu;
 
+pub use bb_base::progress::{PauseGate, ProgressCoalescer};
 pub use conflict_prompt::{ConflictPrompt, KeepBothConflictPrompt};
 pub use copier::{FileCopier, FileSystemFileCopier, ProgressFn};
 pub use drag_out::{DragOutAction, DragOutContract, DropEffect};
@@ -34,10 +33,8 @@ pub use models::{
     PlannedTransfer, RejectedTransfer, Resolutions, TransferClash, TransferError, TransferOutcome,
     TransferPlan, TransferProgress, TransferRejection, TransferVerb, io_message,
 };
-pub use pause_gate::PauseGate;
 pub use planner::TransferPlanner;
 pub use probe::{FileSystemTransferProbe, TransferEntry, TransferEntrySource, TransferProbe};
-pub use progress::ProgressCoalescer;
 pub use queue_rules::{QueuedJobState, QueuedJobSummary, TransferQueueRules};
 pub use rate::TransferRate;
 pub use redo::TransferRedo;

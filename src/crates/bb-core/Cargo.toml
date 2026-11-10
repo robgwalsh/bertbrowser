@@ -12,6 +12,7 @@ test = false
 doctest = false
 
 [dependencies]
+bb-base = { path = "../bb-base" }
 bb-paths = { path = "../bb-paths" }
 rusqlite.workspace = true
 serde.workspace = true

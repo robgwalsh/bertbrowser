@@ -10,7 +10,7 @@ mod date_format;
 mod executor;
 mod metadata_fields;
 mod models;
-pub mod paths;
+pub use bb_base::path_parts as paths;
 mod pattern;
 mod planner;
 mod regex_replace;

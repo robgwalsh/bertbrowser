@@ -29,13 +29,13 @@ use super::models::{
     CompletedTransfer, ConflictResolution, FailedTransfer, PlannedTransfer, Resolutions,
     TransferError, TransferOutcome, TransferPlan, TransferProgress, TransferVerb, join, parent_of,
 };
-use super::pause_gate::PauseGate;
 use super::probe::{FileSystemTransferProbe, TransferProbe};
-use super::progress::ProgressCoalescer;
 use crate::attributes::{DIRECTORY, HIDDEN, REPARSE_POINT};
 use crate::cancel::CancelToken;
 use crate::format::thousands;
 use crate::fs::{DirectoryRemoval, EntryStamp};
+use bb_base::progress::PauseGate;
+use bb_base::progress::ProgressCoalescer;
 
 /// Restoring a transfer: how many items went back, and what could not. `reverted` is exactly the
 /// items that went back, so a redo acts on those and nothing else; the elevation client, which

@@ -2,7 +2,6 @@
 //! an index builds, the cache, searching inside one, and the extract/create/edit planners and
 //! executors. Spec: Core/Services/Archives/* and Core/Services/Preview/ArchiveListing.cs.
 
-mod archive_path;
 mod aware;
 mod browser;
 mod cache;
@@ -14,7 +13,6 @@ mod extract_executor;
 mod extract_models;
 mod extract_planner;
 mod extract_rules;
-mod formats;
 mod index_builder;
 mod listing;
 mod models;
@@ -25,10 +23,11 @@ mod source_walk;
 mod write_rules;
 mod writer;
 
-pub use archive_path::ArchivePath;
 pub use aware::{
     ArchiveAwareFileSystemService, ArchiveLockedError, ArchivePasswords, NoArchivePasswords,
 };
+pub use bb_base::archives::ArchivePath;
+pub use bb_base::archives::{ArchiveContainer, ArchiveFormat, ArchiveFormats};
 pub use browser::ArchiveBrowser;
 pub use cache::ArchiveCache;
 pub use creator::{ArchiveCreator, CreateArchiveOutcome};
@@ -45,7 +44,6 @@ pub use extract_models::{
 };
 pub use extract_planner::{ExtractPlanner, ExtractProbe, FileSystemExtractProbe};
 pub use extract_rules::ExtractRules;
-pub use formats::{ArchiveContainer, ArchiveFormat, ArchiveFormats};
 pub use index_builder::ArchiveIndexBuilder;
 pub use listing::{ArchiveContents, ArchiveEntry, ArchiveListing};
 pub use models::{ArchiveCapabilities, ArchiveFailure, ArchiveIndex, ArchiveNode, RawArchiveEntry};

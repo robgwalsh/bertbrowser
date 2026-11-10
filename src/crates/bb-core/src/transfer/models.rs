@@ -436,25 +436,7 @@ impl TransferOutcome {
     }
 }
 
-/// Progress while a transfer runs. Byte-level, because item counts say nothing useful about a
-/// single large file. The plan's byte total is deliberately absent: it comes from the directory
-/// size index, which is the caller's business.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TransferProgress {
-    /// Items finished.
-    pub done: usize,
-    /// Items in the plan.
-    pub total: usize,
-    /// The item in flight; empty on the terminal report.
-    pub current_name: String,
-    /// Bytes written so far across the whole plan. A move within one volume is a rename, so it
-    /// moves no bytes and this stays at zero, which is correct, not a stall.
-    pub bytes_done: i64,
-    /// Bytes written into the item in flight.
-    pub current_item_bytes: i64,
-    /// That item's size as the OS reports it; 0 when not yet known.
-    pub current_item_total: i64,
-}
+pub use bb_base::progress::TransferProgress;
 
 /// How to settle conflicts, keyed by `PathKey::canonicalize` of the source path.
 pub type Resolutions = HashMap<String, ConflictResolution>;

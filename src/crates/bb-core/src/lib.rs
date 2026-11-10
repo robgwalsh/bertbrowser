@@ -2,12 +2,9 @@
 //! the planners stay testable without a disk. Spec: src/BertBrowser.Core/**.
 
 pub mod archives;
-pub mod attributes;
 pub mod benchmarking;
-pub mod cancel;
 pub mod changes;
 pub mod checksums;
-pub mod cli;
 pub mod columns;
 pub mod commandbars;
 pub mod commands;
@@ -19,7 +16,6 @@ pub mod diff;
 pub mod diskusage;
 pub mod duplicates;
 pub mod elevation;
-pub mod format;
 pub mod fs;
 pub mod ipc;
 pub mod launch;
@@ -37,11 +33,12 @@ pub mod shell_integration;
 pub mod shellmenu;
 pub mod shortcuts;
 pub mod theming;
-pub mod time;
 pub mod timestamps;
 pub mod transfer;
 pub mod undo;
 pub mod updates;
 
+// The shared vocabulary lives in bb-base; re-exported at its old paths so nothing above notices.
+pub use bb_base::{attributes, cancel, cli, format, time};
 pub use bb_paths as paths;
 pub use time::FileTime;

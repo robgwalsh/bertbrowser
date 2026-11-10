@@ -19,7 +19,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::models::TransferProgress;
+use super::TransferProgress;
 use super::pause_gate::PauseGate;
 use crate::cancel::CancelToken;
 
