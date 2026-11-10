@@ -11,6 +11,8 @@ test = false
 doctest = false
 
 [dependencies]
+bb-base = { path = "../bb-base" }
+bb-files = { path = "../bb-files" }
 base64.workspace = true
 zip.workspace = true
 bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }

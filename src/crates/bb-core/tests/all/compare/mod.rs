@@ -1,4 +1,3 @@
-mod compare_equality_tests;
 mod compare_refusal_tests;
 mod compare_rules_tests;
 mod content_settlement_tests;

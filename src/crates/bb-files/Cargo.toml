@@ -1,0 +1,40 @@
+[package]
+name = "bb-files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# Split out of bb-core: files on disk, one operation at a time. Tests live in tests/all (one binary),
+# never in src: see bb-core's Cargo.toml.
+test = false
+doctest = false
+
+[dependencies]
+bb-base = { path = "../bb-base" }
+bb-metadata = { path = "../bb-metadata" }
+bb-paths = { path = "../bb-paths" }
+fancy-regex.workspace = true
+serde.workspace = true
+windows-core = "0.62"
+# COM: the Recycle Bin (IFileOperation and its progress sink, the bin folder's context menu).
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+] }
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
+
+[dev-dependencies]
+bb-base = { path = "../bb-base" }
+bb-fixtures = { path = "../bb-fixtures" }
+windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }

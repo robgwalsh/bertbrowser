@@ -12,7 +12,6 @@ use bb_paths::PathKey;
 
 use super::index_crawler::IndexCrawler;
 use super::index_watcher::IndexWatcher;
-use super::walker::{FileSystemWalker, WalkError};
 use crate::archives::{ArchiveBrowser, ArchiveFormats, ArchivePath};
 use crate::cancel::CancelToken;
 use crate::data::{self, FsIndexRepository, SearchHit};
@@ -22,6 +21,7 @@ use crate::search::{
     ContentProgressSink, ContentReader, ContentScanner, ContentSearchRules,
     FileSystemContentReader, LiveBatches, SearchCandidate, SearchQuery, SearchQueryParse,
 };
+use bb_files::fs::{FileSystemWalker, WalkError};
 
 /// The two streaming channels a search can report through. `live_batches` carries what was found
 /// as it is found; `content_progress` carries how much of a `content:` pass is left to look at,

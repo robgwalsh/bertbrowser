@@ -373,6 +373,7 @@ mod tests {
             "bb-bench",
             "bb-elevator",
             "bb-ffi-harness",
+            "bb-fixtures",
             "bb-indexer",
             "bb-spikes",
             "bb-test-support",

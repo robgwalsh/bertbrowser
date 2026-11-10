@@ -29,11 +29,11 @@ use windows_sys::Win32::System::Threading::{
     CreateEventW, INFINITE, SetEvent, WaitForMultipleObjects,
 };
 
-use super::walker::FileSystemWalker;
 use crate::FileTime;
 use crate::attributes::{DIRECTORY, HIDDEN};
 use crate::cancel::CancelToken;
 use crate::data::{FsEntryRow, FsIndexRepository};
+use bb_files::fs::FileSystemWalker;
 
 /// What a search asks of the watchers.
 pub trait IndexWatcher: Send + Sync {

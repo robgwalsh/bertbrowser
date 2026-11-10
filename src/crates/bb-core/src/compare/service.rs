@@ -15,7 +15,6 @@ use std::sync::Arc;
 use bb_paths::{PathKey, root_len};
 use windows_sys::Win32::Storage::FileSystem::GetVolumeInformationW;
 
-use super::equality::CompareTolerance;
 use super::folder_comparer::{CompareResult, FolderComparer};
 use super::models::{CompareEntry, CompareSourceKind};
 use super::refusal::{CompareProbe, CompareRefusal, FileSystemCompareProbe};
@@ -23,6 +22,7 @@ use crate::cancel::CancelToken;
 use crate::data::{self, FsIndexRepository};
 use crate::fs::{FileSystemWalker, WalkError, is_held_path};
 use crate::mft::MftIndex;
+use bb_files::equality::CompareTolerance;
 
 /// Whether a comparison could be run, and how far to trust it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

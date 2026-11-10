@@ -8,18 +8,13 @@ mod columns;
 mod compare;
 mod crate_layout_tests;
 mod data;
-mod delete;
 mod diff;
 mod fs;
 mod ipc;
 mod layout;
 mod mft;
-mod newitem;
-mod rename;
 mod rules;
 mod search;
-mod shortcuts;
-mod transfer;
 mod updates;
 mod util;
 

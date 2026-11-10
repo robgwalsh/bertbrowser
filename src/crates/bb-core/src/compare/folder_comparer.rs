@@ -11,9 +11,9 @@
 
 use std::collections::HashMap;
 
-use super::equality::{CompareEquality, CompareTolerance};
 use super::models::{CompareEntry, CompareKeys, CompareSide, CompareVerdict};
 use super::rules::CompareRules;
+use bb_files::equality::{CompareEquality, CompareTolerance};
 
 /// What comparing two trees found.
 #[derive(Clone, Debug, PartialEq, Eq)]

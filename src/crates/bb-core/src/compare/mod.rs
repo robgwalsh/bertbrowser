@@ -8,7 +8,6 @@
 //! rather than overlaying it, because the sync planner reads verdicts straight off the result.
 
 mod content_settlement;
-mod equality;
 mod file_compare_plan;
 mod file_content_comparer;
 mod folder_comparer;
@@ -20,8 +19,8 @@ mod sync_models;
 mod sync_planner;
 mod sync_runner;
 
+pub use bb_files::equality::{CompareEquality, CompareTolerance};
 pub use content_settlement::ContentSettlement;
-pub use equality::{CompareEquality, CompareTolerance};
 pub use file_compare_plan::{FileCompareMode, FileComparePlan, FileCompareSide};
 pub use file_content_comparer::{
     ContentComparer, ContentComparison, ContentVerdict, FileContentComparer,

@@ -5,12 +5,11 @@
 
 mod content_scan;
 mod dir_size_result;
-mod file_entry;
 mod search_outcome;
 
+pub use bb_files::models::FileEntry;
 pub use content_scan::{ContentScanLimit, ContentScanProgress, ContentScanReport};
 pub use dir_size_result::DirSizeResult;
-pub use file_entry::FileEntry;
 pub use search_outcome::{SearchOutcome, SearchResultSource};
 
 pub use crate::data::SearchHit;

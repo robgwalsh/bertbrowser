@@ -10,10 +10,10 @@ use std::time::Duration;
 
 use bb_paths::PathKey;
 
-use super::walker::{FileSystemWalker, WalkError};
 use crate::FileTime;
 use crate::cancel::CancelToken;
 use crate::data::{self, FsEntryRow, FsIndexRepository};
+use bb_files::fs::{FileSystemWalker, WalkError};
 
 const CHUNK_SIZE: usize = 20_000;
 

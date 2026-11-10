@@ -5,21 +5,12 @@
 //! FileSystemWalker,IndexCrawler,IndexWatcherService,SearchService,ReadOnlyFile,StagedReplace,
 //! DirectoryRemoval,AccessDenied,EntryStamp,FileListDiff}.cs.
 
-mod file_list_diff;
-mod file_system_service;
 mod index_crawler;
 mod index_watcher;
-mod known_folders;
 mod search_service;
-mod walker;
 
-pub use bb_base::fs::{AccessDenied, DirectoryRemoval, EntryStamp, ReadOnlyFile, StagedReplace};
-pub use file_list_diff::{FileListChanges, FileListDiff};
-pub use file_system_service::{
-    DriveInfo, DriveType, FileSystemService, LocalFileSystem, SubdirectoryPresence,
-};
 pub use index_crawler::IndexCrawler;
 pub use index_watcher::{ChangeApplier, FsChange, FsChangeKind, IndexWatcher, IndexWatcherService};
-pub use known_folders::KnownFolders;
 pub use search_service::{SearchProgress, SearchService, is_held_path};
-pub use walker::{FileSystemWalker, WalkEntry, WalkError};
+// Listing, walking and the executors' shared rules are bb-files'; re-exported so this module stays the one door.
+pub use bb_files::fs::*;

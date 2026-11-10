@@ -13,6 +13,7 @@ doctest = false
 
 [dependencies]
 bb-base = { path = "../bb-base" }
+bb-files = { path = "../bb-files" }
 bb-metadata = { path = "../bb-metadata" }
 bb-preview = { path = "../bb-preview" }
 bb-paths = { path = "../bb-paths" }
