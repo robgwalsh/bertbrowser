@@ -1,12 +1,12 @@
 #Requires -Version 7
 <#
 .SYNOPSIS
-    Times the rebuilds that matter day to day, from a warm tree: a bb-core edit through build.ps1, a
-    C++ view edit through build.ps1, a bb-core edit through `cargo test --no-run`, and an edit in a crate
-    above bb-core (bb-settings) through `cargo test --no-run`.
+    Times the rebuilds that matter day to day, from a warm tree: an edit low in the Rust crates (bb-files'
+    transfer planner: nearly everything rebuilds) through build.ps1 and through `cargo test --no-run`, a C++
+    view edit through build.ps1, and an edit high up (bb-settings) through `cargo test --no-run`.
 
 .DESCRIPTION
-    The Rust scenarios make a real edit (a probe item at the end of bb-core's search/query.rs or
+    The Rust scenarios make a real edit (a probe item at the end of bb-files' transfer/planner.rs or
     bb-settings' search.rs, removed when the script ends); the C++ one touches a view. Each times the rebuild that follows, in the order of an
     edit-build-test loop, so switching between build.ps1 and a plain cargo command is part of what is
     measured. For the two build.ps1 scenarios it also reads the Ninja edges that run
@@ -28,9 +28,9 @@ param(
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path $Root).Path
 $ninjaLog = Join-Path $root "out\$Config\.ninja_log"
-# In the middle of bb-core: an edit there rebuilds bb-core and everything above it.
-$coreFile = Join-Path $root "src\crates\bb-core\src\search\query.rs"
-# Above bb-core: an edit there must not rebuild it.
+# Low down: an edit there rebuilds bb-files, bb-archives, bb-core and everything above them.
+$coreFile = Join-Path $root "src\crates\bb-files\src\transfer\planner.rs"
+# High up: an edit there must not rebuild bb-core or anything below it.
 $upperFile = Join-Path $root "src\crates\bb-settings\src\search.rs"
 $cppFile = Join-Path $root "src\app\views\dialogs\dialogs.cpp"
 
@@ -78,10 +78,10 @@ function TimeBuild([string] $name, [scriptblock] $change) {
 try {
     $results = foreach ($s in $Scenario) {
         switch ($s) {
-            "core" { TimeBuild "bb-core edit -> build.ps1" { EditCore } }
+            "core" { TimeBuild "bb-files edit -> build.ps1" { EditCore } }
             "cpp" { TimeBuild "views .cpp touch -> build.ps1" { Touch $cppFile } }
             { $_ -in "test", "upper" } {
-                $file, $what = ($s -eq "test") ? @($coreFile, "bb-core") : @($upperFile, "bb-settings")
+                $file, $what = ($s -eq "test") ? @($coreFile, "bb-files") : @($upperFile, "bb-settings")
                 Edit $file
                 Push-Location $root
                 try { $t = Measure-Command { cargo test --workspace --no-run 2>&1 | Out-Host } } finally { Pop-Location }

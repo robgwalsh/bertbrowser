@@ -18,7 +18,7 @@ Windows" - Debug then links C++ with its `lld-link` (picked up at the first conf
 ```powershell
 pwsh .\build.ps1 [-Config release] [-Configure]   # enters the VS dev shell; cargo + cbindgen + cmake. Output in out\<config>\
 cargo test --workspace                             # run via PowerShell, NOT the Bash tool: its sandbox ignores Deny ACEs, so access_denied_tests fails there
-cargo test -p bb-core --test all search_grammar        # one filter over the integration binary
+cargo test -p bb-search --test all search_grammar      # one filter over a crate's integration binary
 cargo test -p bb-settings                          # one crate's tests: seconds, when the edit was in a crate above bb-core
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
@@ -50,24 +50,34 @@ against a scratch data directory. Exception: the user explicitly asking you to l
 
 - `src/crates/bb-paths` - `PathKey`, `UniquePath`, natural sort, glob text. No other deps.
 - `src/crates/bb-core` and the crates split from it - everything pure or Win32-behind-a-trait. **The
-  place for anything testable.** Layered so that an edit recompiles as little as possible:
+  place for anything testable.** Layered so that an edit recompiles as little as possible; each crate
+  may use only those listed before it:
   - `bb-base` - the shared vocabulary: `time`, `format`, `attributes`, `cancel`, `cli`, `ArchivePath`, the fs
     primitives (`ReadOnlyFile`, `StagedReplace`, `DirectoryRemoval`, `AccessDenied`, `EntryStamp`), the
     progress trio (`TransferProgress`, `ProgressCoalescer`, `PauseGate`), `path_parts`. Edit rarely: everything rebuilds.
-  - Below `bb-core`, needing only `bb-base`: `bb-metadata`, `bb-preview` (opt-level 1 in dev: the decoders),
-    `bb-theming`, `bb-benchmarking`, `bb-integration` (`shell_integration`, `shellmenu`, `custom_commands`, `launch`).
-  - `bb-core` - the interlocked middle: archives, data (SQLite), fs, search, mft, changes, ipc, transfer,
-    compare, delete, rename, newitem, layout, rules... It re-exports `bb-base`'s modules, `metadata` and
-    `preview` at their old paths (`bb_core::fs::ReadOnlyFile`, `bb_core::metadata`).
-  - Above `bb-core` (nothing in it may use them): `bb-elevation`, `bb-undo`, `bb-settings`, `bb-tools`
-    (`checksums`, `duplicates`, `diskusage`), `bb-commands` (`commands`, `commandbars`).
+  - Leaves on `bb-base`: `bb-metadata`, `bb-preview` (opt-level 1 in dev: the decoders), `bb-theming`,
+    `bb-benchmarking`, `bb-integration` (`shell_integration`, `shellmenu`, `custom_commands`, `launch`).
+  - `bb-search` - the query language, `SearchHit`, the content-scan models.
+  - `bb-index` - the index: `data` (SQLite), `mft`, `changes`, `ipc`, `layout`, `columns`, `rules`. Needs no
+    file operation or archive, so the elevated indexer links it and `bb-base` alone.
+  - `bb-files` - files on disk one operation at a time: basic `fs` (service, walker, listing diff, known
+    folders), `models::FileEntry`, `rename`, `delete`, `transfer`, `newitem`, `shortcuts`, `timestamps`,
+    `equality` (the definition of "the same file", which transfer and compare both ask).
+  - `bb-archives` - archives browsed as folders, and the compression crates (on `bb-files`, `bb-search`).
+  - `bb-core` - only what joins the index to the file system: `fs`'s search service, crawler and
+    watcher, plus `models`, `updates`. It re-exports every crate above at its old path (`bb_core::data`,
+    `bb_core::transfer`, `bb_core::fs::ReadOnlyFile`), so code written against one big crate still reads so.
+  - On `bb-core` (nothing below may use them): `bb-elevation`, `bb-undo`, `bb-settings`, `bb-tools`
+    (`checksums`, `duplicates`, `diskusage`, `compare`, `diff`), `bb-commands` (`commands`, `commandbars`).
   A new module goes in the lowest crate its dependencies allow, never into `bb-base` for convenience.
   Tests are `<crate>/tests/all/<module>/<name>_tests.rs` (`<module>` mirrors the `src` module under test;
   one binary per crate, `main.rs` + a `mod.rs` per folder), real SQLite DBs and trees under `%TEMP%`.
   Never a `#[cfg(test)]` module in these crates' `src`: their libs have `test = false`, so one would never
-  run (`crate_layout_tests` fails on it). A crate below `bb-core` tests without it (`bb-fixtures`, not
-  `bb-test-support`), or a `bb-core` edit rebuilds its tests too. `bb-app` and `bb-ffi` also keep one
-  `tests/all` binary each.
+  run (`crate_layout_tests` fails on it). Test helpers are layered too, so a crate's tests build only
+  the layers it tests: `bb-fixtures` needs nothing of the app (temp paths, junctions, metadata and
+  archive fixtures), `bb-file-fixtures` sits on `bb-files`/`bb-archives` (`FakeRecycleBin`,
+  `archive_support`), `bb-test-support` on `bb-index` (`TempDb`, the pipe fakes). `bb-app` and `bb-ffi`
+  also keep one `tests/all` binary each.
 - `src/crates/bb-shell` - shell/registry/COM services that are not painting (launcher, single
   instance, foreground, folder handler, updates, startup trace, index/elevation pipes).
 - `src/crates/bb-app` - orchestration (tabs, listings, operations queue, palette, settings pages,
@@ -75,11 +85,10 @@ against a scratch data directory. Exception: the user explicitly asking you to l
   Folders: `api` (the public `impl App` surface), `browse`, `ops`, `tools`, `commands`, `side_pane`, `services`;
   the spine (`app`, `events`, `ids`, `seams`, `session`, ...) stays at the top.
 - `src/crates/bb-ffi` - the C ABI staticlib `bbcore`; cbindgen reads this crate alone.
-  `bb-ffi-harness` = the same ABI plus test fixtures (`bbcore_harness.lib`); `bb-test-support` = dev-dep fixtures and fakes
-  (needs `bb-core`); `bb-fixtures` = the ones that do not (temp paths, metadata fixtures), re-exported by it.
+  `bb-ffi-harness` = the same ABI plus test fixtures (`bbcore_harness.lib`); `bb-test-support`, `bb-fixtures`, `bb-file-fixtures` = dev-dep fixtures (above).
   `bb-workspace-hack` - generated by `cargo hakari`, never edited by hand (build gotcha below).
 - `src/crates/bb-indexer`, `bb-elevator` - the two elevated exes (`requireAdministrator`). They link
-  `bb-core` and below (Elevator also `bb-elevation`), never shell COM or orchestration. Indexer **outlives the app**
+  `bb-index` + `bb-base` (Indexer) and `bb-core` + `bb-elevation` (Elevator), never shell COM or orchestration. Indexer **outlives the app**
   (gotcha below); Elevator serves one retried file operation and exits.
 - `src/crates/bb-bench` - benchmark driver.
 - `src/app/{platform,gfx,ui,views,app}` - C++ static lib `bbapp` + `BertBrowser.exe` (WinMain only).
@@ -106,11 +115,14 @@ drops in `tools/parity/dropped.txt`, with a reason).
 ## Where to look, by topic
 
 Paths are Rust unless noted: `core/<module>` = that module of bb-core or of the crate split from it -
-`bb-<name>/src` for `metadata`, `preview`, `theming`, `benchmarking`, `elevation`, `undo`, `settings`
-(the module is the crate), `bb-integration/src/<module>` for `shell_integration`, `shellmenu`,
-`custom_commands`, `launch`, `bb-tools/src/<module>` for `checksums`, `duplicates`, `diskusage`,
-`bb-commands/src/<module>` for `commands`, `commandbars`, `bb-base/src/<module>` for `cli`, `time`,
-`format`, else `bb-core/src/<module>`; `base/` = `bb-base/src`, `app/` = `bb-app/src`, `shell/` =
+`bb-<name>/src` for `metadata`, `preview`, `theming`, `benchmarking`, `search`, `archives`, `elevation`,
+`undo`, `settings` (the module is the crate); `bb-index/src/<module>` for `data`, `mft`, `changes`, `ipc`,
+`layout`, `columns`, `rules`; `bb-files/src/<module>` for `rename`, `delete`, `transfer`, `newitem`,
+`shortcuts`, `timestamps` and `fs` (but `fs`'s crawler, watcher and search service are bb-core's);
+`bb-integration/src/<module>` for `shell_integration`, `shellmenu`, `custom_commands`, `launch`;
+`bb-tools/src/<module>` for `checksums`, `duplicates`, `diskusage`, `compare`, `diff`;
+`bb-commands/src/<module>` for `commands`, `commandbars`; `bb-base/src/<module>` for `cli`, `time`,
+`format`; else `bb-core/src/<module>`; `base/` = `bb-base/src`, `app/` = `bb-app/src`, `shell/` =
 `bb-shell/src`; `ui:` = C++ under `src/app/views` (or `ui`, `gfx`, `platform`). Read the source for
 behavior - this table only says where.
 

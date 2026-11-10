@@ -8,7 +8,7 @@ volume's change journal from then on.
 
 | Layer | What it does | Code |
 |---|---|---|
-| **Build** | One raw read of each NTFS volume's `$MFT` → every name, parent, size, timestamp and attribute on the disk | `bb-core/src/mft/reader.rs`, `volume_indexer.rs` |
+| **Build** | One raw read of each NTFS volume's `$MFT` → every name, parent, size, timestamp and attribute on the disk | `bb-index/src/mft/reader.rs`, `volume_indexer.rs` |
 | **Maintain** | Tail the USN change journal and patch the index as files are created, renamed and deleted | `MftVolumeIndexer::tail` |
 | **Query** | An indexed range scan over one SQLite table | `data/fs_index.rs`, `fs/search_service.rs` |
 
@@ -173,7 +173,7 @@ index helper" material in `CLAUDE.md`.
 journal, so the next launch attaches to a warm index and costs no prompt and no rebuild. Four
 things follow, and each is load-bearing:
 
-- **The pipe name is well-known per user** (`bb-core/src/ipc/index_endpoint.rs`), derived on both sides from
+- **The pipe name is well-known per user** (`bb-index/src/ipc/index_endpoint.rs`), derived on both sides from
   the process's own token SID rather than passed as an argument. It used to carry a random nonce,
   which was right while the helper died with its launcher and wrong the moment a helper had to find
   the *next* app. Deriving it also means the elevated process can no longer be pointed at a name
@@ -229,7 +229,7 @@ Applying a batch (`Apply`) is where the subtlety is:
 ### The query language
 
 A bare word means what it always did — a case-insensitive substring of the name, `*` and `?`
-honoured, several of them ANDed — and on top of that `bb-core/src/search` adds filters:
+honoured, several of them ANDed — and on top of that `bb-search` adds filters:
 
 | Form | Meaning |
 |---|---|
