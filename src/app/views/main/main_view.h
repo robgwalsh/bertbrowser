@@ -64,6 +64,8 @@ struct SelectedRow {
 // by position - so they go whenever the core says the groups were replaced (`version`).
 // A virtual key as a chord names it ("Esc", "Del", "F5", "A"); empty for one no chord uses.
 std::wstring chord_key_name(unsigned vk);
+// "Text (Ctrl+X)" for a tooltip: the gesture the keymap holds for command now, then fter.
+std::wstring gesture_tip(BbApp* app, const std::wstring& text, const wchar_t* command, const std::wstring& after = {});
 
 struct DuplicatesState {
     bool has = false;

@@ -60,6 +60,13 @@ add_library(bbviews STATIC
   views/dialogs/file_pickers.cpp
   views/tools/tool_banner.cpp
   views/main/main_view.cpp
+  views/main/main_view_events.cpp
+  views/main/main_view_layout.cpp
+  views/main/main_view_commands.cpp
+  views/main/main_view_bars.cpp
+  views/main/main_view_tools.cpp
+  views/main/tab_view.cpp
+  views/main/tab_view_sync.cpp
   views/dialogs/ops_dialogs.cpp
   views/dialogs/ops_forms.cpp
   views/shell/file_drag.cpp
