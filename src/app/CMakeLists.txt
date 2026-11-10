@@ -17,6 +17,7 @@ add_library(bbapp STATIC
   ui/collections/tree_view.cpp
   ui/popups/menu.cpp
   ui/popups/popup_layer.cpp
+  ui/popups/rich_tip.cpp
   ui/popups/menu_bar.cpp
   ui/controls/inputs.cpp
   ui/controls/tabs.cpp

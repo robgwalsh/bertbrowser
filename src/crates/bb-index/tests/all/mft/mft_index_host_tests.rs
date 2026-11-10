@@ -501,3 +501,61 @@ fn a_multi_line_failure_is_flattened_into_one_message() {
     assert!(fatal.argument.contains("first line"));
     assert!(joins(thread));
 }
+
+// ---- Usage: what the helper costs, told to whichever app is attached ----
+
+struct CountingProbe(std::sync::atomic::AtomicU64);
+
+impl bb_index::mft::ProcessUsageProbe for CountingProbe {
+    fn sample(&self) -> Option<bb_index::mft::ProcessUsageSample> {
+        let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        Some(bb_index::mft::ProcessUsageSample {
+            pid: 77,
+            uptime_ms: n * 1000,
+            ..Default::default()
+        })
+    }
+}
+
+#[test]
+fn reports_its_usage_once_ready_and_then_on_a_cadence() {
+    let probe = Arc::new(CountingProbe(Default::default()));
+    let host = Arc::new(MftIndexHost::with_usage(
+        Arc::new(ControllableIndexService::new()),
+        probe.clone(),
+        Duration::from_millis(20),
+    ));
+    let (thread, app, _) = hosted_session(host);
+
+    // The opening is untouched: the version, then Ready, and only then a sample.
+    assert_eq!(IndexVerb::Hello, app.receive().unwrap().verb);
+    assert_eq!(IndexVerb::Ready, app.receive().unwrap().verb);
+    let first = app.receive_one_of(&[IndexVerb::Usage]).unwrap();
+    let second = app.receive_one_of(&[IndexVerb::Usage]).unwrap();
+    let up = |m: &bb_index::ipc::IndexMessage| {
+        bb_index::mft::ProcessUsageSample::from_argument(&m.argument)
+            .unwrap()
+            .uptime_ms
+    };
+    assert!(up(&second) > up(&first));
+
+    app.close();
+    assert!(joins(thread));
+    // The sampler stopped with the session: nothing reads counters while nobody is attached.
+    let after = probe.0.load(std::sync::atomic::Ordering::SeqCst);
+    sleep(Duration::from_millis(100));
+    assert_eq!(after, probe.0.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+#[test]
+fn a_host_without_a_probe_sends_no_usage() {
+    let (thread, app) = hosted(Arc::new(ControllableIndexService::new()));
+    app.receive();
+    app.receive();
+    app.send(IndexVerb::Ping, "");
+
+    // The next line is the answer to the ping, not a sample that slipped in first.
+    assert_eq!(IndexVerb::Pong, app.receive().unwrap().verb);
+    app.close();
+    assert!(joins(thread));
+}

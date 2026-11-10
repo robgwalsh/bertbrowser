@@ -175,7 +175,8 @@ void PopupLayer::on_timer(int id) {
             return;
         }
         if (tip_target_ && root()->hovered() && tip_target_->is_ancestor_of(root()->hovered())) {
-            show_tip(tip_target_->tooltip, root()->pointer());
+            if (tip_target_->has_rich_tip()) show_rich_tip(tip_target_, root()->pointer());
+            else show_tip(tip_target_->tooltip, root()->pointer());
         }
     }
 }
@@ -188,7 +189,7 @@ void PopupLayer::hover_changed(Widget* w) {
     tip_target_ = nullptr;
     if (!w || menus_.is_open()) return;
     for (Widget* a = w; a; a = a->parent()) {
-        if (!a->tooltip.empty()) {
+        if (!a->tooltip.empty() || a->has_rich_tip()) {
             tip_target_ = a;
             root()->start_timer(this, kTipTimer, kTipDelayMs);
             return;
@@ -206,7 +207,32 @@ void PopupLayer::show_tip(const std::wstring& text, Point p) {
     tip_ = show(std::move(bubble), tip_rect_);
 }
 
+void PopupLayer::show_rich_tip(Widget* owner, Point p, Size at_least) {
+    hide_tip();
+    auto content = owner->make_rich_tip(res_);
+    if (!content) return;
+    Size sz = content->measure_tree({kInf, kInf});
+    sz = {std::max(sz.w, at_least.w), std::max(sz.h, at_least.h)};
+    tip_text_.clear();
+    rich_owner_ = owner;
+    tip_pointer_ = p;
+    tip_rect_ = place_popup(sz, Rect{p.x, p.y, p.x + 1, p.y + 20}, PopupSide::Below, work_area());
+    tip_ = show(std::move(content), tip_rect_);
+}
+
+void PopupLayer::show_tip_for(Widget* w) {
+    if (!w) return;
+    const Point p{(w->bounds.l + w->bounds.r) / 2, w->bounds.b - 10};
+    if (w->has_rich_tip()) show_rich_tip(w, p);
+    else show_tip(w->tooltip, p);
+}
+
+void PopupLayer::refresh_tip(Widget* owner) {
+    if (tip_ && owner && rich_owner_ == owner) show_rich_tip(owner, tip_pointer_, {tip_rect_.width(), tip_rect_.height()});
+}
+
 void PopupLayer::hide_tip() {
+    rich_owner_ = nullptr;
     if (!tip_) return;
     Widget* t = tip_;
     tip_ = nullptr;

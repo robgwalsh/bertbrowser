@@ -2039,6 +2039,51 @@ fn without_a_helper_the_index_says_nothing_and_search_falls_back() {
     );
 }
 
+/// What the helper costs reaches the host as worded rows, under an event of its own so a tick
+/// re-reads only them; with no helper there is nothing to word.
+#[test]
+fn a_running_helpers_usage_is_rows_and_a_stopped_one_has_none() {
+    let f = Fixture::new();
+    assert_eq!(Value::Null, json(&f.app.index_json())["usage"]);
+    let seen = f.events.lock().unwrap().len();
+
+    f.app.harness_pose_indexer(true).unwrap();
+
+    let index = json(&f.app.index_json());
+    assert_eq!("running", index["presence"]);
+    let rows = index["usage"]["rows"].as_array().unwrap();
+    let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        vec![
+            "memory", "private", "peak", "cpu", "read", "write", "handles", "uptime", "pid"
+        ],
+        ids
+    );
+    assert_eq!("Memory", rows[0]["label"]);
+    assert_eq!("86 MB", rows[0]["value"]);
+    assert_eq!("", rows[0]["detail"]);
+    assert_eq!("Disk read", rows[4]["label"]);
+    assert!(rows[4]["detail"].as_str().unwrap().ends_with(" total"));
+    assert_eq!(
+        bb_core::mft::RATE_WIDTH_TEMPLATE,
+        index["usage"]["valueWidthTemplate"]
+    );
+    let events = f.events.lock().unwrap().clone();
+    for model in [Model::Index, Model::IndexUsage] {
+        assert!(
+            events[seen..]
+                .iter()
+                .any(|e| matches!(e, AppEvent::ModelChanged { model: m } if *m == model)),
+            "{model:?}"
+        );
+    }
+
+    f.app.harness_pose_indexer(false).unwrap();
+    let index = json(&f.app.index_json());
+    assert_eq!(Value::Null, index["usage"]);
+    assert_eq!("not-applicable", index["presence"]);
+}
+
 #[test]
 fn the_declined_index_offers_then_fails_then_offers_again() {
     let f = Fixture::with(|c| c.index_declined = true);

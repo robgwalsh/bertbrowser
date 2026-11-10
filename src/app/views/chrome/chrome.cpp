@@ -75,9 +75,16 @@ void TitleBar::arrange(Rect r) {
     bounds = r;
     float right = r.r;
     for (auto it = children().rbegin(); it != children().rend(); ++it) {
-        if (it->get() == left || it->get() == middle || it->get() == after || it->get() == center || it->get() == app_icon) continue;
+        if (it->get() == left || it->get() == middle || it->get() == after || it->get() == center || it->get() == app_icon ||
+            it->get() == trailing)
+            continue;
         const float w = (*it)->width > 0 ? (*it)->width : 46.0f;
         (*it)->arrange(Rect{right - w, r.t, right, r.b});
+        right -= w;
+    }
+    if (trailing && trailing->flags.visible) {
+        const float w = trailing->width > 0 ? trailing->width : 46.0f;
+        trailing->arrange(Rect{right - w, r.t, right, r.b});
         right -= w;
     }
     // A group of fixed-height controls is laid out from the top of its rect, so give it a rect of its own height

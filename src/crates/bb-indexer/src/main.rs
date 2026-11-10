@@ -29,8 +29,8 @@ use bb_index::ipc::{
     IndexEndpoint, IndexerArguments, IndexerCommand, IndexerPresenceLock, PipeOwner,
 };
 use bb_index::mft::{
-    ChangeRecorderOptions, IndexSessionEnd, MftIndex, MftIndexHost, MftIndexService,
-    RawVolumeAccess,
+    ChangeRecorderOptions, CurrentProcessUsage, IndexSessionEnd, MftIndex, MftIndexHost,
+    MftIndexService, RawVolumeAccess,
 };
 use bb_paths::PathKey;
 
@@ -38,6 +38,10 @@ use bb_paths::PathKey;
 /// long blocking connect, so how quickly a starting app is picked up is a number chosen here. A
 /// quarter of a second is imperceptible against a window opening.
 const CONNECT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// How often an attached app is told what this process costs: often enough for a CPU figure to
+/// feel live in a tooltip, rarely enough that the telling costs nothing worth reporting.
+const USAGE_INTERVAL: Duration = Duration::from_secs(2);
 
 fn main() {
     std::process::exit(run_main());
@@ -149,7 +153,8 @@ fn run(options: &IndexerArguments) -> i32 {
         return 1;
     }
 
-    let host = MftIndexHost::new(index.clone());
+    let host =
+        MftIndexHost::with_usage(index.clone(), CurrentProcessUsage::shared(), USAGE_INTERVAL);
     let code = serve(&host, &sid, &lifetime);
     index.shutdown();
     code

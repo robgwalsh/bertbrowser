@@ -11,6 +11,7 @@
 #include "views/panes/property_host.h"
 #include "views/shell/shell_props.h"
 #include "views/tools/tool_widgets.h"
+#include "ui/popups/rich_tip.h"
 
 #include <dwmapi.h>
 #include <shobjidl.h>
@@ -76,6 +77,73 @@ void MainView::setup_title_bar(DockPanel& root) {
     title_->middle = title_toolbar_;
     setup_title_switchers();
     setup_title_search();
+    setup_indexer_button();
+}
+
+namespace {
+// A title-bar button whose tip is built each time it is shown (and again while it is up) from a model.
+class RichTipButton : public Button {
+public:
+    std::function<RichTipContent()> tip;
+    bool has_rich_tip() const override { return static_cast<bool>(tip); }
+    std::unique_ptr<Widget> make_rich_tip(gfx::Resources& res) override { return std::make_unique<RichTip>(res, tip()); }
+};
+}  // namespace
+
+void MainView::setup_indexer_button() {
+    auto* b = title_->emplace<RichTipButton>();
+    b->name = "IndexerButton";
+    b->icon = &icons::Indexing;
+    b->flat = true;  // the caption buttons' look: nothing until the pointer is over it
+    b->width = 40;
+    b->style.bg = tok::TitleBarBackground;
+    b->style.border = tok::TitleBarBackground;
+    b->style.fg = tok::TitleBarForeground;
+    b->flags.tab_stop = false;
+    b->flags.focusable = false;
+    b->nc_hit = HTCLIENT;
+    b->on_click = [this] {
+        if (popup_) popup_->hide_tip();  // the page it opens says the same, and more
+        bb_settings_page_open(core_.app(), core::s(L"search-index"));
+    };
+    b->tip = [this] {
+        RichTipContent c;
+        c.title = L"Search index helper";
+        c.subtitle = core::wide(index_state_["helperText"].str());
+        const json::Value& usage = index_state_["usage"];
+        const json::Value& rows = usage["rows"];
+        for (size_t i = 0; i < rows.size(); ++i) {
+            c.rows.push_back({core::wide(rows[i]["label"].str()), core::wide(rows[i]["value"].str()),
+                              core::wide(rows[i]["detail"].str())});
+        }
+        c.value_template = core::wide(usage["valueWidthTemplate"].str());
+        if (c.rows.empty()) c.rows.push_back({L"Resource use", L"not reported yet"});
+        c.footer = L"Click for the Search index settings";
+        return c;
+    };
+    b->set_visible(false);
+    title_->trailing = b;
+    indexer_button_ = b;
+}
+
+void MainView::sync_indexer_button() {
+    if (!indexer_button_) return;
+    const bool running = index_state_["presence"].str() == "running";
+    if (indexer_button_->flags.visible != running) {
+        if (!running && popup_) popup_->hide_tip();
+        indexer_button_->set_visible(running);
+        title_->request_layout();
+        title_->arrange(title_->bounds);
+        title_->invalidate();
+    }
+    if (popup_) popup_->refresh_tip(indexer_button_);
+}
+
+void MainView::refresh_index_usage() {
+    index_state_ = try_model([&](BbOwnedStr* o) { return bb_index_state(core_.app(), o); });
+    if (index_state_.is_null()) return;
+    sync_indexer_button();
+    if (settings_) settings_->sync_usage();
 }
 
 void MainView::setup_title_switchers() {
@@ -673,6 +741,7 @@ void MainView::sync_index() {
     if (Widget* start = indexer_banner_->find("IndexerStart")) start->set_visible(b["canStart"].boolean());
     browser_->request_layout();
     refresh_status();
+    sync_indexer_button();
 }
 
 bool MainView::pose_tab_drag(int gap) {

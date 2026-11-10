@@ -87,6 +87,12 @@ impl IndexListener for Listener {
             inner.mft_index_refreshed();
         }
     }
+
+    fn usage_changed(&self) {
+        if let Some(inner) = self.0.upgrade() {
+            inner.hub.model(Model::IndexUsage);
+        }
+    }
 }
 
 fn presence_name(p: IndexerPresence) -> &'static str {
@@ -287,6 +293,19 @@ impl Inner {
                 "message": banner.message,
                 "canStart": banner.can_start,
             },
+            // What the helper costs, worded once for the title-bar tip and the Settings page alike;
+            // null while no helper is attached or none has reported yet.
+            "usage": index.usage().map(|usage| json!({
+                "rows": usage.rows().into_iter().map(|row| json!({
+                    "id": row.id,
+                    "label": row.label,
+                    "value": row.value,
+                    "detail": row.detail,
+                })).collect::<Vec<_>>(),
+                // Measured by the host to size a row's `value` column when it has a `detail`, so the
+                // detail stays put as the rate's digits change.
+                "valueWidthTemplate": bb_core::mft::RATE_WIDTH_TEMPLATE,
+            })),
         })
     }
 }

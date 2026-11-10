@@ -15,7 +15,8 @@
 //! between sessions, deliberately, so the log has no holes where "what changed while I was away?" is
 //! asked; the default is still off and the first app to attach overwrites it.
 //!
-//! Everything in the other direction is a state push, not a reply: the app mirrors what arrives and
+//! Everything in the other direction is a state push, not a reply (`Usage`, the helper's own
+//! resource use, included): the app mirrors what arrives and
 //! answers the UI locally, so nothing it asks ever waits on a round trip. Format and discipline are
 //! `NavigationRequest`'s: tab is safe as a separator precisely because every argument rule rejects
 //! control characters, and a line that fails to parse is *ignored and reading continues*; one
@@ -51,10 +52,14 @@ pub enum IndexVerb {
     Pong,
     /// App → helper: record file changes for this many hours, 0 for not at all.
     Record,
+    /// Helper → app: the helper's own resource use, as `key=number` pairs. Added without a version
+    /// bump: an older app's `try_parse` drops the unknown verb and keeps reading, and an older
+    /// helper simply never sends it.
+    Usage,
 }
 
 impl IndexVerb {
-    pub const ALL: [IndexVerb; 12] = [
+    pub const ALL: [IndexVerb; 13] = [
         IndexVerb::Hello,
         IndexVerb::Ready,
         IndexVerb::Start,
@@ -67,6 +72,7 @@ impl IndexVerb {
         IndexVerb::Ping,
         IndexVerb::Pong,
         IndexVerb::Record,
+        IndexVerb::Usage,
     ];
 
     /// The verb as it is written on the wire.
@@ -84,6 +90,7 @@ impl IndexVerb {
             IndexVerb::Ping => "Ping",
             IndexVerb::Pong => "Pong",
             IndexVerb::Record => "Record",
+            IndexVerb::Usage => "Usage",
         }
     }
 
@@ -182,6 +189,7 @@ impl IndexProtocol {
             IndexVerb::Complete => Self::is_acceptable_root_key(argument),
             IndexVerb::Fatal => Self::is_acceptable_status(argument),
             IndexVerb::Record => Self::is_acceptable_retention(argument),
+            IndexVerb::Usage => Self::parse_usage(argument).is_some(),
             // Ready, Start, Shutdown, Ping and Pong say everything by arriving.
             IndexVerb::Ready
             | IndexVerb::Start
@@ -230,6 +238,47 @@ impl IndexProtocol {
         }
         let parsed: u8 = percent.parse().ok()?;
         (parsed <= 100 && parsed.to_string() == percent).then_some((drive, Some(parsed)))
+    }
+
+    /// The most pairs a `Usage` line may carry: room for figures added later, not a payload.
+    pub const MAX_USAGE_PAIRS: usize = 16;
+
+    /// What `Usage` carries: `key=number` pairs joined by commas, in the order given.
+    pub fn format_usage(pairs: &[(&str, u64)]) -> String {
+        pairs
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    /// Reads `format_usage` back, and nothing else: lowercase ASCII keys, each once, and values
+    /// written the one way an unsigned integer is written ("0", "42", never "042", "+4" or "4.0").
+    /// Keys this end does not know are kept, so a later helper may add figures without a bump;
+    /// the reader picks out the ones it understands.
+    pub fn parse_usage(argument: &str) -> Option<Vec<(&str, u64)>> {
+        if argument.is_empty() {
+            return None;
+        }
+        let mut pairs: Vec<(&str, u64)> = Vec::new();
+        for pair in argument.split(',') {
+            let (key, value) = pair.split_once('=')?;
+            if key.is_empty() || !key.bytes().all(|b| b.is_ascii_lowercase()) {
+                return None;
+            }
+            if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            let number: u64 = value.parse().ok()?;
+            if number.to_string() != value || pairs.iter().any(|(k, _)| *k == key) {
+                return None;
+            }
+            pairs.push((key, number));
+            if pairs.len() > Self::MAX_USAGE_PAIRS {
+                return None;
+            }
+        }
+        Some(pairs)
     }
 
     /// A canonical volume root, as `PathKey::canonicalize` produces: "C:\" and nothing else.

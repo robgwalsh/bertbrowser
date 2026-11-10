@@ -984,7 +984,8 @@ pub unsafe extern "C" fn bb_theme_do(
 
 // ---- the search index ----
 
-/// `{status, canRetry, canStart, presence, anyIndexed, building, banner:{show, message, canStart}}`.
+/// `{status, canRetry, canStart, presence, anyIndexed, building, banner:{show, message, canStart},
+/// usage: null | {rows:[{id, label, value}]}}`. `BB_EVT_MODEL_CHANGED` 25 says `usage` moved.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_index_state(app: *mut BbApp, out_json: *mut BbOwnedStr) -> BbStatus {
     guard(|| {

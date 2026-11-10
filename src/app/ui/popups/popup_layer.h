@@ -43,12 +43,20 @@ public:
     bool menu_open() const { return menus_.is_open(); }
     void close_menu(MenuClose why = MenuClose::Dismissed) { menus_.close(why); }
 
-    // Tooltips. Shown by hovering a widget with `tooltip` text; these are for direct use and tests.
+    // Tooltips. Shown by hovering a widget with `tooltip` text (or a rich tip, Widget::has_rich_tip); these are
+    // for direct use and tests.
     void show_tip(const std::wstring& text, Point pointer);
+    // `w`'s tip as hovering it would show it, with the pointer at the middle of its bottom edge (the harness's `tip`).
+    void show_tip_for(Widget* w);
+    // Rebuilds `owner`'s rich tip in place if it is the one showing (what it says moved); otherwise nothing. It
+    // may grow but never shrinks while it stays up.
+    void refresh_tip(Widget* owner);
     void hide_tip();
     bool tip_visible() const { return tip_ != nullptr; }
     const std::wstring& tip_text() const { return tip_text_; }
     Rect tip_rect() const { return tip_rect_; }
+    Widget* tip_content() const { return tip_; }
+    Widget* rich_tip_owner() const { return tip_ ? rich_owner_ : nullptr; }
 
     // PopupPresenter, in-tree unless an external presenter is set.
     Rect work_area() override;
@@ -71,6 +79,9 @@ public:
 
 private:
     void hover_changed(Widget* w);
+    // `at_least`: a refreshed tip keeps the size it had if its new content is smaller, so figures that change
+    // while it is up never make it twitch.
+    void show_rich_tip(Widget* owner, Point pointer, Size at_least = {});
     // A menu item's tooltip: the item the pointer rests on, and what it will say once the delay is up.
     const MenuItem* tip_item_ = nullptr;
     std::wstring menu_tip_;
@@ -89,6 +100,8 @@ private:
     Widget* tip_ = nullptr;
     std::wstring tip_text_;
     Rect tip_rect_;
+    Widget* rich_owner_ = nullptr;  // whose rich tip is showing, if the tip is one
+    Point tip_pointer_;             // where it was shown for, so a refresh lands in the same place
 };
 
 // The text bubble of a tooltip.

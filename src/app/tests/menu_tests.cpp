@@ -2,6 +2,7 @@
 #include "gfx/icons.gen.h"
 #include "platform/popup_window.h"
 #include "ui/popups/menu_bar.h"
+#include "ui/popups/rich_tip.h"
 
 #include <string>
 #include <vector>
@@ -478,6 +479,79 @@ TEST(tooltip_appears_after_rest_and_hides_on_leave_or_press) {
     m.open(items);
     m.wait(1000);
     CHECK(!m.layer->tip_visible());
+}
+
+namespace {
+// A widget whose tip is rows, built afresh each time (as the title bar's index helper button's is).
+struct RichTipped : Widget {
+    int builds = 0;
+    std::wstring memory = L"84 MB";
+    bool has_rich_tip() const override { return true; }
+    std::unique_ptr<Widget> make_rich_tip(gfx::Resources& res) override {
+        ++builds;
+        return std::make_unique<RichTip>(
+            res, RichTipContent{L"Search index helper", L"Running.", {{L"Memory", memory}, {L"CPU", L"0.4%"}}, L"Click for settings"});
+    }
+};
+
+// A rate and its total: the rate held to a cell as wide as the template.
+RichTipContent traffic(const wchar_t* rate) {
+    return RichTipContent{L"Helper", L"", {{L"Disk read", rate, L"3.3 GB total"}}, L"", L"1023.9 MB/s"};
+}
+}  // namespace
+
+TEST(a_rich_tip_holds_a_rate_to_its_template_so_the_total_stays_put) {
+    ThemeScope theme;
+    Rig rig{400, 200};
+    const float narrow = RichTip(rig.root.resources(), traffic(L"0 B/s")).natural_size().w;
+    CHECK(narrow > 0);
+    CHECK_EQ(RichTip(rig.root.resources(), traffic(L"1.2 MB/s")).natural_size().w, narrow);
+    CHECK_EQ(RichTip(rig.root.resources(), traffic(L"1023.9 MB/s")).natural_size().w, narrow);
+}
+
+TEST(a_rich_tip_shows_rows_and_is_rebuilt_in_place_while_up) {
+    MenuRig m;
+    auto* w = m.under->emplace<RichTipped>();
+    m.rig.relayout();
+    m.rig.move({300, 200});
+    m.wait(600);
+    CHECK(m.layer->tip_visible());
+    CHECK(m.layer->rich_tip_owner() == w);
+    auto* tip = dynamic_cast<RichTip*>(m.layer->tip_content());
+    CHECK(tip != nullptr);
+    CHECK_EQ(tip->content().rows.size(), 2);
+    // Two columns and a heading: wider and taller than one line of text.
+    const Rect first = m.layer->tip_rect();
+    CHECK(first.width() > 120 && first.height() > 60);
+    m.rig.render();
+    CHECK(m.rig.bitmap().pixel(static_cast<UINT>(first.l + 1), static_cast<UINT>(first.t + 1)) !=
+          m.rig.bitmap().pixel(static_cast<UINT>(first.l - 5), static_cast<UINT>(first.t - 5)));
+
+    // What it says moved: the same place, the new words.
+    w->memory = L"91.5 MB";
+    m.layer->refresh_tip(w);
+    tip = dynamic_cast<RichTip*>(m.layer->tip_content());
+    CHECK(tip != nullptr);
+    CHECK_TEXT(tip->content().rows[0].value, L"91.5 MB");
+    CHECK_EQ(m.layer->tip_rect().l, first.l);
+    CHECK_EQ(m.layer->tip_rect().t, first.t);
+    CHECK_EQ(w->builds, 2);
+
+    // Narrower words do not shrink a tip that is up: what changes every two seconds must not make it twitch.
+    const Rect grown = m.layer->tip_rect();
+    w->memory = L"1 MB";
+    m.layer->refresh_tip(w);
+    CHECK_EQ(m.layer->tip_rect().width(), grown.width());
+    CHECK_EQ(m.layer->tip_rect().height(), grown.height());
+    CHECK_EQ(w->builds, 3);
+
+    // A refresh for a tip that is not showing builds nothing.
+    m.rig.down({300, 200});
+    CHECK(!m.layer->tip_visible());
+    m.layer->refresh_tip(w);
+    CHECK(!m.layer->tip_visible());
+    CHECK_EQ(w->builds, 3);
+    m.rig.up({300, 200});
 }
 
 // ---- the menu bar -------------------------------------------------------------------------------------

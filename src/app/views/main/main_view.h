@@ -309,6 +309,7 @@ public:
     // The menu a toolbar button, its overflow or its chevron last dropped down (harness).
     const ui::MenuItems* floating_menu() const { return floating_menu_.get(); }
     bool menu_open() const { return popup_ && popup_->menu_open(); }  // an in-tree menu is up (harness)
+    ui::PopupLayer* popup_layer() const { return popup_; }
     uint64_t active_tab() const { return active_tab_; }
     uint64_t active_pane() const { return active_pane_; }
     TabView* tab_view(uint64_t tab);
@@ -532,6 +533,12 @@ private:
     void supply_properties(uint64_t tab);
     void deliver_preview(uint64_t tab, PreviewResult* result);
     void sync_index();
+    // The title bar's index helper button, shown while the helper runs; its tip is the helper's resource use.
+    void setup_indexer_button();
+    void sync_indexer_button();
+    // `Model::IndexUsage`: the helper reported what it costs. Re-reads the index model for the button's tip and
+    // the Settings page's rows only, not the banner and overlays a status change refreshes.
+    void refresh_index_usage();
     void open_toolbar_list(const BarRow& row, ui::Rect anchor);
     void open_overflow(const std::vector<BarRow>& rows, ui::Rect anchor);
     void open_step_menu(const BarRow& row, ui::Rect anchor);
@@ -633,6 +640,7 @@ private:
     std::vector<PaneView*> pane_views_;
     uint64_t active_tab_ = 0, active_pane_ = 0;
     bool index_was_building_ = false;
+    ui::Button* indexer_button_ = nullptr;
     // The title bar's workspace and saved-search dropdowns, shown when Settings places them there.
     ui::StackPanel* switchers_ = nullptr;
     ui::Button* workspace_switcher_ = nullptr;

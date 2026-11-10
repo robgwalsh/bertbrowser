@@ -605,6 +605,27 @@ pub unsafe extern "C" fn bb_undo_clear(app: *mut BbApp) -> BbStatus {
     })
 }
 
+// ---- states the harness poses ----
+
+/// `running` poses an index helper that is up and reporting canned usage; `off`, none. Only the
+/// harness's seams can be posed: the product's index is the real client.
+#[cfg(feature = "fixtures")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_harness_pose_indexer(app: *mut BbApp, state: BbStr) -> BbStatus {
+    guard(|| {
+        let running = match text_of(state).as_str() {
+            "running" => true,
+            "off" => false,
+            other => {
+                return Err(Fail::Err(format!(
+                    "pose-indexer wants running or off, got '{other}'"
+                )));
+            }
+        };
+        Ok(app_of(app)?.app.harness_pose_indexer(running)?)
+    })
+}
+
 // ---- fixtures the harness writes ----
 
 /// Writes a set of small real files into `dir` (created if need be): `metadata` (a camera picture,

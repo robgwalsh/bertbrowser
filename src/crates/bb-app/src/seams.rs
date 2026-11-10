@@ -7,8 +7,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use bb_core::cancel::CancelToken;
+use bb_core::changes::ChangeLogPolicy;
 use bb_core::delete::{DeleteOutcome, DeleteProgress, DeleteUndoResult};
-use bb_core::mft::{MftIndex, NullMftIndex};
+use bb_core::mft::{
+    IndexListener, IndexListeners, IndexStartMode, IndexerPresence, IndexerUsage, MftIndex,
+    NullMftIndex, ProcessUsageSample,
+};
 use bb_core::newitem::NewItemOutcome;
 use bb_core::rename::RenameOutcome;
 use bb_core::transfer::{
@@ -315,7 +319,7 @@ impl Seams {
             notice: probes.clone(),
             conflicts: probes.clone(),
             appearance: probes.clone(),
-            index: Arc::new(NullMftIndex),
+            index: probes.index.clone(),
             sign_in_task: Arc::new(NoSignInTask),
             shell_new: Arc::new(CannedShellNew),
             devices: Arc::new(CannedDevices),
@@ -427,6 +431,8 @@ pub struct HarnessProbes {
     conflict_names: Mutex<HashMap<String, ConflictResolution>>,
     conflict_model: Mutex<serde_json::Value>,
     appearance: Mutex<SystemAppearance>,
+    /// The harness's index: `NullMftIndex` until a script poses a running helper.
+    pub index: Arc<PosedIndex>,
 }
 
 impl Default for HarnessProbes {
@@ -444,6 +450,7 @@ impl Default for HarnessProbes {
             conflict_names: Mutex::default(),
             conflict_model: Mutex::new(serde_json::Value::Null),
             appearance: Mutex::new(SystemAppearance::DARK),
+            index: Arc::new(PosedIndex::default()),
         }
     }
 }
@@ -585,5 +592,109 @@ impl SystemAppearanceSource for HarnessProbes {
 
     fn set(&self, appearance: SystemAppearance) {
         *lock(&self.appearance) = appearance;
+    }
+}
+
+/// The harness's index seam. It answers exactly as `NullMftIndex` does (no helper, nothing indexed,
+/// no banner) until a script poses a running helper with `pose(true)`: presence `Running` and a
+/// canned usage made of two samples, so the rows show rates as a real helper's would. Nothing here
+/// starts a process or opens a pipe.
+#[derive(Default)]
+pub struct PosedIndex {
+    running: Mutex<bool>,
+    listeners: IndexListeners,
+}
+
+impl PosedIndex {
+    pub fn pose(&self, running: bool) {
+        *lock(&self.running) = running;
+        self.listeners.status_changed();
+        self.listeners.usage_changed();
+    }
+
+    fn is_running(&self) -> bool {
+        *lock(&self.running)
+    }
+
+    fn canned_usage() -> IndexerUsage {
+        let mb = 1024 * 1024;
+        let earlier = ProcessUsageSample {
+            pid: 4120,
+            working_set: 86 * mb,
+            private_bytes: 71 * mb,
+            peak_working_set: 212 * mb,
+            cpu_100ns: 9_000_000_000,
+            read_bytes: 3_400 * mb,
+            write_bytes: 610 * mb,
+            handles: 312,
+            uptime_ms: (3 * 60 + 12) * 60_000,
+            cpus: 8,
+        };
+        let later = ProcessUsageSample {
+            // 0.064 s over 2 s on 8 processors: 0.4% of the machine.
+            cpu_100ns: earlier.cpu_100ns + 640_000,
+            read_bytes: earlier.read_bytes + 2 * mb + mb / 2,
+            write_bytes: earlier.write_bytes + 96 * 1024,
+            uptime_ms: earlier.uptime_ms + 2_000,
+            ..earlier
+        };
+        IndexerUsage::advance(Some(&earlier), later)
+    }
+}
+
+impl MftIndex for PosedIndex {
+    fn start_with(&self, mode: IndexStartMode) -> Result<(), String> {
+        NullMftIndex.start_with(mode)
+    }
+    fn stop(&self) {
+        self.pose(false);
+    }
+    fn any_indexed(&self) -> bool {
+        false
+    }
+    fn is_building(&self) -> bool {
+        false
+    }
+    fn building_drives(&self) -> Vec<String> {
+        Vec::new()
+    }
+    fn drive_progress(&self, _drive: &str) -> Option<u8> {
+        None
+    }
+    fn completed_roots(&self) -> Vec<String> {
+        Vec::new()
+    }
+    fn presence(&self) -> IndexerPresence {
+        if self.is_running() {
+            IndexerPresence::Running
+        } else {
+            NullMftIndex.presence()
+        }
+    }
+    fn is_indexed(&self, _path_key: &str) -> bool {
+        false
+    }
+    fn status_text(&self) -> String {
+        String::new()
+    }
+    fn can_retry(&self) -> bool {
+        false
+    }
+    fn can_start(&self) -> bool {
+        false
+    }
+    fn retry(&self) {}
+    fn change_log(&self) -> ChangeLogPolicy {
+        ChangeLogPolicy::OFF
+    }
+    fn set_change_log(&self, _policy: ChangeLogPolicy) {}
+    fn usage(&self) -> Option<IndexerUsage> {
+        self.is_running().then(Self::canned_usage)
+    }
+    fn subscribe(&self, listener: Arc<dyn IndexListener>) -> u64 {
+        self.listeners.subscribe(listener)
+    }
+    fn unsubscribe(&self, id: u64) {
+        self.listeners.unsubscribe(id);
     }
 }

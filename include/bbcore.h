@@ -916,7 +916,8 @@ enum BbStatus bb_theme_do(struct BbApp *app,
                           struct BbStr arg,
                           struct BbOwnedStr *out_result);
 
-// `{status, canRetry, canStart, presence, anyIndexed, building, banner:{show, message, canStart}}`.
+// `{status, canRetry, canStart, presence, anyIndexed, building, banner:{show, message, canStart},
+// usage: null | {rows:[{id, label, value}]}}`. `BB_EVT_MODEL_CHANGED` 25 says `usage` moved.
 enum BbStatus bb_index_state(struct BbApp *app, struct BbOwnedStr *out_json);
 
 // `dismiss-banner` ("not now": not persisted), `start` (the one thing that raises the elevation
@@ -1082,6 +1083,10 @@ enum BbStatus bb_op_rename_rule(struct BbApp *app,
 
 // Commits what the undo history is holding and empties it (Settings, History, Clear).
 enum BbStatus bb_undo_clear(struct BbApp *app);
+
+// `running` poses an index helper that is up and reporting canned usage; `off`, none. Only the
+// harness's seams can be posed: the product's index is the real client.
+enum BbStatus bb_harness_pose_indexer(struct BbApp *app, struct BbStr state);
 
 // Writes a set of small real files into `dir` (created if need be): `metadata` (a camera picture,
 // a bare picture, two songs), `media` (the same tone as FLAC, WAV, M4A and WMA, and a two-track

@@ -160,6 +160,12 @@ void MainView::handle(const BbEvent& e) {
             supply_properties(e.id);
             break;
         case BB_EVT_MODEL_CHANGED:
+            // The helper's two-second usage tick: the button's tip and the Settings rows, nothing else - and not
+            // the bars either, since what the helper costs never decides whether a command can run.
+            if (e.a == 25) {
+                refresh_index_usage();
+                return;
+            }
             if (e.a == 2) apply_theme();
             if (e.a == 10) {
                 for (auto& kv : by_tab_) kv.second->reload_columns();

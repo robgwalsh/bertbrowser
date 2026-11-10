@@ -14,9 +14,13 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 use super::transport::{IndexStream, StreamRead, StreamWrite};
+use super::usage::ProcessUsageProbe;
 use super::{IndexListener, MftIndex};
 use crate::changes::ChangeLogPolicy;
 use crate::ipc::{IndexMessage, IndexProtocol, IndexVerb, LineReader, write_line};
@@ -48,6 +52,9 @@ struct Inner {
     /// not start a second set of volume threads. The service's own start is idempotent too; both,
     /// because this is the local guarantee and losing it silently would be hard to notice.
     started: AtomicBool,
+    /// What reads this process's own counters, and how often a session is told them. None in the
+    /// tests that are not about usage, so their sessions see only the lines they assert on.
+    usage: Option<(Arc<dyn ProcessUsageProbe>, Duration)>,
 }
 
 pub struct MftIndexHost {
@@ -56,6 +63,24 @@ pub struct MftIndexHost {
 
 impl MftIndexHost {
     pub fn new(index: Arc<dyn MftIndex>) -> MftIndexHost {
+        MftIndexHost::build(index, None)
+    }
+
+    /// As `new`, also telling every attached app what this process costs (`Usage`): once as soon
+    /// as the session is `Ready`, then every `interval` until it ends. Nothing is sampled while no
+    /// app is attached.
+    pub fn with_usage(
+        index: Arc<dyn MftIndex>,
+        probe: Arc<dyn ProcessUsageProbe>,
+        interval: Duration,
+    ) -> MftIndexHost {
+        MftIndexHost::build(index, Some((probe, interval)))
+    }
+
+    fn build(
+        index: Arc<dyn MftIndex>,
+        usage: Option<(Arc<dyn ProcessUsageProbe>, Duration)>,
+    ) -> MftIndexHost {
         MftIndexHost {
             inner: Arc::new(Inner {
                 index,
@@ -64,6 +89,7 @@ impl MftIndexHost {
                     reported_building: HashMap::new(),
                 }),
                 started: AtomicBool::new(false),
+                usage,
             }),
         }
     }
@@ -84,7 +110,14 @@ impl MftIndexHost {
         }
 
         let subscription = inner.index.subscribe(inner.clone());
+        inner.open();
+        let ticker = inner
+            .usage
+            .clone()
+            .map(|(probe, interval)| UsageTicker::start(inner.clone(), probe, interval));
         let end = inner.converse(&mut reader, cancel);
+        // Stopped before the stream is let go, so no sample is written into the next session.
+        drop(ticker);
         inner.index.unsubscribe(subscription);
         inner.session().stream = None;
         end
@@ -96,18 +129,21 @@ impl Inner {
         self.write_gate.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    fn converse(
-        &self,
-        reader: &mut LineReader<StreamRead>,
-        cancel: &CancelToken,
-    ) -> IndexSessionEnd {
+    /// The session's opening: the version, everything already known, then `Ready`.
+    fn open(&self) {
         self.send(&IndexMessage::new(
             IndexVerb::Hello,
             &IndexProtocol::PROTOCOL_VERSION.to_string(),
         ));
         self.replay();
         self.send(&IndexMessage::bare(IndexVerb::Ready));
+    }
 
+    fn converse(
+        &self,
+        reader: &mut LineReader<StreamRead>,
+        cancel: &CancelToken,
+    ) -> IndexSessionEnd {
         while !cancel.is_cancelled() {
             // A broken pipe is the ordinary way an app goes away.
             let Ok(Some(line)) = reader.read_line() else {
@@ -208,6 +244,51 @@ impl Inner {
             "The search index could not start.".to_string()
         } else {
             Self::truncate(clean)
+        }
+    }
+}
+
+/// Sends `Usage` for one session on a thread of its own. Dropping it stops the thread and waits for
+/// it, so no sample outlives the session it was meant for.
+struct UsageTicker {
+    stop: Option<mpsc::Sender<()>>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl UsageTicker {
+    fn start(
+        inner: Arc<Inner>,
+        probe: Arc<dyn ProcessUsageProbe>,
+        interval: Duration,
+    ) -> UsageTicker {
+        let (stop, stopped) = mpsc::channel::<()>();
+        let thread = std::thread::Builder::new()
+            .name("bb-index-usage".into())
+            .spawn(move || {
+                loop {
+                    if let Some(sample) = probe.sample() {
+                        inner.send(&IndexMessage::new(IndexVerb::Usage, &sample.to_argument()));
+                    }
+                    match stopped.recv_timeout(interval) {
+                        Err(RecvTimeoutError::Timeout) => continue,
+                        // Asked to stop, or the ticker was dropped: either way the session is over.
+                        _ => break,
+                    }
+                }
+            })
+            .ok();
+        UsageTicker {
+            stop: Some(stop),
+            thread,
+        }
+    }
+}
+
+impl Drop for UsageTicker {
+    fn drop(&mut self) {
+        drop(self.stop.take());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
         }
     }
 }

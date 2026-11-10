@@ -37,6 +37,9 @@ public:
     // Centred on the whole bar rather than on what is left, at its own width, and pushed right (then
     // narrowed) when what is to its left needs the room (the whole-PC search).
     ui::Widget* center = nullptr;
+    // Just left of the caption buttons, the full height of the bar, at its own `width`; only while visible (the
+    // index helper's button).
+    ui::Widget* trailing = nullptr;
     void set_title(std::wstring t);
     void arrange(ui::Rect r) override;
     void paint(ui::PaintContext& pc) override;

@@ -17,6 +17,7 @@ use super::state::MftIndexState;
 use super::transport::{
     IndexHostLaunch, IndexHostLauncher, IndexStream, IndexTransportFactory, StreamRead, StreamWrite,
 };
+use super::usage::{IndexerUsage, ProcessUsageSample};
 use super::{IndexListener, IndexListeners, IndexStartMode, MftIndex};
 use crate::changes::ChangeLogPolicy;
 use crate::ipc::{IndexMessage, IndexProtocol, IndexVerb, LineReader, write_line};
@@ -83,6 +84,8 @@ struct Gate {
     disposed: bool,
     change_log: ChangeLogPolicy,
     presence: IndexerPresence,
+    /// What the helper of the session in progress last said it costs; None between sessions.
+    usage: Option<IndexerUsage>,
 }
 
 struct Inner {
@@ -123,6 +126,7 @@ impl MftIndexClient {
                     disposed: false,
                     change_log: ChangeLogPolicy::OFF,
                     presence: IndexerPresence::NotRunning,
+                    usage: None,
                 }),
                 send_gate: Mutex::new(()),
                 listeners: IndexListeners::new(),
@@ -359,6 +363,17 @@ impl Inner {
                     self.fail(&message.argument, true);
                     return;
                 }
+                IndexVerb::Usage => {
+                    // try_parse admitted only this shape, so this cannot fail.
+                    if let Some(sample) = ProcessUsageSample::from_argument(&message.argument) {
+                        {
+                            let mut gate = self.gate();
+                            let previous = gate.usage.map(|u| u.sample);
+                            gate.usage = Some(IndexerUsage::advance(previous.as_ref(), sample));
+                        }
+                        self.listeners.usage_changed();
+                    }
+                }
                 IndexVerb::Ping => self.send(stream.as_ref(), &IndexMessage::bare(IndexVerb::Pong)),
                 _ => {}
             }
@@ -396,6 +411,7 @@ impl Inner {
 
     fn fail(&self, status: &str, can_retry: bool) {
         self.state.clear();
+        self.clear_usage();
         {
             let mut gate = self.gate();
             gate.failure = Some(status.to_string());
@@ -412,6 +428,7 @@ impl Inner {
     /// nobody has asked for one" is the ordinary state of a freshly launched app, not an error.
     fn settle(&self, presence: IndexerPresence, failure: Option<String>, can_start: bool) {
         self.state.clear();
+        self.clear_usage();
         {
             let mut gate = self.gate();
             // Only a reported failure may offer to be retried. Nothing running because nobody has
@@ -423,6 +440,14 @@ impl Inner {
             gate.presence = presence;
         }
         self.listeners.status_changed();
+    }
+
+    /// A session that ended takes its figures with it: a stopped helper costs nothing, and one
+    /// still running is not this app's to measure until it attaches again.
+    fn clear_usage(&self) {
+        if self.gate().usage.take().is_some() {
+            self.listeners.usage_changed();
+        }
     }
 
     fn announce(&self) {
@@ -559,6 +584,10 @@ impl MftIndex for MftIndexClient {
 
     fn change_log(&self) -> ChangeLogPolicy {
         self.inner.gate().change_log
+    }
+
+    fn usage(&self) -> Option<IndexerUsage> {
+        self.inner.gate().usage
     }
 
     /// Relayed to the helper the moment it is set, if one is up, and again after every Start. The

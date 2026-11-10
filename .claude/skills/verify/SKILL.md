@@ -548,6 +548,10 @@ assert-bars default|custom|<saved name>
 assert-bar-rows <a> | <b> | …   the Menus and toolbars page's middle list, exactly (`-` a separator)
 assert-bar-choice <name> | assert-no-bar-choice <name>
 assert-tooltip <Name> <text>
+tip <Name>                  shows a widget's tip (plain or rich) as resting the pointer on it would, for a `shot`
+assert-tip <text>           the tip showing says this (any line of a rich one: `Memory: 86 MB`)
+pose-indexer running|off    poses a running index helper with canned resource use (the title bar's
+                            IndexerButton, the Search index page's `IndexerUsage.<id>` rows), or none
 assert-palette-open | assert-palette-closed
 assert-palette-row <text> | assert-no-palette-row <text> | assert-palette-order <a> | <b> | …
 assert-palette-selected <text> | assert-palette-hint <text>
@@ -627,7 +631,8 @@ did not change.
 - **The MFT indexer does not run.** It reads every NTFS volume's master file table - minutes of disk on
   a machine someone is using - and needs administrator rights the harness does not request.
   `--index` is accepted and ignored for now; `gsearch` says so rather than reporting an empty result as a
-  finding, and `--index-declined` poses the "user said no" state for the banner.
+  finding, and `--index-declined` poses the "user said no" state for the banner. `pose-indexer running`
+  poses a helper that is up, for what follows one (`tools/ui/indexer-usage.bbs`).
 
 ## Recipes
 

@@ -156,6 +156,7 @@ behavior - this table only says where.
 | Saved workspaces | `core/data/saved_workspace.rs`, `SavedWorkspaceRules` in `core/rules.rs`, `app/services/saved.rs`, ui: `sidebar.cpp`, Workspaces page of `settings_view.cpp` |
 | Saved searches | `core/data/saved_search.rs`, `SavedSearchRules` in `core/rules.rs`, `app/services/saved.rs`, ui: `dialogs.cpp`, `sidebar.cpp`, Saved searches page |
 | Elevated MFT indexer | `src/crates/bb-indexer`, `core/mft/*` (`reader`, `volume_indexer`, `build_progress`, `host`, `client`, `service`, `presence`), `core/ipc/{index_endpoint,index_protocol,indexer_presence_lock}.rs` |
+| Indexer resource use (title-bar button, its rich tip, Search index page rows) | `core/mft/usage.rs` (sample, probe, rates, row wording), `Usage` in `core/ipc/index_protocol.rs`, `MftIndexHost::with_usage`, `app/services/index.rs` (`usage` in `index_json`, `Model::IndexUsage`), `PosedIndex` in `app/seams.rs`, ui: `ui/popups/rich_tip.cpp`, `main_view.cpp` (`setup_indexer_button`), `settings_view.cpp`, `tools/ui/indexer-usage.bbs` |
 | Indexer banner / sign-in task | `core/mft/{banner_rules,autostart}.rs`, `app/services/index.rs`, `shell/indexing.rs` |
 | Change timeline ("What changed") | `core/changes/*`, `core/data/change_log.rs`, `app/tools/changes.rs`, History page of `settings_view.cpp` |
 | Elevated file-op retry | `src/crates/bb-elevator`, `core/elevation/*`, `core/ipc/elevation_protocol.rs`, `shell/elevation.rs` |
@@ -302,7 +303,10 @@ behavior - this table only says where.
   (`IndexerPresenceLock`) because two would tail one journal into one database. The app never launches
   one at startup - it attaches, and a banner offers the prompt (`IndexerBannerRules`). Nothing supervises
   the helper, so it stops itself when the schema, its own exe, or `BertBrowser.exe` beside it changes
-  (`bb-indexer/src/self_checks.rs`).
+  (`bb-indexer/src/self_checks.rs`). **The helper measures its own resource use** and pushes raw counters
+  (`Usage`, every 2 s while a session is attached): a medium app cannot read a high process's memory, and
+  usually has no PID for it. The verb is additive - an old app drops it, an old helper never sends it - so it
+  took no `PROTOCOL_VERSION` bump, which would have made every new app shut down the running helper.
 - **The change log (`fs_change`) is off by default and written only by the index helper's USN tail**,
   under a `ChangeLogPolicy` the app pushes over the pipe (`IndexVerb::Record`, one integer, never a
   path). Nothing reads the journal on demand; recording starts once a volume's build completes; rows

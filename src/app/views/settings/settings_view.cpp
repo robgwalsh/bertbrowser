@@ -27,6 +27,16 @@ std::wstring indexer_line(const json::Value& st) {
     return L"Background indexer: " + (helper.empty() ? core::wide(st["status"].str()) : helper);
 }
 
+// Writes the helper's usage into the rows the Search index page built for it (`IndexerUsage.<id>`).
+void write_usage_rows(Widget& body, const json::Value& st) {
+    const json::Value& rows = st["usage"]["rows"];
+    for (size_t i = 0; i < rows.size(); ++i) {
+        const std::string id = "IndexerUsage." + rows[i]["id"].str();
+        if (auto* v = dynamic_cast<TextBlock*>(body.find(id))) v->set_text(core::wide(rows[i]["value"].str()));
+        if (auto* d = dynamic_cast<TextBlock*>(body.find(id + ".detail"))) d->set_text(core::wide(rows[i]["detail"].str()));
+    }
+}
+
 std::string json_quote(const std::wstring& w) {
     const std::string s = core::utf8(w);
     std::string out = "\"";
@@ -598,6 +608,11 @@ void SettingsView::build_nav(const json::Value& pages) {
     };
 }
 
+void SettingsView::sync_usage() {
+    if (!open_ || searching_ || page_ != "search-index") return;
+    rebuild_if_changed(false);
+}
+
 void SettingsView::rebuild_if_changed(bool force) {
     // The signature is what the page will show: the models it draws from, as text.
     std::string sig = searching_ ? "?" + core::utf8(query_) : page_;
@@ -629,7 +644,9 @@ void SettingsView::rebuild_if_changed(bool force) {
         // a rebuild landing between a press and its release would lose the click.
         const json::Value st = try_model([&](BbOwnedStr* o) { return bb_index_state(app, o); });
         if (auto* line = dynamic_cast<TextBlock*>(body_->find("IndexerStatus"))) line->set_text(indexer_line(st));
-        sig += st["presence"].str() + "|" + st["autostartNote"].str();
+        // The usage rows likewise, every two seconds; only their coming or going rebuilds.
+        write_usage_rows(*body_, st);
+        sig += st["presence"].str() + "|" + st["autostartNote"].str() + "|" + std::to_string(st["usage"]["rows"].size());
         for (const char* flag : {"canStart", "canStop", "autostart", "autostartCanChoose"}) sig += st[flag].boolean() ? "1" : "0";
     } else if (page_ == "new-items") {
         const json::Value st = try_model([&](BbOwnedStr* o) { return bb_new_types_state(app, o); });
@@ -1032,6 +1049,28 @@ void SettingsView::page_search_index(Widget& p) {
     stop->set_enabled(st["canStop"].boolean());
     stop->name = "IndexerStop";
     if (!st["canStop"].boolean() && helper == L"Running, but not responding.") stop->tooltip = L"The helper is not answering, so it cannot be stopped from here.";
+    // What the helper costs, while it runs: the helper measures itself and reports every two seconds.
+    if (st["presence"].str() == "running") {
+        f::gap(p, 2);
+        f::text(p, L"Resource use", tok::TextPrimary, 14.0f, 600)->name = "IndexerUsageHeading";
+        const json::Value& rows = st["usage"]["rows"];
+        if (rows.size() == 0) f::note(p, L"The helper hasn't reported yet.")->name = "IndexerUsagePending";
+        // A row with a detail (a rate and its total) holds the value to a cell as wide as the widest value it
+        // can show, so the total does not shift every two seconds as the rate's digits change.
+        const std::wstring widest = core::wide(st["usage"]["valueWidthTemplate"].str());
+        const float cell = root() ? std::ceil(res().text.measure(widest, gfx::FontSpec{}).width) : 90.0f;
+        for (size_t i = 0; i < rows.size(); ++i) {
+            auto* row = f::row(p);
+            const std::string id = "IndexerUsage." + rows[i]["id"].str();
+            f::row_label(*row, core::wide(rows[i]["label"].str()), 160.0f)->style.fg = tok::TextSecondary;
+            auto* value = f::text(*row, core::wide(rows[i]["value"].str()));
+            value->name = id;
+            const std::string detail = rows[i]["detail"].str();
+            if (detail.empty()) continue;
+            value->width = cell;
+            f::text(*row, core::wide(detail), tok::TextSecondary)->name = id + ".detail";
+        }
+    }
     f::gap(p, 6);
     bool_row(p, L"Start the indexer when BertBrowser launches", "startIndexerAtLaunch");
     // The scheduler is the state: read, not remembered. Each change is one elevation prompt.

@@ -1,0 +1,30 @@
+# The index helper's resource use: a button in the title bar while the helper runs, its rich tip, and the
+# rows on the Search index page of Settings. The harness's index is posed: no helper is started.
+
+settle
+assert-hidden IndexerButton
+
+pose-indexer running
+assert-visible IndexerButton
+shot 01-title-bar TitleBarRoot
+
+tip IndexerButton
+assert-tip Search index helper
+assert-tip Memory: 86 MB
+assert-tip CPU: 0.4%
+assert-tip Disk read: 1.2 MB/s 3.323 GB total
+assert-tip Click for the Search index settings
+shot 02-tip
+
+press IndexerButton
+settle
+assert-visible IndexerUsageHeading
+assert-visible IndexerUsage.memory
+assert-visible IndexerUsage.pid
+assert-visible IndexerUsage.read.detail
+shot 03-settings
+settings close
+
+pose-indexer off
+assert-hidden IndexerButton
+shot 04-off TitleBarRoot

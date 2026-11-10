@@ -30,6 +30,9 @@ public:
 
     // Reads the core's state: shows or hides the layer, switches page, rebuilds the page.
     void sync();
+    // The index helper's usage moved: the Search index page's rows are rewritten in place (rebuilt only when
+    // they come or go), and nothing else is read.
+    void sync_usage();
     bool is_open() const { return open_; }
     // Esc goes back; on the Keyboard page the next key is the recorder's answer. Asked by the main view
     // before the focused control sees a key; true = taken.

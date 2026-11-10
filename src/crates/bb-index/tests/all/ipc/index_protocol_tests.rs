@@ -32,6 +32,7 @@ fn every_verb_round_trips() {
             "The database schema is newer than this helper.",
         ),
         (IndexVerb::Record, "24"),
+        (IndexVerb::Usage, "pid=4120,ws=88211456"),
     ] {
         let message = IndexMessage::new(verb, argument);
 
@@ -317,4 +318,71 @@ fn the_elevated_surface_is_four_verbs_and_none_of_them_names_a_path() {
             "{verb:?}"
         );
     }
+}
+
+// ---- Usage: the helper's own resource use, helper -> app ----
+
+#[test]
+fn usage_round_trips_its_pairs_in_order() {
+    let argument = IndexProtocol::format_usage(&[("pid", 4120), ("ws", 88_211_456), ("cpu", 0)]);
+    assert_eq!("pid=4120,ws=88211456,cpu=0", argument);
+
+    let parsed = parse(&IndexProtocol::format(&IndexMessage::new(
+        IndexVerb::Usage,
+        &argument,
+    )));
+
+    assert_eq!(IndexVerb::Usage, parsed.verb);
+    assert_eq!(
+        Some(vec![("pid", 4120), ("ws", 88_211_456), ("cpu", 0)]),
+        IndexProtocol::parse_usage(&parsed.argument)
+    );
+}
+
+/// A later helper may add figures; an app that does not know a key keeps the ones it does.
+#[test]
+fn usage_keeps_keys_this_end_does_not_know() {
+    assert_eq!(
+        Some(vec![("pid", 1), ("gpu", 7)]),
+        IndexProtocol::parse_usage("pid=1,gpu=7")
+    );
+}
+
+#[test]
+fn usage_carries_numbers_written_one_way_only() {
+    for argument in [
+        "",
+        "pid",
+        "pid=",
+        "=4",
+        "pid=04",
+        "pid=+4",
+        "pid=-4",
+        "pid=4.0",
+        "pid= 4",
+        "pid=18446744073709551616",
+        "PID=4",
+        "p1d=4",
+        "pid=4,pid=5",
+        "pid=4,",
+        "pid=4;ws=5",
+        r"pid=C:\Windows",
+    ] {
+        rejects(&format!("IDX\tUsage\t{argument}"));
+    }
+    assert!(IndexProtocol::parse_usage("pid=18446744073709551615").is_some());
+}
+
+#[test]
+fn usage_is_bounded_in_how_many_pairs_it_carries() {
+    let keys = "abcdefghijklmnopq";
+    let pairs = |n: usize| {
+        keys.chars()
+            .take(n)
+            .map(|k| format!("{k}=1"))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    assert!(IndexProtocol::parse_usage(&pairs(IndexProtocol::MAX_USAGE_PAIRS)).is_some());
+    assert!(IndexProtocol::parse_usage(&pairs(IndexProtocol::MAX_USAGE_PAIRS + 1)).is_none());
 }

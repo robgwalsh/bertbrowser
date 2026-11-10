@@ -7,4 +7,5 @@ mod mft_index_host_tests;
 mod mft_index_state_tests;
 mod mft_path_builder_tests;
 mod ntfs_parsing_tests;
+mod usage_tests;
 mod usn_record_parser_tests;

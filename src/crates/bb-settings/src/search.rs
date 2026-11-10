@@ -143,6 +143,11 @@ impl SettingsIndex {
                 "helper",
                 "start",
                 "stop",
+                "memory",
+                "ram",
+                "cpu",
+                "resource use",
+                "process",
             ],
         ),
         entry(

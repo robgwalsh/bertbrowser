@@ -58,6 +58,9 @@ pub enum Model {
     FileCompare = 23,
     /// The portable devices under "This PC" were read (`tools("devices.list")`).
     Devices = 24,
+    /// The index helper reported what it costs, or stopped being able to (`index_state().usage`).
+    /// Apart from `Index` so a two-second tick re-reads only the rows, never the banner and overlays.
+    IndexUsage = 25,
 }
 
 #[derive(Clone, Debug, PartialEq)]

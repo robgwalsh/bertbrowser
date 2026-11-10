@@ -958,9 +958,20 @@ impl App {
 
     // ---- the search index ----
 
-    /// `{status, canRetry, canStart, presence, anyIndexed, building, banner:{show, message, canStart}}`.
+    /// `{status, canRetry, canStart, presence, anyIndexed, building, banner:{show, message, canStart},
+    /// usage: null | {rows:[{id, label, value}]}}`.
     pub fn index_json(&self) -> String {
         text(&self.inner.index_json())
+    }
+
+    /// The harness's `pose-indexer`: poses a running helper (with canned usage) or none. Refused
+    /// outside a harness build of the app, whose index is real.
+    pub fn harness_pose_indexer(&self, running: bool) -> AppResult<()> {
+        let probes = self
+            .probes()
+            .ok_or_else(|| AppError::Invalid("pose-indexer needs the harness's seams".into()))?;
+        probes.index.pose(running);
+        Ok(())
     }
 
     /// `dismiss-banner`, `start` (the one thing that raises the elevation prompt), `retry`.

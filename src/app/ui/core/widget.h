@@ -173,6 +173,10 @@ public:
     // The root took the modal away from this widget (window deactivated, capture cancelled by the system).
     virtual void on_modal_cancel() {}
     virtual Cursor cursor_at(Point) const { return Cursor::Arrow; }
+    // A tip richer than `tooltip`'s one bubble of text (rows, a heading). Built each time it is shown, and again
+    // by PopupLayer::refresh_tip, so it can change while it is up. Wins over `tooltip` when true.
+    virtual bool has_rich_tip() const { return false; }
+    virtual std::unique_ptr<Widget> make_rich_tip(gfx::Resources&) { return nullptr; }
     // IME: where the caret is (window DIPs) and the composition string as it changes. Edit implements.
     virtual bool ime_caret_rect(Rect*) { return false; }
     virtual void on_ime_composition(const std::wstring&, size_t /*cursor*/) {}

@@ -17,6 +17,7 @@
 #include "views/bridge/json.h"
 #include "views/tools/tool_state.h"
 #include "views/bridge/model.h"
+#include "ui/popups/rich_tip.h"
 
 
 namespace bbh {
@@ -393,6 +394,41 @@ void Runner::install_ui_banner() {
         core::check(bb_index_do(s_.core().app(), core::s(L"dismiss-banner")), "dismiss-banner");
         s_.settle();
         s_.view().sync_overlays();
+    };
+    // A running index helper with canned resource use, or none: what the title-bar button and the Search index
+    // page's rows follow. Only the harness's index can be posed.
+    verbs_[L"pose-indexer"] = [this](const std::wstring& r) {
+        const std::wstring state = lower(require(r, "pose-indexer"));
+        if (state != L"running" && state != L"off") throw FormatError("pose-indexer wants running or off, got '" + to_utf8(state) + "'.");
+        core::check(bb_harness_pose_indexer(s_.core().app(), core::s(state)), "pose-indexer");
+        s_.settle();
+        s_.view().sync_overlays();
+    };
+    // Shows a widget's tip as resting the pointer on it would (a run posts no mouse input), for a `shot`.
+    verbs_[L"tip"] = [this](const std::wstring& r) {
+        const std::wstring name = require(r, "tip");
+        s_.view().refresh_tooltips();
+        bb::ui::Widget* w = s_.view().find_named(to_utf8(name));
+        if (!w) throw AssertionError("there is no element named " + to_utf8(name) + ".");
+        if (!w->shown()) throw AssertionError(to_utf8(name) + " is not shown, so it cannot be hovered.");
+        bb::ui::PopupLayer* layer = s_.view().popup_layer();
+        if (!layer) throw AssertionError("the window has no popup layer.");
+        layer->show_tip_for(w);
+        if (!layer->tip_visible()) throw AssertionError(to_utf8(name) + " has no tip to show.");
+    };
+    // The tip showing contains this text (a plain tip's text, or any line of a rich one).
+    verbs_[L"assert-tip"] = [this](const std::wstring& r) {
+        const std::wstring expected = require(r, "assert-tip");
+        bb::ui::PopupLayer* layer = s_.view().popup_layer();
+        if (!layer || !layer->tip_visible()) throw AssertionError("no tip is showing.");
+        std::wstring all = layer->tip_text();
+        if (auto* rich = dynamic_cast<bb::ui::RichTip*>(layer->tip_content())) {
+            const auto& c = rich->content();
+            all = c.title + L" | " + c.subtitle + L" | ";
+            for (const auto& row : c.rows) all += row.label + L": " + row.value + (row.detail.empty() ? L"" : L" " + row.detail) + L" | ";
+            all += c.footer;
+        }
+        if (!core::icontains(all, expected)) throw AssertionError("the tip says \"" + to_utf8(all) + "\", which does not contain '" + to_utf8(expected) + "'.");
     };
     verbs_[L"start-indexer"] = [this](const std::wstring&) {
         s_.view().sync_overlays();

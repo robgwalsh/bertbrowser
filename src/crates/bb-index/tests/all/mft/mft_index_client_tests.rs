@@ -625,3 +625,69 @@ fn start_after_dispose_does_nothing() {
     sleep(Duration::from_millis(50));
     assert_eq!("", client.status_text());
 }
+
+// ---- Usage ----
+
+struct UsageCounting(AtomicUsize);
+
+impl IndexListener for UsageCounting {
+    fn usage_changed(&self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+fn usage_line(uptime_ms: u64, cpu_100ns: u64) -> String {
+    bb_index::mft::ProcessUsageSample {
+        pid: 4120,
+        working_set: 50 * 1024 * 1024,
+        cpu_100ns,
+        uptime_ms,
+        cpus: 4,
+        ..Default::default()
+    }
+    .to_argument()
+}
+
+#[test]
+fn mirrors_usage_and_makes_rates_of_consecutive_samples() {
+    let (client, helper, _) = connected();
+    let changes = Arc::new(UsageCounting(AtomicUsize::new(0)));
+    client.subscribe(changes.clone());
+    assert_eq!(None, client.usage());
+
+    helper.send(IndexVerb::Usage, &usage_line(10_000, 0));
+    eventually(
+        || client.usage().is_some(),
+        "the first sample should be mirrored",
+    );
+    assert_eq!(None, client.usage().unwrap().cpu_percent);
+
+    // 0.4 s of CPU over 2 s on four processors: five percent.
+    helper.send(IndexVerb::Usage, &usage_line(12_000, 4_000_000));
+    eventually(
+        || client.usage().unwrap().cpu_percent.is_some(),
+        "the second sample should give a rate",
+    );
+    assert!((client.usage().unwrap().cpu_percent.unwrap() - 5.0).abs() < 1e-9);
+    assert_eq!(50 * 1024 * 1024, client.usage().unwrap().sample.working_set);
+    assert!(changes.0.load(Ordering::SeqCst) >= 2);
+}
+
+/// A helper that is gone costs nothing, and a figure left standing would say it does.
+#[test]
+fn losing_the_helper_forgets_its_usage_and_says_so() {
+    let (client, helper, _) = connected();
+    let changes = Arc::new(UsageCounting(AtomicUsize::new(0)));
+    client.subscribe(changes.clone());
+    helper.send(IndexVerb::Usage, &usage_line(10_000, 0));
+    eventually(
+        || client.usage().is_some(),
+        "precondition: a sample arrived",
+    );
+    let before = changes.0.load(Ordering::SeqCst);
+
+    helper.close();
+
+    eventually(|| client.usage().is_none(), "the usage should be cleared");
+    assert!(changes.0.load(Ordering::SeqCst) > before);
+}

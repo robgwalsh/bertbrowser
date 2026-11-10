@@ -24,6 +24,7 @@ mod reader;
 mod service;
 mod state;
 mod transport;
+mod usage;
 mod usn_record;
 mod volume_indexer;
 
@@ -49,6 +50,10 @@ pub use transport::{
     IndexHostLaunch, IndexHostLaunchResult, IndexHostLauncher, IndexStream, IndexTransport,
     IndexTransportFactory, StreamRead, StreamWrite,
 };
+pub use usage::{
+    CurrentProcessUsage, IndexerUsage, ProcessUsageProbe, ProcessUsageSample, RATE_WIDTH_TEMPLATE,
+    UsageRow,
+};
 pub use usn_record::{UsnRecord, UsnRecordParser};
 pub use volume_indexer::{JournalData, MftVolumeIndexer, VolumeAccess, VolumeHandle};
 
@@ -70,6 +75,8 @@ pub trait IndexListener: Send + Sync {
     fn index_refreshed(&self, _root_key: &str) {}
     /// `status_text` (or anything behind it) changed.
     fn status_changed(&self) {}
+    /// `usage` changed: a helper reported its resource use, or the session that did ended.
+    fn usage_changed(&self) {}
 }
 
 /// The index service: the real one, the client mirroring a helper, the null one, and the test's
@@ -116,6 +123,11 @@ pub trait MftIndex: Send + Sync {
     fn change_log(&self) -> ChangeLogPolicy;
     /// Fire-and-forget: the client relays it to the helper, whose own default is off.
     fn set_change_log(&self, policy: ChangeLogPolicy);
+    /// What the helper last said it costs, while a session with one is attached. None for an
+    /// in-process indexer, a helper that has not reported yet, or one too old to.
+    fn usage(&self) -> Option<IndexerUsage> {
+        None
+    }
     /// Subscribes; the id unsubscribes.
     fn subscribe(&self, listener: Arc<dyn IndexListener>) -> u64;
     fn unsubscribe(&self, id: u64);
@@ -163,6 +175,12 @@ impl IndexListeners {
     pub fn status_changed(&self) {
         for listener in self.snapshot() {
             listener.status_changed();
+        }
+    }
+
+    pub fn usage_changed(&self) {
+        for listener in self.snapshot() {
+            listener.usage_changed();
         }
     }
 }
