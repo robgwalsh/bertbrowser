@@ -43,7 +43,7 @@ depends on the core count, and a 24-thread machine hides it. A/B two builds with
 another program's load moved these numbers by 20% in an afternoon, so a run against an old baseline says little
 about a small change. `pageFaults.*` in the entries' parameters are evidence, never gated.
 
-Every tier writes the `BenchResultSet` JSON in `bb-core/src/benchmarking` (schema v2). Only `bb-bench`
+Every tier writes the `BenchResultSet` JSON in `src/crates/bb-benchmarking` (schema v2). Only `bb-bench`
 writes it; the harness and the app emit raw samples it aggregates.
 
 ## The loop

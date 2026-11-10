@@ -258,7 +258,7 @@ and uninstall. So user data lives in `%USERPROFILE%\.bertbrowser\` (`bertbrowser
 `%LOCALAPPDATA%`.
 
 The first native launch over a C# install finds the old data there: `LegacyData::migrate`
-(`bb-core/src/settings/legacy.rs`) moves it into `legacy-<yyyymmdd>\` before the database opens - moved
+(`bb-settings/src/legacy.rs`) moves it into `legacy-<yyyymmdd>\` before the database opens - moved
 aside, never deleted - and the native app starts from a fresh schema. The old index helper exits by itself
 when it sees the new executable and schema (its self-checks); the new one registers its own sign-in task.
 

@@ -473,7 +473,7 @@ trusting its callers.
 ### The other reader: duplicates
 
 The search box is not the only thing that reads these rows. The duplicate finder
-(`bb-core/src/duplicates`) shortlists on `size_bytes` — two files of different lengths cannot be
+(`bb-tools/src/duplicates`) shortlists on `size_bytes` — two files of different lengths cannot be
 duplicates — so the expensive half of finding them is already paid for by the pass above, and only
 the files that collide are ever opened.
 
