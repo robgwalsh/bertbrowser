@@ -36,33 +36,55 @@ impl Sample {
     }
 }
 
-pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
-    let mut scenarios = Vec::new();
-    let mut repeat = 5;
-    let mut harness: Option<PathBuf> = None;
-    let mut out: Option<String> = None;
-    let mut repo: Option<String> = None;
-    let mut machine_key: Option<String> = None;
-    let mut timeout = 600;
-    let mut busy_timeout = 120_000;
+/// What the command line asked for.
+struct Options {
+    scenarios: Vec<String>,
+    repeat: u32,
+    harness: Option<PathBuf>,
+    out: Option<String>,
+    repo: Option<String>,
+    machine_key: Option<String>,
+    timeout: u32,
+    busy_timeout: u32,
+}
 
-    while let Some(arg) = args.next_arg() {
-        match arg.as_str() {
-            "--scenario" => scenarios.push(args.value(&arg)?),
-            "--repeat" => repeat = args.int(&arg)?.max(1),
-            "--harness" => harness = Some(PathBuf::from(args.value(&arg)?)),
-            "--out" => out = Some(args.value(&arg)?),
-            "--repo" => repo = Some(args.value(&arg)?),
-            "--machine-key" => machine_key = Some(args.value(&arg)?),
-            "--timeout" => timeout = args.int(&arg)?,
-            "--busy-timeout" => busy_timeout = args.int(&arg)?,
-            _ => return Err(unknown("ui", &arg)),
+impl Options {
+    fn parse(mut args: ArgList) -> Result<Options, Fail> {
+        let mut options = Options {
+            scenarios: Vec::new(),
+            repeat: 5,
+            harness: None,
+            out: None,
+            repo: None,
+            machine_key: None,
+            timeout: 600,
+            busy_timeout: 120_000,
+        };
+        while let Some(arg) = args.next_arg() {
+            match arg.as_str() {
+                "--scenario" => options.scenarios.push(args.value(&arg)?),
+                "--repeat" => options.repeat = args.int(&arg)?.max(1),
+                "--harness" => options.harness = Some(PathBuf::from(args.value(&arg)?)),
+                "--out" => options.out = Some(args.value(&arg)?),
+                "--repo" => options.repo = Some(args.value(&arg)?),
+                "--machine-key" => options.machine_key = Some(args.value(&arg)?),
+                "--timeout" => options.timeout = args.int(&arg)?,
+                "--busy-timeout" => options.busy_timeout = args.int(&arg)?,
+                _ => return Err(unknown("ui", &arg)),
+            }
         }
+        Ok(options)
     }
+}
 
-    let repo = env::Repo::find(repo.as_deref())?;
-    let harness =
-        harness.unwrap_or_else(|| repo.release_out().join("harness").join("bb-harness.exe"));
+pub fn execute(args: ArgList) -> Result<i32, Fail> {
+    let options = Options::parse(args)?;
+
+    let repo = env::Repo::find(options.repo.as_deref())?;
+    let harness = options
+        .harness
+        .clone()
+        .unwrap_or_else(|| repo.release_out().join("harness").join("bb-harness.exe"));
     if !harness.exists() {
         eprintln!(
             "No harness at {}. Build with `.\\build.ps1 -Config release` from the repository root, or pass --harness.",
@@ -72,8 +94,83 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
     }
 
     let script_dir = repo.ui_scripts();
+    let scripts = find_scripts(&script_dir, &options.scenarios)?;
+    if scripts.is_empty() {
+        eprintln!(
+            "No {SCRIPT_PREFIX}*.bbs scripts under {}.",
+            script_dir.display()
+        );
+        return Ok(2);
+    }
+
+    let work = std::env::temp_dir()
+        .join("bertbrowser-bench-native")
+        .join("ui")
+        .join(format!(
+            "{}-{}",
+            env::local_date_stamp(),
+            std::process::id()
+        ));
+    std::fs::create_dir_all(&work)?;
+
+    let clock = Instant::now();
+    let mut entries = Vec::new();
+    let mut any_failed = false;
+
+    for script in &scripts {
+        let (scenario_entries, failed) = run_scenario(&options, &harness, script, &work)?;
+        any_failed |= failed;
+        entries.extend(scenario_entries);
+    }
+
+    let set = BenchResultSet {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        generated_utc: FileTime::now(),
+        tool: env::tool_version(),
+        git: env::git(&repo.root),
+        machine: env::machine(options.machine_key.as_deref()),
+        run: RunInfo {
+            job: "ui".to_string(),
+            scale: 1,
+            real: false,
+            tiers: vec!["B".to_string()],
+            render_mode: Some("Offscreen".to_string()),
+            repeat: Some(options.repeat),
+            toolchain: None,
+        },
+        benchmarks: entries,
+    };
+    let out_path = options
+        .out
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo.results_dir().join("ui.json"));
+    BenchResultsJson::write(&set, &out_path)?;
+
+    println!();
+    println!("{}", BenchMarkdown::render_results(&set));
+    println!(
+        "# {} entries from {} scenario(s) in {:.1} min -> {}",
+        set.benchmarks.len(),
+        scripts.len(),
+        clock.elapsed().as_secs_f64() / 60.0,
+        out_path.display()
+    );
+
+    if any_failed {
+        eprintln!(
+            "# some scenarios failed; their logs are under {}",
+            work.display()
+        );
+        return Ok(2);
+    }
+    let _ = std::fs::remove_dir_all(&work);
+    Ok(0)
+}
+
+/// The scripts to run: the named scenarios, or every `bench-*.bbs` when none are named.
+fn find_scripts(script_dir: &Path, scenarios: &[String]) -> Result<Vec<PathBuf>, Fail> {
     let scripts: Vec<PathBuf> = if scenarios.is_empty() {
-        let mut found: Vec<PathBuf> = std::fs::read_dir(&script_dir)
+        let mut found: Vec<PathBuf> = std::fs::read_dir(script_dir)
             .map_err(|e| Fail::Error(format!("{}: {e}", script_dir.display())))?
             .flatten()
             .map(|e| e.path())
@@ -99,141 +196,88 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
             missing.display()
         )));
     }
-    if scripts.is_empty() {
-        eprintln!(
-            "No {SCRIPT_PREFIX}*.bbs scripts under {}.",
-            script_dir.display()
+    Ok(scripts)
+}
+
+/// Runs one scenario `options.repeat` times, each in a fresh harness process. Its entries, and
+/// whether it failed (in which case the one entry carries the error).
+fn run_scenario(
+    options: &Options,
+    harness: &Path,
+    script: &Path,
+    work: &Path,
+) -> Result<(Vec<BenchEntry>, bool), Fail> {
+    let repeat = options.repeat;
+    let scenario = script
+        .file_stem()
+        .map(|s| s.to_string_lossy()[SCRIPT_PREFIX.len()..].to_string())
+        .unwrap_or_default();
+    let mut parameters = read_parameters(script);
+    parameters.insert("renderMode".to_string(), "Offscreen".to_string());
+    parameters.insert("repeat".to_string(), repeat.to_string());
+
+    println!("# {scenario}: {repeat} run(s)");
+    let mut runs: Vec<Vec<Sample>> = Vec::new();
+    let mut failure: Option<String> = None;
+
+    for k in 1..=repeat {
+        let run_dir = work.join(&scenario).join(k.to_string());
+        let bench_out = run_dir.join("samples.jsonl");
+        let log = run_dir.join("harness.log");
+        std::fs::create_dir_all(&run_dir)?;
+        let exit = run_harness(
+            harness,
+            script,
+            &run_dir,
+            &bench_out,
+            &log,
+            options.timeout,
+            options.busy_timeout,
         );
-        return Ok(2);
-    }
-
-    let work = std::env::temp_dir()
-        .join("bertbrowser-bench-native")
-        .join("ui")
-        .join(format!(
-            "{}-{}",
-            env::local_date_stamp(),
-            std::process::id()
-        ));
-    std::fs::create_dir_all(&work)?;
-
-    let clock = Instant::now();
-    let mut entries = Vec::new();
-    let mut any_failed = false;
-
-    for script in &scripts {
-        let scenario = script
-            .file_stem()
-            .map(|s| s.to_string_lossy()[SCRIPT_PREFIX.len()..].to_string())
-            .unwrap_or_default();
-        let mut parameters = read_parameters(script);
-        parameters.insert("renderMode".to_string(), "Offscreen".to_string());
-        parameters.insert("repeat".to_string(), repeat.to_string());
-
-        println!("# {scenario}: {repeat} run(s)");
-        let mut runs: Vec<Vec<Sample>> = Vec::new();
-        let mut failure: Option<String> = None;
-
-        for k in 1..=repeat {
-            let run_dir = work.join(&scenario).join(k.to_string());
-            let bench_out = run_dir.join("samples.jsonl");
-            let log = run_dir.join("harness.log");
-            std::fs::create_dir_all(&run_dir)?;
-            let exit = run_harness(
-                &harness,
-                script,
-                &run_dir,
-                &bench_out,
-                &log,
-                timeout,
-                busy_timeout,
-            );
-            if exit != 0 || !bench_out.exists() {
-                failure = Some(format!(
-                    "harness exit {exit} on run {k}; see {}",
-                    log.display()
-                ));
-                break;
-            }
-            let samples = read_samples(&bench_out)?;
-            println!(
-                "#   run {k}: {}",
-                samples
-                    .iter()
-                    .map(|s| match s {
-                        Sample::Time { name, ms } => format!("{name} {ms:.0} ms"),
-                        Sample::Mem { name, process } => format!(
-                            "{name} {:.1}/{:.1}/{:.0} MB",
-                            process.allocator_bytes as f64 / (1024.0 * 1024.0),
-                            process.process_heap_bytes as f64 / (1024.0 * 1024.0),
-                            process.private_bytes as f64 / (1024.0 * 1024.0)
-                        ),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            runs.push(samples);
+        if exit != 0 || !bench_out.exists() {
+            failure = Some(format!(
+                "harness exit {exit} on run {k}; see {}",
+                log.display()
+            ));
+            break;
         }
-
-        if let Some(why) = failure {
-            any_failed = true;
-            eprintln!("# {scenario}: {why}");
-            entries.push(BenchEntry {
-                id: format!("ui.{scenario}"),
-                tier: "B".to_string(),
-                parameters,
-                n: 0,
-                time: None,
-                memory: None,
-                process: None,
-                error: Some(why),
-            });
-            continue;
-        }
-        entries.extend(aggregate(&scenario, &parameters, &runs)?);
+        let samples = read_samples(&bench_out)?;
+        println!("#   run {k}: {}", describe_samples(&samples));
+        runs.push(samples);
     }
 
-    let set = BenchResultSet {
-        schema_version: CURRENT_SCHEMA_VERSION,
-        generated_utc: FileTime::now(),
-        tool: env::tool_version(),
-        git: env::git(&repo.root),
-        machine: env::machine(machine_key.as_deref()),
-        run: RunInfo {
-            job: "ui".to_string(),
-            scale: 1,
-            real: false,
-            tiers: vec!["B".to_string()],
-            render_mode: Some("Offscreen".to_string()),
-            repeat: Some(repeat),
-            toolchain: None,
-        },
-        benchmarks: entries,
-    };
-    let out_path = out
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repo.results_dir().join("ui.json"));
-    BenchResultsJson::write(&set, &out_path)?;
-
-    println!();
-    println!("{}", BenchMarkdown::render_results(&set));
-    println!(
-        "# {} entries from {} scenario(s) in {:.1} min -> {}",
-        set.benchmarks.len(),
-        scripts.len(),
-        clock.elapsed().as_secs_f64() / 60.0,
-        out_path.display()
-    );
-
-    if any_failed {
-        eprintln!(
-            "# some scenarios failed; their logs are under {}",
-            work.display()
-        );
-        return Ok(2);
+    if let Some(why) = failure {
+        eprintln!("# {scenario}: {why}");
+        let entry = BenchEntry {
+            id: format!("ui.{scenario}"),
+            tier: "B".to_string(),
+            parameters,
+            n: 0,
+            time: None,
+            memory: None,
+            process: None,
+            error: Some(why),
+        };
+        return Ok((vec![entry], true));
     }
-    let _ = std::fs::remove_dir_all(&work);
-    Ok(0)
+    Ok((aggregate(&scenario, &parameters, &runs)?, false))
+}
+
+/// One run's samples on a line: times in ms, memory as allocator/heap/private MB.
+fn describe_samples(samples: &[Sample]) -> String {
+    samples
+        .iter()
+        .map(|s| match s {
+            Sample::Time { name, ms } => format!("{name} {ms:.0} ms"),
+            Sample::Mem { name, process } => format!(
+                "{name} {:.1}/{:.1}/{:.0} MB",
+                process.allocator_bytes as f64 / (1024.0 * 1024.0),
+                process.process_heap_bytes as f64 / (1024.0 * 1024.0),
+                process.private_bytes as f64 / (1024.0 * 1024.0)
+            ),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn run_harness(

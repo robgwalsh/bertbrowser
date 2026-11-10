@@ -34,66 +34,65 @@ const LAUNCH_TIMEOUT: Duration = Duration::from_secs(90);
 /// A million index rows: `--session`'s database, sized like a person's rather than like an empty one.
 const SESSION_DB_SCALE: u32 = 10;
 
-pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
-    let mut launches = DEFAULT_LAUNCHES;
-    let mut app: Option<PathBuf> = None;
-    let mut out: Option<String> = None;
-    let mut repo: Option<String> = None;
-    let mut machine_key: Option<String> = None;
-    let mut allow_running = false;
-    let mut affinity: Option<usize> = None;
-    let mut session = false;
+/// A measured launch: its trace and how long the process lived, in ms.
+type KeptLaunch = (StartupTraceData, f64);
 
-    while let Some(arg) = args.next_arg() {
-        match arg.as_str() {
-            "--launches" => launches = args.int(&arg)?.max(2),
-            "--app" => app = Some(PathBuf::from(args.value(&arg)?)),
-            "--out" => out = Some(args.value(&arg)?),
-            "--repo" => repo = Some(args.value(&arg)?),
-            "--machine-key" => machine_key = Some(args.value(&arg)?),
-            "--allow-running" => allow_running = true,
-            "--affinity" => affinity = Some(parse_affinity(&args.value(&arg)?)?),
-            "--session" => session = true,
-            _ => return Err(unknown("startup", &arg)),
+/// What the command line asked for.
+struct Options {
+    launches: u32,
+    app: Option<PathBuf>,
+    out: Option<String>,
+    repo: Option<String>,
+    machine_key: Option<String>,
+    allow_running: bool,
+    affinity: Option<usize>,
+    session: bool,
+}
+
+impl Options {
+    fn parse(mut args: ArgList) -> Result<Options, Fail> {
+        let mut options = Options {
+            launches: DEFAULT_LAUNCHES,
+            app: None,
+            out: None,
+            repo: None,
+            machine_key: None,
+            allow_running: false,
+            affinity: None,
+            session: false,
+        };
+        while let Some(arg) = args.next_arg() {
+            match arg.as_str() {
+                "--launches" => options.launches = args.int(&arg)?.max(2),
+                "--app" => options.app = Some(PathBuf::from(args.value(&arg)?)),
+                "--out" => options.out = Some(args.value(&arg)?),
+                "--repo" => options.repo = Some(args.value(&arg)?),
+                "--machine-key" => options.machine_key = Some(args.value(&arg)?),
+                "--allow-running" => options.allow_running = true,
+                "--affinity" => options.affinity = Some(parse_affinity(&args.value(&arg)?)?),
+                "--session" => options.session = true,
+                _ => return Err(unknown("startup", &arg)),
+            }
         }
+        Ok(options)
     }
+}
 
-    let repo = env::Repo::find(repo.as_deref())?;
-    let app = app.unwrap_or_else(|| repo.release_out().join("app").join("BertBrowser.exe"));
-    if !app.exists() {
-        eprintln!(
-            "No app at {}. Build with `.\\build.ps1 -Config release` from the repository root, or pass --app.",
-            app.display()
-        );
-        return Ok(2);
-    }
-    if env::is_running("BertBrowser.exe") && !allow_running {
-        eprintln!(
-            "A BertBrowser is running. The single-instance claim is per user, so a measured launch would start as a second copy and take a different path. Close it, or pass --allow-running to measure that path on purpose."
-        );
-        return Ok(2);
-    }
-    if env::is_running("bb-indexer.exe") || env::is_running("BertBrowser.Indexer.exe") {
-        println!(
-            "# note: the index helper is running. A traced launch does not attach to it, but it is tailing the journal."
-        );
-    }
-
-    // A child inherits this, which leaves nothing to race between starting it and restricting it.
-    if let Some(mask) = affinity {
-        use windows_sys::Win32::System::Threading::{GetCurrentProcess, SetProcessAffinityMask};
-        // SAFETY: a plain call on this process's own pseudo-handle.
-        if unsafe { SetProcessAffinityMask(GetCurrentProcess(), mask) } == 0 {
-            return Err(Fail::Usage(format!(
-                "--affinity {mask:#x} is not a mask of this machine's processors."
-            )));
-        }
+pub fn execute(args: ArgList) -> Result<i32, Fail> {
+    let options = Options::parse(args)?;
+    let repo = env::Repo::find(options.repo.as_deref())?;
+    let app = match preflight(&options, &repo) {
+        Ok(app) => app,
+        Err(code) => return Ok(code),
+    };
+    if let Some(mask) = options.affinity {
+        restrict_affinity(mask)?;
     }
 
     let corpus_root = corpus::default_root();
     let say = |line: &str| println!("{line}");
     let tree = corpus::ensure_tree(&corpus_root, 1, &say, false)?;
-    let session_db = if session {
+    let session_db = if options.session {
         Some(corpus::ensure_db(
             &corpus_root,
             SESSION_DB_SCALE,
@@ -114,64 +113,20 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
     std::fs::create_dir_all(&traces)?;
 
     println!(
-        "# {launches} launches of {}, first discarded; data dir {}",
+        "# {} launches of {}, first discarded; data dir {}",
+        options.launches,
         app.display(),
         state.display()
     );
 
-    let mut kept: Vec<(StartupTraceData, f64)> = Vec::new();
-    let mut failure: Option<String> = None;
-
-    for k in 0..launches {
-        let trace_path = traces.join(format!("trace-{k:02}.json"));
-        // The discarded launch makes the data directory one this build owns (it would move the seeded
-        // files aside as an older version's otherwise), and only then is there a session to come back to.
-        let named = (session_db.is_none() || k == 0).then_some(tree.startup.as_path());
-        let result = launch(&app, named, &state, &trace_path);
-        let (trace, lifetime_ms) = match result {
-            Ok(r) => r,
-            Err(e) => {
-                failure = Some(format!("launch {k}: {e}"));
-                break;
-            }
-        };
-
-        let first = trace.marks_ms.get(StartupMarks::FIRST_LISTING).map_or_else(
-            || "no first listing".to_string(),
-            |ms| format!("{ms:.0} ms"),
-        );
-        let held = trace
-            .memory
-            .as_ref()
-            .and_then(|m| m.get(StartupMemoryPoints::FIRST_LISTING))
-            .map_or_else(String::new, |m| {
-                format!(
-                    ", {:.0} MB working set",
-                    m.working_set_bytes as f64 / (1024.0 * 1024.0)
-                )
-            });
-        println!(
-            "#   launch {k}{}: first listing at {first}{held}, exit after {lifetime_ms:.0} ms, instance {}{}",
-            if k == 0 { " (cold, discarded)" } else { "" },
-            trace.instance,
-            trace
-                .error
-                .as_ref()
-                .map_or_else(String::new, |e| format!(", error: {e}"))
-        );
-        if let Some(e) = &trace.error {
-            failure = Some(format!("launch {k}: {e}"));
-            break;
-        }
-        if k > 0 {
-            kept.push((trace, lifetime_ms));
-        }
-        if k == 0
-            && let Some(db) = &session_db
-        {
-            seed_session(&state, db, &tree)?;
-        }
-    }
+    let (kept, mut failure) = run_launches(
+        &options,
+        &app,
+        &tree,
+        session_db.as_deref(),
+        &state,
+        &traces,
+    )?;
 
     // Closing saves what the window held. Had a launch fallen back to one pane, the numbers would still look
     // fine and would be measuring the wrong thing.
@@ -179,65 +134,15 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
         failure = Some("the launches did not restore the seeded session".to_string());
     }
 
-    let mut parameters: BTreeMap<String, String> = [
-        ("launches", launches.to_string()),
-        ("discarded", "1".to_string()),
-        (
-            "startFolder",
-            if session { "session" } else { "Startup(500)" }.to_string(),
-        ),
-        ("parked", "true".to_string()),
-        (
-            "app",
-            app.strip_prefix(&repo.root)
-                .unwrap_or(&app)
-                .to_string_lossy()
-                .to_string(),
-        ),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_string(), v))
-    .collect();
-
-    let entries = match &failure {
-        Some(why) => {
-            eprintln!("# {why}; traces under {}", traces.display());
-            vec![BenchEntry {
-                id: "startup.firstListing".to_string(),
-                tier: "C".to_string(),
-                parameters,
-                n: 0,
-                time: None,
-                memory: None,
-                process: None,
-                error: Some(why.clone()),
-            }]
-        }
-        None => {
-            parameters.insert("instance".to_string(), dominant_instance(&kept));
-            if let Some(mask) = affinity {
-                parameters.insert("affinity".to_string(), format!("{mask:#x}"));
-            }
-            parameters.extend(page_fault_parameters(&kept));
-            let mut entries = entries_of(&kept, &parameters)?;
-            if session {
-                // Its own ids: a launch into a session is never compared with one into a named folder.
-                for entry in &mut entries {
-                    entry.id = entry.id.replacen("startup.", "startup.session.", 1);
-                }
-            }
-            entries
-        }
-    };
-
+    let entries = entries_for(&options, &repo, &app, &kept, &failure, &traces)?;
     let set = BenchResultSet {
         schema_version: CURRENT_SCHEMA_VERSION,
         generated_utc: FileTime::now(),
         tool: env::tool_version(),
         git: env::git(&repo.root),
-        machine: env::machine(machine_key.as_deref()),
+        machine: env::machine(options.machine_key.as_deref()),
         run: RunInfo {
-            job: if session {
+            job: if options.session {
                 "startup-session"
             } else {
                 "startup"
@@ -247,13 +152,13 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
             real: false,
             tiers: vec!["C".to_string()],
             render_mode: None,
-            repeat: Some(launches),
+            repeat: Some(options.launches),
             toolchain: None,
         },
         benchmarks: entries,
     };
-    let out_path = out.map(PathBuf::from).unwrap_or_else(|| {
-        repo.results_dir().join(if session {
+    let out_path = options.out.map(PathBuf::from).unwrap_or_else(|| {
+        repo.results_dir().join(if options.session {
             "startup-session.json"
         } else {
             "startup.json"
@@ -269,6 +174,183 @@ pub fn execute(mut args: ArgList) -> Result<i32, Fail> {
         let _ = std::fs::remove_dir_all(&work);
     }
     Ok(if failure.is_none() { 0 } else { 2 })
+}
+
+/// Finds the app and refuses (`Err` is the exit code, the reason already printed) when a launch
+/// would not measure what it should.
+fn preflight(options: &Options, repo: &env::Repo) -> Result<PathBuf, i32> {
+    let app = options
+        .app
+        .clone()
+        .unwrap_or_else(|| repo.release_out().join("app").join("BertBrowser.exe"));
+    if !app.exists() {
+        eprintln!(
+            "No app at {}. Build with `.\\build.ps1 -Config release` from the repository root, or pass --app.",
+            app.display()
+        );
+        return Err(2);
+    }
+    if env::is_running("BertBrowser.exe") && !options.allow_running {
+        eprintln!(
+            "A BertBrowser is running. The single-instance claim is per user, so a measured launch would start as a second copy and take a different path. Close it, or pass --allow-running to measure that path on purpose."
+        );
+        return Err(2);
+    }
+    if env::is_running("bb-indexer.exe") || env::is_running("BertBrowser.Indexer.exe") {
+        println!(
+            "# note: the index helper is running. A traced launch does not attach to it, but it is tailing the journal."
+        );
+    }
+    Ok(app)
+}
+
+/// A child inherits this, which leaves nothing to race between starting it and restricting it.
+fn restrict_affinity(mask: usize) -> Result<(), Fail> {
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, SetProcessAffinityMask};
+    // SAFETY: a plain call on this process's own pseudo-handle.
+    if unsafe { SetProcessAffinityMask(GetCurrentProcess(), mask) } == 0 {
+        return Err(Fail::Usage(format!(
+            "--affinity {mask:#x} is not a mask of this machine's processors."
+        )));
+    }
+    Ok(())
+}
+
+/// Launches the app `options.launches` times. The kept launches (all but the cold first) and, when
+/// one failed, why; the launches stop at the first failure.
+fn run_launches(
+    options: &Options,
+    app: &Path,
+    tree: &corpus::TreePaths,
+    session_db: Option<&Path>,
+    state: &Path,
+    traces: &Path,
+) -> Result<(Vec<KeptLaunch>, Option<String>), Fail> {
+    let mut kept: Vec<KeptLaunch> = Vec::new();
+    let mut failure: Option<String> = None;
+
+    for k in 0..options.launches {
+        let trace_path = traces.join(format!("trace-{k:02}.json"));
+        // The discarded launch makes the data directory one this build owns (it would move the seeded
+        // files aside as an older version's otherwise), and only then is there a session to come back to.
+        let named = (session_db.is_none() || k == 0).then_some(tree.startup.as_path());
+        let result = launch(app, named, state, &trace_path);
+        let (trace, lifetime_ms) = match result {
+            Ok(r) => r,
+            Err(e) => {
+                failure = Some(format!("launch {k}: {e}"));
+                break;
+            }
+        };
+
+        report_launch(k, &trace, lifetime_ms);
+        if let Some(e) = &trace.error {
+            failure = Some(format!("launch {k}: {e}"));
+            break;
+        }
+        if k > 0 {
+            kept.push((trace, lifetime_ms));
+        }
+        if k == 0
+            && let Some(db) = session_db
+        {
+            seed_session(state, db, tree)?;
+        }
+    }
+    Ok((kept, failure))
+}
+
+/// The progress line for one launch.
+fn report_launch(k: u32, trace: &StartupTraceData, lifetime_ms: f64) {
+    let first = trace.marks_ms.get(StartupMarks::FIRST_LISTING).map_or_else(
+        || "no first listing".to_string(),
+        |ms| format!("{ms:.0} ms"),
+    );
+    let held = trace
+        .memory
+        .as_ref()
+        .and_then(|m| m.get(StartupMemoryPoints::FIRST_LISTING))
+        .map_or_else(String::new, |m| {
+            format!(
+                ", {:.0} MB working set",
+                m.working_set_bytes as f64 / (1024.0 * 1024.0)
+            )
+        });
+    println!(
+        "#   launch {k}{}: first listing at {first}{held}, exit after {lifetime_ms:.0} ms, instance {}{}",
+        if k == 0 { " (cold, discarded)" } else { "" },
+        trace.instance,
+        trace
+            .error
+            .as_ref()
+            .map_or_else(String::new, |e| format!(", error: {e}"))
+    );
+}
+
+/// The result entries: the one failing entry when a launch failed, else the measured ones.
+fn entries_for(
+    options: &Options,
+    repo: &env::Repo,
+    app: &Path,
+    kept: &[(StartupTraceData, f64)],
+    failure: &Option<String>,
+    traces: &Path,
+) -> Result<Vec<BenchEntry>, Fail> {
+    let mut parameters: BTreeMap<String, String> = [
+        ("launches", options.launches.to_string()),
+        ("discarded", "1".to_string()),
+        (
+            "startFolder",
+            if options.session {
+                "session"
+            } else {
+                "Startup(500)"
+            }
+            .to_string(),
+        ),
+        ("parked", "true".to_string()),
+        (
+            "app",
+            app.strip_prefix(&repo.root)
+                .unwrap_or(app)
+                .to_string_lossy()
+                .to_string(),
+        ),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect();
+
+    Ok(match failure {
+        Some(why) => {
+            eprintln!("# {why}; traces under {}", traces.display());
+            vec![BenchEntry {
+                id: "startup.firstListing".to_string(),
+                tier: "C".to_string(),
+                parameters,
+                n: 0,
+                time: None,
+                memory: None,
+                process: None,
+                error: Some(why.clone()),
+            }]
+        }
+        None => {
+            parameters.insert("instance".to_string(), dominant_instance(kept));
+            if let Some(mask) = options.affinity {
+                parameters.insert("affinity".to_string(), format!("{mask:#x}"));
+            }
+            parameters.extend(page_fault_parameters(kept));
+            let mut entries = entries_of(kept, &parameters)?;
+            if options.session {
+                // Its own ids: a launch into a session is never compared with one into a named folder.
+                for entry in &mut entries {
+                    entry.id = entry.id.replacen("startup.", "startup.session.", 1);
+                }
+            }
+            entries
+        }
+    })
 }
 
 /// What a person comes back to: two panes, three tabs (one of them ten thousand files, showing in neither pane's

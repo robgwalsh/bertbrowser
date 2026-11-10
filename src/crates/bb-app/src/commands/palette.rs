@@ -18,7 +18,7 @@ use bb_core::rules::SavedWorkspaceRules;
 use serde_json::{Value, json};
 
 use crate::app::{Inner, lock};
-use crate::commands::{CommandOutcome, SETTINGS_OPEN_REASON};
+use crate::commands::{CommandOutcome, Ctx, SETTINGS_OPEN_REASON};
 use crate::events::Model;
 use crate::ids::{AppError, AppResult};
 use crate::services::settings::SETTINGS_PAGES;
@@ -174,13 +174,34 @@ impl Inner {
             .then(|| SETTINGS_OPEN_REASON.to_string());
         let blocked = blocked.as_deref();
         let mut items = Vec::new();
+        self.push_command_items(&mut items, &ctx);
+        self.push_bar_items(&mut items);
+        self.push_workspace_items(&mut items, blocked);
+        self.push_search_items(&mut items, blocked);
+        self.push_bookmark_items(&mut items, blocked);
+        self.push_custom_command_items(&mut items, &ctx, blocked);
+        self.push_new_file_items(&mut items, &ctx, blocked);
+        self.push_tab_items(&mut items, blocked);
+        self.push_drive_items(&mut items, blocked);
+        self.push_column_items(&mut items, blocked);
+        self.push_theme_items(&mut items);
+        self.push_settings_page_items(&mut items);
 
+        let suggested = PaletteSuggestions::for_state(ctx.selected_count(), ctx.is_settings_open())
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        (items, suggested)
+    }
+
+    /// What the catalogue offers, less the palette itself.
+    fn push_command_items(&self, items: &mut Vec<PaletteItem>, ctx: &Ctx) {
         for command in CommandCatalog::all() {
             // The palette is not offered as a row in itself.
             if command.id == "app.palette" {
                 continue;
             }
-            let Some(state) = self.command_state_in(&ctx, command.id) else {
+            let Some(state) = self.command_state_in(ctx, command.id) else {
                 continue;
             };
             let mut entry = PaletteEntry::new(command.id, command.name, command.category);
@@ -197,7 +218,10 @@ impl Inner {
                 completion: None,
             });
         }
+    }
 
+    /// Saved menu and toolbar arrangements.
+    fn push_bar_items(&self, items: &mut Vec<PaletteItem>) {
         // Not blocked by the settings page: recalling an arrangement is what its own page is for.
         let in_force = self.bars_current_name();
         for saved in self.bars_saved() {
@@ -228,7 +252,10 @@ impl Inner {
                 completion: None,
             });
         }
+    }
 
+    /// Saved workspaces.
+    fn push_workspace_items(&self, items: &mut Vec<PaletteItem>, blocked: Option<&str>) {
         for workspace in self.saved_workspaces() {
             let mut entry = PaletteEntry::new(
                 &format!("workspace:{}", workspace.name),
@@ -247,7 +274,10 @@ impl Inner {
                 completion: None,
             });
         }
+    }
 
+    /// Saved searches.
+    fn push_search_items(&self, items: &mut Vec<PaletteItem>, blocked: Option<&str>) {
         for search in self.saved_searches() {
             let mut entry = PaletteEntry::new(
                 &format!("search:{}", search.name),
@@ -270,7 +300,10 @@ impl Inner {
                 completion: None,
             });
         }
+    }
 
+    /// Bookmarks.
+    fn push_bookmark_items(&self, items: &mut Vec<PaletteItem>, blocked: Option<&str>) {
         for bookmark in self.bookmark_list() {
             let name = leaf_name(&bookmark.display_path);
             let mut entry = PaletteEntry::new(
@@ -290,10 +323,18 @@ impl Inner {
                 completion: None,
             });
         }
+    }
 
+    /// The user's own commands.
+    fn push_custom_command_items(
+        &self,
+        items: &mut Vec<PaletteItem>,
+        ctx: &Ctx,
+        blocked: Option<&str>,
+    ) {
         let custom_ids = self.custom_command_ids();
         for id in custom_ids {
-            if let Some(state) = self.command_state_in(&ctx, &id)
+            if let Some(state) = self.command_state_in(ctx, &id)
                 && let Some(def) = self.custom_command(&id)
             {
                 let mut entry = PaletteEntry::new(&id, &def.name, "Custom commands");
@@ -313,10 +354,13 @@ impl Inner {
                 });
             }
         }
+    }
 
+    /// One "New ..." row per new-file type.
+    fn push_new_file_items(&self, items: &mut Vec<PaletteItem>, ctx: &Ctx, blocked: Option<&str>) {
         let new_blocked = blocked
             .map(str::to_string)
-            .or_else(|| self.registry_why_not(&ctx, "file.new-file"));
+            .or_else(|| self.registry_why_not(ctx, "file.new-file"));
         for template in self.new_file_types() {
             let mut entry = PaletteEntry::new(
                 &format!("new:{}|{}", template.label, template.extension),
@@ -335,7 +379,10 @@ impl Inner {
                 completion: None,
             });
         }
+    }
 
+    /// The open tabs.
+    fn push_tab_items(&self, items: &mut Vec<PaletteItem>, blocked: Option<&str>) {
         let mut number = 0;
         for (path, title) in self.all_tab_titles() {
             number += 1;
@@ -353,7 +400,10 @@ impl Inner {
                 completion: None,
             });
         }
+    }
 
+    /// The drives.
+    fn push_drive_items(&self, items: &mut Vec<PaletteItem>, blocked: Option<&str>) {
         for (root, label) in self.drive_list() {
             let mut entry = PaletteEntry::new(&format!("drive:{root}"), &root, "Drives");
             entry.icon = Some("Icon.Drive".into());
@@ -368,7 +418,10 @@ impl Inner {
                 completion: Some(root),
             });
         }
+    }
 
+    /// Columns to show or hide on this tab.
+    fn push_column_items(&self, items: &mut Vec<PaletteItem>, blocked: Option<&str>) {
         // Every built-in and curated column, each as "show" or "hide" for this tab.
         let showing: std::collections::HashSet<String> =
             ColumnLayoutRules::normalize(self.active_tab_columns().as_deref())
@@ -405,7 +458,10 @@ impl Inner {
                 completion: None,
             });
         }
+    }
 
+    /// The themes.
+    fn push_theme_items(&self, items: &mut Vec<PaletteItem>) {
         let current_theme = self.theme_current_id();
         for theme in self.theme_available() {
             let mut entry =
@@ -427,7 +483,10 @@ impl Inner {
                 completion: None,
             });
         }
+    }
 
+    /// The Settings pages.
+    fn push_settings_page_items(&self, items: &mut Vec<PaletteItem>) {
         for (id, name, icon) in SETTINGS_PAGES {
             let mut entry = PaletteEntry::new(&format!("settings:{id}"), name, "Settings");
             entry.icon = Some(icon.to_string());
@@ -444,12 +503,6 @@ impl Inner {
                 completion: None,
             });
         }
-
-        let suggested = PaletteSuggestions::for_state(ctx.selected_count(), ctx.is_settings_open())
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        (items, suggested)
     }
 
     /// What a typed path offers, or None when the text is not a path and is therefore a search for
