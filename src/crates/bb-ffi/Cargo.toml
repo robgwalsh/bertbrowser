@@ -6,6 +6,8 @@ license.workspace = true
 publish.workspace = true
 
 [lib]
+# No doc examples: without this, `cargo test` runs a rustdoc pass over the crate that finds nothing.
+doctest = false
 name = "bbcore"
 # The staticlib is what C++ links; the rlib lets the integration tests call the extern "C" functions.
 crate-type = ["staticlib", "rlib"]
@@ -23,6 +25,7 @@ bb-test-support = { path = "../bb-test-support", optional = true }
 mimalloc = "0.1.52"
 # The same library mimalloc wraps, for handing memory back before a reading: bb_allocator_held.
 libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
 
 [features]
 default = []

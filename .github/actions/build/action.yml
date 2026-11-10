@@ -22,35 +22,52 @@ runs:
 
     - uses: Swatinem/rust-cache@v2
 
-    - uses: ilammy/msvc-dev-cmd@v1
+    # Prebuilt binaries rather than compiling them on every run.
+    - uses: taiki-e/install-action@v2
       with:
-        arch: x64
-
-    - uses: seanmiddleditch/gha-setup-ninja@v5
-
-    - name: Install cbindgen
-      shell: pwsh
-      run: cargo install cbindgen --locked
+        tool: cbindgen,cargo-hakari
 
     - name: Format
       shell: pwsh
       run: cargo fmt --all --check
 
+    # Every cargo invocation (the product, the harness, the tests) must resolve third-party crates
+    # with one feature set, or bb-core and everything above it compiles once per set. The
+    # bb-workspace-hack crate holds that set; this fails when a Cargo.toml change leaves it stale.
+    # Fix locally with `cargo hakari generate` and `cargo hakari manage-deps`.
+    - name: Workspace-hack is current
+      shell: pwsh
+      run: |
+        cargo hakari generate --diff
+        if ($LASTEXITCODE) { exit 1 }
+        cargo hakari manage-deps --dry-run
+        if ($LASTEXITCODE) { exit 1 }
+
     - name: Clippy
       shell: pwsh
       run: cargo clippy --workspace --all-targets -- -D warnings
 
-    # Release, so it shares its artifacts with the cmake build below, which compiles the same profile.
+    # Release, so it shares its artifacts with the cmake build below, which compiles the same profile
+    # (and, through bb-workspace-hack, the same features).
     - name: Test
       shell: pwsh
       run: cargo test --workspace --release
 
-    # After the tests, which pin the committed major version. Cargo.lock follows on the next build, so
-    # nothing below uses --locked.
+    # After the tests, which pin the committed major version. Exports BB_VERSION to the steps below,
+    # which only bb-ffi reads, so the release build reuses everything the tests compiled.
     - name: Stamp the version
       if: inputs.version != ''
       shell: pwsh
       run: pwsh tools/set-version.ps1 -Version '${{ inputs.version }}'
+
+    # The MSVC environment only from here on: the cargo steps above run without it, as cargo inside
+    # the cmake build does (CMakeLists.txt, BB_CARGO_ENV). A C build script reruns when INCLUDE/LIB
+    # differ from its last run, and bb-core and everything above it would compile a second time.
+    - uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - uses: seanmiddleditch/gha-setup-ninja@v5
 
     - name: Configure
       shell: pwsh

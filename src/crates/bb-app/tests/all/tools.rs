@@ -1,7 +1,7 @@
 //! The tool windows' state: checksums, the file compare, disk usage, the change timeline, and the
 //! folder comparison's banner, filter, refusals, ending and sync.
 
-mod common;
+use crate::common;
 
 use bb_app::TabId;
 use bb_core::delete::DeleteMode;

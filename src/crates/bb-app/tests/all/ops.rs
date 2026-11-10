@@ -2,7 +2,7 @@
 //! asks, the right-drag menu, rename preview, archives (extract, compress, edits that undo), shortcuts, the
 //! undo history and the right-click menu's composition rules.
 
-mod common;
+use crate::common;
 
 use bb_app::OpId;
 use common::{Fixture, eventually};

@@ -3,3 +3,7 @@
 # the VC redistributable from Setup.exe.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+# LLD (shipped with the Rust toolchain) rather than MSVC's link.exe for every Rust executable: the test
+# binaries, bb-indexer, bb-elevator, bb-bench. Several times faster on a large link with debug info.
+# The staticlibs C++ links are not linked by rustc, so this does not touch them.
+linker = "rust-lld.exe"

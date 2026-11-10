@@ -24,6 +24,7 @@ add_library(bbapp STATIC
   ui/collections/tile_view.cpp
 )
 target_include_directories(bbapp PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_precompile_headers(bbapp PRIVATE "${BB_PCH}")
 target_link_libraries(bbapp PUBLIC
   d2d1 dwrite d3d11 dxgi dcomp windowscodecs dwmapi
   shell32 ole32 oleaut32 uuid propsys shlwapi comctl32 imm32 uxtheme user32 gdi32
@@ -75,6 +76,7 @@ add_library(bbviews STATIC
   views/settings/settings_ctxmenu.cpp
 )
 target_include_directories(bbviews PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_precompile_headers(bbviews PRIVATE "${BB_PCH}")
 # Header and system libraries only: the Rust archive itself is linked by the executable, because the
 # product and the harness link different builds of it (the harness's carries the test fixtures).
 target_link_libraries(bbviews PUBLIC bbapp bbcore_abi mfplat mf mfuuid)

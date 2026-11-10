@@ -17,6 +17,7 @@ windows-sys = { workspace = true, features = [
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
 ] }
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
 
 [dev-dependencies]
 tempfile.workspace = true

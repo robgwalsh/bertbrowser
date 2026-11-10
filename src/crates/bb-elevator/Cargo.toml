@@ -5,6 +5,12 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[[bin]]
+name = "bb-elevator"
+path = "src/main.rs"
+# No tests in it: without this, `cargo test` builds and links an empty test binary for it.
+test = false
+
 [dependencies]
 bb-paths = { path = "../bb-paths" }
 bb-core = { path = "../bb-core" }
@@ -17,6 +23,7 @@ windows-sys = { workspace = true, features = [
     "Win32_System_Pipes",
     "Win32_System_Threading",
 ] }
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
 
 [build-dependencies]
 embed-manifest.workspace = true

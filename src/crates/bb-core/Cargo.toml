@@ -5,6 +5,12 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[lib]
+# No in-crate tests (they live in tests/) and no doc examples: without these, `cargo test` compiles
+# the whole crate a second time as its own test binary, and runs a rustdoc pass that finds nothing.
+test = false
+doctest = false
+
 [dependencies]
 bb-paths = { path = "../bb-paths" }
 rusqlite.workspace = true
@@ -54,6 +60,7 @@ liblzma.workspace = true
 ruzstd.workspace = true
 lofty.workspace = true
 quick-xml.workspace = true
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
 
 [dev-dependencies]
 bb-test-support = { path = "../bb-test-support" }

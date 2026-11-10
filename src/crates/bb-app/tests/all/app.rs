@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use bb_app::{AppError, AppEvent, SelectOp};
 use bb_core::commands::{FocusKind, FocusState, KeyChord};

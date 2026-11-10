@@ -2,7 +2,7 @@
 //! registry and its one gate, the keymap and the Keyboard page, the palette, the command bars,
 //! columns and their property seam, saved searches and workspaces, settings, themes and the index.
 
-mod common;
+use crate::common;
 
 use bb_app::{AppError, AppEvent, Model, PropSupply, prop_words};
 use bb_core::commands::{FocusKind, FocusState, KeyChord};

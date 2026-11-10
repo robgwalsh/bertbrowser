@@ -1,7 +1,7 @@
 //! The side panes' models: what the preview makes of a selection, and the metadata pane's boxes,
 //! apply, undo and dates, over real files in a throwaway tree.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 

@@ -5,7 +5,9 @@
 mod command_template;
 mod executable_path;
 mod vscode_path;
-pub(crate) mod win_path;
+/// Public for the integration tests (`tests/all/launch/win_path_tests.rs`), not as an API.
+#[doc(hidden)]
+pub mod win_path;
 
 pub use command_template::CommandTemplate;
 pub use executable_path::ExecutablePath;

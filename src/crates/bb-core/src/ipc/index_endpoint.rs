@@ -91,28 +91,3 @@ impl IndexEndpoint {
         Ok(sid_text)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Against the real token: what comes back is a SID the name rule accepts, so the two
-    /// processes derive one name from it.
-    #[test]
-    fn the_current_user_sid_is_one_the_endpoint_accepts() {
-        let sid = IndexEndpoint::current_user_sid().expect("a user SID");
-        assert!(IndexerPresenceLock::is_acceptable_sid(&sid), "{sid}");
-        assert_eq!(
-            format!("BertBrowser.Index.{sid}"),
-            IndexEndpoint::for_current_user().unwrap()
-        );
-    }
-
-    #[test]
-    fn a_sid_this_app_would_not_produce_is_refused() {
-        assert_eq!(
-            Err(Error::UnacceptableSid("Rob".to_string())),
-            IndexEndpoint::for_user("Rob")
-        );
-    }
-}

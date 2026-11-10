@@ -13,6 +13,7 @@ add_executable(bbapp_tests
   icon_tests.cpp
 )
 target_link_libraries(bbapp_tests PRIVATE bbapp)
+target_precompile_headers(bbapp_tests PRIVATE "${BB_PCH}")
 add_test(NAME bbapp_tests COMMAND bbapp_tests)
 
 # Run after every build, so a build that compiles but breaks the framework fails here.

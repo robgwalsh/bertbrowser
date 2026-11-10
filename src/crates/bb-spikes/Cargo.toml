@@ -9,6 +9,9 @@ description = "Phase 0 risk spikes written in Rust; deleted after M5 like the C+
 [[bin]]
 name = "s5_copy_pause"
 path = "src/bin/s5_copy_pause.rs"
+# No tests in it: without this, `cargo test` builds and links an empty test binary for it.
+test = false
 
 [dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }

@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[lib]
+# No doc examples: without this, `cargo test` runs a rustdoc pass over the crate that finds nothing.
+doctest = false
+
 [dependencies]
 bb-core = { path = "../bb-core" }
 bb-paths = { path = "../bb-paths" }
@@ -24,6 +28,7 @@ windows = { workspace = true, features = [
     "Win32_System_SystemServices",
     "Win32_UI_Shell",
 ] }
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
 
 [dev-dependencies]
 bb-test-support = { path = "../bb-test-support" }

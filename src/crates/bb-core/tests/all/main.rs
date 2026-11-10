@@ -10,6 +10,8 @@ mod columns;
 mod commandbars;
 mod commands;
 mod compare;
+mod crate_layout_tests;
+mod custom_commands;
 mod data;
 mod delete;
 mod diff;

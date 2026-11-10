@@ -5,8 +5,15 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[lib]
+# No in-crate tests (they live in tests/) and no doc examples: without these, `cargo test` compiles
+# the whole crate a second time as its own test binary, and runs a rustdoc pass that finds nothing.
+test = false
+doctest = false
+
 [dependencies]
 bb-core = { path = "../bb-core" }
 bb-paths = { path = "../bb-paths" }
 base64.workspace = true
 zip.workspace = true
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }

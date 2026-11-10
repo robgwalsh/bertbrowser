@@ -23,6 +23,7 @@ windows = { workspace = true, features = [
     "Win32_System_TaskScheduler",
     "Win32_System_Variant",
 ] }
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
 
 [build-dependencies]
 embed-manifest.workspace = true

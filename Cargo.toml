@@ -44,6 +44,9 @@ codegen-units = 4
 # Dependencies (sqlite, compressors) are built optimised even in debug so test runs stay fast.
 [profile.dev.package."*"]
 opt-level = 2
+# File and line for a backtrace through a dependency, not full variable info nobody steps through:
+# full debuginfo for all of them is most of what the linker writes into each PDB.
+debug = "line-tables-only"
 
 # bb-core holds the decoders a window waits on (a GIF's LZW, a hex dump's formatting, the syntax
 # tokenizer): unoptimised, the 150-frame GIF the animation script plays took longer to decode than

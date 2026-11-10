@@ -140,3 +140,64 @@ fn written_lines_round_trip() {
     assert_eq!(Some("two…".to_string()), reader.read_line().unwrap());
     assert_eq!(None, reader.read_line().unwrap());
 }
+
+// Formerly the crate's own tests of LineReader.
+
+/// Hands out one byte per read, so every line crosses a fill boundary.
+struct Trickle<'a>(&'a [u8]);
+
+impl Read for Trickle<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self.0.split_first() {
+            Some((first, rest)) if !buf.is_empty() => {
+                buf[0] = *first;
+                self.0 = rest;
+                Ok(1)
+            }
+            _ => Ok(0),
+        }
+    }
+}
+
+#[test]
+fn bytes_after_a_newline_belong_to_the_next_line() {
+    let mut reader = LineReader::new(&b"IDX\tHello\t2\nIDX\tReady\n"[..], 64);
+    assert_eq!(
+        Some("IDX\tHello\t2".to_string()),
+        reader.read_line().unwrap()
+    );
+    assert_eq!(Some("IDX\tReady".to_string()), reader.read_line().unwrap());
+    assert_eq!(None, reader.read_line().unwrap());
+}
+
+#[test]
+fn a_character_split_across_reads_lands_whole() {
+    let mut reader = LineReader::new(Trickle("Indexing C:…\nnext\n".as_bytes()), 64);
+    assert_eq!(
+        Some("Indexing C:…".to_string()),
+        reader.read_line().unwrap()
+    );
+    assert_eq!(Some("next".to_string()), reader.read_line().unwrap());
+}
+
+#[test]
+fn a_stream_ending_without_a_newline_yields_what_arrived() {
+    let mut reader = LineReader::new(&b"OPS\tReady"[..], 64);
+    assert_eq!(Some("OPS\tReady".to_string()), reader.read_line().unwrap());
+    assert_eq!(None, reader.read_line().unwrap());
+}
+
+#[test]
+fn a_peer_that_never_sends_a_newline_is_cut_off_at_the_cap() {
+    let endless = vec![b'a'; 5000];
+    let mut reader = LineReader::new(&endless[..], 100);
+    let line = reader.read_line().unwrap().unwrap();
+    assert_eq!(100, line.len());
+}
+
+#[test]
+fn write_line_terminates_and_flushes() {
+    let mut out = Vec::new();
+    write_line(&mut out, "IDX\tStart").unwrap();
+    assert_eq!(b"IDX\tStart\n".to_vec(), out);
+}

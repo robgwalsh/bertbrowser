@@ -4,17 +4,26 @@ use super::*;
 
 // ---- process-level ----
 
+/// The version this build reports: `BB_VERSION` when the build sets it (CI stamps the release or
+/// unstable version that way - tools/set-version.ps1), else the workspace's committed version. An
+/// environment variable rather than a rewrite of Cargo.toml, because every workspace crate inherits
+/// that version and would recompile; cargo rebuilds only this crate when `BB_VERSION` changes.
+const APP_VERSION: &str = match option_env!("BB_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 /// The core version, as a view into static storage.
 #[unsafe(no_mangle)]
 pub extern "C" fn bb_version() -> BbStr {
     static VERSION: OnceLock<Vec<u16>> = OnceLock::new();
-    BbStr::of(VERSION.get_or_init(|| env!("CARGO_PKG_VERSION").encode_utf16().collect()))
+    BbStr::of(VERSION.get_or_init(|| APP_VERSION.encode_utf16().collect()))
 }
 
 /// Whether this build is on the unstable release channel, decided from its own version string.
 #[unsafe(no_mangle)]
 pub extern "C" fn bb_is_unstable() -> bool {
-    bb_core::updates::ReleaseChannel::is_unstable(Some(env!("CARGO_PKG_VERSION")))
+    bb_core::updates::ReleaseChannel::is_unstable(Some(APP_VERSION))
 }
 
 /// The message behind the last non-OK status on this thread. The view is valid until the next

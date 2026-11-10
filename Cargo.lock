@@ -49,6 +49,7 @@ dependencies = [
  "bb-paths",
  "bb-shell",
  "bb-test-support",
+ "bb-workspace-hack",
  "serde",
  "serde_json",
  "windows",
@@ -60,6 +61,7 @@ name = "bb-bench"
 version = "2.0.0"
 dependencies = [
  "bb-core",
+ "bb-workspace-hack",
  "mimalloc",
  "rusqlite",
  "serde",
@@ -74,6 +76,7 @@ version = "2.0.0"
 dependencies = [
  "bb-paths",
  "bb-test-support",
+ "bb-workspace-hack",
  "bzip2",
  "crc32fast",
  "fancy-regex",
@@ -103,6 +106,7 @@ version = "2.0.0"
 dependencies = [
  "bb-core",
  "bb-paths",
+ "bb-workspace-hack",
  "embed-manifest",
  "windows-sys 0.61.2",
 ]
@@ -116,6 +120,7 @@ dependencies = [
  "bb-ffi",
  "bb-shell",
  "bb-test-support",
+ "bb-workspace-hack",
  "libmimalloc-sys",
  "mimalloc",
  "serde_json",
@@ -127,6 +132,7 @@ name = "bb-ffi-harness"
 version = "2.0.0"
 dependencies = [
  "bb-ffi",
+ "bb-workspace-hack",
 ]
 
 [[package]]
@@ -135,6 +141,7 @@ version = "2.0.0"
 dependencies = [
  "bb-core",
  "bb-paths",
+ "bb-workspace-hack",
  "embed-manifest",
  "windows",
  "windows-sys 0.61.2",
@@ -144,6 +151,7 @@ dependencies = [
 name = "bb-paths"
 version = "2.0.0"
 dependencies = [
+ "bb-workspace-hack",
  "windows-sys 0.61.2",
 ]
 
@@ -153,6 +161,7 @@ version = "2.0.0"
 dependencies = [
  "bb-core",
  "bb-test-support",
+ "bb-workspace-hack",
  "serde_json",
  "velopack",
  "windows-sys 0.61.2",
@@ -162,6 +171,7 @@ dependencies = [
 name = "bb-spikes"
 version = "2.0.0"
 dependencies = [
+ "bb-workspace-hack",
  "windows-sys 0.61.2",
 ]
 
@@ -172,7 +182,25 @@ dependencies = [
  "base64",
  "bb-core",
  "bb-paths",
+ "bb-workspace-hack",
  "zip 9.1.3",
+]
+
+[[package]]
+name = "bb-workspace-hack"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "cc",
+ "getrandom 0.4.3",
+ "libmimalloc-sys",
+ "proc-macro2",
+ "quote",
+ "smallvec",
+ "syn 3.0.9",
+ "windows",
+ "windows-core",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
