@@ -34,6 +34,9 @@ const LAUNCH_TIMEOUT: Duration = Duration::from_secs(90);
 /// A million index rows: `--session`'s database, sized like a person's rather than like an empty one.
 const SESSION_DB_SCALE: u32 = 10;
 
+/// A measured launch: its trace and how long the process lived, in ms.
+type KeptLaunch = (StartupTraceData, f64);
+
 /// What the command line asked for.
 struct Options {
     launches: u32,
@@ -222,8 +225,8 @@ fn run_launches(
     session_db: Option<&Path>,
     state: &Path,
     traces: &Path,
-) -> Result<(Vec<(StartupTraceData, f64)>, Option<String>), Fail> {
-    let mut kept: Vec<(StartupTraceData, f64)> = Vec::new();
+) -> Result<(Vec<KeptLaunch>, Option<String>), Fail> {
+    let mut kept: Vec<KeptLaunch> = Vec::new();
     let mut failure: Option<String> = None;
 
     for k in 0..options.launches {
