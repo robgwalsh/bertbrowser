@@ -16,7 +16,7 @@ namespace bb::views {
 using namespace bb::ui;
 namespace f = forms;
 
-namespace {
+namespace ctxmenu {
 
 std::string upper(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
@@ -210,7 +210,9 @@ std::string array_of(const std::vector<std::string>& items) {
     return out + "]";
 }
 
-}  // namespace
+}  // namespace ctxmenu
+
+using namespace ctxmenu;
 
 // What the list holds is the membership: writing all three from it is how no arrangement can un-hide anything.
 static void apply_rows(SettingsView& view, MainView& main, const Model& m, const std::vector<Row>& rows) {
@@ -253,6 +255,45 @@ void SettingsView::open_new_command() {
     rebuild_if_changed(true);
 }
 
+// The app's entries back in their original order and all on the menu; your commands and other programs'
+// entries keep whether they are on it and go back to where unplaced entries land. Spec: ResetMenu.
+static std::vector<Row> reset_rows(BbApp* app, const Model& m) {
+    std::vector<Row> rows;
+    std::map<std::string, const json::Value*> built_ins;
+    for (size_t i = 0; i < m.page["builtIns"].size(); ++i) built_ins[upper(m.page["builtIns"][i]["token"].str())] = &m.page["builtIns"][i];
+    for (size_t i = 0; i < m.page["defaultLayout"].size(); ++i) {
+        const std::string token = m.page["defaultLayout"][i].str();
+        if (token == "-") {
+            Row sep;
+            sep.token = token;
+            rows.push_back(sep);
+        } else if (upper(token) == "@MORE") {
+            Row more;
+            more.token = token;
+            more.name = L"New entries from other programs appear here";
+            rows.push_back(more);
+        } else if (const auto it = built_ins.find(upper(token)); it != built_ins.end()) {
+            rows.push_back(row_for_built_in(app, *it->second));
+        }
+    }
+    // Your commands, then other programs' entries: each group behind a separator of its own, just above the
+    // "new entries" row. Spec: SettingsViewModel.PlaceUnplaced.
+    std::vector<Row> commands, shell;
+    for (const Row& r : m.rows) {
+        if (r.separator() || r.more() || r.token.rfind("app:", 0) == 0) continue;
+        (r.token.rfind("cmd:", 0) == 0 ? commands : shell).push_back(r);
+    }
+    for (std::vector<Row>* group : {&commands, &shell}) {
+        if (group->empty()) continue;
+        size_t at = more_index(rows);
+        Row sep;
+        sep.token = "-";
+        rows.insert(rows.begin() + static_cast<std::ptrdiff_t>(at++), sep);
+        for (Row& r : *group) rows.insert(rows.begin() + static_cast<std::ptrdiff_t>(at++), std::move(r));
+    }
+    return rows;
+}
+
 void SettingsView::page_context_menu(Widget& p) {
     MainView& main = main_;
     f::heading(p, L"Context menu");
@@ -269,15 +310,28 @@ void SettingsView::page_context_menu(Widget& p) {
     cols->height = 430;
     cols->flex = 1;
 
+    const CommitRows commit = [this, model, &main](std::vector<Row> rows, int select) {
+        menu_selected_ = select;
+        apply_rows(*this, main, *model, rows);
+        rebuild_if_changed(true);
+    };
+    auto* list = context_menu_list(*cols, model, commit);
+    context_menu_choices(*cols, model, commit, list);
+    context_command_editor(p, model);
+    context_new_command(p, model);
+}
+
+// The menu in order, with the buttons that rearrange it. Returns the list, which the choices drag into.
+f::ItemList* SettingsView::context_menu_list(Widget& cols, const std::shared_ptr<Model>& model, const CommitRows& commit) {
+    const bool show_shell = get("showShellExtensions").boolean(true);
     // -- the menu, in order
-    auto* left = cols->emplace<StackPanel>(Orientation::Vertical, 6.0f);
+    auto* left = cols.emplace<StackPanel>(Orientation::Vertical, 6.0f);
     left->flex = 1;
     f::text(*left, L"In the menu", tok::TextSecondary, 13.0f, 600);
     auto* list = left->emplace<f::ItemList>();
     list->name = "MenuLayoutList";
     list->flex = 1;
     list->row_height = 28;
-    const bool show_shell = get("showShellExtensions").boolean(true);
     std::vector<f::ListEntry> entries;
     for (const Row& r : model->rows) {
         f::ListEntry e;
@@ -310,11 +364,6 @@ void SettingsView::page_context_menu(Widget& p) {
         }
     };
 
-    auto commit = [this, model, &main](std::vector<Row> rows, int select) {
-        menu_selected_ = select;
-        apply_rows(*this, main, *model, rows);
-        rebuild_if_changed(true);
-    };
     auto move_by = [this, model, commit](int d) {
         const int at = menu_selected_, to = at + d, n = static_cast<int>(model->rows.size());
         if (at < 0 || at >= n || to < 0 || to >= n) return;
@@ -365,50 +414,20 @@ void SettingsView::page_context_menu(Widget& p) {
     f::button(*tools2, L"New command\u2026", [this] { open_new_command(); })->name = "MenuNewCommand";
     // The app's entries back in their original order and all on the menu; your commands and other programs'
     // entries keep whether they are on it and go back to where unplaced entries land. Spec: ResetMenu.
-    auto* reset = f::button(*tools2, L"Reset", [this, model, commit] {
-        std::vector<Row> rows;
-        std::map<std::string, const json::Value*> built_ins;
-        for (size_t i = 0; i < model->page["builtIns"].size(); ++i) built_ins[upper(model->page["builtIns"][i]["token"].str())] = &model->page["builtIns"][i];
-        for (size_t i = 0; i < model->page["defaultLayout"].size(); ++i) {
-            const std::string token = model->page["defaultLayout"][i].str();
-            if (token == "-") {
-                Row sep;
-                sep.token = token;
-                rows.push_back(sep);
-            } else if (upper(token) == "@MORE") {
-                Row more;
-                more.token = token;
-                more.name = L"New entries from other programs appear here";
-                rows.push_back(more);
-            } else if (const auto it = built_ins.find(upper(token)); it != built_ins.end()) {
-                rows.push_back(row_for_built_in(core_.app(), *it->second));
-            }
-        }
-        // Your commands, then other programs' entries: each group behind a separator of its own, just above the
-        // "new entries" row. Spec: SettingsViewModel.PlaceUnplaced.
-        std::vector<Row> commands, shell;
-        for (const Row& r : model->rows) {
-            if (r.separator() || r.more() || r.token.rfind("app:", 0) == 0) continue;
-            (r.token.rfind("cmd:", 0) == 0 ? commands : shell).push_back(r);
-        }
-        for (std::vector<Row>* group : {&commands, &shell}) {
-            if (group->empty()) continue;
-            size_t at = more_index(rows);
-            Row sep;
-            sep.token = "-";
-            rows.insert(rows.begin() + static_cast<std::ptrdiff_t>(at++), sep);
-            for (Row& r : *group) rows.insert(rows.begin() + static_cast<std::ptrdiff_t>(at++), std::move(r));
-        }
-        commit(std::move(rows), -1);
-    });
+    auto* reset = f::button(*tools2, L"Reset", [this, model, commit] { commit(reset_rows(core_.app(), *model), -1); });
     reset->name = "MenuReset";
     reset->tooltip = L"BertBrowser's entries back in their original order, all on the menu";
     f::text(*left, L"Alt+↑/↓ moves · Del removes", tok::TextMuted, 11.0f);
 
     if (dragging_pose_) list->set_drop_line(3);  // the line a drag draws between two rows, placed rather than dragged
+    return list;
+}
 
+// What can be added or taken out, grouped; a choice dragged onto `list` lands where it is dropped.
+void SettingsView::context_menu_choices(Widget& cols, const std::shared_ptr<Model>& model, const CommitRows& commit, f::ItemList* list) {
+    const bool show_shell = get("showShellExtensions").boolean(true);
     // -- what can be in it
-    auto* right = cols->emplace<StackPanel>(Orientation::Vertical, 6.0f);
+    auto* right = cols.emplace<StackPanel>(Orientation::Vertical, 6.0f);
     right->width = 320;
     f::text(*right, L"Add or remove", tok::TextSecondary, 13.0f, 600);
     auto* choices = right->emplace<f::ItemList>();
@@ -509,9 +528,12 @@ void SettingsView::page_context_menu(Widget& p) {
     };
     f::note(*right, L"Double-click to add or take out. The list on the left is the order of both right-click menus.");
     f::note(*right, L"Programs of your own. In Arguments, {path}, {name} and {dir} expand per item \u2014 quote tokens that may contain spaces, e.g. \"{path}\". Blank arguments default to the quoted full path.");
+}
 
-    // -- one of your commands, edited where it is: every change is written at once (a command missing a
-    // field keeps the whole list unwritten, and the strip says why). Spec: SettingsView.xaml (CommandEditor).
+// One of your commands, edited where it is: every change is written at once (a command missing a
+// field keeps the whole list unwritten, and the strip says why). Spec: SettingsView.xaml (CommandEditor).
+void SettingsView::context_command_editor(Widget& p, const std::shared_ptr<Model>& model) {
+    MainView& main = main_;
     // The commands as typed while the core holds them unwritten (a missing field), else the saved ones. The hold is
     // the core's: once it is gone (fixed, discarded, left) the saved list is the truth again.
     if (try_model([&](BbOwnedStr* o) { return bb_settings_page_state(main.core().app(), o); })["problem"].str().empty()) pending_commands_ = json::Value();
@@ -596,8 +618,11 @@ void SettingsView::page_context_menu(Widget& p) {
             main_.defer([this] { rebuild_if_changed(true); });
         })->name = "CommandDone";
     }
+}
 
-    // -- a command of your own
+// A command of your own.
+void SettingsView::context_new_command(Widget& p, const std::shared_ptr<Model>& model) {
+    MainView& main = main_;
     if (command_editor_) {
         f::gap(p, 6);
         f::text(p, L"New command", tok::TextSecondary, 14.0f, 600);
