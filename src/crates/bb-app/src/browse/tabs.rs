@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use bb_core::archives::ArchiveBrowser;
+use bb_core::archives::{ArchiveBrowser, ArchivePath};
 use bb_core::attributes::HIDDEN;
 use bb_core::cancel::CancelToken;
 use bb_core::data::SearchHit;
@@ -735,16 +735,7 @@ impl Inner {
         };
         let parse = SearchQuery::parse(&text);
         if let Some(problem) = parse.problem {
-            let mut t = lock(&cell);
-            if t.generation == generation {
-                // Refused before anything ran, so nothing is loading. Spec:
-                // DirectoryTabViewModel.RunSearchAsync (Problem returns before BeginSearch).
-                t.is_loading = false;
-                t.error = Some(problem.clone());
-                t.status = problem;
-            }
-            drop(t);
-            self.hub.emit(AppEvent::TabChanged { tab });
+            self.search_refused(&cell, tab, generation, problem);
             return;
         }
         let Some(query) = parse.query else {
@@ -756,43 +747,11 @@ impl Inner {
         // nowhere near fs_entry, which must never learn a virtual path.
         let archive_here = if global { None } else { self.fs.resolve(&path) };
         if needs_content && archive_here.is_some() {
-            // Refused rather than answered wrongly: an entry has no file on disk, so its candidate
-            // carries no content, and an unread candidate counts as a possible match by design. Run the
-            // walk anyway and every entry in the container comes back as a hit.
-            // Spec: DirectoryTabViewModel.RunSearchAsync (the archive branch).
-            let message =
-                "content: can't look inside archives \u{2014} extract it first.".to_string();
-            let mut t = lock(&cell);
-            if t.generation == generation {
-                Self::begin_flattened(&mut t, false);
-                t.is_loading = false;
-                t.error = Some(message.clone());
-                t.status = message;
-                t.is_search_running = false;
-                let version = t.version;
-                drop(t);
-                self.hub.emit(AppEvent::ListingChanged { tab, version });
-                self.hub.emit(AppEvent::TabChanged { tab });
-            }
+            self.search_refuse_content_in_archive(&cell, tab, generation);
             return;
         }
-        {
-            let mut t = lock(&cell);
-            if t.generation != generation {
-                return;
-            }
-            Self::begin_flattened(&mut t, false);
-            t.shows_content_matches = needs_content;
-            t.is_search_running = needs_content;
-            t.status = if global {
-                format!("Searching this PC for '{text}'\u{2026}")
-            } else {
-                format!("Searching for '{text}'\u{2026}")
-            };
-            let version = t.version;
-            drop(t);
-            self.compare_tab_flattened(tab, false);
-            self.hub.emit(AppEvent::ListingChanged { tab, version });
+        if !self.search_begin(&cell, tab, generation, &text, global, needs_content) {
+            return;
         }
 
         let stream_status = (!needs_content && !global)
@@ -837,29 +796,7 @@ impl Inner {
         let result = if global {
             self.search.search_all(&text, false, progress, &stop)
         } else if let Some(a) = archive_here {
-            let index = self.fs.read_archive(&a.archive_file);
-            // Spec: DirectoryTabViewModel.ArchiveSearchLimit (1,000, and "showing first" past it).
-            const ARCHIVE_SEARCH_LIMIT: usize = 1_000;
-            match bb_core::archives::ArchiveSearchScanner::search(
-                &index,
-                &a.archive_file,
-                &a.entry_path,
-                Some(&query),
-                ARCHIVE_SEARCH_LIMIT,
-                &stop,
-                true,
-            ) {
-                Ok(hits) => {
-                    let truncated = hits.len() >= ARCHIVE_SEARCH_LIMIT;
-                    Ok(Some(SearchOutcome::new(
-                        hits,
-                        truncated,
-                        bb_core::models::SearchResultSource::Index,
-                        false,
-                    )))
-                }
-                Err(_) => Ok(None),
-            }
+            self.search_in_archive(&a, &query, &stop)
         } else {
             self.search.search(&path, &text, false, progress, &stop)
         };
@@ -877,17 +814,32 @@ impl Inner {
             return;
         }
 
+        self.search_install(&cell, tab, generation, &outcome, &text, global, path);
+    }
+
+    /// Puts a finished search's hits on the list, sorted, with the status line that sums it up.
+    #[allow(clippy::too_many_arguments)]
+    fn search_install(
+        &self,
+        cell: &TabCell,
+        tab: TabId,
+        generation: u64,
+        outcome: &SearchOutcome,
+        text: &str,
+        global: bool,
+        path: String,
+    ) {
         let mut rows: Vec<Row> = outcome.hits.iter().map(Row::from_hit).collect();
         if global {
             for row in rows.iter_mut() {
                 hydrate_search_metadata(row);
             }
         }
-        let spec = lock(&cell).sort_spec();
+        let spec = lock(cell).sort_spec();
         spec.sort(&mut rows);
         self.hydrate_dir_sizes(&mut rows);
 
-        let mut t = lock(&cell);
+        let mut t = lock(cell);
         if t.generation != generation {
             return;
         }
@@ -904,7 +856,7 @@ impl Inner {
         t.status = format!(
             "{count} result(s) for '{text}' in {scope}{truncated}{}",
             search_suffix(
-                &outcome,
+                outcome,
                 global,
                 self.seams.index.any_indexed() || self.seams.index.is_building()
             )
@@ -914,6 +866,102 @@ impl Inner {
         self.hub.emit(AppEvent::ListingChanged { tab, version });
         self.hub.emit(AppEvent::TabChanged { tab });
         self.props_after_install(tab);
+    }
+
+    /// A query that would not parse: shown as the tab's error, and nothing runs.
+    fn search_refused(&self, cell: &TabCell, tab: TabId, generation: u64, problem: String) {
+        let mut t = lock(cell);
+        if t.generation == generation {
+            // Refused before anything ran, so nothing is loading. Spec:
+            // DirectoryTabViewModel.RunSearchAsync (Problem returns before BeginSearch).
+            t.is_loading = false;
+            t.error = Some(problem.clone());
+            t.status = problem;
+        }
+        drop(t);
+        self.hub.emit(AppEvent::TabChanged { tab });
+    }
+
+    fn search_refuse_content_in_archive(&self, cell: &TabCell, tab: TabId, generation: u64) {
+        // Refused rather than answered wrongly: an entry has no file on disk, so its candidate
+        // carries no content, and an unread candidate counts as a possible match by design. Run the
+        // walk anyway and every entry in the container comes back as a hit.
+        // Spec: DirectoryTabViewModel.RunSearchAsync (the archive branch).
+        let message = "content: can't look inside archives \u{2014} extract it first.".to_string();
+        let mut t = lock(cell);
+        if t.generation == generation {
+            Self::begin_flattened(&mut t, false);
+            t.is_loading = false;
+            t.error = Some(message.clone());
+            t.status = message;
+            t.is_search_running = false;
+            let version = t.version;
+            drop(t);
+            self.hub.emit(AppEvent::ListingChanged { tab, version });
+            self.hub.emit(AppEvent::TabChanged { tab });
+        }
+    }
+
+    /// Turns the tab into a (still empty) search result with its "Searching..." status. False when a
+    /// newer navigation has superseded this run.
+    fn search_begin(
+        &self,
+        cell: &TabCell,
+        tab: TabId,
+        generation: u64,
+        text: &str,
+        global: bool,
+        needs_content: bool,
+    ) -> bool {
+        let mut t = lock(cell);
+        if t.generation != generation {
+            return false;
+        }
+        Self::begin_flattened(&mut t, false);
+        t.shows_content_matches = needs_content;
+        t.is_search_running = needs_content;
+        t.status = if global {
+            format!("Searching this PC for '{text}'\u{2026}")
+        } else {
+            format!("Searching for '{text}'\u{2026}")
+        };
+        let version = t.version;
+        drop(t);
+        self.compare_tab_flattened(tab, false);
+        self.hub.emit(AppEvent::ListingChanged { tab, version });
+        true
+    }
+
+    /// A search inside an archive, answered from the index its listing was read from.
+    fn search_in_archive(
+        &self,
+        a: &ArchivePath,
+        query: &SearchQuery,
+        stop: &CancelToken,
+    ) -> bb_core::data::Result<Option<SearchOutcome>> {
+        let index = self.fs.read_archive(&a.archive_file);
+        // Spec: DirectoryTabViewModel.ArchiveSearchLimit (1,000, and "showing first" past it).
+        const ARCHIVE_SEARCH_LIMIT: usize = 1_000;
+        match bb_core::archives::ArchiveSearchScanner::search(
+            &index,
+            &a.archive_file,
+            &a.entry_path,
+            Some(query),
+            ARCHIVE_SEARCH_LIMIT,
+            stop,
+            true,
+        ) {
+            Ok(hits) => {
+                let truncated = hits.len() >= ARCHIVE_SEARCH_LIMIT;
+                Ok(Some(SearchOutcome::new(
+                    hits,
+                    truncated,
+                    bb_core::models::SearchResultSource::Index,
+                    false,
+                )))
+            }
+            Err(_) => Ok(None),
+        }
     }
 
     fn run_flat(self: &Arc<Self>, tab: TabId, generation: u64, token: CancelToken) {
