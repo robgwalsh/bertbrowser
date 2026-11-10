@@ -1,4 +1,3 @@
-mod metadata_codec_tests;
+// The metadata edit end to end with the executors and the undo history around it; the codecs' own
+// tests are in bb-metadata.
 mod metadata_edit_tests;
-mod metadata_formats_tests;
-mod property_fallback_tests;

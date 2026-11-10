@@ -2,7 +2,6 @@
 //! failing row in the assertion message, so `tools/parity/tests.ps1` can match names one to one.
 
 mod archives;
-mod benchmarking;
 mod changes;
 mod checksums;
 mod cli;
@@ -11,7 +10,6 @@ mod commandbars;
 mod commands;
 mod compare;
 mod crate_layout_tests;
-mod custom_commands;
 mod data;
 mod delete;
 mod diff;
@@ -20,20 +18,15 @@ mod duplicates;
 mod elevation;
 mod fs;
 mod ipc;
-mod launch;
 mod layout;
 mod metadata;
 mod mft;
 mod newitem;
-mod preview;
 mod rename;
 mod rules;
 mod search;
 mod settings;
-mod shell_integration;
-mod shellmenu;
 mod shortcuts;
-mod theming;
 mod timestamps;
 mod transfer;
 mod undo;

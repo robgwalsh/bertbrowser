@@ -990,12 +990,11 @@ fn settings_round_trip_and_hidden_items_refresh_every_tab() {
 fn the_palette_has_one_colour_per_token_and_follows_the_system_appearance() {
     let f = Fixture::new();
     let palette = f.app.theme_palette();
-    assert_eq!(bb_core::theming::ThemeToken::COUNT, palette.len());
+    assert_eq!(bb_theming::ThemeToken::COUNT, palette.len());
 
     // A fresh data directory follows Windows: dark, then light when the appearance changes.
     let dark = f.app.theme_palette();
-    f.probes
-        .set_appearance(bb_core::theming::SystemAppearance::LIGHT);
+    f.probes.set_appearance(bb_theming::SystemAppearance::LIGHT);
     let light = f.app.theme_palette();
     assert_ne!(dark, light);
     // Pinning a theme stops following.

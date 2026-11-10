@@ -15,14 +15,14 @@ use bb_core::format;
 use bb_core::rename::{
     RenamePart, RenamePattern, RenamePlanner, RenameRule, RenameSource, RenameTemplate,
 };
-use bb_core::shellmenu::{
-    BuiltInMenuItems, BuiltInMenuPlaces, MenuLayoutRules, MenuPlacementKind, MenuSeparatorRules,
-    MenuSlot,
-};
 use bb_core::transfer::{
     RightDropContext, RightDropMenuRules, RightDropVerb, TransferPlanner, TransferVerb,
 };
 use bb_core::undo::{StepVerdict, UndoBudget, UndoKind};
+use bb_integration::shellmenu::{
+    BuiltInMenuItems, BuiltInMenuPlaces, MenuLayoutRules, MenuPlacementKind, MenuSeparatorRules,
+    MenuSlot,
+};
 use bb_paths::{PathKey, file_name};
 use serde_json::{Value, json};
 

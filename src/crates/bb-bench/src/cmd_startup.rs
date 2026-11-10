@@ -17,12 +17,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use bb_core::FileTime;
-use bb_core::benchmarking::{
+use bb_benchmarking::{
     BenchEntry, BenchMarkdown, BenchResultSet, BenchResultsJson, CURRENT_SCHEMA_VERSION,
     ProcessStats, RunInfo, StartupMarks, StartupMemory, StartupMemoryPoints, StartupTraceData,
     StartupTraceJson, TimeStats,
 };
+use bb_core::FileTime;
 use bb_core::layout::{SessionLayout, SessionTab, SplitOrientation};
 use bb_core::settings::{AppPaths, AppSettings};
 

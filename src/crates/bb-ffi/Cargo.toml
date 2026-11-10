@@ -15,6 +15,8 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 bb-app = { path = "../bb-app" }
 bb-core = { path = "../bb-core" }
+bb-benchmarking = { path = "../bb-benchmarking" }
+bb-theming = { path = "../bb-theming" }
 bb-shell = { path = "../bb-shell" }
 serde_json.workspace = true
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

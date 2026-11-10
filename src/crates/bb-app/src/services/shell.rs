@@ -6,9 +6,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bb_core::custom_commands::CustomCommandDefinition;
 use bb_core::data::{Bookmark, BookmarkRepository, BookmarkService};
 use bb_core::layout::SplitOrientation;
+use bb_integration::custom_commands::CustomCommandDefinition;
 use serde_json::{Value, json};
 use windows_sys::Win32::Storage::FileSystem::{
     GetDriveTypeW, GetLogicalDriveStringsW, GetVolumeInformationW,

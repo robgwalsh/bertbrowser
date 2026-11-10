@@ -3,7 +3,7 @@
 //!
 //! One executable, several verbs: `run` (Tier A, a hand-rolled runner over bb-core with a counting
 //! allocator), `ui` (Tier B, the offscreen harness), `startup` (Tier C, the real exe) and the
-//! bookkeeping around them. Every tier writes the one schema in `bb_core::benchmarking`, and this is
+//! bookkeeping around them. Every tier writes the one schema in `bb_benchmarking`, and this is
 //! the only program that writes it.
 
 mod alloc;

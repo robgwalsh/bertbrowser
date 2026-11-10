@@ -17,7 +17,7 @@ use bb_core::diskusage::{
 use bb_core::format::byte_size;
 use bb_core::fs::LocalFileSystem;
 use bb_core::mft::MftIndex;
-use bb_core::theming::{ResolvedTheme, ThemeToken};
+use bb_theming::{ResolvedTheme, ThemeToken};
 use serde_json::{Value, json};
 
 use crate::app::Inner;
@@ -71,7 +71,7 @@ fn size_text(node: &DiskUsageNode) -> String {
     }
 }
 
-fn argb(c: bb_core::theming::ThemeColor) -> u32 {
+fn argb(c: bb_theming::ThemeColor) -> u32 {
     u32::from(c.a) << 24 | u32::from(c.r) << 16 | u32::from(c.g) << 8 | u32::from(c.b)
 }
 

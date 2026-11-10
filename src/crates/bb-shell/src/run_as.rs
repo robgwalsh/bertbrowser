@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use bb_core::shell_integration::{ElevatedOpen, ElevatedOpenKind, RunAsVerbRules};
+use bb_integration::shell_integration::{ElevatedOpen, ElevatedOpenKind, RunAsVerbRules};
 
 use crate::registry::{Hive, Registry, SystemRegistry};
 

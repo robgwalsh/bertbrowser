@@ -3,10 +3,10 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use bb_core::FileTime;
-use bb_core::benchmarking::{
+use bb_benchmarking::{
     BenchMarkdown, BenchResultSet, BenchResultsJson, CURRENT_SCHEMA_VERSION, RunInfo,
 };
+use bb_core::FileTime;
 
 use crate::args::{ArgList, Fail, unknown};
 use crate::runner::{Job, Suite};

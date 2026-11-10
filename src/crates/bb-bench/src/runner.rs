@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::Instant;
 
-use bb_core::benchmarking::{AllocStats, BenchEntry, TimeStats};
+use bb_benchmarking::{AllocStats, BenchEntry, TimeStats};
 
 use crate::alloc;
 

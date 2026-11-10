@@ -5,22 +5,22 @@ use std::fs::FileTimes;
 use std::os::windows::fs::{FileTimesExt, MetadataExt};
 use std::path::PathBuf;
 
-use bb_core::FileTime;
-use bb_core::attributes::{
+use bb_base::FileTime;
+use bb_base::attributes::{
     ARCHIVE, DIRECTORY, HIDDEN, NORMAL, READONLY, RECALL_ON_DATA_ACCESS, REPARSE_POINT,
 };
-use bb_core::cancel::CancelToken;
+use bb_base::cancel::CancelToken;
+use bb_base::time::TICKS_PER_HOUR;
 use bb_core::delete::{DeleteExecutor, FileSystemDeleteProbe};
 use bb_core::fs::{DirectoryRemoval, EntryStamp, ReadOnlyFile};
-use bb_core::metadata::{
+use bb_core::rename::RenameExecutor;
+use bb_core::transfer::TransferExecutor;
+use bb_core::undo::{MetadataEditRecord, PlainUndoHost, UndoKind, UndoableRecord};
+use bb_metadata::{
     EDITED_MARKER, HeldVersion, MetadataCodecs, MetadataDocument, MetadataEdit,
     MetadataEditExecutor, MetadataEditOutcome, MetadataEditPlan, MetadataEditPlanner,
     MetadataField, MetadataProbe, MetadataRejection, REPLACED_MARKER,
 };
-use bb_core::rename::RenameExecutor;
-use bb_core::time::TICKS_PER_HOUR;
-use bb_core::transfer::TransferExecutor;
-use bb_core::undo::{MetadataEditRecord, PlainUndoHost, UndoKind, UndoableRecord};
 use bb_test_support::metadata_fixtures as fx;
 use bb_test_support::unique_temp_path;
 

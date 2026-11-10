@@ -12,8 +12,8 @@
 
 use std::sync::Arc;
 
-use bb_core::launch::ExecutablePath;
-use bb_core::shell_integration::{ElevatedOpen, RunAsVerbRules};
+use bb_integration::launch::ExecutablePath;
+use bb_integration::shell_integration::{ElevatedOpen, RunAsVerbRules};
 
 use crate::registry::{Registry, SystemRegistry};
 use crate::run_as::RunAsVerbRegistry;
@@ -368,9 +368,26 @@ mod tests {
 
         let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let mut found = Vec::new();
-        for name in ["bb-app", "bb-core", "bb-ffi", "bb-shell", "bb-paths"] {
-            visit(&crates.join(name).join("src"), &mut found);
+        // Every crate of the app, including any split out later; not the tools beside it.
+        let not_the_app = [
+            "bb-bench",
+            "bb-elevator",
+            "bb-ffi-harness",
+            "bb-indexer",
+            "bb-spikes",
+            "bb-test-support",
+            "bb-workspace-hack",
+        ];
+        let mut scanned = 0;
+        for entry in std::fs::read_dir(&crates).unwrap() {
+            let dir = entry.unwrap().path();
+            let name = dir.file_name().unwrap().to_string_lossy().to_string();
+            if dir.join("src").is_dir() && !not_the_app.contains(&name.as_str()) {
+                visit(&dir.join("src"), &mut found);
+                scanned += 1;
+            }
         }
+        assert!(scanned >= 5, "scanned only {scanned} crates");
         let allowed = [
             "bb-shell\\src\\launcher.rs",
             "bb-shell/src/launcher.rs",

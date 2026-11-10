@@ -8,7 +8,7 @@ use super::{
     AccessKeys, BarItem, BarItemKind, CommandBarCaptions, CommandBarDefaults, CommandBarLists,
     CommandBarSet, ToolbarSpec,
 };
-use crate::shellmenu::{MenuSeparatorRules, MenuSlot};
+use bb_integration::shellmenu::{MenuSeparatorRules, MenuSlot};
 
 /// A command as it stands this instant, as far as a menu or a toolbar needs to know.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]

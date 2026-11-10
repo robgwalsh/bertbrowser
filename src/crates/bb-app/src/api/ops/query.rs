@@ -5,12 +5,12 @@ use std::collections::HashSet;
 
 use bb_core::archives::{ArchiveFormats, ArchivePath, ArchiveWriteRules};
 use bb_core::rename::RenameRule;
-use bb_core::shellmenu::{
-    Guid, ShellExtensionKind, ShellFileType, ShellHandlerRegistration, ShellMenuContext,
-    ShellMenuKeys, ShellMenuRules, ShellMenuTarget, ShellVerbRegistration,
-};
 use bb_core::transfer::{
     DragOutAction, DragOutContract, DropEffect, DropInContract, DropOrigin, TransferVerb,
+};
+use bb_integration::shellmenu::{
+    Guid, ShellExtensionKind, ShellFileType, ShellHandlerRegistration, ShellMenuContext,
+    ShellMenuKeys, ShellMenuRules, ShellMenuTarget, ShellVerbRegistration,
 };
 use bb_paths::file_name;
 use serde_json::{Value, json};

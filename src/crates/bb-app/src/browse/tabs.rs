@@ -390,7 +390,7 @@ impl Inner {
                 let version = t.version;
                 drop(t);
                 bb_shell::startup_trace::global()
-                    .mark(bb_core::benchmarking::StartupMarks::LISTING_LANDED);
+                    .mark(bb_benchmarking::StartupMarks::LISTING_LANDED);
                 self.hub.emit(AppEvent::ListingChanged { tab, version });
                 self.hub.emit(AppEvent::TabChanged { tab });
                 self.props_after_install(tab);

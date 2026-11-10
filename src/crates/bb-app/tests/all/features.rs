@@ -7,7 +7,7 @@ use crate::common;
 use bb_app::{AppError, AppEvent, Model, PropSupply, prop_words};
 use bb_core::commands::{FocusKind, FocusState, KeyChord};
 use bb_core::newitem::NewItemKind;
-use bb_core::theming::SystemAppearance;
+use bb_theming::SystemAppearance;
 use common::{Fixture, eventually};
 use serde_json::Value;
 
@@ -1950,7 +1950,7 @@ fn a_theme_change_asks_the_host_to_repush_the_palette() {
             model: Model::Theme
         }
     )));
-    assert_eq!(bb_core::theming::ThemeToken::COUNT, light.len());
+    assert_eq!(bb_theming::ThemeToken::COUNT, light.len());
 }
 
 #[test]

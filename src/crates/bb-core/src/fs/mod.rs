@@ -5,7 +5,6 @@
 //! FileSystemWalker,IndexCrawler,IndexWatcherService,SearchService,ReadOnlyFile,StagedReplace,
 //! DirectoryRemoval,AccessDenied,EntryStamp,FileListDiff}.cs.
 
-mod directory_removal;
 mod file_list_diff;
 mod file_system_service;
 mod index_crawler;
@@ -14,8 +13,7 @@ mod known_folders;
 mod search_service;
 mod walker;
 
-pub use bb_base::fs::{AccessDenied, EntryStamp, ReadOnlyFile, StagedReplace};
-pub use directory_removal::DirectoryRemoval;
+pub use bb_base::fs::{AccessDenied, DirectoryRemoval, EntryStamp, ReadOnlyFile, StagedReplace};
 pub use file_list_diff::{FileListChanges, FileListDiff};
 pub use file_system_service::{
     DriveInfo, DriveType, FileSystemService, LocalFileSystem, SubdirectoryPresence,

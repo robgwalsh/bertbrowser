@@ -48,8 +48,8 @@ opt-level = 2
 # full debuginfo for all of them is most of what the linker writes into each PDB.
 debug = "line-tables-only"
 
-# bb-core holds the decoders a window waits on (a GIF's LZW, a hex dump's formatting, the syntax
+# bb-preview holds the decoders a window waits on (a GIF's LZW, a hex dump's formatting, the syntax
 # tokenizer): unoptimised, the 150-frame GIF the animation script plays took longer to decode than
 # the script waits. One level of optimisation is most of the win for a fraction of the compile cost.
-[profile.dev.package.bb-core]
+[profile.dev.package.bb-preview]
 opt-level = 1

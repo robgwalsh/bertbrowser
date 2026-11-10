@@ -3,9 +3,9 @@
 use std::collections::HashMap;
 
 use bb_core::archives::ArchiveEdit;
-use bb_core::shellmenu::StaticVerbCommand;
 use bb_core::transfer::{ConflictResolution, Resolutions, TransferPlanner, TransferVerb};
 use bb_core::undo::UndoBudget;
+use bb_integration::shellmenu::StaticVerbCommand;
 use bb_paths::file_name;
 use serde_json::json;
 

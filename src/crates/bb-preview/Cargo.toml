@@ -1,0 +1,18 @@
+[package]
+name = "bb-preview"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# Split out of bb-core: the classifier and the decoders a preview waits on. Tests live in tests/all (one binary), never in src: see bb-core's Cargo.toml.
+test = false
+doctest = false
+
+[dependencies]
+bb-base = { path = "../bb-base" }
+bb-paths = { path = "../bb-paths" }
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
+[dev-dependencies]
+bb-base = { path = "../bb-base" }

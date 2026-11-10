@@ -1,0 +1,28 @@
+[package]
+name = "bb-metadata"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# Split out of bb-core: the metadata codecs, planner and executor (and lofty, which nothing else needs). Tests live in tests/all (one binary), never in src: see bb-core's Cargo.toml.
+test = false
+doctest = false
+
+[dependencies]
+bb-base = { path = "../bb-base" }
+bb-paths = { path = "../bb-paths" }
+lofty.workspace = true
+quick-xml.workspace = true
+sha2.workspace = true
+zip.workspace = true
+windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
+
+[dev-dependencies]
+bb-base = { path = "../bb-base" }
+bb-fixtures = { path = "../bb-fixtures" }
+crc32fast.workspace = true
+windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
+zip.workspace = true

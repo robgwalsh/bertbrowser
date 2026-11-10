@@ -1,0 +1,27 @@
+[package]
+name = "bb-benchmarking"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# Split out of bb-core: the benchmark schema and its rules. Tests live in tests/all (one binary), never in src: see bb-core's Cargo.toml.
+test = false
+doctest = false
+
+[dependencies]
+bb-base = { path = "../bb-base" }
+fancy-regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+] }
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
+
+[dev-dependencies]
+bb-fixtures = { path = "../bb-fixtures" }

@@ -472,7 +472,7 @@ impl Inner {
                 "color theme".into(),
                 "switch theme".into(),
             ];
-            if bb_core::theming::ids_equal(&theme.id, &current_theme) {
+            if bb_theming::ids_equal(&theme.id, &current_theme) {
                 entry.detail = "in use".into();
             }
             items.push(PaletteItem {

@@ -14,8 +14,8 @@ impl From<std::io::Error> for Fail {
     }
 }
 
-impl From<bb_core::benchmarking::BenchError> for Fail {
-    fn from(e: bb_core::benchmarking::BenchError) -> Self {
+impl From<bb_benchmarking::BenchError> for Fail {
+    fn from(e: bb_benchmarking::BenchError) -> Self {
         Fail::Error(e.to_string())
     }
 }

@@ -13,6 +13,7 @@ doctest = false
 
 [dependencies]
 bb-core = { path = "../bb-core" }
+bb-fixtures = { path = "../bb-fixtures" }
 bb-paths = { path = "../bb-paths" }
 base64.workspace = true
 zip.workspace = true

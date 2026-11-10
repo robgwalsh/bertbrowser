@@ -1,6 +1,6 @@
 //! Regenerates `docs/performance.md` from every committed baseline. Spec: Cli/ReportCommand.cs.
 
-use bb_core::benchmarking::{BenchResultsJson, PerformanceDoc};
+use bb_benchmarking::{BenchResultsJson, PerformanceDoc};
 
 use crate::args::{ArgList, Fail, unknown};
 use crate::env;

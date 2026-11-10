@@ -10,8 +10,8 @@
 
 use std::sync::Arc;
 
-use bb_core::custom_commands::CustomCommandDefinition;
-use bb_core::launch::{CommandTemplate, VsCodePath};
+use bb_integration::custom_commands::CustomCommandDefinition;
+use bb_integration::launch::{CommandTemplate, VsCodePath};
 use bb_shell::LaunchRequest;
 
 use crate::app::{Inner, lock};

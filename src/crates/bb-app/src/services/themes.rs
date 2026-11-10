@@ -13,7 +13,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use bb_core::settings::AppPaths;
-use bb_core::theming::{
+use bb_theming::{
     ColorMap, ResolvedTheme, SystemAppearance, SystemThemeRules, ThemeCatalog, ThemeColor,
     ThemeDefinition, ThemeId, ThemeJson, ThemeResolver, ThemeToken, ids_equal,
 };
@@ -483,8 +483,7 @@ impl Inner {
     /// Writes the theme on screen, overrides and all, as a theme file someone else can import.
     /// Spec: ThemeService.TryExport.
     pub(crate) fn theme_export(&self, path: &str) -> AppResult<()> {
-        let text =
-            bb_core::theming::ThemeJson::serialize_resolved(&lock(&self.extra.theme).resolved());
+        let text = bb_theming::ThemeJson::serialize_resolved(&lock(&self.extra.theme).resolved());
         std::fs::write(path, text).map_err(|e| AppError::Invalid(e.to_string()))
     }
 

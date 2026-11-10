@@ -13,6 +13,10 @@ doctest = false
 
 [dependencies]
 bb-base = { path = "../bb-base" }
+bb-integration = { path = "../bb-integration" }
+bb-metadata = { path = "../bb-metadata" }
+bb-preview = { path = "../bb-preview" }
+bb-theming = { path = "../bb-theming" }
 bb-paths = { path = "../bb-paths" }
 rusqlite.workspace = true
 serde.workspace = true
@@ -59,8 +63,6 @@ flate2.workspace = true
 bzip2.workspace = true
 liblzma.workspace = true
 ruzstd.workspace = true
-lofty.workspace = true
-quick-xml.workspace = true
 bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
 
 [dev-dependencies]

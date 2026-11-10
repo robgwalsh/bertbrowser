@@ -15,10 +15,10 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use bb_core::FileTime;
-use bb_core::benchmarking::{
+use bb_benchmarking::{
     StartupMarks, StartupMemory, StartupMemoryPoints, StartupTraceData, StartupTraceJson,
 };
+use bb_core::FileTime;
 
 pub const FILE_VARIABLE: &str = "BERTBROWSER_STARTUP_TRACE";
 pub const EXIT_VARIABLE: &str = "BERTBROWSER_EXIT_AFTER_STARTUP";

@@ -8,8 +8,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use bb_benchmarking::{BenchEntry, BenchResultSet, BenchResultsJson, CURRENT_SCHEMA_VERSION};
 use bb_core::FileTime;
-use bb_core::benchmarking::{BenchEntry, BenchResultSet, BenchResultsJson, CURRENT_SCHEMA_VERSION};
 
 use crate::args::{ArgList, Fail, unknown};
 use crate::env;
@@ -104,7 +104,7 @@ pub fn merge(sets: &[BenchResultSet], machine_key: Option<&str>) -> BenchResultS
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bb_core::benchmarking::{GitInfo, MachineInfo, RunInfo};
+    use bb_benchmarking::{GitInfo, MachineInfo, RunInfo};
 
     fn set(tier: &str, ids: &[&str]) -> BenchResultSet {
         BenchResultSet {

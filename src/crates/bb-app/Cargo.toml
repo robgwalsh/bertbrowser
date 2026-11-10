@@ -11,6 +11,9 @@ doctest = false
 
 [dependencies]
 bb-core = { path = "../bb-core" }
+bb-benchmarking = { path = "../bb-benchmarking" }
+bb-integration = { path = "../bb-integration" }
+bb-theming = { path = "../bb-theming" }
 bb-paths = { path = "../bb-paths" }
 bb-shell = { path = "../bb-shell" }
 serde.workspace = true

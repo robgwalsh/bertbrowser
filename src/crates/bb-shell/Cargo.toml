@@ -11,6 +11,8 @@ doctest = false
 
 [dependencies]
 bb-core = { path = "../bb-core" }
+bb-benchmarking = { path = "../bb-benchmarking" }
+bb-integration = { path = "../bb-integration" }
 serde_json.workspace = true
 # Installer hooks and the update manager. The newest release that is not a git-describe build.
 velopack = "1.2.161"

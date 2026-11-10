@@ -1,0 +1,16 @@
+[package]
+name = "bb-fixtures"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# No in-crate tests and no doc examples: see bb-core's Cargo.toml.
+test = false
+doctest = false
+
+[dependencies]
+base64.workspace = true
+zip.workspace = true
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }

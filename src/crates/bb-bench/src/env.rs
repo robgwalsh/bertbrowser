@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use bb_core::benchmarking::{GitInfo, MachineInfo, MachineKey, MachineProbe, Win32Probe};
+use bb_benchmarking::{GitInfo, MachineInfo, MachineKey, MachineProbe, Win32Probe};
 
 use crate::args::Fail;
 

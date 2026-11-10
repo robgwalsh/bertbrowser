@@ -6,10 +6,10 @@
 
 pub use crate::checksums::ChecksumAlgorithm;
 pub use crate::commandbars::{BarItem, CommandBarSet, SavedCommandBarSet, ToolbarSpec};
-pub use crate::custom_commands::CustomCommandDefinition;
+pub use bb_integration::custom_commands::CustomCommandDefinition;
 
 /// A built-in id (`dark-plus`, `light-plus`, …) or the file stem of one of the user's own themes.
-/// The rules about one (`is_safe`, `unique`) live in `crate::theming::ThemeId`; the value is text.
+/// The rules about one (`is_safe`, `unique`) live in `bb_theming::ThemeId`; the value is text.
 pub type ThemeId = String;
 
 pub use crate::newitem::NewFileTemplate;

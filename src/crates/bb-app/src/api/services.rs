@@ -9,7 +9,7 @@ use bb_core::columns::ColumnValue;
 use bb_core::commands::{FocusState, KeyChord};
 use bb_core::data::SavedSearchScope;
 use bb_core::newitem::NewItemKind;
-use bb_core::theming::SystemAppearance;
+use bb_theming::SystemAppearance;
 use serde_json::{Value, json};
 
 use crate::app::{App, lock};

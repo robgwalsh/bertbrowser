@@ -1,0 +1,21 @@
+[package]
+name = "bb-integration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# Split out of bb-core: how the app sits in the shell, as data - folder handler, Win+E, the context menu's composition, custom commands, finding programs to launch. Tests live in tests/all (one binary), never in src: see bb-core's Cargo.toml.
+test = false
+doctest = false
+
+[dependencies]
+bb-paths = { path = "../bb-paths" }
+serde.workspace = true
+windows-sys = { workspace = true, features = ["Win32_System_Com"] }
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
+
+[dev-dependencies]
+bb-base = { path = "../bb-base" }
+serde_json.workspace = true

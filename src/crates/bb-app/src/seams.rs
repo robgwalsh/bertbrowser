@@ -11,17 +11,17 @@ use bb_core::delete::{DeleteOutcome, DeleteProgress, DeleteUndoResult};
 use bb_core::elevation::{
     DeleteRetry, ElevatedOperationRunner, ElevatedRun, NewItemRetry, RenameRetry, TransferRetry,
 };
-use bb_core::launch::ExecutablePath;
 use bb_core::mft::{MftIndex, NullMftIndex};
 use bb_core::newitem::NewItemOutcome;
 use bb_core::rename::RenameOutcome;
-use bb_core::theming::SystemAppearance;
 use bb_core::transfer::{
     ConflictDefaults, ConflictResolution, Resolutions, TransferOutcome, TransferPlan,
     TransferProgress, TransferUndoResult,
 };
+use bb_integration::launch::ExecutablePath;
 use bb_paths::PathKey;
 pub use bb_shell::LaunchRequest;
+use bb_theming::SystemAppearance;
 
 use crate::events::EventHub;
 use crate::ops::ui::Questions;

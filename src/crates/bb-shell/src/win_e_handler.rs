@@ -1,5 +1,5 @@
 //! Registering this app as what Win+E opens, in the current user's hive. What a registration is and
-//! when one is stale are `bb_core::shell_integration`'s; this only writes and reads, through the
+//! when one is stale are `bb_integration::shell_integration`'s; this only writes and reads, through the
 //! [`Registry`] seam.
 //!
 //! As with the folder handler, nothing here runs unasked except the two safety nets: the uninstall
@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use bb_core::shell_integration::{
+use bb_integration::shell_integration::{
     FolderHandlerRegistration, FolderHandlerState, ShellRegistryValue, WinEHandlerReading,
     WinEHandlerRegistration, WinEHandlerRules,
 };

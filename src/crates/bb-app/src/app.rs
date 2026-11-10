@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering}
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 
-use bb_core::benchmarking::StartupMarks;
+use bb_benchmarking::StartupMarks;
 use bb_core::cancel::CancelToken;
 use bb_core::columns::ColumnSetting;
 use bb_core::data::{Db, DirSizeRepository, FsIndexRepository};

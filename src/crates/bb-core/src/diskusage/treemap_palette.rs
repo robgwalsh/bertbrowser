@@ -11,7 +11,7 @@
 //! entries collide as soon as the count divides evenly into 360.
 //! Spec: src/BertBrowser.Core/Services/DiskUsage/TreemapPalette.cs.
 
-use crate::theming::{ResolvedTheme, ThemeColor, ThemeContrast, ThemeToken};
+use bb_theming::{ResolvedTheme, ThemeColor, ThemeContrast, ThemeToken};
 
 /// About 137.507 degrees, the angle that spreads any number of samples most evenly.
 const GOLDEN_ANGLE: f64 = 137.50776405003785;

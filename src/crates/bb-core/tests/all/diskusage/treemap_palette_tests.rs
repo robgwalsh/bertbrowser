@@ -4,7 +4,7 @@
 // guarantee the shipped tokens get from `theme_catalog_tests` has to be earned here by rule
 // instead. Every built-in is run through it, including the light-accent ones.
 use bb_core::diskusage::TreemapPalette;
-use bb_core::theming::{
+use bb_theming::{
     ColorMap, ResolvedTheme, ThemeCatalog, ThemeColor, ThemeContrast, ThemeDefinition,
     ThemeResolver, ThemeToken,
 };

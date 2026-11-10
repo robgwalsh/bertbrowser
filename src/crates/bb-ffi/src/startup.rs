@@ -18,7 +18,7 @@ use super::*;
 
 use std::path::{Path, PathBuf};
 
-use bb_core::benchmarking::StartupMarks;
+use bb_benchmarking::StartupMarks;
 use bb_core::cli::{CommandLine, CommandLineRequest};
 use bb_core::settings::LegacyData;
 use bb_shell::startup_trace::{self, StartupTrace};

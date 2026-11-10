@@ -38,7 +38,7 @@ pub unsafe extern "C" fn bb_settings_set(
 /// How many colour tokens a palette holds.
 #[unsafe(no_mangle)]
 pub extern "C" fn bb_theme_token_count() -> u32 {
-    bb_core::theming::ThemeToken::COUNT as u32
+    bb_theming::ThemeToken::COUNT as u32
 }
 
 /// The current theme's colours as 0xAARRGGBB, one per token in token order. Writes up to `cap` and

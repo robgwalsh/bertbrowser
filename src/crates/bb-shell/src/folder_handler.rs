@@ -1,5 +1,5 @@
 //! Registering this app as the shell's handler for folders and drives, in the current user's hive.
-//! What a registration is and when one is stale are `bb_core::shell_integration`'s; this only writes
+//! What a registration is and when one is stale are `bb_integration::shell_integration`'s; this only writes
 //! and reads, through the [`Registry`] seam. Spec: App/Interop/FolderHandlerRegistry.cs,
 //! App/Services/FolderHandlerService.cs.
 //!
@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use bb_core::shell_integration::{
+use bb_integration::shell_integration::{
     FolderHandlerReading, FolderHandlerRegistration, FolderHandlerRules, FolderHandlerState,
     ShellRegistryValue,
 };

@@ -45,10 +45,13 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 name = "bb-app"
 version = "2.0.0"
 dependencies = [
+ "bb-benchmarking",
  "bb-core",
+ "bb-integration",
  "bb-paths",
  "bb-shell",
  "bb-test-support",
+ "bb-theming",
  "bb-workspace-hack",
  "serde",
  "serde_json",
@@ -70,6 +73,7 @@ dependencies = [
 name = "bb-bench"
 version = "2.0.0"
 dependencies = [
+ "bb-benchmarking",
  "bb-core",
  "bb-workspace-hack",
  "mimalloc",
@@ -81,21 +85,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "bb-benchmarking"
+version = "2.0.0"
+dependencies = [
+ "bb-base",
+ "bb-fixtures",
+ "bb-workspace-hack",
+ "fancy-regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "bb-core"
 version = "2.0.0"
 dependencies = [
  "bb-base",
+ "bb-integration",
+ "bb-metadata",
  "bb-paths",
+ "bb-preview",
  "bb-test-support",
+ "bb-theming",
  "bb-workspace-hack",
  "bzip2",
  "crc32fast",
  "fancy-regex",
  "flate2",
  "liblzma",
- "lofty",
  "md-5",
- "quick-xml",
  "rusqlite",
  "ruzstd",
  "serde",
@@ -127,10 +147,12 @@ name = "bb-ffi"
 version = "2.0.0"
 dependencies = [
  "bb-app",
+ "bb-benchmarking",
  "bb-core",
  "bb-ffi",
  "bb-shell",
  "bb-test-support",
+ "bb-theming",
  "bb-workspace-hack",
  "libmimalloc-sys",
  "mimalloc",
@@ -147,6 +169,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bb-fixtures"
+version = "2.0.0"
+dependencies = [
+ "base64",
+ "bb-workspace-hack",
+ "zip 9.1.3",
+]
+
+[[package]]
 name = "bb-indexer"
 version = "2.0.0"
 dependencies = [
@@ -159,6 +190,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "bb-integration"
+version = "2.0.0"
+dependencies = [
+ "bb-base",
+ "bb-paths",
+ "bb-workspace-hack",
+ "serde",
+ "serde_json",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "bb-metadata"
+version = "2.0.0"
+dependencies = [
+ "bb-base",
+ "bb-fixtures",
+ "bb-paths",
+ "bb-workspace-hack",
+ "crc32fast",
+ "lofty",
+ "quick-xml",
+ "sha2",
+ "windows-sys 0.61.2",
+ "zip 9.1.3",
+]
+
+[[package]]
 name = "bb-paths"
 version = "2.0.0"
 dependencies = [
@@ -167,10 +226,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "bb-preview"
+version = "2.0.0"
+dependencies = [
+ "bb-base",
+ "bb-paths",
+ "bb-workspace-hack",
+]
+
+[[package]]
 name = "bb-shell"
 version = "2.0.0"
 dependencies = [
+ "bb-benchmarking",
  "bb-core",
+ "bb-integration",
  "bb-test-support",
  "bb-workspace-hack",
  "serde_json",
@@ -192,9 +262,19 @@ version = "2.0.0"
 dependencies = [
  "base64",
  "bb-core",
+ "bb-fixtures",
  "bb-paths",
  "bb-workspace-hack",
  "zip 9.1.3",
+]
+
+[[package]]
+name = "bb-theming"
+version = "2.0.0"
+dependencies = [
+ "bb-workspace-hack",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -202,16 +282,28 @@ name = "bb-workspace-hack"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "block-buffer",
  "cc",
+ "cipher",
+ "crc32fast",
+ "digest",
+ "flate2",
  "getrandom 0.4.3",
+ "hashbrown 0.17.1",
+ "inout",
  "libmimalloc-sys",
+ "memchr",
  "proc-macro2",
  "quote",
+ "regex-syntax",
+ "simd-adler32",
  "smallvec",
  "syn 3.0.9",
  "windows",
  "windows-core",
  "windows-sys 0.61.2",
+ "zeroize",
+ "zlib-rs",
 ]
 
 [[package]]

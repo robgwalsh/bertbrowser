@@ -3,7 +3,7 @@
 use std::io::Write as _;
 use std::path::Path;
 
-use bb_core::benchmarking::{
+use bb_benchmarking::{
     BenchCompare, BenchMarkdown, BenchResultSet, BenchResultsJson, CompareOptions, CompareReport,
 };
 

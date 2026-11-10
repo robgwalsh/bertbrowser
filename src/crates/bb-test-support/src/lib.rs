@@ -1,32 +1,16 @@
 //! Shared test helpers: temp databases and trees under %TEMP%, in-memory pipe pairs, fixtures copied
 //! verbatim from MetadataFixtures and ArchiveFixtures, in-memory probes. A dev-dependency only.
 
-pub mod metadata_fixtures;
-pub mod metadata_fixtures_data;
+// Re-exported from bb-fixtures, which a crate below bb-core can use without bb-core.
+pub use bb_fixtures::{metadata_fixtures, metadata_fixtures_data, unique_temp_path};
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use bb_core::data::Db;
 
 pub mod duplex;
 pub mod pipe_fakes;
-
-static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// A unique name under %TEMP%, as the C# tests built theirs.
-pub fn unique_temp_path(prefix: &str, suffix: &str) -> PathBuf {
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
-    std::env::temp_dir().join(format!(
-        "{prefix}-{}-{n}-{nanos:x}{suffix}",
-        std::process::id()
-    ))
-}
 
 /// A migrated database in a temp file, deleted with its WAL and SHM on drop.
 pub struct TempDb {

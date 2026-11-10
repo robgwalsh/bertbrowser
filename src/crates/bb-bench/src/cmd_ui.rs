@@ -11,11 +11,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use bb_core::FileTime;
-use bb_core::benchmarking::{
+use bb_benchmarking::{
     BenchEntry, BenchMarkdown, BenchResultSet, BenchResultsJson, CURRENT_SCHEMA_VERSION,
     ProcessStats, RunInfo, TimeStats,
 };
+use bb_core::FileTime;
 
 use crate::args::{ArgList, Fail, unknown};
 use crate::env;
