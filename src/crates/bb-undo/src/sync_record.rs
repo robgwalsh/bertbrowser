@@ -9,9 +9,9 @@ use super::models::{HeldEntry, StepReport, StepResult, UndoItemDetail, UndoKind,
 use super::record::UndoableRecord;
 use super::text::UndoText;
 use bb_base::cancel::CancelToken;
-use bb_core::compare::{SyncOutcome, SyncRunner};
 use bb_core::rename::paths::{directory_exists, directory_name};
 use bb_core::transfer::{PlannedTransfer, TransferExecutor, TransferPlan, TransferVerb};
+use bb_tools::compare::{SyncOutcome, SyncRunner};
 
 const RECYCLE_BIN: &str = "Recycle Bin";
 const HOLDING_FOLDER: &str = "BertBrowser's holding folder";

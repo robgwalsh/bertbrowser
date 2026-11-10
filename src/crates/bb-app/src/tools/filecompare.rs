@@ -6,13 +6,13 @@
 use std::io::{Seek, SeekFrom};
 
 use bb_core::cancel::CancelToken;
-use bb_core::compare::{
+use bb_core::fs::ReadOnlyFile;
+use bb_core::preview::{HexPreviewReader, TextPreviewReader, TextReadOptions};
+use bb_tools::compare::{
     ContentComparer, ContentComparison, ContentVerdict, FileCompareMode, FileComparePlan,
     FileCompareSide, FileContentComparer,
 };
-use bb_core::diff::{DiffOp, DiffOptions, TextDiffer};
-use bb_core::fs::ReadOnlyFile;
-use bb_core::preview::{HexPreviewReader, TextPreviewReader, TextReadOptions};
+use bb_tools::diff::{DiffOp, DiffOptions, TextDiffer};
 use serde_json::{Value, json};
 
 use bb_core::format::thousands;

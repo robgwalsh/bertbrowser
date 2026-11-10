@@ -4,10 +4,8 @@
 mod changes;
 mod cli;
 mod columns;
-mod compare;
 mod crate_layout_tests;
 mod data;
-mod diff;
 mod fs;
 mod ipc;
 mod layout;

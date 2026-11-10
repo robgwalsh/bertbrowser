@@ -18,16 +18,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use bb_core::cancel::CancelToken;
-use bb_core::compare::{
+use bb_core::data::FsIndexRepository;
+use bb_core::delete::{DeleteMode, DeletePlanner};
+use bb_core::format::byte_size;
+use bb_core::transfer::{TransferExecutor, TransferPlanner};
+use bb_tools::compare::{
     CompareAvailability, CompareRefusal, CompareResult, CompareRowState, CompareRules, CompareSide,
     CompareVerdict, ContentComparer, ContentSettlement, ContentVerdict, FileContentComparer,
     FileSystemCompareProbe, FolderCompareOutcome, FolderCompareService, SyncActionKind,
     SyncOutcome, SyncPlanner, SyncPlans, SyncPreview, SyncRunner,
 };
-use bb_core::data::FsIndexRepository;
-use bb_core::delete::{DeleteMode, DeletePlanner};
-use bb_core::format::byte_size;
-use bb_core::transfer::{TransferExecutor, TransferPlanner};
 use bb_undo::SyncRecord;
 use serde_json::{Value, json};
 

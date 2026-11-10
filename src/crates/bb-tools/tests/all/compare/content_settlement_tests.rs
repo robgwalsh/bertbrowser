@@ -3,11 +3,11 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use bb_core::FileTime;
-use bb_core::compare::{
+use bb_paths::file_name;
+use bb_tools::compare::{
     CompareEntry, CompareResult, CompareRules, CompareTolerance, CompareVerdict, ContentSettlement,
     ContentVerdict, FolderComparer,
 };
-use bb_paths::file_name;
 
 // --- the rule ---
 

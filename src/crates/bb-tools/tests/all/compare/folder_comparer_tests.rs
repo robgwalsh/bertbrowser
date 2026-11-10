@@ -4,10 +4,10 @@
 // what lets a whole subtree be synced without opening it, which makes it the piece a wrong answer
 // is hardest to notice in: a folder that says "same" is a folder nobody looks inside.
 use bb_core::FileTime;
-use bb_core::compare::{
+use bb_paths::{file_name, fold_upper};
+use bb_tools::compare::{
     CompareEntry, CompareResult, CompareSide, CompareTolerance, CompareVerdict, FolderComparer,
 };
-use bb_paths::{file_name, fold_upper};
 
 fn noon() -> FileTime {
     FileTime::from_ymd_hms(2026, 3, 14, 12, 0, 0)

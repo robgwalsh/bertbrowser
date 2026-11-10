@@ -6,7 +6,7 @@
 
 use bb_paths::file_name;
 
-use crate::preview::{PreviewClassifier, PreviewKind};
+use bb_core::preview::{PreviewClassifier, PreviewKind};
 
 /// How a pair of files should be shown side by side.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

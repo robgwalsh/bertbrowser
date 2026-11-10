@@ -15,8 +15,8 @@ use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
 };
 
-use crate::cancel::{CancelToken, Cancelled};
-use crate::fs::ReadOnlyFile;
+use bb_base::cancel::{CancelToken, Cancelled};
+use bb_core::fs::ReadOnlyFile;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ContentVerdict {

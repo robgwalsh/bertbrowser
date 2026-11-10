@@ -13,6 +13,7 @@ doctest = false
 [dependencies]
 bb-base = { path = "../bb-base" }
 bb-core = { path = "../bb-core" }
+bb-files = { path = "../bb-files" }
 bb-paths = { path = "../bb-paths" }
 bb-theming = { path = "../bb-theming" }
 crc32fast.workspace = true

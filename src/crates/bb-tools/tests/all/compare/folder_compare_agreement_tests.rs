@@ -13,11 +13,11 @@ use std::sync::Arc;
 
 use bb_core::FileTime;
 use bb_core::cancel::CancelToken;
-use bb_core::compare::{CompareResult, CompareSourceKind, CompareVerdict, FolderCompareService};
 use bb_core::data::FsIndexRepository;
 use bb_core::fs::IndexCrawler;
 use bb_core::mft::{MftIndex, NullMftIndex};
 use bb_test_support::{TempDb, unique_temp_path};
+use bb_tools::compare::{CompareResult, CompareSourceKind, CompareVerdict, FolderCompareService};
 
 struct Fixture {
     _db: TempDb,

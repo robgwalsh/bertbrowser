@@ -1,5 +1,5 @@
 // Port of tests/BertBrowser.Core.Tests/TextDifferTests.cs
-use bb_core::diff::{DiffOp, DiffOptions, TextDiff, TextDiffer};
+use bb_tools::diff::{DiffOp, DiffOptions, TextDiff, TextDiffer};
 
 fn lines(text: &str) -> Vec<&str> {
     if text.is_empty() {

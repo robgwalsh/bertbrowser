@@ -2,7 +2,7 @@
 //
 // The judgements a comparison makes about what to show and what a sync may touch. Pure, and held
 // still here because every one of them is read from a colour on a row rather than from a number.
-use bb_core::compare::{CompareRowState, CompareRules, CompareSide, CompareVerdict};
+use bb_tools::compare::{CompareRowState, CompareRules, CompareSide, CompareVerdict};
 
 // --- The per-side projection ---
 

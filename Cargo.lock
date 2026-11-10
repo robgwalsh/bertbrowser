@@ -391,6 +391,7 @@ version = "2.0.0"
 dependencies = [
  "bb-base",
  "bb-core",
+ "bb-files",
  "bb-paths",
  "bb-test-support",
  "bb-theming",
@@ -413,6 +414,7 @@ dependencies = [
  "bb-metadata",
  "bb-paths",
  "bb-test-support",
+ "bb-tools",
  "bb-workspace-hack",
  "windows-sys 0.61.2",
 ]

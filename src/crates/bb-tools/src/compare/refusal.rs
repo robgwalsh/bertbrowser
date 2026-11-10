@@ -6,8 +6,8 @@
 
 use bb_paths::PathKey;
 
-use crate::archives::ArchivePath;
-use crate::transfer::{FileSystemTransferProbe, TransferProbe};
+use bb_core::archives::ArchivePath;
+use bb_core::transfer::{FileSystemTransferProbe, TransferProbe};
 
 /// The filesystem questions a comparison has to ask before it starts, injected so the containment
 /// rules can be tested against link layouts that are impractical to create.

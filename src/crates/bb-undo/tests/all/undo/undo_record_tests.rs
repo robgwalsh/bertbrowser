@@ -8,7 +8,6 @@ use std::time::{Duration, SystemTime};
 
 use bb_base::FileTime;
 use bb_base::cancel::CancelToken;
-use bb_core::compare::{SyncPlans, SyncRunner};
 use bb_core::delete::{
     DeleteDisposition, DeleteExecutor, DeleteMode, DeletePlan, FileSystemDeleteProbe, PlannedDelete,
 };
@@ -19,6 +18,7 @@ use bb_core::transfer::{
 };
 use bb_paths::PathKey;
 use bb_test_support::unique_temp_path;
+use bb_tools::compare::{SyncPlans, SyncRunner};
 use bb_undo::{
     DeleteRecord, HeldEntry, HeldFolderSizes, HeldSize, HeldSizeEstimator, PlainUndoHost,
     RenameRecord, StepVerdict, SyncRecord, TransferRecord, UndoBudget, UndoStack, UndoableRecord,

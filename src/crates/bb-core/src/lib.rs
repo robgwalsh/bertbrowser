@@ -3,9 +3,7 @@
 
 pub mod changes;
 pub mod columns;
-pub mod compare;
 pub mod data;
-pub mod diff;
 pub mod fs;
 pub mod ipc;
 pub mod layout;

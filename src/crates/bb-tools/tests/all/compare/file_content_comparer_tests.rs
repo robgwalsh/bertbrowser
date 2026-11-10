@@ -5,8 +5,8 @@ use std::os::windows::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
 use bb_core::cancel::{CancelToken, Cancelled};
-use bb_core::compare::{ContentComparer, ContentComparison, ContentVerdict, FileContentComparer};
 use bb_test_support::unique_temp_path;
+use bb_tools::compare::{ContentComparer, ContentComparison, ContentVerdict, FileContentComparer};
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
 };

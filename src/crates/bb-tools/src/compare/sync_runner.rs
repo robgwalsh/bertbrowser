@@ -14,9 +14,11 @@
 use std::cell::RefCell;
 
 use super::sync_models::{SyncOutcome, SyncPlans};
-use crate::cancel::CancelToken;
-use crate::delete::{DeleteExecutor, DeleteOutcome, DeleteProgress, DeleteRedo, DeleteUndoResult};
-use crate::transfer::{
+use bb_base::cancel::CancelToken;
+use bb_core::delete::{
+    DeleteExecutor, DeleteOutcome, DeleteProgress, DeleteRedo, DeleteUndoResult,
+};
+use bb_core::transfer::{
     TransferExecutor, TransferOutcome, TransferProgress, TransferRedo, TransferVerb,
 };
 
@@ -230,7 +232,7 @@ impl<'a> SyncRunner<'a> {
     /// throughput read as though it were still writing.
     fn remove(
         &self,
-        plan: &crate::delete::DeletePlan,
+        plan: &bb_core::delete::DeletePlan,
         cancel: &CancelToken,
         progress: Option<&mut (dyn FnMut(TransferProgress) + '_)>,
         done: usize,

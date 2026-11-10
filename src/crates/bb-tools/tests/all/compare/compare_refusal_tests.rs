@@ -5,8 +5,8 @@
 // right" delete the wrong thing, and it does it silently.
 use std::collections::{HashMap, HashSet};
 
-use bb_core::compare::{CompareProbe, CompareRefusal};
 use bb_paths::fold_upper;
+use bb_tools::compare::{CompareProbe, CompareRefusal};
 
 const LEFT: &str = r"C:\Work\left";
 const RIGHT: &str = r"C:\Work\right";

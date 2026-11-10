@@ -29,13 +29,13 @@ pub(crate) struct CompareState {
     pub right: PaneId,
     pub differences_only: bool,
     /// The verdicts, once the folders have been read; settling by content replaces them.
-    pub result: Option<std::sync::Arc<bb_core::compare::CompareResult>>,
+    pub result: Option<std::sync::Arc<bb_tools::compare::CompareResult>>,
     pub left_root: String,
     pub right_root: String,
     pub left_tab: Option<crate::ids::TabId>,
     pub right_tab: Option<crate::ids::TabId>,
     /// What the folder service answered, before any settling: what a sync is planned from.
-    pub outcome: Option<std::sync::Arc<bb_core::compare::FolderCompareOutcome>>,
+    pub outcome: Option<std::sync::Arc<bb_tools::compare::FolderCompareOutcome>>,
     /// A caveat to show with the summary (a partial scan, a drive still building).
     pub message: Option<String>,
     /// A scan is running.

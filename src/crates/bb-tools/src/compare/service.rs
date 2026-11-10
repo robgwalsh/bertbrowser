@@ -18,10 +18,10 @@ use windows_sys::Win32::Storage::FileSystem::GetVolumeInformationW;
 use super::folder_comparer::{CompareResult, FolderComparer};
 use super::models::{CompareEntry, CompareSourceKind};
 use super::refusal::{CompareProbe, CompareRefusal, FileSystemCompareProbe};
-use crate::cancel::CancelToken;
-use crate::data::{self, FsIndexRepository};
-use crate::fs::{FileSystemWalker, WalkError, is_held_path};
-use crate::mft::MftIndex;
+use bb_base::cancel::CancelToken;
+use bb_core::data::{self, FsIndexRepository};
+use bb_core::fs::{FileSystemWalker, WalkError, is_held_path};
+use bb_core::mft::MftIndex;
 use bb_files::equality::CompareTolerance;
 
 /// Whether a comparison could be run, and how far to trust it.

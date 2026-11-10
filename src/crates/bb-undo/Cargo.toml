@@ -15,6 +15,7 @@ bb-base = { path = "../bb-base" }
 bb-core = { path = "../bb-core" }
 bb-elevation = { path = "../bb-elevation" }
 bb-paths = { path = "../bb-paths" }
+bb-tools = { path = "../bb-tools" }
 bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
 
 [dev-dependencies]

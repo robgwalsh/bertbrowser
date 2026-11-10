@@ -6,11 +6,6 @@
 use std::collections::HashSet;
 
 use bb_core::FileTime;
-use bb_core::compare::{
-    CompareAvailability, CompareEntry, CompareSourceKind, CompareTolerance, DeletePlanning,
-    FolderCompareOutcome, FolderComparer, SyncAction, SyncActionKind, SyncPlanner, SyncPreview,
-    TransferPlanning,
-};
 use bb_core::delete::{
     DeleteMode, DeletePlan, DeleteRejection, DeleteSource, PlannedDelete, RejectedDelete,
 };
@@ -19,6 +14,11 @@ use bb_core::transfer::{
     TransferVerb,
 };
 use bb_paths::{file_name, fold_upper};
+use bb_tools::compare::{
+    CompareAvailability, CompareEntry, CompareSourceKind, CompareTolerance, DeletePlanning,
+    FolderCompareOutcome, FolderComparer, SyncAction, SyncActionKind, SyncPlanner, SyncPreview,
+    TransferPlanning,
+};
 
 const LEFT: &str = r"C:\Work\left";
 const RIGHT: &str = r"C:\Work\right";

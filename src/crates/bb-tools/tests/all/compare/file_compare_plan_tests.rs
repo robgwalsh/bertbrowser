@@ -1,5 +1,5 @@
 // Port of tests/BertBrowser.Core.Tests/FileComparePlanTests.cs
-use bb_core::compare::{FileCompareMode, FileComparePlan, FileCompareSide};
+use bb_tools::compare::{FileCompareMode, FileComparePlan, FileCompareSide};
 
 fn side(name: &str) -> FileCompareSide {
     FileCompareSide::new(name, false)

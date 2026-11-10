@@ -8,14 +8,14 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bb_core::cancel::CancelToken;
-use bb_core::compare::{
-    CompareAvailability, FolderCompareService, SyncOutcome, SyncPlanner, SyncPreview, SyncRunner,
-};
 use bb_core::data::FsIndexRepository;
 use bb_core::delete::{DeleteExecutor, DeleteMode, DeletePlanner, FileSystemDeleteProbe};
 use bb_core::mft::NullMftIndex;
 use bb_core::transfer::{FileSystemTransferProbe, TransferExecutor, TransferPlanner};
 use bb_test_support::{TempDb, unique_temp_path};
+use bb_tools::compare::{
+    CompareAvailability, FolderCompareService, SyncOutcome, SyncPlanner, SyncPreview, SyncRunner,
+};
 
 struct Fixture {
     root: PathBuf,

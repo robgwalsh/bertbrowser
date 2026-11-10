@@ -10,7 +10,6 @@
 use std::sync::LazyLock;
 
 use bb_core::archives::{ArchiveEditExecutor, LibraryArchiveReader};
-use bb_core::compare::SyncRunner;
 use bb_core::delete::{DeleteExecutor, DeleteOutcome, DeletePlan, DeleteUndoResult};
 use bb_core::metadata::MetadataEditExecutor;
 use bb_core::rename::{RenameExecutor, RenameOutcome, RenamePlan};
@@ -20,6 +19,7 @@ use bb_core::transfer::{
     TransferUndoResult, TransferVerb,
 };
 use bb_elevation::Elevated;
+use bb_tools::compare::SyncRunner;
 
 /// A progress sink a redo writes through while it runs.
 pub type ProgressSink<'a> = Box<dyn FnMut(TransferProgress) + 'a>;

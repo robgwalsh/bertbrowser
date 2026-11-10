@@ -10,8 +10,8 @@ use super::models::{CompareEntry, CompareKeys, CompareSide, CompareVerdict};
 use super::rules::CompareRules;
 use super::service::FolderCompareOutcome;
 use super::sync_models::{SyncAction, SyncActionKind, SyncPlans, SyncPreview};
-use crate::delete::{DeleteMode, DeletePlan, DeletePlanner, DeleteSource};
-use crate::transfer::{ConflictResolution, TransferPlan, TransferPlanner, TransferVerb};
+use bb_core::delete::{DeleteMode, DeletePlan, DeletePlanner, DeleteSource};
+use bb_core::transfer::{ConflictResolution, TransferPlan, TransferPlanner, TransferVerb};
 
 /// `TransferPlanner.Plan`, as a sync asks it: a seam so the planner's rules stay its own tests'
 /// business and `to_plans` can be pinned against an in-memory one.
