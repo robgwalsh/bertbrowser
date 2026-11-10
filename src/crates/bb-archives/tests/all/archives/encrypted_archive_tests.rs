@@ -4,12 +4,12 @@
 // entries, while a 7z with its headers encrypted has nothing to list at all.
 use std::sync::Arc;
 
-use bb_archive_fixtures::archive_support::TempRoot;
 use bb_archives::{
     ArchiveAwareFileSystemService, ArchiveCache, ArchiveFailure, ArchiveLockedError,
     ArchivePasswords, ArchiveReader, LibraryArchiveReader,
 };
 use bb_base::cancel::CancelToken;
+use bb_file_fixtures::archive_support::TempRoot;
 use bb_files::fs::{FileSystemService, LocalFileSystem};
 use bb_fixtures::archive_fixtures;
 

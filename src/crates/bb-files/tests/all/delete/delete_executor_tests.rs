@@ -14,11 +14,11 @@ use std::time::{Duration, SystemTime};
 
 use bb_base::attributes::{HIDDEN, READONLY, REPARSE_POINT};
 use bb_base::cancel::CancelToken;
+use bb_file_fixtures::fake_recycle_bin::FakeRecycleBin;
 use bb_files::delete::{
     DeleteDisposition, DeleteExecutor, DeleteMode, DeleteOutcome, DeletePlanner, DeleteProgress,
     DeleteSource, DeleteUndoResult, FileSystemDeleteProbe,
 };
-use bb_fixtures::fake_recycle_bin::FakeRecycleBin;
 use bb_fixtures::unique_temp_path;
 
 use crate::fs::directory_removal_tests::try_create_junction;

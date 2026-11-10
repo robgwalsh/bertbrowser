@@ -1,20 +1,17 @@
 //! Shared test helpers: temp databases and trees under %TEMP%, in-memory pipe pairs, fixtures copied
 //! verbatim from MetadataFixtures and ArchiveFixtures, in-memory probes. A dev-dependency only.
 
-// Re-exported from bb-fixtures and bb-archive-fixtures, which a crate below bb-core can use without
-// bb-core.
-pub use bb_archive_fixtures::archive_support;
+// Re-exported from bb-fixtures, which a crate below bb-index can use without it.
 pub use bb_fixtures::{
-    archive_fixtures, fake_recycle_bin, metadata_fixtures, metadata_fixtures_data,
-    try_create_junction, unique_temp_path,
+    archive_fixtures, metadata_fixtures, metadata_fixtures_data, try_create_junction,
+    unique_temp_path,
 };
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use bb_core::data::Db;
+use bb_index::data::Db;
 
-pub mod duplex;
 pub mod pipe_fakes;
 
 /// A migrated database in a temp file, deleted with its WAL and SHM on drop.

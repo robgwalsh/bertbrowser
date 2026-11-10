@@ -19,6 +19,7 @@ bb-tools = { path = "../bb-tools" }
 bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
 
 [dev-dependencies]
+bb-file-fixtures = { path = "../bb-file-fixtures" }
 bb-metadata = { path = "../bb-metadata" }
 bb-test-support = { path = "../bb-test-support" }
 windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }

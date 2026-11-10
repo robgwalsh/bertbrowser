@@ -10,13 +10,13 @@ use std::path::{Path, PathBuf};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use crate::elevation::duplex::{DuplexEnd, DuplexPair};
 use bb_base::cancel::CancelToken;
 use bb_core::ipc::{ElevationMessage, ElevationProtocol, ElevationVerb, LineReader, write_line};
 use bb_core::newitem::{NewItemKind, NewItemPlan};
 use bb_core::rename::PlannedRename;
 use bb_core::transfer::{ConflictResolution, PlannedTransfer};
 use bb_elevation::{ElevationHeader, ElevationHost, ElevationOperation, ElevationTransferItem};
-use bb_test_support::duplex::{DuplexEnd, DuplexPair};
 use bb_test_support::unique_temp_path;
 
 const PATIENCE: Duration = Duration::from_secs(5);

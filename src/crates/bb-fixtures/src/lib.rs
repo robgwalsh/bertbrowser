@@ -1,9 +1,8 @@
-//! Test fixtures that need nothing above bb-files: a unique temp path, the metadata fixtures copied
-//! verbatim from MetadataFixtures and ArchiveFixtures, and a Recycle Bin that really moves files. A dev-dependency only.
-//! Apart from bb-test-support (which re-exports all of it) so that a crate below bb-core can test
-//! without bb-core in its test build.
+//! Test fixtures that need nothing of the app: a unique temp path, a junction maker, and the metadata
+//! and archive fixtures copied verbatim from MetadataFixtures and ArchiveFixtures. A dev-dependency
+//! only. bb-test-support (on bb-index) re-exports it; bb-file-fixtures (on bb-files and bb-archives)
+//! holds the fakes that need those.
 
-pub mod fake_recycle_bin;
 pub mod metadata_fixtures;
 pub mod metadata_fixtures_data;
 

@@ -2,12 +2,12 @@
 use std::io::Read;
 use std::sync::atomic::{AtomicI32, Ordering};
 
-use bb_archive_fixtures::archive_support::{TempRoot, write_zip};
 use bb_archives::{
     ArchiveIndex, ArchiveReadError, ArchiveReader, EntrySink, ExtractConflict, ExtractExecutor,
     ExtractOutcome, ExtractPlanner, LibraryArchiveReader,
 };
 use bb_base::cancel::{CancelToken, Cancelled};
+use bb_file_fixtures::archive_support::{TempRoot, write_zip};
 use bb_files::transfer::TransferProgress;
 
 struct Fixture {

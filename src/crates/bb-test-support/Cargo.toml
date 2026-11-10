@@ -12,9 +12,8 @@ test = false
 doctest = false
 
 [dependencies]
-bb-archive-fixtures = { path = "../bb-archive-fixtures" }
-bb-core = { path = "../bb-core" }
-bb-elevation = { path = "../bb-elevation" }
+# bb-index, not bb-core: the index's own tests use this, and must not rebuild for a transfer edit.
+bb-index = { path = "../bb-index" }
 bb-fixtures = { path = "../bb-fixtures" }
 bb-paths = { path = "../bb-paths" }
 base64.workspace = true

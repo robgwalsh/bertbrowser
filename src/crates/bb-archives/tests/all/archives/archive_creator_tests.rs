@@ -1,10 +1,10 @@
 // Port of tests/BertBrowser.Core.Tests/ArchiveCreatorTests.cs.
-use bb_archive_fixtures::archive_support::TempRoot;
 use bb_archives::{
     ArchiveCreator, ArchiveFormats, ArchiveReader, ArchiveSource, ArchiveSourceWalk,
     ArchiveWriteFormat, ArchiveWriteRules, CompressionLevel, CompressionType, LibraryArchiveReader,
 };
 use bb_base::cancel::CancelToken;
+use bb_file_fixtures::archive_support::TempRoot;
 use bb_files::transfer::TransferProgress;
 use windows_sys::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, SetFileAttributesW};
 

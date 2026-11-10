@@ -28,7 +28,7 @@ windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
 
 [dev-dependencies]
-bb-archive-fixtures = { path = "../bb-archive-fixtures" }
+bb-file-fixtures = { path = "../bb-file-fixtures" }
 bb-base = { path = "../bb-base" }
 bb-fixtures = { path = "../bb-fixtures" }
 windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }

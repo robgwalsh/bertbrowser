@@ -3,10 +3,10 @@ use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use bb_archive_fixtures::archive_support::{TempRoot, write_zip};
 use bb_archives::{ArchiveAwareFileSystemService, ArchiveBrowser, LibraryArchiveReader};
 use bb_base::FileTime;
 use bb_base::attributes::HIDDEN;
+use bb_file_fixtures::archive_support::{TempRoot, write_zip};
 use bb_files::fs::{DriveInfo, FileSystemService, LocalFileSystem, SubdirectoryPresence};
 use bb_files::models::FileEntry;
 

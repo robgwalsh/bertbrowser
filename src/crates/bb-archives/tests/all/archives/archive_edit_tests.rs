@@ -2,12 +2,12 @@
 // is really rewriting it beside itself and swapping. The happy path matters least here. What these
 // are for is the safety: that a refusal is a refusal rather than a silent conversion, that a
 // failure leaves the original exactly where it was, and that undo puts back the same bytes.
-use bb_archive_fixtures::archive_support::{TempRoot, write_archive, write_zip};
 use bb_archives::{
     ArchiveEdit, ArchiveEditExecutor, ArchiveEditOutcome, ArchiveEditPlan, ArchiveEditPlanner,
     ArchiveEditRejection, ArchiveReader, ArchiveType, CompressionType, LibraryArchiveReader,
 };
 use bb_base::cancel::CancelToken;
+use bb_file_fixtures::archive_support::{TempRoot, write_archive, write_zip};
 use bb_files::rename::RenamePattern;
 use bb_fixtures::archive_fixtures;
 

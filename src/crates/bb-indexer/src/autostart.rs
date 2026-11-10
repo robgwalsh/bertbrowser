@@ -16,8 +16,8 @@
 //! **Untestable here**: registering needs elevation and changes the machine. The definition it
 //! registers is `IndexerAutoStartTask::build_xml`, which is what the tests pin.
 
-use bb_core::ipc::IndexEndpoint;
-use bb_core::mft::IndexerAutoStartTask;
+use bb_index::ipc::IndexEndpoint;
+use bb_index::mft::IndexerAutoStartTask;
 use windows::Win32::Foundation::ERROR_FILE_NOT_FOUND;
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,

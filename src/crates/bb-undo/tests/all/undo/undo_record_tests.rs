@@ -24,7 +24,7 @@ use bb_undo::{
     RenameRecord, StepVerdict, SyncRecord, TransferRecord, UndoBudget, UndoStack, UndoableRecord,
 };
 
-use bb_test_support::fake_recycle_bin::FakeRecycleBin;
+use bb_file_fixtures::fake_recycle_bin::FakeRecycleBin;
 
 struct Fixture {
     root: PathBuf,

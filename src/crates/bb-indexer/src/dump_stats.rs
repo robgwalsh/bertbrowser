@@ -5,8 +5,8 @@
 
 use std::time::Instant;
 
-use bb_core::cancel::CancelToken;
-use bb_core::mft::{MftReader, RawVolumeAccess, VolumeAccess, VolumeHandle};
+use bb_base::cancel::CancelToken;
+use bb_index::mft::{MftReader, RawVolumeAccess, VolumeAccess, VolumeHandle};
 
 pub fn run() -> i32 {
     let access = RawVolumeAccess;

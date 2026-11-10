@@ -10,9 +10,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use bb_core::changes::ChangeLogPolicy;
-use bb_core::ipc::{IndexMessage, IndexProtocol, IndexVerb, LineReader, write_line};
-use bb_core::mft::{
+use bb_index::changes::ChangeLogPolicy;
+use bb_index::ipc::{IndexMessage, IndexProtocol, IndexVerb, LineReader, write_line};
+use bb_index::mft::{
     IndexHostLaunchResult, IndexHostLauncher, IndexListener, IndexListeners, IndexStartMode,
     IndexStream, IndexTransport, IndexTransportFactory, IndexerPresence, MftIndex, MftIndexState,
     StreamRead, StreamWrite,

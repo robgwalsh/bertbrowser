@@ -4,11 +4,11 @@
 // the failure behaviour: damaged bytes and a file that only claims to be an archive all have to
 // come back as an index carrying a message, because the whole browsing surface rests on that
 // never failing.
-use bb_archive_fixtures::archive_support::{TempRoot, write_archive, write_zip};
 use bb_archives::{
     ArchiveFailure, ArchiveReader, ArchiveType, CompressionType, LibraryArchiveReader,
 };
 use bb_base::cancel::CancelToken;
+use bb_file_fixtures::archive_support::{TempRoot, write_archive, write_zip};
 
 struct Fixture {
     root: TempRoot,

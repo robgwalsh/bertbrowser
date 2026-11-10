@@ -21,14 +21,14 @@ mod selftest;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bb_core::cancel::CancelToken;
-use bb_core::data::{
+use bb_base::cancel::CancelToken;
+use bb_index::data::{
     ChangeLogRepository, Db, DirSizeRepository, EXPECTED_SCHEMA_VERSION, FsIndexRepository,
 };
-use bb_core::ipc::{
+use bb_index::ipc::{
     IndexEndpoint, IndexerArguments, IndexerCommand, IndexerPresenceLock, PipeOwner,
 };
-use bb_core::mft::{
+use bb_index::mft::{
     ChangeRecorderOptions, IndexSessionEnd, MftIndex, MftIndexHost, MftIndexService,
     RawVolumeAccess,
 };
@@ -181,7 +181,7 @@ fn serve(host: &MftIndexHost, sid: &str, lifetime: &CancelToken) -> i32 {
             continue;
         }
 
-        let stream: Arc<dyn bb_core::mft::IndexStream> = Arc::new(client);
+        let stream: Arc<dyn bb_index::mft::IndexStream> = Arc::new(client);
         if host.run(stream, lifetime) == IndexSessionEnd::Stop {
             return 0;
         }

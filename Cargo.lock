@@ -65,21 +65,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "bb-archive-fixtures"
-version = "2.0.0"
-dependencies = [
- "bb-archives",
- "bb-base",
- "bb-fixtures",
- "bb-workspace-hack",
-]
-
-[[package]]
 name = "bb-archives"
 version = "2.0.0"
 dependencies = [
- "bb-archive-fixtures",
  "bb-base",
+ "bb-file-fixtures",
  "bb-files",
  "bb-fixtures",
  "bb-paths",
@@ -157,6 +147,7 @@ dependencies = [
  "bb-archives",
  "bb-base",
  "bb-files",
+ "bb-index",
  "bb-metadata",
  "bb-paths",
  "bb-preview",
@@ -224,10 +215,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bb-file-fixtures"
+version = "2.0.0"
+dependencies = [
+ "bb-archives",
+ "bb-base",
+ "bb-files",
+ "bb-fixtures",
+ "bb-workspace-hack",
+]
+
+[[package]]
 name = "bb-files"
 version = "2.0.0"
 dependencies = [
  "bb-base",
+ "bb-file-fixtures",
  "bb-fixtures",
  "bb-metadata",
  "bb-paths",
@@ -245,16 +248,32 @@ version = "2.0.0"
 dependencies = [
  "base64",
  "bb-base",
- "bb-files",
  "bb-workspace-hack",
  "zip 9.1.3",
+]
+
+[[package]]
+name = "bb-index"
+version = "2.0.0"
+dependencies = [
+ "bb-base",
+ "bb-paths",
+ "bb-preview",
+ "bb-search",
+ "bb-test-support",
+ "bb-workspace-hack",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "bb-indexer"
 version = "2.0.0"
 dependencies = [
- "bb-core",
+ "bb-base",
+ "bb-index",
  "bb-paths",
  "bb-workspace-hack",
  "embed-manifest",
@@ -367,10 +386,8 @@ name = "bb-test-support"
 version = "2.0.0"
 dependencies = [
  "base64",
- "bb-archive-fixtures",
- "bb-core",
- "bb-elevation",
  "bb-fixtures",
+ "bb-index",
  "bb-paths",
  "bb-workspace-hack",
  "zip 9.1.3",
@@ -391,6 +408,7 @@ version = "2.0.0"
 dependencies = [
  "bb-base",
  "bb-core",
+ "bb-file-fixtures",
  "bb-files",
  "bb-paths",
  "bb-test-support",
@@ -411,6 +429,7 @@ dependencies = [
  "bb-base",
  "bb-core",
  "bb-elevation",
+ "bb-file-fixtures",
  "bb-metadata",
  "bb-paths",
  "bb-test-support",
@@ -427,7 +446,9 @@ dependencies = [
  "block-buffer",
  "cc",
  "cipher",
+ "crc32fast",
  "digest",
+ "flate2",
  "getrandom 0.4.3",
  "hashbrown 0.17.1",
  "inout",
@@ -436,12 +457,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex-syntax",
+ "simd-adler32",
  "smallvec",
  "syn 3.0.9",
  "windows",
  "windows-core",
  "windows-sys 0.61.2",
  "zeroize",
+ "zlib-rs",
 ]
 
 [[package]]

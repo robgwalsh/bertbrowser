@@ -11,8 +11,8 @@ use bb_core::archives::{ArchiveAwareFileSystemService, LibraryArchiveReader};
 use bb_core::data::{DirSizeRepository, FsIndexRepository};
 use bb_core::fs::LocalFileSystem;
 use bb_core::mft::NullMftIndex;
+use bb_file_fixtures::archive_support::{TempRoot, write_zip};
 use bb_test_support::TempDb;
-use bb_test_support::archive_support::{TempRoot, write_zip};
 use bb_tools::diskusage::{ArchiveUsage, DiskUsageAvailability, DiskUsageService};
 
 struct Fixture {

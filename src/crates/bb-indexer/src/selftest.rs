@@ -7,14 +7,14 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use bb_core::FileTime;
-use bb_core::attributes::ARCHIVE;
-use bb_core::cancel::CancelToken;
-use bb_core::data::{Db, DirSizeRepository, FsIndexRepository};
-use bb_core::mft::fixtures::{
+use bb_base::FileTime;
+use bb_base::attributes::ARCHIVE;
+use bb_base::cancel::CancelToken;
+use bb_index::data::{Db, DirSizeRepository, FsIndexRepository};
+use bb_index::mft::fixtures::{
     FakeVolume, FakeVolumeAccess, FileRecordSpec, VolumeImageBuilder, build_usn_record,
 };
-use bb_core::mft::{MftIndex, MftIndexService, usn_reason};
+use bb_index::mft::{MftIndex, MftIndexService, usn_reason};
 use bb_paths::PathKey;
 
 const CLOSE_CREATE: u32 = usn_reason::CLOSE | usn_reason::FILE_CREATE;

@@ -12,9 +12,9 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use bb_core::FileTime;
-use bb_core::cancel::CancelToken;
-use bb_core::data::Db;
+use bb_base::FileTime;
+use bb_base::cancel::CancelToken;
+use bb_index::data::Db;
 
 /// How often to look for a reason to stop.
 const INTERVAL: Duration = Duration::from_secs(30);

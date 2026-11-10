@@ -1,8 +1,8 @@
 // Port of tests/BertBrowser.Core.Tests/ArchiveListingTests.cs.
 use std::io::Cursor;
 
-use bb_archive_fixtures::archive_support::{TempRoot, write_zip};
 use bb_archives::ArchiveListing;
+use bb_file_fixtures::archive_support::{TempRoot, write_zip};
 
 /// A zip in memory. Bytes, not text with a byte-order mark: the sizes these tests assert on would
 /// otherwise silently be three bytes over.

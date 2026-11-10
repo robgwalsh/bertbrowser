@@ -15,6 +15,7 @@ doctest = false
 bb-archives = { path = "../bb-archives" }
 bb-base = { path = "../bb-base" }
 bb-files = { path = "../bb-files" }
+bb-index = { path = "../bb-index" }
 bb-metadata = { path = "../bb-metadata" }
 bb-preview = { path = "../bb-preview" }
 bb-search = { path = "../bb-search" }
