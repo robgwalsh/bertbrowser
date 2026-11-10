@@ -35,7 +35,20 @@ MainView::MainView(core::Core& core, platform::Window& window)
     auto* root = outer->emplace<DockPanel>();
     root->name = "MainDock";
     root->style.bg = tok::WindowBackground;
-    title_ = root->emplace<TitleBar>();
+    setup_title_bar(*root);
+    DockPanel* browser_dock = setup_browser(*root);
+    setup_transfer_strip(*browser_dock);
+    setup_indexer_banner(*browser_dock);
+    setup_sidebar(*browser_dock);
+    setup_pane_column();
+    wire_tree_events();
+    setup_overlays();
+    wire_window(std::move(outer));
+}
+
+// The caption: icon, menu bar, toolbar, the switchers and the search group.
+void MainView::setup_title_bar(DockPanel& root) {
+    title_ = root.emplace<TitleBar>();
     title_->name = "TitleBarRoot";
     title_->dock = Dock::Top;
     title_->show_title = false;
@@ -61,93 +74,101 @@ MainView::MainView(core::Core& core, platform::Window& window)
     title_toolbar_->style.bg = gfx::kNoToken;
     title_toolbar_->nc_hit = HTCLIENT;
     title_->middle = title_toolbar_;
-    {
-        // Workspaces and saved searches, when Settings puts them in the title bar rather than the sidebar.
-        // Spec: MainWindow.xaml (WorkspaceSwitcher, SavedSearchSwitcher).
-        switchers_ = title_->emplace<StackPanel>(Orientation::Horizontal, 6.0f);
-        switchers_->name = "TitleSwitchers";
-        switchers_->nc_hit = HTCLIENT;
-        auto make = [this](const char* id, const IconData& icon, const wchar_t* tip, bool workspaces) {
-            auto* b = switchers_->emplace<Button>();
-            b->name = id;
-            b->icon = &icon;
-            b->tooltip = tip;
-            b->height = 26;
-            // The same well as the whole-PC search beside it, so the two read as one family. Spec: HeaderDropdownButton.
-            b->style.bg = tok::WindowBackground;
-            b->style.border = tok::BorderSubtle;
-            b->flags.tab_stop = false;
-            b->nc_hit = HTCLIENT;
-            b->on_click = [this, workspaces] { open_switcher(workspaces); };
-            return b;
-        };
-        workspace_switcher_ = make("WorkspaceSwitcher", icons::SplitRight, L"Switch workspace", true);
-        search_switcher_ = make("SavedSearchSwitcher", icons::Search, L"Run a saved search", false);
-        switchers_->set_visible(false);
-        title_->after = switchers_;
+    setup_title_switchers();
+    setup_title_search();
+}
+
+void MainView::setup_title_switchers() {
+    // Workspaces and saved searches, when Settings puts them in the title bar rather than the sidebar.
+    // Spec: MainWindow.xaml (WorkspaceSwitcher, SavedSearchSwitcher).
+    switchers_ = title_->emplace<StackPanel>(Orientation::Horizontal, 6.0f);
+    switchers_->name = "TitleSwitchers";
+    switchers_->nc_hit = HTCLIENT;
+    auto make = [this](const char* id, const IconData& icon, const wchar_t* tip, bool workspaces) {
+        auto* b = switchers_->emplace<Button>();
+        b->name = id;
+        b->icon = &icon;
+        b->tooltip = tip;
+        b->height = 26;
+        // The same well as the whole-PC search beside it, so the two read as one family. Spec: HeaderDropdownButton.
+        b->style.bg = tok::WindowBackground;
+        b->style.border = tok::BorderSubtle;
+        b->flags.tab_stop = false;
+        b->nc_hit = HTCLIENT;
+        b->on_click = [this, workspaces] { open_switcher(workspaces); };
+        return b;
+    };
+    workspace_switcher_ = make("WorkspaceSwitcher", icons::SplitRight, L"Switch workspace", true);
+    search_switcher_ = make("SavedSearchSwitcher", icons::Search, L"Run a saved search", false);
+    switchers_->set_visible(false);
+    title_->after = switchers_;
+}
+
+void MainView::setup_title_search() {
+    // The command palette beside the whole-PC search: both are "find it by typing", one for commands and
+    // one for files. Centred on the bar. Spec: MainWindow.xaml (TitleBarSearchGroup).
+    title_search_group_ = title_->emplace<StackPanel>(Orientation::Horizontal, 4.0f);
+    title_search_group_->name = "TitleBarSearchGroup";
+    title_search_group_->nc_hit = HTCLIENT;
+    auto* palette = title_search_group_->emplace<Button>();
+    palette->name = "PaletteButton";
+    palette->icon = &icons::Palette;
+    palette->width = 30;
+    palette->height = 26;
+    palette->style.bg = tok::TitleBarBackground;
+    palette->style.border = tok::TitleBarBackground;
+    palette->style.fg = tok::TitleBarForeground;
+    palette->flags.tab_stop = false;
+    palette->flags.focusable = false;  // the palette hands the keyboard back to what had it
+    palette->nc_hit = HTCLIENT;
+    palette->on_click = [this] { execute_command(L"app.palette"); };
+    title_search_ = title_search_group_->emplace<SearchField>(
+        [this] {
+            if (TabView* tv = active_view()) tv->clear_search(true);
+        },
+        [this] { execute_command(L"search.save"); });
+    title_search_->name = "GlobalSearchBox";
+    title_search_->width = 300;
+    title_search_->height = 26;
+    // A well in the title bar: the window's own colour inside a faint edge. Spec: HeaderFieldBorder.
+    title_search_->style.bg = tok::WindowBackground;
+    title_search_->style.border = tok::BorderSubtle;
+    for (Button* b : {title_search_->clear_button(), title_search_->save_button()}) {
+        b->style.bg = tok::WindowBackground;
+        b->style.border = tok::WindowBackground;
     }
-    {
-        // The command palette beside the whole-PC search: both are "find it by typing", one for commands and
-        // one for files. Centred on the bar. Spec: MainWindow.xaml (TitleBarSearchGroup).
-        title_search_group_ = title_->emplace<StackPanel>(Orientation::Horizontal, 4.0f);
-        title_search_group_->name = "TitleBarSearchGroup";
-        title_search_group_->nc_hit = HTCLIENT;
-        auto* palette = title_search_group_->emplace<Button>();
-        palette->name = "PaletteButton";
-        palette->icon = &icons::Palette;
-        palette->width = 30;
-        palette->height = 26;
-        palette->style.bg = tok::TitleBarBackground;
-        palette->style.border = tok::TitleBarBackground;
-        palette->style.fg = tok::TitleBarForeground;
-        palette->flags.tab_stop = false;
-        palette->flags.focusable = false;  // the palette hands the keyboard back to what had it
-        palette->nc_hit = HTCLIENT;
-        palette->on_click = [this] { execute_command(L"app.palette"); };
-        title_search_ = title_search_group_->emplace<SearchField>(
-            [this] {
-                if (TabView* tv = active_view()) tv->clear_search(true);
-            },
-            [this] { execute_command(L"search.save"); });
-        title_search_->name = "GlobalSearchBox";
-        title_search_->width = 300;
-        title_search_->height = 26;
-        // A well in the title bar: the window's own colour inside a faint edge. Spec: HeaderFieldBorder.
-        title_search_->style.bg = tok::WindowBackground;
-        title_search_->style.border = tok::BorderSubtle;
-        for (Button* b : {title_search_->clear_button(), title_search_->save_button()}) {
-            b->style.bg = tok::WindowBackground;
-            b->style.border = tok::WindowBackground;
-        }
-        title_search_->placeholder = L"Search this PC";
-        title_search_->nc_hit = HTCLIENT;
-        title_search_->clear_button()->name = "GlobalSearchClearButton";
-        title_search_->save_button()->name = "GlobalSaveSearchButton";
-        title_search_->on_changed = [this](const std::wstring& text) {
-            title_search_->sync_buttons();
-            if (title_search_suppress_ || !active_tab_) return;
-            bb_tab_set_search(core_.app(), active_tab_, core::s(text), true);
-        };
-        title_search_->on_cancel = [this] {
-            if (TabView* tv = active_view()) tv->search_escape(true);
-        };
-        // The syntax reference, to the right of the field it explains. Spec: MainWindow.xaml (SearchSyntaxButton).
-        auto* syntax = title_search_group_->emplace<Button>();
-        syntax->name = "SearchSyntaxButton";
-        syntax->icon = &icons::Properties;
-        syntax->tooltip = L"What you can type here";
-        syntax->width = 30;
-        syntax->height = 26;
-        syntax->style.bg = tok::TitleBarBackground;
-        syntax->style.border = tok::TitleBarBackground;
-        syntax->style.fg = tok::TitleBarForeground;
-        syntax->flags.tab_stop = false;
-        syntax->nc_hit = HTCLIENT;
-        syntax->on_click = [this] { execute_command(L"search.syntax"); };
-        title_->center = title_search_group_;
-        refresh_tooltips();  // and again whenever a key is rebound
-    }
-    browser_ = root->emplace<Panel>();
+    title_search_->placeholder = L"Search this PC";
+    title_search_->nc_hit = HTCLIENT;
+    title_search_->clear_button()->name = "GlobalSearchClearButton";
+    title_search_->save_button()->name = "GlobalSaveSearchButton";
+    title_search_->on_changed = [this](const std::wstring& text) {
+        title_search_->sync_buttons();
+        if (title_search_suppress_ || !active_tab_) return;
+        bb_tab_set_search(core_.app(), active_tab_, core::s(text), true);
+    };
+    title_search_->on_cancel = [this] {
+        if (TabView* tv = active_view()) tv->search_escape(true);
+    };
+    // The syntax reference, to the right of the field it explains. Spec: MainWindow.xaml (SearchSyntaxButton).
+    auto* syntax = title_search_group_->emplace<Button>();
+    syntax->name = "SearchSyntaxButton";
+    syntax->icon = &icons::Properties;
+    syntax->tooltip = L"What you can type here";
+    syntax->width = 30;
+    syntax->height = 26;
+    syntax->style.bg = tok::TitleBarBackground;
+    syntax->style.border = tok::TitleBarBackground;
+    syntax->style.fg = tok::TitleBarForeground;
+    syntax->flags.tab_stop = false;
+    syntax->nc_hit = HTCLIENT;
+    syntax->on_click = [this] { execute_command(L"search.syntax"); };
+    title_->center = title_search_group_;
+    refresh_tooltips();  // and again whenever a key is rebound
+}
+
+// Everything under the title bar: the toolbar rows and the status bar. Returns the dock the rest is put in.
+DockPanel* MainView::setup_browser(DockPanel& root) {
+    browser_ = root.emplace<Panel>();
     browser_->name = "BrowserRoot";
     browser_->dock = Dock::Fill;
     auto* browser_dock = browser_->emplace<DockPanel>();
@@ -166,90 +187,97 @@ MainView::MainView(core::Core& core, platform::Window& window)
     status_->on_scale = [this](double scale) {
         if (active_tab_) bb_tab_set_thumbnail_scale(core_.app(), active_tab_, scale);
     };
-    {
-        // What a copy or move is doing: the headline, a bar, and the numbers. Above the status line.
-        auto* strip = browser_dock->emplace<StackPanel>(Orientation::Horizontal, 14.0f);
-        strip->name = "TransferStrip";
-        strip->dock = Dock::Bottom;
-        strip->height = 36;
-        strip->pad = 8;
-        strip->style.bg = tok::SurfaceRaised;
-        strip->set_visible(false);
-        transfer_strip_ = strip;
-        transfer_head_ = strip->emplace<TextBlock>();
-        transfer_head_->width = 250;
-        transfer_head_->style.font.weight = 600;
-        transfer_bar_ = strip->emplace<ProgressBar>();
-        transfer_bar_->width = 220;
-        transfer_detail_ = strip->emplace<TextBlock>();
-        transfer_detail_->flex = 1;
-        transfer_detail_->style.fg = tok::TextSecondary;
-        // How many more are queued behind this one; blank when there is only the running job. Spec:
-        // MainWindow.xaml (TransferQueue.WaitingText).
-        transfer_waiting_ = strip->emplace<TextBlock>();
-        transfer_waiting_->name = "TransferWaiting";
-        transfer_waiting_->style.fg = tok::TextSecondary;
-        // Links, as the original's were. Spec: MainWindow.xaml (the transfer strip's LinkButtons).
-        transfer_pause_ = strip->emplace<Button>(L"Pause");
-        transfer_pause_->name = "TransferPause";
-        transfer_pause_->link = true;
-        transfer_pause_->on_click = [this] {
-            const bool paused = queue_["paused"].boolean();
-            BbOwnedStr o{};
-            bb_ops_do(core_.app(), core::s(paused ? L"queue-resume" : L"queue-pause"), core::s(L""), &o);
-            bb_str_free(o);
-        };
-        auto* details = strip->emplace<Button>(L"Details");
-        details->name = "TransferDetails";
-        details->link = true;
-        details->tooltip = L"Show every item in this transfer, and everything queued behind it";
-        details->on_click = [this] { open_dialog(L"transfer"); };
-        transfer_cancel_ = strip->emplace<Button>(L"Cancel");
-        transfer_cancel_->name = "TransferCancel";
-        transfer_cancel_->link = true;
-        transfer_cancel_->style.font.weight = 600;
-        transfer_cancel_->tooltip = L"Stop this transfer. Whatever has already been transferred stays, and can be undone.";
-        transfer_cancel_->on_click = [this] {
-            BbOwnedStr o{};
-            bb_ops_do(core_.app(), core::s(L"cancel-running"), core::s(L""), &o);
-            bb_str_free(o);
-        };
-    }
-    {
-        // The offer to start the search index helper, above the status bar and the transfer strip:
-        // shown until answered, Dismiss lasts the session. A neutral surface rather than a warning,
-        // on purpose: nothing is wrong, search falls back to a crawl, and this is an offer. Spec:
-        // MainWindow.xaml (IndexerBanner).
-        auto* banner = browser_dock->emplace<StackPanel>(Orientation::Vertical, 0.0f);
-        banner->name = "IndexerBanner";
-        banner->dock = Dock::Bottom;
-        banner->set_visible(false);
-        indexer_banner_ = banner;
-        auto* rule = banner->emplace<Widget>();
-        rule->height = 1;
-        rule->style.bg = tok::BorderSubtle;
-        auto* row = banner->emplace<StackPanel>(Orientation::Horizontal, 12.0f);
-        row->pad = 7;
-        row->style.bg = tok::SurfaceRaised;
-        auto* glyph = row->emplace<Icon>(&icons::Indexing, 14.0f);
-        glyph->style.fg = tok::TextSecondary;
-        indexer_text_ = row->emplace<TextBlock>();
-        indexer_text_->style.fg = tok::TextSecondary;
-        indexer_text_->wrap = true;
-        indexer_text_->vcenter = true;
-        indexer_text_->flex = 1;
-        auto* start = row->emplace<Button>(L"Start indexer");
-        start->name = "IndexerStart";
-        start->icon = &icons::Shield;  // a UAC prompt, as everywhere else that asks for administrator rights
-        start->tooltip = L"Ask for administrator rights so drives can be indexed";
-        start->on_click = [this] { bb_index_do(core_.app(), core::s(L"start")); };
-        auto* dismiss = row->emplace<Button>(L"Dismiss");
-        dismiss->name = "IndexerDismiss";
-        dismiss->link = true;
-        dismiss->tooltip = L"Hide this until the next time BertBrowser starts";
-        dismiss->on_click = [this] { bb_index_do(core_.app(), core::s(L"dismiss-banner")); };
-    }
-    main_split_ = browser_dock->emplace<Splitter>(Orientation::Horizontal);
+    return browser_dock;
+}
+
+void MainView::setup_transfer_strip(DockPanel& browser_dock) {
+    // What a copy or move is doing: the headline, a bar, and the numbers. Above the status line.
+    auto* strip = browser_dock.emplace<StackPanel>(Orientation::Horizontal, 14.0f);
+    strip->name = "TransferStrip";
+    strip->dock = Dock::Bottom;
+    strip->height = 36;
+    strip->pad = 8;
+    strip->style.bg = tok::SurfaceRaised;
+    strip->set_visible(false);
+    transfer_strip_ = strip;
+    transfer_head_ = strip->emplace<TextBlock>();
+    transfer_head_->width = 250;
+    transfer_head_->style.font.weight = 600;
+    transfer_bar_ = strip->emplace<ProgressBar>();
+    transfer_bar_->width = 220;
+    transfer_detail_ = strip->emplace<TextBlock>();
+    transfer_detail_->flex = 1;
+    transfer_detail_->style.fg = tok::TextSecondary;
+    // How many more are queued behind this one; blank when there is only the running job. Spec:
+    // MainWindow.xaml (TransferQueue.WaitingText).
+    transfer_waiting_ = strip->emplace<TextBlock>();
+    transfer_waiting_->name = "TransferWaiting";
+    transfer_waiting_->style.fg = tok::TextSecondary;
+    // Links, as the original's were. Spec: MainWindow.xaml (the transfer strip's LinkButtons).
+    transfer_pause_ = strip->emplace<Button>(L"Pause");
+    transfer_pause_->name = "TransferPause";
+    transfer_pause_->link = true;
+    transfer_pause_->on_click = [this] {
+        const bool paused = queue_["paused"].boolean();
+        BbOwnedStr o{};
+        bb_ops_do(core_.app(), core::s(paused ? L"queue-resume" : L"queue-pause"), core::s(L""), &o);
+        bb_str_free(o);
+    };
+    auto* details = strip->emplace<Button>(L"Details");
+    details->name = "TransferDetails";
+    details->link = true;
+    details->tooltip = L"Show every item in this transfer, and everything queued behind it";
+    details->on_click = [this] { open_dialog(L"transfer"); };
+    transfer_cancel_ = strip->emplace<Button>(L"Cancel");
+    transfer_cancel_->name = "TransferCancel";
+    transfer_cancel_->link = true;
+    transfer_cancel_->style.font.weight = 600;
+    transfer_cancel_->tooltip = L"Stop this transfer. Whatever has already been transferred stays, and can be undone.";
+    transfer_cancel_->on_click = [this] {
+        BbOwnedStr o{};
+        bb_ops_do(core_.app(), core::s(L"cancel-running"), core::s(L""), &o);
+        bb_str_free(o);
+    };
+}
+
+void MainView::setup_indexer_banner(DockPanel& browser_dock) {
+    // The offer to start the search index helper, above the status bar and the transfer strip:
+    // shown until answered, Dismiss lasts the session. A neutral surface rather than a warning,
+    // on purpose: nothing is wrong, search falls back to a crawl, and this is an offer. Spec:
+    // MainWindow.xaml (IndexerBanner).
+    auto* banner = browser_dock.emplace<StackPanel>(Orientation::Vertical, 0.0f);
+    banner->name = "IndexerBanner";
+    banner->dock = Dock::Bottom;
+    banner->set_visible(false);
+    indexer_banner_ = banner;
+    auto* rule = banner->emplace<Widget>();
+    rule->height = 1;
+    rule->style.bg = tok::BorderSubtle;
+    auto* row = banner->emplace<StackPanel>(Orientation::Horizontal, 12.0f);
+    row->pad = 7;
+    row->style.bg = tok::SurfaceRaised;
+    auto* glyph = row->emplace<Icon>(&icons::Indexing, 14.0f);
+    glyph->style.fg = tok::TextSecondary;
+    indexer_text_ = row->emplace<TextBlock>();
+    indexer_text_->style.fg = tok::TextSecondary;
+    indexer_text_->wrap = true;
+    indexer_text_->vcenter = true;
+    indexer_text_->flex = 1;
+    auto* start = row->emplace<Button>(L"Start indexer");
+    start->name = "IndexerStart";
+    start->icon = &icons::Shield;  // a UAC prompt, as everywhere else that asks for administrator rights
+    start->tooltip = L"Ask for administrator rights so drives can be indexed";
+    start->on_click = [this] { bb_index_do(core_.app(), core::s(L"start")); };
+    auto* dismiss = row->emplace<Button>(L"Dismiss");
+    dismiss->name = "IndexerDismiss";
+    dismiss->link = true;
+    dismiss->tooltip = L"Hide this until the next time BertBrowser starts";
+    dismiss->on_click = [this] { bb_index_do(core_.app(), core::s(L"dismiss-banner")); };
+}
+
+// The sidebar column: saved searches and workspaces, and the folder tree under its header.
+void MainView::setup_sidebar(DockPanel& browser_dock) {
+    main_split_ = browser_dock.emplace<Splitter>(Orientation::Horizontal);
     main_split_->dock = Dock::Fill;
     main_split_->name = "MainSplitter";
     main_split_->set_position(260);  // Spec: MainWindow.xaml (sidebar column Width 260, MinWidth 150)
@@ -317,6 +345,9 @@ MainView::MainView(core::Core& core, platform::Window& window)
         window_.root().invalidate_all();
         for (auto& kv : tools_) kv.second->window().root().invalidate_all();
     };
+}
+
+void MainView::setup_pane_column() {
     // The panes, with the compare banner above them and not above the sidebar: a comparison is one
     // thing spanning two panes. Spec: MainWindow.xaml (PaneHostSite).
     auto* pane_column = main_split_->emplace<DockPanel>();
@@ -325,7 +356,9 @@ MainView::MainView(core::Core& core, platform::Window& window)
     pane_host_ = pane_column->emplace<Panel>();
     pane_host_->name = "PaneHostSite";
     pane_host_->dock = Dock::Fill;
+}
 
+void MainView::wire_tree_events() {
     // A folder middle-clicked opens in a pane to the right; a drive as the "middle-click a drive" setting says
     // (a new panel, or a new tab). Spec: MainWindow.FolderTreeItem_PreviewMiddleClick, ShellViewModel.OpenDrive.
     tree_->on_middle = [this](uint64_t id) {
@@ -367,6 +400,9 @@ MainView::MainView(core::Core& core, platform::Window& window)
             }
         }
     };
+}
+
+void MainView::setup_overlays() {
     // The overlays sit over everything under the title bar, in the order they stack: Settings, then (later)
     // the palette and the dialog layer.
     settings_ = browser_->emplace<SettingsView>(*this, core_);
@@ -406,6 +442,9 @@ MainView::MainView(core::Core& core, platform::Window& window)
             });
         }
     };
+}
+
+void MainView::wire_window(std::unique_ptr<Panel> outer) {
     Widget* content = window_.root().set_content(std::move(outer));
     popup_ = PopupLayer::install(*content);
 

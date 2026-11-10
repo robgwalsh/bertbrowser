@@ -203,8 +203,16 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     : main_(main), core_(core), tab_(tab), adapter_(core, tab) {
     adapter_.icons = &main.shell_icons();
     style.bg = tok::ListBackground;
-    BbApp* app = core.app();
+    setup_nav_bar();
+    setup_banners();
+    setup_body();
+    wire_list_events();
+}
 
+// The row of buttons above the list: back, forward, up, refresh, the path, the folder search, and the
+// buttons for flat view and the side pane.
+void TabView::setup_nav_bar() {
+    BbApp* app = core_.app();
     auto nav = std::make_unique<StackPanel>(Orientation::Horizontal, 2.0f);
     nav->pad = 4;
     nav->dock = Dock::Top;
@@ -297,7 +305,10 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     }
     add(std::move(nav));
     apply_icon_size();
+}
 
+// The activity strip and the two banners under the nav bar.
+void TabView::setup_banners() {
     // Activity: a listing or a search on its way. A fixed 3px strip either way, so nothing below it moves
     // when it comes and goes. Spec: DirectoryTabView.xaml (the activity indicator).
     {
@@ -345,7 +356,11 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     unlock_->on_click = [this] { main_.open_dialog(L"archive-password"); };
     banner->set_visible(false);
     banner_panel_ = add(std::move(banner));
+}
 
+// The side pane at the right, and the list and tile views beside it.
+void TabView::setup_body() {
+    BbApp* app = core_.app();
     auto body = std::make_unique<DockPanel>();
     body->dock = Dock::Fill;
     body_ = add(std::move(body));
@@ -393,6 +408,11 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
     empty_ = view_area_->emplace<Overlay>();
     empty_->name = "EmptyMessage";
     empty_->set_visible(false);
+}
+
+// What the list and the tiles do with the pointer and the keyboard.
+void TabView::wire_list_events() {
+    BbApp* app = core_.app();
     list_->on_header_menu = [this](Point p) { open_context(p, true); };
     list_->on_drag_start = [this](MouseButton b) {
         if (FileDrag* d = main_.file_drag()) d->start(tab_, b);
