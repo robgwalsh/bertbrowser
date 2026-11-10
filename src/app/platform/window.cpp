@@ -390,6 +390,211 @@ LRESULT CALLBACK Window::static_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
     }
 }
 
+// Frame messages: with the custom chrome the client area is the whole window bar the side and bottom frames.
+std::optional<LRESULT> Window::on_nc_calc_size(UINT msg, WPARAM wp, LPARAM lp) {
+    if (options_.custom_chrome && wp && !full_screen_) {
+        // Keep the side and bottom frames (DWM draws the resize borders and the shadow for them)
+        // and give the top back to the client, so there is no caption. Maximised, the frame would
+        // hang off the monitor, so inset the top by the frame height.
+        auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lp);
+        const LONG top = params->rgrc[0].top;
+        DefWindowProcW(hwnd_, msg, wp, lp);
+        params->rgrc[0].top = top + (IsZoomed(hwnd_) ? frame_y(GetDpiForWindow(hwnd_)) : 0);
+        return 0;
+    }
+    return std::nullopt;
+}
+
+std::optional<LRESULT> Window::on_get_min_max_info(LPARAM lp) {
+    if (options_.min_width_dip || options_.min_height_dip) {
+        auto* mm = reinterpret_cast<MINMAXINFO*>(lp);
+        const int dpi = static_cast<int>(GetDpiForWindow(hwnd_));
+        if (options_.min_width_dip) mm->ptMinTrackSize.x = MulDiv(options_.min_width_dip, dpi, 96);
+        if (options_.min_height_dip) mm->ptMinTrackSize.y = MulDiv(options_.min_height_dip, dpi, 96);
+    }
+    if (options_.custom_chrome && !full_screen_) {
+        const HMONITOR monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO info{sizeof(info)};
+        if (monitor && GetMonitorInfoW(monitor, &info)) {
+            auto* mm = reinterpret_cast<MINMAXINFO*>(lp);
+            mm->ptMaxPosition.x = info.rcWork.left - info.rcMonitor.left;
+            mm->ptMaxPosition.y = info.rcWork.top - info.rcMonitor.top;
+            mm->ptMaxSize.x = info.rcWork.right - info.rcWork.left;
+            mm->ptMaxSize.y = info.rcWork.bottom - info.rcWork.top;
+            mm->ptMaxTrackSize = mm->ptMaxSize;
+        }
+        return 0;
+    }
+    return std::nullopt;
+}
+
+std::optional<LRESULT> Window::on_nc_button_up(WPARAM wp) {
+    const bool chrome = options_.custom_chrome;
+    // A parked window must never be maximised or minimised: maximising moves it onto the screen.
+    if (chrome && wp == HTMAXBUTTON) {
+        if (!options_.parked) ShowWindow(hwnd_, IsZoomed(hwnd_) ? SW_RESTORE : SW_MAXIMIZE);
+        return 0;
+    }
+    if (chrome && wp == HTMINBUTTON) {
+        if (!options_.parked) ShowWindow(hwnd_, SW_MINIMIZE);
+        return 0;
+    }
+    if (chrome && wp == HTCLOSE) {
+        PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+        return 0;
+    }
+    return std::nullopt;
+}
+
+void Window::on_nc_mouse_move(LPARAM lp) {
+    POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+    ScreenToClient(hwnd_, &pt);
+    root_.mouse_move(to_dip(pt.x, pt.y));
+    TRACKMOUSEEVENT t{sizeof(t), TME_LEAVE | TME_NONCLIENT, hwnd_, 0};
+    TrackMouseEvent(&t);
+}
+
+void Window::on_enable(WPARAM wp) {
+    // A modal child disables its owner at the Win32 level; undo that at once so the title bar
+    // stays draggable and closable. The content block is the app's own business. (Not for a
+    // parked window: its disabled state is the point.)
+    if (options_.custom_chrome && !options_.parked && wp == FALSE && !reenabling_) {
+        reenabling_ = true;
+        EnableWindow(hwnd_, TRUE);
+        reenabling_ = false;
+    }
+}
+
+void Window::on_size_message(WPARAM wp) {
+    if (wp != SIZE_MINIMIZED) {
+        root_.window_maximized = wp == SIZE_MAXIMIZED;
+        on_size();
+    }
+}
+
+void Window::on_dpi_changed(WPARAM wp, LPARAM lp) {
+    if (!options_.dpi_override) {
+        dpi_ = HIWORD(wp);
+        if (surface_) surface_->set_dpi(static_cast<float>(dpi_));
+        const auto* r = reinterpret_cast<const RECT*>(lp);
+        SetWindowPos(hwnd_, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+        on_size();
+    }
+}
+
+void Window::on_paint() {
+    PAINTSTRUCT ps;
+    BeginPaint(hwnd_, &ps);
+    EndPaint(hwnd_, &ps);
+    paint_first_frame();
+}
+
+// ---- pointer and keyboard ----
+
+void Window::on_mouse_move(WPARAM wp, LPARAM lp) {
+    if (!tracking_leave_) {
+        TRACKMOUSEEVENT t{sizeof(t), TME_LEAVE, hwnd_, 0};
+        tracking_leave_ = TrackMouseEvent(&t) != 0;
+    }
+    root_.mouse_move(to_dip(GET_X_LPARAM(lp), GET_Y_LPARAM(lp)), mouse_mods(wp));
+}
+
+void Window::on_mouse_wheel(WPARAM wp, LPARAM lp) {
+    POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+    ScreenToClient(hwnd_, &pt);
+    root_.wheel(to_dip(pt.x, pt.y), GET_WHEEL_DELTA_WPARAM(wp), mouse_mods(GET_KEYSTATE_WPARAM(wp)));
+}
+
+std::optional<LRESULT> Window::on_key_down(WPARAM wp, LPARAM lp) {
+    const bool handled = root_.key_down(static_cast<unsigned>(wp)) || shift_f10(wp, lp);
+    position_ime();
+    if (handled) return 0;
+    return std::nullopt;
+}
+
+std::optional<LRESULT> Window::on_sys_key_down(WPARAM wp, LPARAM lp) {
+    const bool handled = root_.key_down(static_cast<unsigned>(wp));
+    if (handled && wp != VK_MENU && wp != VK_F10) return 0;
+    if (!handled && shift_f10(wp, lp)) return 0;
+    return std::nullopt;
+}
+
+std::optional<LRESULT> Window::on_key_up(UINT msg, WPARAM wp) {
+    root_.key_up(static_cast<unsigned>(wp));
+    // The Apps key's release opens the menu here rather than through DefWindowProc's WM_CONTEXTMENU, which
+    // a posted key (the harness) never gets; stopping it here means the menu is asked for once.
+    if (msg == WM_KEYUP && wp == VK_APPS) {
+        root_.context_key();
+        return 0;
+    }
+    if (msg == WM_KEYUP) return 0;
+    return std::nullopt;
+}
+
+void Window::on_activate(WPARAM wp) {
+    if (LOWORD(wp) == WA_INACTIVE) root_.cancel_modal();
+    if (!options_.parked && root_.window_active != (LOWORD(wp) != WA_INACTIVE)) {
+        root_.window_active = LOWORD(wp) != WA_INACTIVE;
+        root_.invalidate_all();
+    }
+}
+
+std::optional<LRESULT> Window::on_timer_message(WPARAM wp) {
+    if (wp == kTickTimer) {
+        root_.tick();
+        return 0;
+    }
+    if (on_timer) {
+        on_timer(wp);
+        return 0;
+    }
+    return std::nullopt;
+}
+
+// ---- input method ----
+
+void Window::on_ime_composition(LPARAM lp) {
+    const HIMC himc = ImmGetContext(hwnd_);
+    if (himc) {
+        auto read = [&](DWORD what) {
+            const LONG bytes = ImmGetCompositionStringW(himc, what, nullptr, 0);
+            std::wstring s;
+            if (bytes > 0) {
+                s.resize(static_cast<size_t>(bytes) / sizeof(wchar_t));
+                ImmGetCompositionStringW(himc, what, s.data(), static_cast<DWORD>(bytes));
+            }
+            return s;
+        };
+        if (lp & GCS_RESULTSTR) root_.ime_commit(read(GCS_RESULTSTR));
+        if (lp & GCS_COMPSTR) {
+            const LONG cursor = ImmGetCompositionStringW(himc, GCS_CURSORPOS, nullptr, 0);
+            root_.ime_composition(read(GCS_COMPSTR), cursor > 0 ? static_cast<size_t>(cursor) : 0);
+        }
+        ImmReleaseContext(hwnd_, himc);
+    }
+    position_ime();
+}
+
+// ---- teardown ----
+
+void Window::on_destroy() {
+    if (tick_running_) {
+        KillTimer(hwnd_, kTickTimer);
+        tick_running_ = false;
+    }
+    if (options_.quit_on_destroy) PostQuitMessage(0);
+}
+
+LRESULT Window::on_nc_destroy(UINT msg, WPARAM wp, LPARAM lp) {
+    const LRESULT r = DefWindowProcW(hwnd_, msg, wp, lp);
+    SetWindowLongPtrW(hwnd_, GWLP_USERDATA, 0);
+    hwnd_ = nullptr;
+    return r;
+}
+
+// One handler per message (or small group); a handler that does not answer leaves the message to
+// DefWindowProc, which is what the `break`s of a switch used to mean.
 LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
     const bool chrome = options_.custom_chrome;
     if (msg == kHardwareReady) {
@@ -399,87 +604,34 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
     if (on_message && msg >= WM_APP && msg < 0xC000 && on_message(msg, wp, lp)) {
         return 0;
     }
+    std::optional<LRESULT> answer;
     switch (msg) {
         case WM_NCCALCSIZE:
-            if (chrome && wp && !full_screen_) {
-                // Keep the side and bottom frames (DWM draws the resize borders and the shadow for them)
-                // and give the top back to the client, so there is no caption. Maximised, the frame would
-                // hang off the monitor, so inset the top by the frame height.
-                auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lp);
-                const LONG top = params->rgrc[0].top;
-                DefWindowProcW(hwnd_, msg, wp, lp);
-                params->rgrc[0].top = top + (IsZoomed(hwnd_) ? frame_y(GetDpiForWindow(hwnd_)) : 0);
-                return 0;
-            }
+            answer = on_nc_calc_size(msg, wp, lp);
             break;
         case WM_NCHITTEST:
             if (chrome) return nc_hit_test(lp);
             break;
         case WM_GETMINMAXINFO:
-            if (options_.min_width_dip || options_.min_height_dip) {
-                auto* mm = reinterpret_cast<MINMAXINFO*>(lp);
-                const int dpi = static_cast<int>(GetDpiForWindow(hwnd_));
-                if (options_.min_width_dip) mm->ptMinTrackSize.x = MulDiv(options_.min_width_dip, dpi, 96);
-                if (options_.min_height_dip) mm->ptMinTrackSize.y = MulDiv(options_.min_height_dip, dpi, 96);
-            }
-            if (chrome && !full_screen_) {
-                const HMONITOR monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
-                MONITORINFO info{sizeof(info)};
-                if (monitor && GetMonitorInfoW(monitor, &info)) {
-                    auto* mm = reinterpret_cast<MINMAXINFO*>(lp);
-                    mm->ptMaxPosition.x = info.rcWork.left - info.rcMonitor.left;
-                    mm->ptMaxPosition.y = info.rcWork.top - info.rcMonitor.top;
-                    mm->ptMaxSize.x = info.rcWork.right - info.rcWork.left;
-                    mm->ptMaxSize.y = info.rcWork.bottom - info.rcWork.top;
-                    mm->ptMaxTrackSize = mm->ptMaxSize;
-                }
-                return 0;
-            }
+            answer = on_get_min_max_info(lp);
             break;
         case WM_NCLBUTTONDOWN:
             if (chrome && (wp == HTMAXBUTTON || wp == HTMINBUTTON || wp == HTCLOSE)) return 0;
             break;
         case WM_NCLBUTTONUP:
-            // A parked window must never be maximised or minimised: maximising moves it onto the screen.
-            if (chrome && wp == HTMAXBUTTON) {
-                if (!options_.parked) ShowWindow(hwnd_, IsZoomed(hwnd_) ? SW_RESTORE : SW_MAXIMIZE);
-                return 0;
-            }
-            if (chrome && wp == HTMINBUTTON) {
-                if (!options_.parked) ShowWindow(hwnd_, SW_MINIMIZE);
-                return 0;
-            }
-            if (chrome && wp == HTCLOSE) {
-                PostMessageW(hwnd_, WM_CLOSE, 0, 0);
-                return 0;
-            }
+            answer = on_nc_button_up(wp);
             break;
-        case WM_NCMOUSEMOVE: {
-            POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
-            ScreenToClient(hwnd_, &pt);
-            root_.mouse_move(to_dip(pt.x, pt.y));
-            TRACKMOUSEEVENT t{sizeof(t), TME_LEAVE | TME_NONCLIENT, hwnd_, 0};
-            TrackMouseEvent(&t);
+        case WM_NCMOUSEMOVE:
+            on_nc_mouse_move(lp);
             break;
-        }
         case WM_NCMOUSELEAVE:
             root_.mouse_leave();
             break;
         case WM_ENABLE:
-            // A modal child disables its owner at the Win32 level; undo that at once so the title bar
-            // stays draggable and closable. The content block is the app's own business. (Not for a
-            // parked window: its disabled state is the point.)
-            if (chrome && !options_.parked && wp == FALSE && !reenabling_) {
-                reenabling_ = true;
-                EnableWindow(hwnd_, TRUE);
-                reenabling_ = false;
-            }
+            on_enable(wp);
             break;
         case WM_SIZE:
-            if (wp != SIZE_MINIMIZED) {
-                root_.window_maximized = wp == SIZE_MAXIMIZED;
-                on_size();
-            }
+            on_size_message(wp);
             return 0;
         case WM_SETTINGCHANGE:
         case WM_SYSCOLORCHANGE:
@@ -490,38 +642,22 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             if (on_clipboard_changed) on_clipboard_changed();
             return 0;
         case WM_DPICHANGED:
-            if (!options_.dpi_override) {
-                dpi_ = HIWORD(wp);
-                if (surface_) surface_->set_dpi(static_cast<float>(dpi_));
-                const auto* r = reinterpret_cast<const RECT*>(lp);
-                SetWindowPos(hwnd_, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top,
-                             SWP_NOZORDER | SWP_NOACTIVATE);
-                on_size();
-            }
+            on_dpi_changed(wp, lp);
             return 0;
         case WM_ERASEBKGND:
             return 1;
-        case WM_PAINT: {
-            PAINTSTRUCT ps;
-            BeginPaint(hwnd_, &ps);
-            EndPaint(hwnd_, &ps);
-            paint_first_frame();
+        case WM_PAINT:
+            on_paint();
             return 0;
-        }
         case WM_SETCURSOR:
             if (LOWORD(lp) == HTCLIENT) {
                 SetCursor(LoadCursorW(nullptr, cursor_id(root_.cursor())));
                 return TRUE;
             }
             break;
-        case WM_MOUSEMOVE: {
-            if (!tracking_leave_) {
-                TRACKMOUSEEVENT t{sizeof(t), TME_LEAVE, hwnd_, 0};
-                tracking_leave_ = TrackMouseEvent(&t) != 0;
-            }
-            root_.mouse_move(to_dip(GET_X_LPARAM(lp), GET_Y_LPARAM(lp)), mouse_mods(wp));
+        case WM_MOUSEMOVE:
+            on_mouse_move(wp, lp);
             return 0;
-        }
         case WM_MOUSELEAVE:
             tracking_leave_ = false;
             root_.mouse_leave();
@@ -537,34 +673,18 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_MBUTTONUP:
             mouse_button(msg, wp, lp);
             return 0;
-        case WM_MOUSEWHEEL: {
-            POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
-            ScreenToClient(hwnd_, &pt);
-            root_.wheel(to_dip(pt.x, pt.y), GET_WHEEL_DELTA_WPARAM(wp), mouse_mods(GET_KEYSTATE_WPARAM(wp)));
+        case WM_MOUSEWHEEL:
+            on_mouse_wheel(wp, lp);
             return 0;
-        }
-        case WM_KEYDOWN: {
-            const bool handled = root_.key_down(static_cast<unsigned>(wp)) || shift_f10(wp, lp);
-            position_ime();
-            if (handled) return 0;
+        case WM_KEYDOWN:
+            answer = on_key_down(wp, lp);
             break;
-        }
-        case WM_SYSKEYDOWN: {
-            const bool handled = root_.key_down(static_cast<unsigned>(wp));
-            if (handled && wp != VK_MENU && wp != VK_F10) return 0;
-            if (!handled && shift_f10(wp, lp)) return 0;
+        case WM_SYSKEYDOWN:
+            answer = on_sys_key_down(wp, lp);
             break;
-        }
         case WM_KEYUP:
         case WM_SYSKEYUP:
-            root_.key_up(static_cast<unsigned>(wp));
-            // The Apps key's release opens the menu here rather than through DefWindowProc's WM_CONTEXTMENU, which
-            // a posted key (the harness) never gets; stopping it here means the menu is asked for once.
-            if (msg == WM_KEYUP && wp == VK_APPS) {
-                root_.context_key();
-                return 0;
-            }
-            if (msg == WM_KEYUP) return 0;
+            answer = on_key_up(msg, wp);
             break;
         case WM_CONTEXTMENU:
             // From the keyboard (the Apps key, Shift+F10) the position is -1: there is no pointer to open the
@@ -579,25 +699,14 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             root_.cancel_modal();
             break;
         case WM_ACTIVATE:
-            if (LOWORD(wp) == WA_INACTIVE) root_.cancel_modal();
-            if (!options_.parked && root_.window_active != (LOWORD(wp) != WA_INACTIVE)) {
-                root_.window_active = LOWORD(wp) != WA_INACTIVE;
-                root_.invalidate_all();
-            }
+            on_activate(wp);
             break;
         case WM_SETFOCUS:
         case WM_KILLFOCUS:
             root_.set_mods({});  // a key released while elsewhere never reached us
             break;
         case WM_TIMER:
-            if (wp == kTickTimer) {
-                root_.tick();
-                return 0;
-            }
-            if (on_timer) {
-                on_timer(wp);
-                return 0;
-            }
+            answer = on_timer_message(wp);
             break;
         case WM_IME_SETCONTEXT:
             // We draw the composition ourselves; the IME keeps its candidate list.
@@ -606,28 +715,9 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             root_.ime_composition(L"", 0);
             position_ime();
             return 0;
-        case WM_IME_COMPOSITION: {
-            const HIMC himc = ImmGetContext(hwnd_);
-            if (himc) {
-                auto read = [&](DWORD what) {
-                    const LONG bytes = ImmGetCompositionStringW(himc, what, nullptr, 0);
-                    std::wstring s;
-                    if (bytes > 0) {
-                        s.resize(static_cast<size_t>(bytes) / sizeof(wchar_t));
-                        ImmGetCompositionStringW(himc, what, s.data(), static_cast<DWORD>(bytes));
-                    }
-                    return s;
-                };
-                if (lp & GCS_RESULTSTR) root_.ime_commit(read(GCS_RESULTSTR));
-                if (lp & GCS_COMPSTR) {
-                    const LONG cursor = ImmGetCompositionStringW(himc, GCS_CURSORPOS, nullptr, 0);
-                    root_.ime_composition(read(GCS_COMPSTR), cursor > 0 ? static_cast<size_t>(cursor) : 0);
-                }
-                ImmReleaseContext(hwnd_, himc);
-            }
-            position_ime();
+        case WM_IME_COMPOSITION:
+            on_ime_composition(lp);
             return 0;
-        }
         case WM_IME_ENDCOMPOSITION:
             root_.ime_end();
             return 0;
@@ -639,22 +729,14 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         case WM_DESTROY:
-            if (tick_running_) {
-                KillTimer(hwnd_, kTickTimer);
-                tick_running_ = false;
-            }
-            if (options_.quit_on_destroy) PostQuitMessage(0);
+            on_destroy();
             break;
-        case WM_NCDESTROY: {
-            const LRESULT r = DefWindowProcW(hwnd_, msg, wp, lp);
-            SetWindowLongPtrW(hwnd_, GWLP_USERDATA, 0);
-            hwnd_ = nullptr;
-            return r;
-        }
+        case WM_NCDESTROY:
+            return on_nc_destroy(msg, wp, lp);
         default:
             break;
     }
-    return DefWindowProcW(hwnd_, msg, wp, lp);
+    return answer ? *answer : DefWindowProcW(hwnd_, msg, wp, lp);
 }
 
 }  // namespace bb::platform
