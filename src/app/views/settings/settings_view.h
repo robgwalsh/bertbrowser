@@ -19,6 +19,11 @@ class MainView;
 class LeaveLayer;
 class SearchField;
 
+namespace ctxmenu {
+struct Row;
+struct Model;
+}  // namespace ctxmenu
+
 class SettingsView : public ui::Widget {
 public:
     SettingsView(MainView& main, core::Core& core);
@@ -100,7 +105,20 @@ private:
     int column_selected_ = 0;
     void page_saved(ui::Widget& p, bool workspaces);
     void page_context_menu(ui::Widget& p);
+    // The Context menu page's parts (settings_ctxmenu.cpp). commit writes a rearranged list of rows.
+    using CommitRows = std::function<void(std::vector<ctxmenu::Row>, int)>;
+    forms::ItemList* context_menu_list(ui::Widget& cols, const std::shared_ptr<ctxmenu::Model>& model, const CommitRows& commit);
+    void context_menu_choices(ui::Widget& cols, const std::shared_ptr<ctxmenu::Model>& model, const CommitRows& commit, forms::ItemList* list);
+    void context_command_editor(ui::Widget& p, const std::shared_ptr<ctxmenu::Model>& model);
+    void context_new_command(ui::Widget& p, const std::shared_ptr<ctxmenu::Model>& model);
     void page_bars(ui::Widget& p);
+    // The Menus and toolbars page's parts (settings_view.cpp), and the two things they all do.
+    void bars_header(ui::Widget& p, const json::Value& m);
+    void bars_targets(ui::Widget& cols, const json::Value& m);
+    forms::ItemList* bars_items(ui::Widget& cols, const json::Value& m);
+    void bars_picker(ui::Widget& cols, const json::Value& m, forms::ItemList* rows);
+    void bars_do(const std::wstring& verb, const std::wstring& arg = L"");
+    void rebuild_bars_page();
     // The bars page's two inline name boxes: Save as (a new name) and Rename (a saved one's).
     enum class BarNaming { None, SaveAs, Rename };
     BarNaming bar_naming_ = BarNaming::None;

@@ -64,6 +64,8 @@ struct SelectedRow {
 // by position - so they go whenever the core says the groups were replaced (`version`).
 // A virtual key as a chord names it ("Esc", "Del", "F5", "A"); empty for one no chord uses.
 std::wstring chord_key_name(unsigned vk);
+// "Text (Ctrl+X)" for a tooltip: the gesture the keymap holds for command now, then fter.
+std::wstring gesture_tip(BbApp* app, const std::wstring& text, const wchar_t* command, const std::wstring& after = {});
 
 struct DuplicatesState {
     bool has = false;
@@ -210,6 +212,11 @@ public:
     bool side_pending() const { return preview_ && preview_->pending(); }
 
 private:
+    // The constructor's parts, in the order it runs them.
+    void setup_nav_bar();
+    void setup_banners();
+    void setup_body();
+    void wire_list_events();
     std::wstring last_tree_mirror_;  // the folder the selection last showed in the tree
     void end_path_edit();
     void sync_columns();
@@ -534,6 +541,18 @@ private:
     std::unique_ptr<ui::Widget> build_node(const json::Value& node, const json::Value& panes, const std::vector<uint32_t>& path);
     void refresh_status();
     static void sink(void* ctx, BbEvent* evt);
+    // The constructor's parts, in the order it runs them.
+    void setup_title_bar(ui::DockPanel& root);
+    void setup_title_switchers();
+    void setup_title_search();
+    ui::DockPanel* setup_browser(ui::DockPanel& root);
+    void setup_transfer_strip(ui::DockPanel& browser_dock);
+    void setup_indexer_banner(ui::DockPanel& browser_dock);
+    void setup_sidebar(ui::DockPanel& browser_dock);
+    void setup_pane_column();
+    void wire_tree_events();
+    void setup_overlays();
+    void wire_window(std::unique_ptr<ui::Panel> outer);
 
     core::Core& core_;
     platform::Window& window_;

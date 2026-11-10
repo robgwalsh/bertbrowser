@@ -12,6 +12,7 @@
 #include <functional>
 #include <stdexcept>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace bb::platform {
@@ -102,6 +103,26 @@ private:
     static void register_class();
     static LRESULT CALLBACK static_proc(HWND, UINT, WPARAM, LPARAM);
     LRESULT handle(UINT msg, WPARAM wp, LPARAM lp);
+    // The parts of handle. One that returns an optional answers the message when it holds a value and
+    // otherwise leaves it to DefWindowProc.
+    std::optional<LRESULT> on_nc_calc_size(UINT msg, WPARAM wp, LPARAM lp);
+    std::optional<LRESULT> on_get_min_max_info(LPARAM lp);
+    std::optional<LRESULT> on_nc_button_up(WPARAM wp);
+    void on_nc_mouse_move(LPARAM lp);
+    void on_enable(WPARAM wp);
+    void on_size_message(WPARAM wp);
+    void on_dpi_changed(WPARAM wp, LPARAM lp);
+    void on_paint();
+    void on_mouse_move(WPARAM wp, LPARAM lp);
+    void on_mouse_wheel(WPARAM wp, LPARAM lp);
+    std::optional<LRESULT> on_key_down(WPARAM wp, LPARAM lp);
+    std::optional<LRESULT> on_sys_key_down(WPARAM wp, LPARAM lp);
+    std::optional<LRESULT> on_key_up(UINT msg, WPARAM wp);
+    void on_activate(WPARAM wp);
+    std::optional<LRESULT> on_timer_message(WPARAM wp);
+    void on_ime_composition(LPARAM lp);
+    void on_destroy();
+    LRESULT on_nc_destroy(UINT msg, WPARAM wp, LPARAM lp);
     LRESULT nc_hit_test(LPARAM lp);
     void on_size();
     void create_surface();

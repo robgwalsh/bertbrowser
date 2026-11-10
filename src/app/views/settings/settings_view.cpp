@@ -1453,30 +1453,48 @@ void SettingsView::page_saved(Widget& p, bool workspaces) {
 
 void SettingsView::page_bars(Widget& p) {
     BbApp* app = core_.app();
-    auto bars_do = [app](const std::wstring& verb, const std::wstring& arg = L"") {
-        try {
-            core::check(bb_barpage_do(app, core::s(verb), core::s(arg)), "bars");
-        } catch (const core::CoreError&) {
-        }
-    };
     const json::Value m = try_model([&](BbOwnedStr* o) { return bb_bars_query(app, core::s(L"page"), core::s(L""), o); });
     bars_model_ = m;
+    bars_header(p, m);
+
+    auto* cols = f::row(p, 14);
+    cols->height = 520;
+    cols->flex = 1;
+
+    bars_targets(*cols, m);
+    f::ItemList* rows = bars_items(*cols, m);
+    bars_picker(*cols, m, rows);
+}
+
+// One verb of the Menus and toolbars page, handed to the core; a refusal is the page's to show, not an error.
+void SettingsView::bars_do(const std::wstring& verb, const std::wstring& arg) {
+    try {
+        core::check(bb_barpage_do(core_.app(), core::s(verb), core::s(arg)), "bars");
+    } catch (const core::CoreError&) {
+    }
+}
+
+void SettingsView::rebuild_bars_page() {
+    main_.defer([this] { build_page(); });
+}
+
+// The title, the status line, Save as / Reset, and the name box while an arrangement is being named.
+void SettingsView::bars_header(Widget& p, const json::Value& m) {
     f::heading(p, L"Menus and toolbars");
     f::note(p, L"What is on the menu bar and the toolbars, and in what order. Changes show in the title bar above as you make them. Every command stays in the command palette (" +
                    gesture_or(L"app.palette", L"Command palette") + L") whether or not it is placed here.");
     auto* top = f::row(p);
     auto* status = f::text(*top, core::wide(m["status"].str()), tok::TextMuted, 13.0f);
     status->flex = 1;
-    auto rebuild = [this] { main_.defer([this] { build_page(); }); };
-    auto* save_as = f::button(*top, L"Save as\u2026", [this, rebuild] {
+    auto* save_as = f::button(*top, L"Save as\u2026", [this] {
         bar_naming_ = BarNaming::SaveAs;
         bar_name_text_.clear();
-        rebuild();
+        rebuild_bars_page();
     });
     save_as->name = "BarSaveAs";
     save_as->tooltip = L"Keep this arrangement under a name, to come back to";
     // Asks first when the arrangement in force is saved under no name (the core does).
-    auto* reset = f::button(*top, L"Reset to default", [bars_do] { bars_do(L"reset"); });
+    auto* reset = f::button(*top, L"Reset to default", [this] { bars_do(L"reset"); });
     reset->name = "BarReset";
     reset->tooltip = L"The menus and toolbar BertBrowser ships with. Saved arrangements are kept.";
     reset->set_enabled(!m["isDefault"].boolean());
@@ -1490,7 +1508,7 @@ void SettingsView::page_bars(Widget& p) {
         auto* box = f::field(*nr, bar_name_text_, 220, [this](const std::wstring& t) { bar_name_text_ = t; });
         box->automation_id = "BarSaveName";
         box->name = "BarSaveName";
-        auto commit = [this, bars_do, renaming, old_name, rebuild] {
+        auto commit = [this, renaming, old_name] {
             std::wstring name = bar_name_text_;
             while (!name.empty() && iswspace(name.back())) name.pop_back();
             while (!name.empty() && iswspace(name.front())) name.erase(name.begin());
@@ -1498,13 +1516,13 @@ void SettingsView::page_bars(Widget& p) {
             bars_do(renaming ? L"rename-saved" : L"save", renaming ? old_name + L" to " + name : name);
             bars_do(L"select-saved", name);  // what was just named is the one the buttons below act on
             bar_naming_ = BarNaming::None;
-            rebuild();
+            rebuild_bars_page();
         };
         box->on_commit = commit;
         f::button(*nr, renaming ? L"Rename" : L"Save", commit)->name = "BarSaveCommit";
-        f::button(*nr, L"Cancel", [this, rebuild] {
+        f::button(*nr, L"Cancel", [this] {
             bar_naming_ = BarNaming::None;
-            rebuild();
+            rebuild_bars_page();
         });
         if (!root() || !root()->focused() || !body_->is_ancestor_of(root()->focused())) {
             main_.defer([this] {
@@ -1512,13 +1530,12 @@ void SettingsView::page_bars(Widget& p) {
             });
         }
     }
+}
 
-    auto* cols = f::row(p, 14);
-    cols->height = 520;
-    cols->flex = 1;
-
+// Which bar is being edited, and the saved arrangements.
+void SettingsView::bars_targets(Widget& cols, const json::Value& m) {
     // -- which bar, and the saved arrangements
-    auto* left = cols->emplace<StackPanel>(Orientation::Vertical, 6.0f);
+    auto* left = cols.emplace<StackPanel>(Orientation::Vertical, 6.0f);
     left->width = 230;
     f::text(*left, L"Edit", tok::TextSecondary, 13.0f, 600);
     auto* targets = left->emplace<f::ItemList>();
@@ -1537,15 +1554,15 @@ void SettingsView::page_bars(Widget& p) {
     }
     targets->row_height = 30;
     targets->set_entries(std::move(te), tsel);
-    targets->on_select = [bars_do, tkeys](int i) {
+    targets->on_select = [this, tkeys](int i) {
         if (i >= 0 && static_cast<size_t>(i) < tkeys.size()) bars_do(L"select", tkeys[static_cast<size_t>(i)]);
     };
     // Toolbar rows come and go here; the menu bar and the title bar always exist.
     auto* trow = f::row(*left, 6);
-    auto* add_row = f::button(*trow, L"Add toolbar", [bars_do] { bars_do(L"add-row"); });
+    auto* add_row = f::button(*trow, L"Add toolbar", [this] { bars_do(L"add-row"); });
     add_row->name = "BarAddRow";
     add_row->tooltip = L"A new toolbar under the title bar";
-    auto* remove_row = f::button(*trow, L"Remove", [bars_do] { bars_do(L"remove-row"); });
+    auto* remove_row = f::button(*trow, L"Remove", [this] { bars_do(L"remove-row"); });
     remove_row->tooltip = L"Take the selected toolbar row away, with everything on it";
     remove_row->name = "BarRemoveRow";
     remove_row->set_enabled(m["target"]["kind"].str() == "row");
@@ -1571,20 +1588,20 @@ void SettingsView::page_bars(Widget& p) {
             ->name = "SavedBarsEmpty";
     }
     saved->automation_id = "SavedBarsList";
-    saved->on_select = [bars_do, snames](int i) {
+    saved->on_select = [this, snames](int i) {
         if (i >= 0 && static_cast<size_t>(i) < snames.size()) bars_do(L"select-saved", snames[static_cast<size_t>(i)]);
     };
-    saved->on_activate = [bars_do, snames](int i) {
+    saved->on_activate = [this, snames](int i) {
         if (i >= 0 && static_cast<size_t>(i) < snames.size()) bars_do(L"apply-saved", snames[static_cast<size_t>(i)]);
     };
     // Enter and a double click use it (above); F2 renames and Del deletes. Spec: SettingsView.xaml.cs (SavedBarsList_KeyDown).
-    saved->on_key = [this, bars_do, snames, saved, rebuild](unsigned vk) {
+    saved->on_key = [this, snames, saved](unsigned vk) {
         const int at = saved->selected;
         if (at < 0 || static_cast<size_t>(at) >= snames.size()) return false;
         if (vk == VK_F2) {
             bar_naming_ = BarNaming::Rename;
             bar_name_text_ = snames[static_cast<size_t>(at)];
-            rebuild();
+            rebuild_bars_page();
             return true;
         }
         if (vk == VK_DELETE) {
@@ -1594,28 +1611,31 @@ void SettingsView::page_bars(Widget& p) {
         return false;
     };
     auto* sr = f::row(*left, 6);
-    auto* use = f::button(*sr, L"Use", [bars_do, snames, ssel] { if (ssel >= 0) bars_do(L"apply-saved", snames[static_cast<size_t>(ssel)]); });
+    auto* use = f::button(*sr, L"Use", [this, snames, ssel] { if (ssel >= 0) bars_do(L"apply-saved", snames[static_cast<size_t>(ssel)]); });
     use->name = "BarUseSaved";
     use->tooltip = L"Switch the menus and toolbars to this arrangement (Enter)";
     use->set_enabled(ssel >= 0);
-    auto* rename = f::button(*sr, L"Rename\u2026", [this, snames, ssel, rebuild] {
+    auto* rename = f::button(*sr, L"Rename\u2026", [this, snames, ssel] {
         if (ssel < 0) return;
         bar_naming_ = BarNaming::Rename;
         bar_name_text_ = snames[static_cast<size_t>(ssel)];
-        rebuild();
+        rebuild_bars_page();
     });
     rename->name = "BarRenameSaved";
     rename->tooltip = L"Rename (F2)";
     rename->set_enabled(ssel >= 0);
-    auto* forget = f::button(*sr, L"Remove", [bars_do, snames, ssel] { if (ssel >= 0) bars_do(L"remove-saved", snames[static_cast<size_t>(ssel)]); });
+    auto* forget = f::button(*sr, L"Remove", [this, snames, ssel] { if (ssel >= 0) bars_do(L"remove-saved", snames[static_cast<size_t>(ssel)]); });
     forget->tooltip = L"Delete (Del)";
     forget->set_enabled(ssel >= 0);
+}
 
+// What is on the bar: its rows, the buttons that rearrange them, and the options that go with the bar.
+f::ItemList* SettingsView::bars_items(Widget& cols, const json::Value& m) {
     // -- what is on the bar
-    auto* mid = cols->emplace<StackPanel>(Orientation::Vertical, 6.0f);
+    auto* mid = cols.emplace<StackPanel>(Orientation::Vertical, 6.0f);
     mid->flex = 1;
     auto* loc = f::row(*mid);
-    if (m["canUp"].boolean()) f::button(*loc, L"←", [bars_do] { bars_do(L"up"); })->tooltip = L"Back out of this submenu (Backspace)";
+    if (m["canUp"].boolean()) f::button(*loc, L"←", [this] { bars_do(L"up"); })->tooltip = L"Back out of this submenu (Backspace)";
     f::text(*loc, core::wide(m["location"].str()), tok::TextPrimary, 14.0f, 600);
     auto* rows = mid->emplace<f::ItemList>();
     rows->name = "BarRows";
@@ -1635,17 +1655,17 @@ void SettingsView::page_bars(Widget& p) {
         if (r["selected"].boolean()) rsel = static_cast<int>(i);
     }
     rows->set_entries(std::move(re), rsel);
-    rows->on_select = [bars_do](int i) { bars_do(L"pick", std::to_wstring(i)); };
-    rows->on_activate = [bars_do](int i) { bars_do(L"open", std::to_wstring(i)); };
+    rows->on_select = [this](int i) { bars_do(L"pick", std::to_wstring(i)); };
+    rows->on_activate = [this](int i) { bars_do(L"open", std::to_wstring(i)); };
     // Alt+Up/Down moves the selected item, Del takes it off, Enter opens a submenu (above) and Backspace backs
     // out of one. Spec: SettingsView.xaml.cs (BarItemsList_KeyDown).
     rows->automation_id = "BarRows";
-    nudge_ = [bars_do](int d) { bars_do(L"nudge", d < 0 ? L"up" : L"down"); };
+    nudge_ = [this](int d) { bars_do(L"nudge", d < 0 ? L"up" : L"down"); };
     nudge_for_ = rows;
     // Or dragged to its new place. Spec: SettingsView.xaml.cs (BarItemsList drag).
-    rows->on_reorder = [bars_do](int from, int to) { bars_do(L"move", std::to_wstring(from) + L" " + std::to_wstring(to)); };
+    rows->on_reorder = [this](int from, int to) { bars_do(L"move", std::to_wstring(from) + L" " + std::to_wstring(to)); };
     const bool can_up = m["canUp"].boolean();
-    rows->on_key = [bars_do, can_up](unsigned vk) {
+    rows->on_key = [this, can_up](unsigned vk) {
         if (vk == VK_DELETE) {
             bars_do(L"remove");
             return true;
@@ -1658,27 +1678,27 @@ void SettingsView::page_bars(Widget& p) {
     };
     auto* rb = f::row(*mid, 6);
     const bool row_is_menu = rsel >= 0 && m["rows"][static_cast<size_t>(rsel)]["menu"].boolean();
-    auto* open = f::button(*rb, L"Open", [bars_do, rsel] { if (rsel >= 0) bars_do(L"open", std::to_wstring(rsel)); });
+    auto* open = f::button(*rb, L"Open", [this, rsel] { if (rsel >= 0) bars_do(L"open", std::to_wstring(rsel)); });
     open->name = "BarOpen";
     open->tooltip = L"Edit what is inside the selected menu (Enter)";
     open->set_enabled(row_is_menu);
-    f::button(*rb, L"↑", [bars_do] { bars_do(L"nudge", L"up"); });
-    f::button(*rb, L"↓", [bars_do] { bars_do(L"nudge", L"down"); });
-    f::button(*rb, L"Remove", [bars_do] { bars_do(L"remove"); })->tooltip = L"Take this off (Del)";
+    f::button(*rb, L"↑", [this] { bars_do(L"nudge", L"up"); });
+    f::button(*rb, L"↓", [this] { bars_do(L"nudge", L"down"); });
+    f::button(*rb, L"Remove", [this] { bars_do(L"remove"); })->tooltip = L"Take this off (Del)";
     f::text(*mid, L"Alt+\u2191/\u2193 moves \u00b7 Del removes \u00b7 Enter opens a menu", tok::TextMuted, 11.0f);
     auto* rb2 = f::row(*mid, 6);
     // The menu bar's own level holds menus only, so there is nothing to separate. Spec: CanAddBarSeparator.
-    auto* add_sep = f::button(*rb2, L"Add separator", [bars_do] { bars_do(L"add-separator"); });
+    auto* add_sep = f::button(*rb2, L"Add separator", [this] { bars_do(L"add-separator"); });
     add_sep->name = "BarAddSeparator";
     add_sep->set_enabled(m["canAdd"].boolean());
     // At the top of the menu bar only menus can be added: a command needs a menu to be in.
-    auto* addm = f::button(*rb2, m["addSubmenuLabel"].str() == "Submenu" ? L"Add submenu" : L"Add menu", [bars_do] { bars_do(L"add-menu"); });
+    auto* addm = f::button(*rb2, m["addSubmenuLabel"].str() == "Submenu" ? L"Add submenu" : L"Add menu", [this] { bars_do(L"add-menu"); });
     addm->name = "BarAddMenu";
     addm->tooltip = L"An empty menu to fill: open it, then add commands from the right";
     if (m["canEditCaption"].boolean()) {
         auto* cr = f::row(*mid, 6);
         f::row_label(*cr, L"Name", 60);
-        auto* ce = f::field(*cr, core::wide(m["caption"].str()), 240, [bars_do](const std::wstring& t) { bars_do(L"name", t); });
+        auto* ce = f::field(*cr, core::wide(m["caption"].str()), 240, [this](const std::wstring& t) { bars_do(L"name", t); });
         ce->automation_id = "BarCaption";
         ce->width = -1;
         ce->flex = 1;
@@ -1686,23 +1706,27 @@ void SettingsView::page_bars(Widget& p) {
     }
     if (m["isToolbar"].boolean()) {
         f::check(*mid, L"Show names beside the icons", m["showsText"].boolean(),
-                 [bars_do](bool v) { bars_do(L"show-text", v ? L"on" : L"off"); });
+                 [this](bool v) { bars_do(L"show-text", v ? L"on" : L"off"); });
         // One button can carry its name when the rest of the toolbar is icons only.
         if (rsel >= 0 && !m["rows"][static_cast<size_t>(rsel)]["separator"].boolean() && !m["showsText"].boolean()) {
             f::check(*mid, L"Always show this button\u2019s name", m["rows"][static_cast<size_t>(rsel)]["showText"].boolean(),
-                     [bars_do](bool v) { bars_do(L"row-show-text", v ? L"on" : L"off"); });
+                     [this](bool v) { bars_do(L"row-show-text", v ? L"on" : L"off"); });
         }
     }
+    return rows;
+}
 
+// The picker: every command that can be added, filtered. Dragging one onto `rows` places it where it is dropped.
+void SettingsView::bars_picker(Widget& cols, const json::Value& m, f::ItemList* rows) {
     // -- the picker
-    auto* right = cols->emplace<StackPanel>(Orientation::Vertical, 6.0f);
+    auto* right = cols.emplace<StackPanel>(Orientation::Vertical, 6.0f);
     right->width = 240;
     f::text(*right, L"Add", tok::TextSecondary, 13.0f, 600);
-    auto* filter = f::field(*right, core::wide(m["filter"].str()), -1, [bars_do](const std::wstring& t) { bars_do(L"filter", t); }, L"Find a command");
+    auto* filter = f::field(*right, core::wide(m["filter"].str()), -1, [this](const std::wstring& t) { bars_do(L"filter", t); }, L"Find a command");
     filter->automation_id = "BarFilter";
     filter->width = -1;
     f::check(*right, L"Only what is not placed anywhere", m["unplacedOnly"].boolean(),
-             [bars_do](bool v) { bars_do(L"unplaced", v ? L"on" : L"off"); });
+             [this](bool v) { bars_do(L"unplaced", v ? L"on" : L"off"); });
     auto* choices = right->emplace<f::ItemList>();
     choices->name = "BarChoices";
     choices->flex = 1;
@@ -1722,17 +1746,17 @@ void SettingsView::page_bars(Widget& p) {
     }
     choices->set_entries(std::move(ce));
     const bool can_add = m["canAdd"].boolean();
-    choices->on_activate = [bars_do, cids, can_add](int i) { if (i >= 0 && can_add) bars_do(L"add", cids[static_cast<size_t>(i)]); };
+    choices->on_activate = [this, cids, can_add](int i) { if (i >= 0 && can_add) bars_do(L"add", cids[static_cast<size_t>(i)]); };
     // Dragged onto the list, a choice lands exactly where it is dropped. Spec: SettingsView.xaml.cs (BarChoices drag).
     if (can_add) {
         choices->tooltip = L"Double-click to add after the selected item, or drag onto the list to put it exactly where you want";
         choices->can_drag = [cids](int i) { return i >= 0 && static_cast<size_t>(i) < cids.size() && !cids[static_cast<size_t>(i)].empty(); };
         choices->drag_into = rows;
-        rows->on_drop_in = [bars_do, cids](int from, int at) {
+        rows->on_drop_in = [this, cids](int from, int at) {
             if (from >= 0 && static_cast<size_t>(from) < cids.size()) bars_do(L"add-at", std::to_wstring(at) + L" " + cids[static_cast<size_t>(from)]);
         };
     }
-    auto* add = f::button(*right, L"Add", [bars_do, choices, cids] {
+    auto* add = f::button(*right, L"Add", [this, choices, cids] {
         if (choices->selected >= 0) bars_do(L"add", cids[static_cast<size_t>(choices->selected)]);
     });
     add->name = "BarAdd";
