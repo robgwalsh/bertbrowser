@@ -127,6 +127,7 @@ dependencies = [
  "bb-metadata",
  "bb-paths",
  "bb-preview",
+ "bb-search",
  "bb-test-support",
  "bb-workspace-hack",
  "bzip2",
@@ -282,6 +283,19 @@ dependencies = [
  "bb-base",
  "bb-paths",
  "bb-workspace-hack",
+]
+
+[[package]]
+name = "bb-search"
+version = "2.0.0"
+dependencies = [
+ "bb-base",
+ "bb-fixtures",
+ "bb-paths",
+ "bb-preview",
+ "bb-workspace-hack",
+ "fancy-regex",
+ "rusqlite",
 ]
 
 [[package]]

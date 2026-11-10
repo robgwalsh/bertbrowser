@@ -1,7 +1,7 @@
 // Port of tests/BertBrowser.Core.Tests/SearchGrammarTests.cs.
-use bb_core::FileTime;
-use bb_core::attributes::{ARCHIVE, COMPRESSED, HIDDEN, READONLY, REPARSE_POINT, SYSTEM};
-use bb_core::search::SearchQuery;
+use bb_base::FileTime;
+use bb_base::attributes::{ARCHIVE, COMPRESSED, HIDDEN, READONLY, REPARSE_POINT, SYSTEM};
+use bb_search::SearchQuery;
 
 use crate::support::Entry;
 

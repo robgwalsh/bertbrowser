@@ -1,6 +1,6 @@
 // Port of tests/BertBrowser.Core.Tests/SearchQueryTests.cs: what a bare query has always meant. The
 // point of the file is that adding ext: and friends did not quietly change what an ordinary search does.
-use bb_core::search::SearchQuery;
+use bb_search::SearchQuery;
 use rusqlite::types::Value;
 
 use crate::support::Entry;

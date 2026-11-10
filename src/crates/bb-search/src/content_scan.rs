@@ -1,6 +1,6 @@
 //! What a `content:` reading pass did, for the status bar and for the honest account behind an
 //! empty or short result. Spec: Core/Models/ContentScanModels.cs (`ContentMatch` itself is in
-//! `crate::search`, beside the snippet that builds it).
+//! `crate`, beside the snippet that builds it).
 
 /// Live progress of the reading pass.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

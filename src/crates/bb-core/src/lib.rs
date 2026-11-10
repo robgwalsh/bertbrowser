@@ -13,7 +13,6 @@ pub mod layout;
 pub mod mft;
 pub mod models;
 pub mod rules;
-pub mod search;
 pub mod updates;
 
 // The shared vocabulary lives in bb-base; re-exported at its old paths so nothing above notices.
@@ -23,4 +22,5 @@ pub use bb_files::{delete, newitem, rename, shortcuts, timestamps, transfer};
 pub use bb_metadata as metadata;
 pub use bb_paths as paths;
 pub use bb_preview as preview;
+pub use bb_search as search;
 pub use time::FileTime;

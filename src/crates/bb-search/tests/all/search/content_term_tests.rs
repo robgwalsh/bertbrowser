@@ -1,7 +1,7 @@
 // Port of tests/BertBrowser.Core.Tests/ContentTermTests.cs: the content: term and the three-valued
 // logic it exists for. Collapse NeedsContent to either boolean in AND, OR or NOT and something here
 // goes red.
-use bb_core::search::{SearchMatch, SearchQuery};
+use bb_search::{SearchMatch, SearchQuery};
 
 use crate::support::Entry;
 

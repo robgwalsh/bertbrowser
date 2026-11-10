@@ -1,0 +1,25 @@
+[package]
+name = "bb-search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# Split out of bb-core: the query language and the rows a search hands back. Tests live in
+# tests/all (one binary), never in src: see bb-core's Cargo.toml.
+test = false
+doctest = false
+
+[dependencies]
+bb-base = { path = "../bb-base" }
+bb-paths = { path = "../bb-paths" }
+bb-preview = { path = "../bb-preview" }
+fancy-regex.workspace = true
+rusqlite.workspace = true
+bb-workspace-hack = { version = "0.1", path = "../bb-workspace-hack" }
+
+[dev-dependencies]
+bb-base = { path = "../bb-base" }
+bb-fixtures = { path = "../bb-fixtures" }
+rusqlite.workspace = true

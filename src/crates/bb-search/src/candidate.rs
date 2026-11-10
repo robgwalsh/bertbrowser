@@ -4,7 +4,7 @@
 //! candidate. Spec: Core/Services/Search/SearchCandidate.cs.
 
 use super::ContentText;
-use crate::FileTime;
+use bb_base::FileTime;
 
 #[derive(Clone, Copy)]
 pub struct SearchCandidate<'a> {

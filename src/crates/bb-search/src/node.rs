@@ -6,7 +6,7 @@
 //! red. Terms that cannot be expressed at all emit `1`. Spec: Core/Services/Search/SearchNode.cs, SearchTerms.cs.
 
 use super::{GlobText, SearchCandidate, SearchMatch, SqlPredicateBuilder};
-use crate::FileTime;
+use bb_base::FileTime;
 
 /// Which timestamp a date term is about. Accessed is deliberately absent: Windows ships with
 /// last-access updates disabled, so the value on disk is frozen.

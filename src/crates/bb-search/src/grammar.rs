@@ -8,8 +8,8 @@
 use bb_paths::fold_upper;
 
 use super::{DateField, DateShorthand, SearchNode, SearchQuery, SearchSyntax, SizeText};
-use crate::FileTime;
-use crate::attributes;
+use bb_base::FileTime;
+use bb_base::attributes;
 
 /// The outcome of parsing a query box. `query` is None when there is nothing to run (an empty box,
 /// or text too broad to be a useful search); with `problem` also None that means "not a search" and

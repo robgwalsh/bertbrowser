@@ -1,6 +1,6 @@
 // Port of tests/BertBrowser.Core.Tests/SizeTextTests.cs.
-use bb_core::format::byte_size;
-use bb_core::search::SizeText;
+use bb_base::format::byte_size;
+use bb_search::SizeText;
 
 #[test]
 fn parses_sizes_with_units() {

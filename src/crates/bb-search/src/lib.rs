@@ -1,33 +1,41 @@
 //! The search query language: grammar, the term tree with its two faces (`matches` is the
 //! definition, `write_sql` an optimisation that may be wider but never narrower), size and date
-//! literals, content text and snippets. Spec: Core/Services/Search/*.
+//! literals, content text and snippets - and the result rows and scan reports a search hands back,
+//! which the index (bb-core) reads and writes. bb-core re-exports all of it as `bb_core::search`.
+//! Spec: Core/Services/Search/*.
 
 mod candidate;
 mod content_reader;
+mod content_scan;
 mod content_scanner;
 mod content_text;
 mod date_shorthand;
 mod glob;
 mod grammar;
+mod hit;
 mod node;
 mod predicate;
 mod query;
 mod rules;
+mod search_outcome;
 mod size_text;
 mod snippet;
 mod syntax;
 
 pub use candidate::SearchCandidate;
 pub use content_reader::{ContentReader, FileSystemContentReader, FileText};
+pub use content_scan::{ContentScanLimit, ContentScanProgress, ContentScanReport};
 pub use content_scanner::{ContentProgressSink, ContentScanOutcome, ContentScanner, LiveBatches};
 pub use content_text::{ContentMatch, ContentText};
 pub use date_shorthand::DateShorthand;
 pub use glob::GlobText;
 pub use grammar::{SearchGrammar, SearchQueryParse};
+pub use hit::SearchHit;
 pub use node::{DateField, SearchNode};
 pub use predicate::{SqlPredicate, SqlPredicateBuilder};
 pub use query::SearchQuery;
 pub use rules::ContentSearchRules;
+pub use search_outcome::{SearchOutcome, SearchResultSource};
 pub use size_text::SizeText;
 pub use snippet::ContentSnippet;
 pub use syntax::{SearchSyntax, SearchSyntaxEntry, SearchSyntaxSection};

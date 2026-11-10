@@ -1,6 +1,6 @@
 //! The final result of a search. Spec: Core/Models/SearchOutcome.cs.
 
-use super::{ContentScanReport, SearchHit};
+use crate::{ContentScanReport, SearchHit};
 
 /// Where a search's results came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

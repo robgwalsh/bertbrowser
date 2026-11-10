@@ -5,11 +5,11 @@ use std::fs::OpenOptions;
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
-use bb_core::cancel::{CancelToken, Cancelled};
-use bb_core::search::{
+use bb_base::cancel::{CancelToken, Cancelled};
+use bb_fixtures::unique_temp_path;
+use bb_search::{
     ContentReader, ContentSearchRules, ContentText, FileSystemContentReader, FileText,
 };
-use bb_test_support::unique_temp_path;
 
 const FILE_SHARE_READ: u32 = 1;
 const FILE_SHARE_WRITE: u32 = 2;

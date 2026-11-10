@@ -14,9 +14,9 @@ use std::fs::File;
 use std::io::Read;
 
 use super::{ContentSearchRules, ContentText};
-use crate::cancel::{CancelToken, Cancelled};
-use crate::fs::ReadOnlyFile;
-use crate::preview::{TextPreviewReader, TextReadOptions};
+use bb_base::cancel::{CancelToken, Cancelled};
+use bb_base::fs::ReadOnlyFile;
+use bb_preview::{TextPreviewReader, TextReadOptions};
 
 /// What reading a file for a content search produced.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -1,6 +1,6 @@
 // Port of tests/BertBrowser.Core.Tests/ContentSnippetTests.cs: which line the match was on, and how
 // much of it to show.
-use bb_core::search::{ContentMatch, ContentSnippet, ContentText};
+use bb_search::{ContentMatch, ContentSnippet, ContentText};
 
 fn text(s: &str) -> ContentText {
     ContentText::new(s, false)

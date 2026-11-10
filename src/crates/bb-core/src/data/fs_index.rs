@@ -12,7 +12,7 @@ use rusqlite::{Connection, ToSql, params};
 use super::{Db, Error, IN_CHUNK, Result, placeholders};
 use crate::FileTime;
 use crate::cancel::CancelToken;
-use crate::search::{ContentMatch, SearchCandidate, SearchQuery, SqlPredicate};
+use crate::search::{SearchCandidate, SearchQuery, SqlPredicate};
 
 /// A row destined for (or read from) the `fs_entry` search index.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,23 +53,7 @@ pub struct FsSubtreeRow {
     pub modified_utc: FileTime,
 }
 
-/// One search result. `relative_dir_display` is the parent directory relative to the search root
-/// ("" for direct children), display-cased; for a whole-PC search it is the full parent path.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SearchHit {
-    pub display_path: String,
-    pub relative_dir_display: String,
-    pub name: String,
-    pub is_directory: bool,
-    pub size_bytes: i64,
-    pub modified_utc: FileTime,
-    pub hidden: bool,
-    /// Zero means not recorded rather than none.
-    pub attributes: u32,
-    pub created_utc: FileTime,
-    /// Where a `content:` term found its needle, when one did.
-    pub content_match: Option<ContentMatch>,
-}
+pub use bb_search::SearchHit;
 
 /// The shortlist a duplicate scan starts from, with the two counts that tell a sizeless index from
 /// an empty folder.

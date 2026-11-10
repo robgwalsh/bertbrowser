@@ -6,14 +6,14 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use bb_core::FileTime;
-use bb_core::cancel::{CancelToken, Cancelled};
-use bb_core::data::SearchHit;
-use bb_core::models::{ContentScanLimit, ContentScanProgress};
-use bb_core::search::{
+use bb_base::FileTime;
+use bb_base::cancel::{CancelToken, Cancelled};
+use bb_search::SearchHit;
+use bb_search::{
     ContentReader, ContentScanOutcome, ContentScanner, ContentSearchRules, ContentText, FileText,
     SearchQuery,
 };
+use bb_search::{ContentScanLimit, ContentScanProgress};
 
 fn q(text: &str) -> SearchQuery {
     let parse = SearchQuery::parse(text);

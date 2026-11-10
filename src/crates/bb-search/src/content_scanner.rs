@@ -18,9 +18,9 @@ use super::{
     ContentReader, ContentSearchRules, ContentSnippet, ContentText, FileText, SearchCandidate,
     SearchMatch, SearchQuery,
 };
-use crate::cancel::CancelToken;
-use crate::data::SearchHit;
-use crate::models::{ContentScanLimit, ContentScanProgress, ContentScanReport};
+use crate::SearchHit;
+use crate::{ContentScanLimit, ContentScanProgress, ContentScanReport};
+use bb_base::cancel::CancelToken;
 
 /// A sink for hits as they are found, when the caller wants them streamed.
 pub type LiveBatches<'a> = Option<&'a (dyn Fn(&[SearchHit]) + Sync)>;

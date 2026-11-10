@@ -1,7 +1,7 @@
 // Port of tests/BertBrowser.Core.Tests/DateShorthandTests.cs. The clock is injected throughout:
 // "today" is otherwise a test that fails once a day at midnight.
-use bb_core::FileTime;
-use bb_core::search::DateShorthand;
+use bb_base::FileTime;
+use bb_search::DateShorthand;
 
 /// A Wednesday, so the week boundaries are not accidentally right. Local wall-clock ticks.
 fn now() -> FileTime {
