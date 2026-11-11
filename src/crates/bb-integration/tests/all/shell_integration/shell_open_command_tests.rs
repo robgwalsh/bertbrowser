@@ -136,3 +136,26 @@ fn an_environment_variable_is_not_mistaken_for_a_placeholder() {
         parsed.arguments.replace("%SystemRoot%", "C:\\Windows")
     );
 }
+
+#[test]
+fn an_unquoted_placeholder_gets_a_path_with_spaces_quoted() {
+    let exe = r"C:\tools\app.exe";
+    let spaced = r"C:\My Files\a b.sln";
+
+    let unquoted =
+        ShellOpenCommandParser::parse(Some(&format!("\"{exe}\" %1")), spaced, real(&[exe]))
+            .expect("parsed");
+    let quoted =
+        ShellOpenCommandParser::parse(Some(&format!("\"{exe}\" \"%1\"")), spaced, real(&[exe]))
+            .expect("parsed");
+    let mixed = ShellOpenCommandParser::parse(
+        Some(&format!("\"{exe}\" /f \"%1\" %1")),
+        spaced,
+        real(&[exe]),
+    )
+    .expect("parsed");
+
+    assert_eq!(format!("\"{spaced}\""), unquoted.arguments);
+    assert_eq!(format!("\"{spaced}\""), quoted.arguments);
+    assert_eq!(format!("/f \"{spaced}\" \"{spaced}\""), mixed.arguments);
+}

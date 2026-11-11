@@ -12,7 +12,7 @@
 //! decoders, and whatever they fail with is a message, never a panic. Synchronous on purpose, like
 //! the file-system service; callers own their worker thread.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::os::windows::fs::OpenOptionsExt;
@@ -233,6 +233,7 @@ impl ArchiveReader for LibraryArchiveReader {
             format,
             &[entry_path.to_string()],
             password,
+            Some(max_bytes),
             &mut sink,
             cancel,
         );
@@ -257,6 +258,7 @@ impl ArchiveReader for LibraryArchiveReader {
             format,
             entry_paths,
             password,
+            None,
             on_entry,
             cancel,
         ) {
@@ -283,6 +285,7 @@ fn walk(
     format: &ArchiveFormat,
     entry_paths: &[String],
     password: Option<&str>,
+    max_entry_bytes: Option<i64>,
     on_entry: EntrySink<'_>,
     cancel: &CancelToken,
 ) -> Result<(), Stop> {
@@ -290,6 +293,7 @@ fn walk(
     let mut pass = Pass {
         wanted,
         seen: 0,
+        max_entry_bytes,
         on_entry,
     };
     match format.container {
@@ -304,6 +308,9 @@ fn walk(
 struct Pass<'a> {
     wanted: HashSet<String>,
     seen: usize,
+    /// Set by a bounded read (a preview): the caller will take at most this much of an entry, so
+    /// a backend that can only decode a whole entry must not be handed one that is larger.
+    max_entry_bytes: Option<i64>,
     on_entry: EntrySink<'a>,
 }
 
@@ -461,13 +468,25 @@ fn zip_walk(
     cancel: &CancelToken,
 ) -> Result<(), Stop> {
     let mut archive = zip_open(archive_file)?;
+    // The index keeps the LAST of a duplicated name, so that is the one extracted and previewed.
+    let mut last: HashMap<String, usize> = HashMap::new();
     for i in 0..archive.len() {
+        cancel.check()?;
+        let entry = archive.by_index_data(i).map_err(zip_stop)?;
+        if entry.is_dir() {
+            continue;
+        }
+        let name = entry.name().ok().map(|n| n.into_owned());
+        if let Some(key) = pass.wants(name.as_deref()) {
+            last.insert(fold_upper(&key), i);
+        }
+    }
+    let mut order: Vec<usize> = last.into_values().collect();
+    order.sort_unstable();
+    for i in order {
         cancel.check()?;
         let (key, size) = {
             let entry = archive.by_index_data(i).map_err(zip_stop)?;
-            if entry.is_dir() {
-                continue;
-            }
             let name = entry.name().ok().map(|n| n.into_owned());
             (pass.wants(name.as_deref()), entry.size() as i64)
         };
@@ -559,6 +578,27 @@ fn sevenz_list(
     ))
 }
 
+/// The most a walk will decode only to throw away (what a caller left of an entry, or an entry in
+/// a solid block that nobody asked for).
+const DRAIN_LIMIT: u64 = 4 << 30;
+
+/// Reads the rest of a solid-block entry so the next one starts in the right place, honouring a
+/// cancel and a hard cap so a bomb cannot pin the worker.
+fn drain(content: &mut dyn Read, cancel: &CancelToken) -> Result<(), Stop> {
+    let mut buffer = [0u8; 64 * 1024];
+    let mut total = 0u64;
+    loop {
+        cancel.check()?;
+        match content.read(&mut buffer) {
+            Ok(0) | Err(_) => return Ok(()),
+            Ok(n) => total += n as u64,
+        }
+        if total > DRAIN_LIMIT {
+            return Err(Stop::Malformed(DAMAGED.to_string()));
+        }
+    }
+}
+
 fn sevenz_walk(
     archive_file: &str,
     password: Option<&str>,
@@ -580,17 +620,28 @@ fn sevenz_walk(
             pass.wants(Some(entry.name()))
         };
         let Some(key) = key else {
-            let _ = io::copy(content, &mut io::sink());
-            return Ok(true);
+            return match drain(content, cancel) {
+                Ok(()) => Ok(true),
+                Err(s) => {
+                    stop = Some(s);
+                    Ok(false)
+                }
+            };
         };
-        let announced = pass.announce(&key, content, entry.size() as i64);
-        let _ = io::copy(content, &mut io::sink());
-        match announced {
-            Ok(more) => Ok(more),
+        match pass.announce(&key, content, entry.size() as i64) {
+            // The caller stopped (it has what it wanted, or cancelled): abort the walk rather
+            // than decompress the rest of the entry for nobody.
             Err(s) => {
                 stop = Some(s);
                 Ok(false)
             }
+            Ok(more) => match drain(content, cancel) {
+                Ok(()) => Ok(more),
+                Err(s) => {
+                    stop = Some(s);
+                    Ok(false)
+                }
+            },
         }
     });
     if let Some(stop) = stop {
@@ -709,6 +760,11 @@ fn rar_walk(
         };
         let size = cursor.entry().unpacked_size as i64;
         match key {
+            Some(_) if pass.max_entry_bytes.is_some_and(|max| size > max) => {
+                // The library decodes a whole entry before handing any of it back, so a bounded
+                // read cannot bound it. An entry larger than the bound is not decoded at all.
+                open = cursor.skip().map_err(|e| rar_stop(e, archive_file))?;
+            }
             Some(key) => {
                 // The library can only hand back a whole entry, so the bound lands on the caller's
                 // side of the copy rather than on the decompression.
@@ -835,8 +891,25 @@ fn tar_walk(
     pass: &mut Pass<'_>,
     cancel: &CancelToken,
 ) -> Result<(), Stop> {
+    // The index keeps the LAST of a duplicated name, so a first pass over the headers finds which
+    // one that is and the second announces only it.
+    let mut last: HashMap<String, usize> = HashMap::new();
+    {
+        let mut archive = tar::Archive::new(tar_stream(archive_file, format)?);
+        for (i, entry) in archive.entries()?.enumerate() {
+            cancel.check()?;
+            let entry = entry?;
+            if entry.header().entry_type().is_dir() {
+                continue;
+            }
+            let name = entry.path().ok().map(|p| p.to_string_lossy().into_owned());
+            if let Some(key) = pass.wants(name.as_deref()) {
+                last.insert(fold_upper(&key), i);
+            }
+        }
+    }
     let mut archive = tar::Archive::new(tar_stream(archive_file, format)?);
-    for entry in archive.entries()? {
+    for (i, entry) in archive.entries()?.enumerate() {
         cancel.check()?;
         let mut entry = entry?;
         if !entry.header().entry_type().is_file() {
@@ -846,6 +919,9 @@ fn tar_walk(
         let Some(key) = pass.wants(name.as_deref()) else {
             continue;
         };
+        if last.get(&fold_upper(&key)) != Some(&i) {
+            continue;
+        }
         let size = entry.size() as i64;
         if !pass.announce(&key, &mut entry, size)? {
             return Ok(());

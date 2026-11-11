@@ -11,5 +11,8 @@ fn main() {
         )
         .expect("embed manifest");
     }
+    // Static imports resolve from System32 only. Without it the loader looks in the exe's own
+    // folder first, so a DLL planted beside this administrator-token process would run elevated.
+    println!("cargo:rustc-link-arg-bins=/DEPENDENTLOADFLAG:0x800");
     println!("cargo:rerun-if-changed=build.rs");
 }

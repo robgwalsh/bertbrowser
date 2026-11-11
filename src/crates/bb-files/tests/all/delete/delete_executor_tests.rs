@@ -889,3 +889,32 @@ fn undo_will_not_overwrite_something_that_took_the_original_path() {
     assert_eq!(undo.failed.len(), 1);
     assert_content(&s(&file), "something else entirely");
 }
+
+#[test]
+fn a_junction_planted_as_the_trash_folder_is_never_moved_through() {
+    // Anyone who can create a folder at a volume root can plant `.bertbrowser-trash` as a junction
+    // first; the run (elevated, in the helper) must not stage the user's files through it.
+    let f = Fixture::new();
+    let elsewhere = f.dir(&["elsewhere"]);
+    let trash = f.p(&[DeleteExecutor::TRASH_FOLDER_NAME]);
+    if !try_create_junction(&trash, &elsewhere) {
+        return; // junctions need a filesystem that supports them
+    }
+    let file = f.file("payload", &["victim", "a.txt"]);
+
+    let outcome = f.run_staged(std::slice::from_ref(&file));
+
+    assert!(!file.exists());
+    assert_eq!(outcome.deleted.len(), 1);
+    assert_eq!(
+        std::fs::read_dir(&elsewhere).unwrap().count(),
+        0,
+        "nothing may land behind the junction"
+    );
+    assert!(
+        !outcome
+            .staging_directories
+            .iter()
+            .any(|d| d.contains(DeleteExecutor::TRASH_FOLDER_NAME))
+    );
+}

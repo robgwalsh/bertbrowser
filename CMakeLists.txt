@@ -42,6 +42,10 @@ set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedd
 set(BB_PCH "${CMAKE_SOURCE_DIR}/src/app/pch.h")
 add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX STRICT)
 add_link_options(/WX)
+# Control Flow Guard in Release (the shipped binary). Release links are non-incremental, so the linker
+# has no /INCREMENTAL to warn about under /WX; Debug is left alone for build speed.
+add_compile_options($<$<CONFIG:Release>:/guard:cf>)
+add_link_options($<$<CONFIG:Release>:/GUARD:CF>)
 
 # ---- Rust: cargo builds the staticlib, cbindgen writes the header -------------------------------
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")

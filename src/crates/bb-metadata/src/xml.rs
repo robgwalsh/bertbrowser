@@ -272,6 +272,9 @@ impl Element {
 }
 
 impl Document {
+    /// The deepest nesting `parse` accepts; real XMP is under ten.
+    pub const MAX_DEPTH: usize = 256;
+
     /// The tree, or None when the text is not well-formed XML, declares a document type, or
     /// uses an entity nobody defined.
     pub fn parse(text: &str) -> Option<Document> {
@@ -289,6 +292,10 @@ impl Document {
         loop {
             match reader.read_event().ok()? {
                 Event::Start(start) => {
+                    // Every walk of the tree recurses, so the nesting is bounded here.
+                    if stack.len() >= Self::MAX_DEPTH {
+                        return None;
+                    }
                     let mut element = Element::new(start.name().as_ref());
                     for attribute in start.attributes() {
                         let attribute = attribute.ok()?;

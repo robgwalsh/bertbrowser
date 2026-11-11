@@ -29,6 +29,14 @@ use pipe::PipeStream;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn main() -> ExitCode {
+    // First, before anything can load a library lazily: later loads search System32 only, never the
+    // exe's folder or the current directory, which a medium-integrity process may write to.
+    // SAFETY: a plain flag; no pointers.
+    unsafe {
+        windows_sys::Win32::System::LibraryLoader::SetDefaultDllDirectories(
+            windows_sys::Win32::System::LibraryLoader::LOAD_LIBRARY_SEARCH_SYSTEM32,
+        );
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let options = match ElevatorArguments::try_parse(&args) {
         Ok(options) => options,

@@ -1,2 +1,6 @@
 # C# tests deliberately not ported, one per line: FileTests.cs::MethodName  reason
 # Everything else in a ported file must exist in Rust under the snake_cased name.
+IndexerAutoStartTaskTests.cs::PassesOnlyTheDataDirectory  the task now also passes --app-dir; Rust: passes_the_data_directory_and_the_app_directory_only
+IndexerAutoStartTaskTests.cs::PointsAtTheHelper  the task runs the administrator-only installed copy; Rust: runs_the_installed_copy_not_a_file_beside_the_app
+IndexerAutoStartTaskTests.cs::KnowsWhenARegisteredTaskPointsSomewhereElse  needs_reregistration replaced by state_from_task_xml (command, --app-dir and installed copy); Rust: the state tests in indexer_auto_start_task_tests.rs
+IndexerAutoStartTaskTests.cs::SaysNothingIsWrongWhenThereIsNoTask  same; Rust: no_task_is_off

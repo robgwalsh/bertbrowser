@@ -230,7 +230,8 @@ Clipboard Clipboard::system(HWND owner) {
         }
         if (const HANDLE h = GetClipboardData(CF_UNICODETEXT)) {
             if (const auto* p = static_cast<const wchar_t*>(GlobalLock(h))) {
-                text = p;
+                // Bounded by the block, not trusted to be NUL-terminated.
+                text.assign(p, wcsnlen(p, GlobalSize(h) / sizeof(wchar_t)));
                 GlobalUnlock(h);
             }
         }

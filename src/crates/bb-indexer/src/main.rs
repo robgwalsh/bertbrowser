@@ -28,9 +28,10 @@ use bb_index::data::{
 use bb_index::ipc::{
     IndexEndpoint, IndexerArguments, IndexerCommand, IndexerPresenceLock, PipeOwner,
 };
+use bb_index::mft::InstalledHelper;
 use bb_index::mft::{
-    ChangeRecorderOptions, CurrentProcessUsage, IndexSessionEnd, MftIndex, MftIndexHost,
-    MftIndexService, RawVolumeAccess,
+    APP_FILE_NAME, AppDirectoryFault, ChangeRecorderOptions, CurrentProcessUsage, IndexSessionEnd,
+    MftIndex, MftIndexHost, MftIndexService, RawVolumeAccess,
 };
 use bb_paths::PathKey;
 
@@ -44,6 +45,14 @@ const CONNECT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const USAGE_INTERVAL: Duration = Duration::from_secs(2);
 
 fn main() {
+    // First, before anything can load a library lazily: later loads search System32 only, never the
+    // exe's folder or the current directory, which a medium-integrity process may write to.
+    // SAFETY: a plain flag; no pointers.
+    unsafe {
+        windows_sys::Win32::System::LibraryLoader::SetDefaultDllDirectories(
+            windows_sys::Win32::System::LibraryLoader::LOAD_LIBRARY_SEARCH_SYSTEM32,
+        );
+    }
     std::process::exit(run_main());
 }
 
@@ -67,13 +76,53 @@ fn run_main() -> i32 {
     };
 
     match options.command {
-        IndexerCommand::RegisterAutoStart => autostart::register(&options.data_directory),
+        IndexerCommand::RegisterAutoStart => autostart::register(&options),
         IndexerCommand::UnregisterAutoStart => autostart::unregister(),
         IndexerCommand::Run => run(&options),
     }
 }
 
+/// Exit codes of the same-build gate, distinct from every other code in this crate.
+const EXIT_APP_MISSING: i32 = 16;
+const EXIT_NOT_THIS_BUILD: i32 = 15;
+
+/// The folder of the app this helper belongs to: `--app-dir`, else the folder of this executable
+/// (the app started it from beside itself). Then the same-build gate: when that is not this
+/// executable's own folder, `<app dir>\bb-indexer.exe` must be byte-identical to this executable,
+/// and `<app dir>\BertBrowser.exe` must exist. Only ever reads there.
+fn resolve_app_directory(options: &IndexerArguments) -> Result<std::path::PathBuf, i32> {
+    let Ok(exe) = std::env::current_exe() else {
+        eprintln!("Cannot determine this executable's path.");
+        return Err(1);
+    };
+    let app_dir = match (&options.app_directory, exe.parent()) {
+        (Some(dir), _) => std::path::PathBuf::from(dir),
+        (None, Some(own)) => own.to_path_buf(),
+        (None, None) => {
+            eprintln!("Cannot determine this executable's folder.");
+            return Err(1);
+        }
+    };
+    match InstalledHelper::check_app_directory(&exe, &app_dir) {
+        Ok(()) => Ok(app_dir),
+        Err(AppDirectoryFault::AppMissing) => {
+            eprintln!("BertBrowser is not installed at the given app directory.");
+            Err(EXIT_APP_MISSING)
+        }
+        Err(AppDirectoryFault::HelperDiffers) => {
+            eprintln!("The app directory holds a different build of this helper.");
+            Err(EXIT_NOT_THIS_BUILD)
+        }
+    }
+}
+
 fn run(options: &IndexerArguments) -> i32 {
+    // Before anything else, and certainly before the database: an old build must never write to a
+    // new build's database.
+    let app_dir = match resolve_app_directory(options) {
+        Ok(dir) => dir,
+        Err(code) => return code,
+    };
     let sid = match IndexEndpoint::current_user_sid() {
         Ok(sid) => sid,
         Err(error) => {
@@ -96,6 +145,14 @@ fn run(options: &IndexerArguments) -> i32 {
     };
 
     let db_path = std::path::Path::new(&options.data_directory).join("bertbrowser.db");
+    // The data directory is the app's (medium-integrity) argument and this process writes to the
+    // database with an administrator token: a junction in either place would redirect that write.
+    if is_link(std::path::Path::new(&options.data_directory)) || is_link(&db_path) {
+        eprintln!(
+            "The data directory or its database is a link, which this helper will not follow."
+        );
+        return 8;
+    }
     if !db_path.is_file() {
         // The app creates and migrates the database under its own token, before it ever starts
         // this process. Creating one here would leave an Administrators-owned file behind, and at
@@ -143,7 +200,7 @@ fn run(options: &IndexerArguments) -> i32 {
     ));
 
     let lifetime = CancelToken::new();
-    let _self_checks = self_checks::start(db.clone(), lifetime.clone());
+    let _self_checks = self_checks::start(db.clone(), lifetime.clone(), &app_dir);
 
     // Indexing is this process's job whether or not anyone is watching: started by the sign-in
     // task there may be no app for hours, and the whole point is that the index is warm when one
@@ -155,13 +212,13 @@ fn run(options: &IndexerArguments) -> i32 {
 
     let host =
         MftIndexHost::with_usage(index.clone(), CurrentProcessUsage::shared(), USAGE_INTERVAL);
-    let code = serve(&host, &sid, &lifetime);
+    let code = serve(&host, &sid, &lifetime, &app_dir);
     index.shutdown();
     code
 }
 
 /// Hosts one app after another until asked to stop.
-fn serve(host: &MftIndexHost, sid: &str, lifetime: &CancelToken) -> i32 {
+fn serve(host: &MftIndexHost, sid: &str, lifetime: &CancelToken, app_dir: &std::path::Path) -> i32 {
     let endpoint = match IndexEndpoint::for_user(sid) {
         Ok(endpoint) => endpoint,
         Err(error) => {
@@ -181,7 +238,7 @@ fn serve(host: &MftIndexHost, sid: &str, lifetime: &CancelToken) -> i32 {
             continue;
         };
 
-        if !is_our_app(&client) {
+        if !is_our_app(&client, app_dir) {
             // Not the app this helper ships beside. Hang up rather than report to it.
             continue;
         }
@@ -195,30 +252,30 @@ fn serve(host: &MftIndexHost, sid: &str, lifetime: &CancelToken) -> i32 {
     0
 }
 
-/// Whether the process listening on the pipe is the BertBrowser this helper ships beside. A
+/// Whether the process listening on the pipe is the BertBrowser at `<app dir>\BertBrowser.exe`. A
 /// coherence check, not a boundary: nothing between two processes of one user is one. What this
 /// rules out is confusion: a stale build, or another program that happened to claim the name. The
 /// direction works because a high-integrity process may open a medium-integrity one for
 /// `PROCESS_QUERY_LIMITED_INFORMATION`; the reverse would not.
-fn is_our_app(client: &pipe::PipeClient) -> bool {
+fn is_our_app(client: &pipe::PipeClient, app_dir: &std::path::Path) -> bool {
     let Some(server_process_id) = PipeOwner::server_process_id(client) else {
         return false;
     };
     let Some(actual) = PipeOwner::image_path_of(server_process_id) else {
         return false;
     };
-    let Some(expected) = app_beside_us() else {
-        return false;
-    };
+    let expected = app_dir.join(APP_FILE_NAME).to_string_lossy().into_owned();
     matches!(
         (PathKey::canonicalize(&actual), PathKey::canonicalize(&expected)),
         (Ok(a), Ok(e)) if a == e
     )
 }
 
-/// `BertBrowser.exe` in this executable's directory.
-fn app_beside_us() -> Option<String> {
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    Some(dir.join("BertBrowser.exe").to_string_lossy().into_owned())
+/// True for a symlink or junction (any reparse point); an unreadable entry is treated as not one
+/// here, since the open that follows reports a missing file on its own.
+fn is_link(path: &std::path::Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    std::fs::symlink_metadata(path)
+        .is_ok_and(|meta| meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
 }

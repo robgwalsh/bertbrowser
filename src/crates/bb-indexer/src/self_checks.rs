@@ -15,6 +15,7 @@ use std::time::Duration;
 use bb_base::FileTime;
 use bb_base::cancel::CancelToken;
 use bb_index::data::Db;
+use bb_index::mft::{APP_FILE_NAME, HELPER_FILE_NAME};
 
 /// How often to look for a reason to stop.
 const INTERVAL: Duration = Duration::from_secs(30);
@@ -65,12 +66,13 @@ impl Drop for SelfChecks {
 
 /// Starts the timer; cancels `lifetime` when the helper should stop. Dropping the result stops the
 /// timer.
-pub fn start(db: Arc<Db>, lifetime: CancelToken) -> SelfChecks {
-    let own_path = std::env::current_exe().ok();
-    let app_path = own_path
-        .as_ref()
-        .and_then(|p| p.parent())
-        .map(|dir| dir.join("BertBrowser.exe"));
+///
+/// "The installation" is the app folder: the stamp watched is that of `<app dir>\bb-indexer.exe`
+/// (this executable itself when running beside the app), so an app update replaces it and stops
+/// a helper running from the administrator-only copy.
+pub fn start(db: Arc<Db>, lifetime: CancelToken, app_dir: &Path) -> SelfChecks {
+    let own_path = Some(app_dir.join(HELPER_FILE_NAME));
+    let app_path = Some(app_dir.join(APP_FILE_NAME));
     let at_start = read(&db, own_path.as_deref(), app_path.as_deref());
     let stop = CancelToken::new();
     let ticker = stop.clone();

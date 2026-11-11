@@ -42,3 +42,18 @@ fn template_without_tokens_is_returned_verbatim() {
         CommandTemplate::expand(Some("--verbose"), SAMPLE_PATH)
     );
 }
+
+#[test]
+fn a_drive_root_inside_quotes_does_not_escape_the_closing_quote() {
+    use bb_integration::launch::escape_trailing_backslashes;
+
+    assert_eq!(r"C:\\", escape_trailing_backslashes(r"C:\"));
+    assert_eq!(r"C:\a", escape_trailing_backslashes(r"C:\a"));
+    assert_eq!(
+        r#"--dir "C:\\" x"#,
+        CommandTemplate::expand(Some(r#"--dir "{path}" x"#), r"C:\")
+    );
+    assert_eq!("\"C:\\\\\"", CommandTemplate::expand(None, r"C:\"));
+    // Unquoted tokens are left verbatim.
+    assert_eq!(r"C:\ x", CommandTemplate::expand(Some("{path} x"), r"C:\"));
+}

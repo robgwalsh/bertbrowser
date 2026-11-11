@@ -392,3 +392,15 @@ fn folding_leaves_the_real_line_breaks_where_they_were() {
         folded.text.split('\n').collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn a_huge_budget_over_a_small_stream_reads_it_whole_without_sizing_to_the_budget() {
+    let preview = read_budget(b"hello", i64::from(i32::MAX));
+    assert_eq!("hello", preview.text);
+    assert!(!preview.truncated);
+
+    // A stream that is longer than the budget still reports that more remains.
+    let preview = read_budget(&[b'a'; 100], 10);
+    assert_eq!(10, preview.text.len());
+    assert!(preview.truncated);
+}

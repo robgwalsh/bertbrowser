@@ -260,7 +260,7 @@ fn atoms(
             size = end - position;
         }
 
-        if size < header_length || position + size > end {
+        if size < header_length || position.checked_add(size).is_none_or(|e| e > end) {
             return Err(not_audio());
         }
 

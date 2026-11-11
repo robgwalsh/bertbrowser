@@ -224,14 +224,19 @@ fn read_header(source: &mut dyn Source) -> MetadataResult<Header> {
     while at + 24 <= end {
         let guid: [u8; 16] = header[at..at + 16].try_into().expect("16 bytes");
         let length = u64::from_le_bytes(header[at + 16..at + 24].try_into().expect("8 bytes"));
-        if length < 24 || at as u64 + length > end as u64 {
+        if length < 24
+            || (at as u64)
+                .checked_add(length)
+                .is_none_or(|e| e > end as u64)
+        {
             return Err(not_audio());
         }
+        let length = length as usize;
         objects.push(Object {
             guid,
-            data: header[at + 24..at + length as usize].to_vec(),
+            data: header[at + 24..at + length].to_vec(),
         });
-        at += length as usize;
+        at += length;
     }
 
     Ok(Header {

@@ -49,12 +49,22 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl GifPlayer {
+    /// The compressed file is never larger than the pixels it may decode to, a quarter of that
+    /// being generous for a GIF.
+    const MAX_FILE_BYTES: u64 = AnimationLimits::MAX_DECODED_BYTES / 4;
+
     /// Reads the file, checks the size gate and starts decoding. Returns once frame 0 is ready.
     pub fn open(path: &str) -> Result<Arc<GifPlayer>, GifOpenError> {
         let mut file = ReadOnlyFile::try_open(path, false).ok_or(GifOpenError::Unreadable)?;
         let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
+        // The file is untrusted: read one byte past the cap rather than whatever its length is.
+        (&mut file)
+            .take(Self::MAX_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)
             .map_err(|_| GifOpenError::Unreadable)?;
+        if bytes.len() as u64 > Self::MAX_FILE_BYTES {
+            return Err(GifOpenError::TooLarge { frames: 0 });
+        }
         drop(file); // nothing holds the file open while it plays
         Self::from_bytes(bytes)
     }

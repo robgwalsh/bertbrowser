@@ -213,9 +213,11 @@ std::optional<Payload> read_payload(IDataObject* obj) {
     if (SUCCEEDED(obj->GetData(&ours, &m))) {
         Payload p;
         p.in_app = true;
-        if (void* data = GlobalLock(m.hGlobal)) {
-            p.paths = split_nul(static_cast<const wchar_t*>(data), GlobalSize(m.hGlobal) / sizeof(wchar_t));
-            GlobalUnlock(m.hGlobal);
+        if (m.tymed == TYMED_HGLOBAL && m.hGlobal) {
+            if (void* data = GlobalLock(m.hGlobal)) {
+                p.paths = split_nul(static_cast<const wchar_t*>(data), GlobalSize(m.hGlobal) / sizeof(wchar_t));
+                GlobalUnlock(m.hGlobal);
+            }
         }
         ReleaseStgMedium(&m);
         if (!p.paths.empty()) return p;
@@ -223,13 +225,21 @@ std::optional<Payload> read_payload(IDataObject* obj) {
     FORMATETC drop = hglobal_format(CF_HDROP);
     if (SUCCEEDED(obj->GetData(&drop, &m))) {
         Payload p;
-        if (const HDROP h = static_cast<HDROP>(GlobalLock(m.hGlobal))) {
-            const UINT n = DragQueryFileW(h, 0xFFFFFFFF, nullptr, 0);
-            for (UINT i = 0; i < n; ++i) {
-                wchar_t path[MAX_PATH * 4];
-                if (DragQueryFileW(h, i, path, static_cast<UINT>(std::size(path)))) p.paths.emplace_back(path);
+        if (m.tymed == TYMED_HGLOBAL && m.hGlobal) {
+            if (const HDROP h = static_cast<HDROP>(GlobalLock(m.hGlobal))) {
+                const UINT n = DragQueryFileW(h, 0xFFFFFFFF, nullptr, 0);
+                for (UINT i = 0; i < n; ++i) {
+                    // The needed length first (excluding the NUL), so a long path is never cut short.
+                    const UINT len = DragQueryFileW(h, i, nullptr, 0);
+                    if (len == 0) continue;
+                    std::wstring path(len, L'\0');
+                    const UINT got = DragQueryFileW(h, i, path.data(), len + 1);
+                    if (got == 0) continue;
+                    path.resize(got);
+                    p.paths.push_back(std::move(path));
+                }
+                GlobalUnlock(m.hGlobal);
             }
-            GlobalUnlock(m.hGlobal);
         }
         ReleaseStgMedium(&m);
         if (!p.paths.empty()) return p;

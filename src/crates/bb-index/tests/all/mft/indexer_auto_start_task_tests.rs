@@ -3,14 +3,15 @@
 // loudly, so the tests are the specification. The C# read values back through XDocument; here the
 // elements are found by name in the text and unescaped, which is the same question asked of the
 // same bytes.
-use bb_index::mft::IndexerAutoStartTask;
+use bb_index::mft::{AutoStartState, IndexerAutoStartTask};
 
 const SID: &str = "S-1-5-21-1845729561-1936007304-1872547691-1001";
-const HELPER: &str = r"C:\Users\Rob\AppData\Local\BertBrowser\current\BertBrowser.Indexer.exe";
+const HELPER: &str = r"C:\Program Files\BertBrowser\bb-indexer.exe";
+const APP_DIR: &str = r"C:\Users\Rob\AppData\Local\BertBrowser\current";
 const DATA_DIR: &str = r"C:\Users\Rob\.bertbrowser";
 
 fn xml() -> String {
-    IndexerAutoStartTask::build_xml(HELPER, DATA_DIR, SID)
+    IndexerAutoStartTask::build_xml(HELPER, DATA_DIR, APP_DIR, SID)
 }
 
 /// The first `<element>`'s text, unescaped.
@@ -87,70 +88,111 @@ fn keeps_running_on_battery_and_when_idle() {
 }
 
 #[test]
-fn passes_only_the_data_directory() {
+fn passes_the_data_directory_and_the_app_directory_only() {
     let arguments = value(&xml(), "Arguments");
 
-    assert_eq!(format!("--data-dir \"{DATA_DIR}\""), arguments);
+    assert_eq!(
+        format!("--data-dir \"{DATA_DIR}\" --app-dir \"{APP_DIR}\""),
+        arguments
+    );
     assert!(!arguments.contains("--pipe"));
     assert!(!arguments.contains("--parent-pid"));
 }
 
 #[test]
-fn points_at_the_helper() {
-    assert_eq!(HELPER, value(&xml(), "Command"));
+fn runs_the_installed_copy_not_a_file_beside_the_app() {
+    let command = value(&xml(), "Command");
+
+    assert_eq!(HELPER, command);
+    assert!(!command.starts_with(APP_DIR));
 }
 
 /// A profile path may perfectly well contain an ampersand, and an unescaped one makes the whole
 /// definition unparseable, which the scheduler reports as a failure with no clue in it.
 #[test]
 fn escapes_paths_the_xml_would_otherwise_choke_on() {
-    let doc = IndexerAutoStartTask::build_xml(HELPER, r"C:\Users\Bill & Ted\.bertbrowser", SID);
+    let doc = IndexerAutoStartTask::build_xml(
+        r"C:\Program Files\A & B\bb-indexer.exe",
+        r"C:\Users\Bill & Ted\.bertbrowser",
+        r"C:\Users\Bill & Ted\app",
+        SID,
+    );
 
-    assert!(value(&doc, "Arguments").contains("Bill & Ted"));
+    assert!(value(&doc, "Arguments").contains(r"Bill & Ted\.bertbrowser"));
+    assert!(value(&doc, "Arguments").contains(r"Bill & Ted\app"));
+    assert_eq!(
+        r"C:\Program Files\A & B\bb-indexer.exe",
+        value(&doc, "Command")
+    );
     // The raw text carries the entity, which is what makes the document parse at all.
     assert!(doc.contains("Bill &amp; Ted"));
     assert!(!doc.contains("Bill & Ted"));
 }
 
-/// An update moves the install directory, leaving the task aimed at an executable that is gone. It
-/// cannot be repaired without another prompt, so the settings page has to be able to say so.
-#[test]
-fn knows_when_a_registered_task_points_somewhere_else() {
-    for (registered, current, expected) in [
-        (
-            r"C:\Old\BertBrowser.Indexer.exe",
-            r"C:\New\BertBrowser.Indexer.exe",
-            true,
-        ),
-        (
-            r"C:\App\BertBrowser.Indexer.exe",
-            r"C:\App\BertBrowser.Indexer.exe",
-            false,
-        ),
-        (
-            r"c:\app\bertbrowser.indexer.exe",
-            r"C:\App\BertBrowser.Indexer.exe",
-            false,
-        ),
-        (
-            "\"C:\\App\\BertBrowser.Indexer.exe\"",
-            r"C:\App\BertBrowser.Indexer.exe",
-            false,
-        ),
-    ] {
-        assert_eq!(
-            expected,
-            IndexerAutoStartTask::needs_reregistration(Some(registered), current),
-            "{registered} vs {current}"
-        );
-    }
+fn state_of(xml: Option<&str>, copy_matches: bool) -> AutoStartState {
+    IndexerAutoStartTask::state_from_task_xml(xml, HELPER, APP_DIR, copy_matches)
 }
 
 #[test]
-fn says_nothing_is_wrong_when_there_is_no_task() {
-    assert!(!IndexerAutoStartTask::needs_reregistration(None, HELPER));
-    assert!(!IndexerAutoStartTask::needs_reregistration(
-        Some(""),
-        HELPER
-    ));
+fn no_task_is_off() {
+    assert_eq!(AutoStartState::Off, state_of(None, true));
+}
+
+#[test]
+fn a_registration_that_matches_everything_is_on() {
+    assert_eq!(AutoStartState::On, state_of(Some(&xml()), true));
+}
+
+#[test]
+fn paths_compare_the_way_windows_does() {
+    let doc = IndexerAutoStartTask::build_xml(
+        &HELPER.to_uppercase(),
+        DATA_DIR,
+        &format!("{APP_DIR}\\"),
+        SID,
+    );
+    assert_eq!(AutoStartState::On, state_of(Some(&doc), true));
+}
+
+/// Every registration made before the installed copy existed pointed beside the app. Those users
+/// are offered re-registration, which is the whole point of the fix.
+#[test]
+fn an_old_style_command_beside_the_app_is_stale() {
+    let old = r#"<Task><Actions><Exec><Command>C:\Users\Rob\AppData\Local\BertBrowser\current\bb-indexer.exe</Command><Arguments>--data-dir "C:\Users\Rob\.bertbrowser"</Arguments></Exec></Actions></Task>"#;
+    assert_eq!(AutoStartState::Stale, state_of(Some(old), true));
+}
+
+#[test]
+fn the_installed_command_with_no_app_dir_is_stale() {
+    let doc = xml().replace(
+        &IndexerAutoStartTask::escape(&format!(" --app-dir \"{APP_DIR}\"")),
+        "",
+    );
+    assert!(!doc.contains("--app-dir"));
+    assert_eq!(AutoStartState::Stale, state_of(Some(&doc), true));
+}
+
+#[test]
+fn a_different_app_directory_is_stale() {
+    let doc = IndexerAutoStartTask::build_xml(HELPER, DATA_DIR, r"C:\Elsewhere\app", SID);
+    assert_eq!(AutoStartState::Stale, state_of(Some(&doc), true));
+}
+
+#[test]
+fn a_different_command_is_stale() {
+    let doc = IndexerAutoStartTask::build_xml(r"C:\Temp\bb-indexer.exe", DATA_DIR, APP_DIR, SID);
+    assert_eq!(AutoStartState::Stale, state_of(Some(&doc), true));
+}
+
+/// The installed copy missing or differing from the app's helper (an update has replaced the app)
+/// is stale even though the task itself is exactly right.
+#[test]
+fn an_installed_copy_that_is_missing_or_differs_is_stale() {
+    assert_eq!(AutoStartState::Stale, state_of(Some(&xml()), false));
+}
+
+#[test]
+fn a_flag_that_merely_ends_in_app_dir_is_not_the_argument() {
+    let doc = xml().replace("--app-dir", "--not-app-dir");
+    assert_eq!(AutoStartState::Stale, state_of(Some(&doc), true));
 }

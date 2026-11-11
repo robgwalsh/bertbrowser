@@ -186,6 +186,10 @@ impl MetadataCodec for TiffCodec {
         let data = load(source)?;
         let little = data[0] == b'I';
         let mut hash = Sha256::new();
+        // Strips may overlap and each may name the whole file, so what is hashed is bounded by a
+        // multiple of the file: past it the answer is "cannot", never a digest of a prefix.
+        let hash_budget = (data.len() as u64).saturating_mul(2);
+        let mut hashed = 0u64;
 
         let mut seen: HashSet<u64> = HashSet::new();
         let mut pending: VecDeque<u64> = VecDeque::new();
@@ -248,7 +252,14 @@ impl MetadataCodec for TiffCodec {
                 }
 
                 for (at, length) in offsets.iter().zip(&lengths) {
-                    if at + length > data.len() as u64 {
+                    if at
+                        .checked_add(*length)
+                        .is_none_or(|e| e > data.len() as u64)
+                    {
+                        return Err(not_tiff());
+                    }
+                    hashed = hashed.saturating_add(*length);
+                    if hashed > hash_budget {
                         return Err(not_tiff());
                     }
                     hash.update((*length as i64).to_le_bytes());

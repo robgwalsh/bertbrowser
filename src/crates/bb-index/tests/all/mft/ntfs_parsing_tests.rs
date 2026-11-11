@@ -3,8 +3,11 @@
 // file); the boot sector for the geometry test is laid out here, field by field, as it was.
 use bb_base::FileTime;
 use bb_base::attributes::{ARCHIVE, HIDDEN, READONLY, SYSTEM};
-use bb_index::mft::fixtures::{FileNameSpec, FileRecordSpec, build_file_record};
-use bb_index::mft::{MftFileRecord, MftReader, NtfsLayout};
+use bb_base::cancel::CancelToken;
+use bb_index::mft::fixtures::{
+    FakeVolume, FileNameSpec, FileRecordSpec, build_boot_sector, build_file_record,
+};
+use bb_index::mft::{MftFileRecord, MftReader, NtfsLayout, ReadError};
 
 type Reader<'a> = MftReader<'a>;
 
@@ -65,6 +68,50 @@ fn parse_boot_sector_rejects_non_ntfs() {
     let mut boot = vec![0u8; 512];
     boot[3..11].copy_from_slice(b"FAT32   ");
     assert!(Reader::try_parse_boot_sector(&boot).is_none());
+}
+
+fn read_whole_volume_with_boot(boot: Vec<u8>) -> Result<bool, ReadError> {
+    let mut image = boot;
+    image.resize(8192, 0);
+    let volume = FakeVolume::new(image);
+    MftReader::new(&volume).try_read_all(&CancelToken::none(), |_| {})
+}
+
+#[test]
+fn a_boot_sector_with_an_impossible_record_size_is_a_read_error_not_an_allocation() {
+    // -63 is a 2^63-byte record, 127 is ~2 GB of clusters: both sized a `vec!` before the bound.
+    for raw in [(-63i8) as u8, (-127i8) as u8, 127u8, (-17i8) as u8] {
+        let mut boot = build_boot_sector(512, 8, 786432, 10);
+        boot[NtfsLayout::BOOT_CLUSTERS_PER_FILE_RECORD] = raw;
+        boot[NtfsLayout::BOOT_SECTORS_PER_CLUSTER] = 8;
+
+        assert!(
+            matches!(
+                read_whole_volume_with_boot(boot.clone()),
+                Err(ReadError::Io(_))
+            ),
+            "record size byte {raw}"
+        );
+        assert!(Reader::try_parse_boot_sector(&boot).is_none(), "{raw}");
+    }
+}
+
+#[test]
+fn a_boot_sector_with_an_impossible_cluster_size_is_a_read_error() {
+    let boot = build_boot_sector(32768, 255, 786432, 10);
+
+    assert!(matches!(
+        read_whole_volume_with_boot(boot),
+        Err(ReadError::Io(_))
+    ));
+}
+
+#[test]
+fn the_largest_accepted_record_size_still_parses() {
+    let boot = build_boot_sector(512, 8, 786432, 16);
+
+    let geometry = Reader::try_parse_boot_sector(&boot).expect("accepted");
+    assert_eq!(65536, geometry.bytes_per_file_record);
 }
 
 // --- Update-sequence-array fixup ---

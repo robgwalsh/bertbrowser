@@ -32,12 +32,17 @@ pub enum IndexerCommand {
 pub struct IndexerArguments {
     pub command: IndexerCommand,
     pub data_directory: String,
+    /// The folder of the app this helper belongs to (`--app-dir`). None means the folder of the
+    /// helper's own executable, which is right when the app started it from beside itself; the
+    /// sign-in task runs an administrator-only copy and so names the app's folder.
+    pub app_directory: Option<String>,
 }
 
 impl IndexerArguments {
     /// Parses, or explains why not. The error is for a log; nobody types this command line.
     pub fn try_parse<S: AsRef<str>>(args: &[S]) -> Result<IndexerArguments, String> {
         let mut data_dir: Option<&str> = None;
+        let mut app_dir: Option<&str> = None;
         let mut command: Option<IndexerCommand> = None;
 
         let mut i = 0;
@@ -47,6 +52,10 @@ impl IndexerArguments {
             match (arg, value) {
                 ("--data-dir", Some(v)) => {
                     data_dir = Some(v);
+                    i += 1;
+                }
+                ("--app-dir", Some(v)) => {
+                    app_dir = Some(v);
                     i += 1;
                 }
                 ("--register-autostart" | "--unregister-autostart", _) => {
@@ -75,7 +84,7 @@ impl IndexerArguments {
 
         let Some(data_dir) = data_dir else {
             return Err(
-                "Usage: BertBrowser.Indexer [--register-autostart|--unregister-autostart] --data-dir <path>"
+                "Usage: BertBrowser.Indexer [--register-autostart|--unregister-autostart] --data-dir <path> [--app-dir <path>]"
                     .to_string(),
             );
         };
@@ -83,9 +92,16 @@ impl IndexerArguments {
             return Err("The data directory is not an acceptable absolute path.".to_string());
         }
 
+        if let Some(app_dir) = app_dir
+            && !NavigationRequest::is_acceptable_path(app_dir)
+        {
+            return Err("The app directory is not an acceptable absolute path.".to_string());
+        }
+
         Ok(IndexerArguments {
             command: command.unwrap_or_default(),
             data_directory: data_dir.to_string(),
+            app_directory: app_dir.map(str::to_string),
         })
     }
 }

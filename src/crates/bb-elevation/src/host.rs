@@ -31,6 +31,7 @@ use super::models::{
     ElevationHeader, ElevationNewItemResult, ElevationOperation, ElevationProgressReport,
     ElevationSummary, ElevationTransferItem, ElevationTransferResult,
 };
+use super::rules::ElevationRules;
 use super::wire::WireRecord;
 use bb_base::cancel::CancelToken;
 use bb_base::cli::NavigationRequest;
@@ -47,6 +48,7 @@ use bb_core::transfer::{
 };
 
 const NOT_A_PATH: &str = "The request named something that is not an acceptable path.";
+const PROTECTED: &str = "The request named a location that is never changed with elevated rights.";
 
 pub struct ElevationHost<'a> {
     stream: Mutex<Box<dyn ElevationStream>>,
@@ -240,6 +242,9 @@ impl<'a> ElevationHost<'a> {
         {
             return self.send(ElevationVerb::Fatal, NOT_A_PATH);
         }
+        if any_refused(parsed.iter().map(|p| p.item.source_path.as_str())) {
+            return self.send(ElevationVerb::Fatal, PROTECTED);
+        }
 
         let verb = if header.operation == ElevationOperation::TransferMove {
             TransferVerb::Move
@@ -306,6 +311,11 @@ impl<'a> ElevationHost<'a> {
         {
             return self.send(ElevationVerb::Fatal, NOT_A_PATH);
         }
+        if any_refused(parsed.iter().map(|p| p.source_path.as_str()))
+            || any_refused(parsed.iter().map(|p| p.final_path.as_str()))
+        {
+            return self.send(ElevationVerb::Fatal, PROTECTED);
+        }
 
         // staging_directories: empty deliberately. The unelevated half still holds items in its
         // own staging folders, and this pass must not purge them out from under it.
@@ -333,6 +343,9 @@ impl<'a> ElevationHost<'a> {
         if !all_acceptable(parsed.iter().map(|p| p.source_path.as_str())) {
             return self.send(ElevationVerb::Fatal, NOT_A_PATH);
         }
+        if any_refused(parsed.iter().map(|p| p.source_path.as_str())) {
+            return self.send(ElevationVerb::Fatal, PROTECTED);
+        }
 
         let plan = DeletePlan {
             mode: header.delete_mode,
@@ -359,6 +372,9 @@ impl<'a> ElevationHost<'a> {
         if !all_acceptable(parsed.iter().map(|p| p.source_path.as_str())) {
             return self.send(ElevationVerb::Fatal, NOT_A_PATH);
         }
+        if any_refused(parsed.iter().map(|p| p.source_path.as_str())) {
+            return self.send(ElevationVerb::Fatal, PROTECTED);
+        }
 
         let outcome = DeleteOutcome {
             permanent: header.permanent,
@@ -382,6 +398,11 @@ impl<'a> ElevationHost<'a> {
             || !all_acceptable(parsed.iter().map(|p| p.target_path.as_str()))
         {
             return self.send(ElevationVerb::Fatal, NOT_A_PATH);
+        }
+        if any_refused(parsed.iter().map(|p| p.source_path.as_str()))
+            || any_refused(parsed.iter().map(|p| p.target_path.as_str()))
+        {
+            return self.send(ElevationVerb::Fatal, PROTECTED);
         }
 
         let outcome = RenameExecutor.execute(&RenamePlan::new(parsed, Vec::new()));
@@ -515,6 +536,12 @@ fn all_acceptable<'p>(paths: impl Iterator<Item = &'p str>) -> bool {
     }
     let _ = any;
     true
+}
+
+/// The same refusal the app applies before it offers elevation, repeated here because the app is
+/// the unprivileged, attacker-reachable side: the check only protects anything where the token is.
+fn any_refused<'p>(mut paths: impl Iterator<Item = &'p str>) -> bool {
+    paths.any(ElevationRules::is_refused_for_elevation)
 }
 
 /// Every item, or None if any one of them could not be read: a malformed request is refused whole

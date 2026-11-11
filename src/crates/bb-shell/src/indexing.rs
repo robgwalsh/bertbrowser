@@ -21,8 +21,8 @@ use bb_elevation::elevated_process::{self, ProcessHandle, StartError};
 
 use crate::pipe::{PeerCheck, PipeCreateError, PipeServer, PipeSession};
 
-/// The helper's file name, beside the app.
-pub const INDEXER_EXECUTABLE: &str = "bb-indexer.exe";
+/// The helper's file name, beside the app (and in the installed folder: one name, in `bb_core::mft`).
+pub const INDEXER_EXECUTABLE: &str = bb_core::mft::HELPER_FILE_NAME;
 
 /// Real buffers: see `crate::pipe`. They only need to hold a short burst of one-line messages.
 const IN_BUFFER: u32 = 16 * 1024;
@@ -148,13 +148,28 @@ impl IndexAutoStart {
                 } else {
                     String::from_utf8_lossy(&bytes).into_owned()
                 };
-                bb_core::mft::IndexerAutoStartTask::state_from_task_xml(
-                    Some(&text),
-                    &self.helper_path,
-                )
+                self.judge(&text)
             }
             Err(_) => bb_core::mft::AutoStartState::Unknown,
         }
+    }
+
+    /// The task's XML against this build: the installed copy's path, this app's folder, and
+    /// whether the installed copy is byte-identical to the helper beside this app.
+    fn judge(&self, task_xml: &str) -> bb_core::mft::AutoStartState {
+        use bb_core::mft::{AutoStartState, IndexerAutoStartTask, InstalledHelper};
+        let helper = std::path::Path::new(&self.helper_path);
+        let (Some(installed), Some(app_dir)) = (InstalledHelper::installed_path(), helper.parent())
+        else {
+            // Nowhere to install means nothing installed that could be right.
+            return AutoStartState::Stale;
+        };
+        IndexerAutoStartTask::state_from_task_xml(
+            Some(task_xml),
+            &installed.to_string_lossy(),
+            &app_dir.to_string_lossy(),
+            InstalledHelper::files_are_identical(&installed, helper),
+        )
     }
 
     /// Registers or removes the task, and answers whether the scheduler now says so - verified, not
@@ -180,10 +195,8 @@ impl IndexAutoStart {
         };
         let state = self.state();
         if on {
-            matches!(
-                state,
-                bb_core::mft::AutoStartState::On | bb_core::mft::AutoStartState::Stale
-            )
+            // Only `On` is a registration that will work: the copy is installed and the task names it.
+            state == bb_core::mft::AutoStartState::On
         } else {
             state == bb_core::mft::AutoStartState::Off
         }

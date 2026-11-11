@@ -92,26 +92,31 @@ impl Drop for MftIndexService {
 impl Inner {
     fn run_volume(self: &Arc<Inner>, mut indexer: MftVolumeIndexer, drive: &str) {
         let cancel = self.lifetime.clone();
-        if indexer.open(self.volumes.as_ref()) {
-            self.state.mark_building(drive);
-            self.update_status();
-
-            let on_progress = |percent: Option<u8>| {
-                self.state.set_progress(drive, percent);
+        // A panic while parsing one volume's records (the bytes come off a disk that may be a
+        // mounted image) is that volume's failure, never the helper's: searches on it fall back
+        // to a crawl, exactly as for any other volume that fails to index.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if indexer.open(self.volumes.as_ref()) {
+                self.state.mark_building(drive);
                 self.update_status();
-            };
-            match indexer.build_initial_index(&cancel, &on_progress) {
-                Ok(()) if !cancel.is_cancelled() => {
-                    self.state.mark_complete(indexer.root_key());
-                    self.state.clear_building(drive);
+
+                let on_progress = |percent: Option<u8>| {
+                    self.state.set_progress(drive, percent);
                     self.update_status();
-                    self.listeners.index_refreshed(indexer.root_key());
-                    indexer.tail(&cancel);
+                };
+                match indexer.build_initial_index(&cancel, &on_progress) {
+                    Ok(()) if !cancel.is_cancelled() => {
+                        self.state.mark_complete(indexer.root_key());
+                        self.state.clear_building(drive);
+                        self.update_status();
+                        self.listeners.index_refreshed(indexer.root_key());
+                        indexer.tail(&cancel);
+                    }
+                    // A volume that fails to index is non-fatal: searches on it fall back to a crawl.
+                    _ => {}
                 }
-                // A volume that fails to index is non-fatal: searches on it fall back to a crawl.
-                _ => {}
             }
-        }
+        }));
         self.state.clear_building(drive);
         self.update_status();
     }

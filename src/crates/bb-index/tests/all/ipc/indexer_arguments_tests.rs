@@ -101,3 +101,32 @@ fn accepts_a_unc_data_directory() {
 
     assert_eq!(r"\\server\share\data", options.data_directory);
 }
+
+#[test]
+fn the_app_directory_is_optional_and_absent_means_beside_the_helper() {
+    assert_eq!(None, parse(&["--data-dir", r"C:\Data"]).app_directory);
+}
+
+#[test]
+fn accepts_an_app_directory() {
+    let options = parse(&[
+        "--register-autostart",
+        "--app-dir",
+        r"C:\Users\Rob\AppData\Local\BertBrowser\current",
+        "--data-dir",
+        r"C:\Data",
+    ]);
+
+    assert_eq!(
+        Some(r"C:\Users\Rob\AppData\Local\BertBrowser\current".to_string()),
+        options.app_directory
+    );
+}
+
+#[test]
+fn rejects_an_app_directory_that_is_not_an_acceptable_absolute_path() {
+    for dir in [r"..\app", "app", r"\.\C:", r"\?\C:\app", r"C:\app\*", ""] {
+        rejects(&["--data-dir", r"C:\Data", "--app-dir", dir]);
+    }
+    rejects(&["--data-dir", r"C:\Data", "--app-dir"]);
+}

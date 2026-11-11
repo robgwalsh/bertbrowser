@@ -348,3 +348,38 @@ fn an_entry_named_dot_dot_evil_never_reaches_the_index() {
     assert!(index.refused_count >= 1);
     assert!(f.entry(&path, "evil.dll", 1024).is_none());
 }
+
+#[test]
+fn a_duplicated_name_extracts_the_entry_the_index_lists_in_a_zip() {
+    let f = Fixture::new();
+    // The zip writer refuses a duplicate, so one is made by renaming `z.txt` to `a.txt` in the bytes.
+    let path = f.zip("dup.zip", &[("a.txt", b"first"), ("z.txt", b"second!")]);
+    let bytes = std::fs::read(&path).unwrap();
+    let needle = b"z.txt";
+    let mut patched = bytes.clone();
+    for at in 0..bytes.len() - needle.len() {
+        if &bytes[at..at + needle.len()] == needle {
+            patched[at..at + needle.len()].copy_from_slice(b"a.txt");
+        }
+    }
+    std::fs::write(&path, patched).unwrap();
+    let index = f.read(&path);
+    assert_eq!(7, index.find("a.txt").unwrap().size_bytes);
+
+    assert_eq!(Some(b"second!".to_vec()), f.entry(&path, "a.txt", 100));
+}
+
+#[test]
+fn a_duplicated_name_extracts_the_entry_the_index_lists_in_a_tar() {
+    let f = Fixture::new();
+    let path = f.write(
+        ArchiveType::Tar,
+        CompressionType::None,
+        "dup.tar",
+        &[("a.txt", b"first"), ("b.txt", b"b"), ("a.txt", b"second!")],
+    );
+    let index = f.read(&path);
+    assert_eq!(7, index.find("a.txt").unwrap().size_bytes);
+
+    assert_eq!(Some(b"second!".to_vec()), f.entry(&path, "a.txt", 100));
+}

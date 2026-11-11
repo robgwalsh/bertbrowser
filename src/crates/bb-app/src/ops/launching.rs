@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use bb_integration::custom_commands::CustomCommandDefinition;
-use bb_integration::launch::{CommandTemplate, VsCodePath};
+use bb_integration::launch::{CommandTemplate, VsCodePath, escape_trailing_backslashes};
 use bb_shell::LaunchRequest;
 
 use crate::app::{Inner, lock};
@@ -54,7 +54,11 @@ pub(crate) fn terminal_request(
     if let Some(terminal) = resolve("wt.exe") {
         return Ok(LaunchRequest {
             file: terminal,
-            arguments: format!("-d \"{dir}\""),
+            // Windows Terminal splits its own command line on `;`; `\;` is its escape for a literal one.
+            arguments: format!(
+                "-d \"{}\"",
+                escape_trailing_backslashes(&dir).replace(';', "\\;")
+            ),
             ..LaunchRequest::default()
         });
     }
@@ -93,9 +97,19 @@ pub(crate) fn vscode_request(
     let Some(exe) = candidates.into_iter().flatten().next() else {
         return Err("VS Code not found. Install it, or add 'code' to your PATH.".to_string());
     };
+    // A batch shim goes through cmd.exe, which expands `%VAR%` even inside quotes: refuse such a
+    // path rather than hand it over. The real editor beside the shim was already preferred above.
+    let lower = exe.to_ascii_lowercase();
+    if (lower.ends_with(".cmd") || lower.ends_with(".bat")) && target.path.contains('%') {
+        return Err(
+            "Cannot open this in VS Code: its path contains '%', which the code.cmd \
+                    launcher would expand."
+                .to_string(),
+        );
+    }
     Ok(LaunchRequest {
         file: exe,
-        arguments: format!("\"{}\"", target.path),
+        arguments: format!("\"{}\"", escape_trailing_backslashes(&target.path)),
         ..LaunchRequest::default()
     })
 }
@@ -344,6 +358,22 @@ mod tests {
         .unwrap();
         assert!(r.file.ends_with("Code.exe"), "{}", r.file);
         assert_eq!(r#""C:\proj""#, r.arguments);
+    }
+
+    #[test]
+    fn a_terminal_escapes_semicolons_and_a_trailing_backslash() {
+        let r = terminal_request(&dir(r"C:\a;b\"), &found(&[("wt.exe", r"C:\wt.exe")])).unwrap();
+        assert_eq!(r#"-d "C:\a\;b\\""#, r.arguments);
+    }
+
+    #[test]
+    fn a_batch_shim_refuses_a_path_with_a_percent_sign() {
+        let shim = found(&[("code", r"C:\bin\code.cmd")]);
+        let e = vscode_request(&dir(r"C:\100%\x"), &shim, None, None).unwrap_err();
+        assert!(e.contains("'%'"), "{e}");
+        assert!(vscode_request(&dir(r"C:\100\x"), &shim, None, None).is_ok());
+        let exe = found(&[("code", r"C:\bin\code.exe")]);
+        assert!(vscode_request(&dir(r"C:\100%\x"), &exe, None, None).is_ok());
     }
 
     #[test]

@@ -209,19 +209,23 @@ impl TextPreviewReader {
 /// Reads up to `budget` bytes, plus one more purely to answer "is there more?" without seeking or
 /// asking the caller for a length it may not have.
 pub(crate) fn read_at_most(stream: &mut impl Read, budget: usize) -> (Vec<u8>, bool) {
-    let mut buffer = vec![0u8; budget + 1];
-    let mut total = 0;
-    while total < buffer.len() {
-        match stream.read(&mut buffer[total..]) {
+    // Grown as bytes arrive, never sized to the budget up front: a small file must not cost the
+    // whole budget, and the length of a file that is being written to cannot be trusted.
+    let limit = budget as u64 + 1;
+    let mut buffer = Vec::new();
+    let mut taken = stream.take(limit);
+    let mut chunk = [0u8; 64 * 1024];
+    loop {
+        match taken.read(&mut chunk) {
             Ok(0) => break,
-            Ok(read) => total += read,
+            Ok(read) => buffer.extend_from_slice(&chunk[..read]),
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(_) => break,
         }
     }
 
-    let more_remains = total > budget;
-    buffer.truncate(total.min(budget));
+    let more_remains = buffer.len() > budget;
+    buffer.truncate(buffer.len().min(budget));
     (buffer, more_remains)
 }
 

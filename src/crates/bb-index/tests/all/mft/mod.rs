@@ -1,6 +1,7 @@
 mod build_progress_tests;
 mod indexer_auto_start_task_tests;
 mod indexer_banner_rules_tests;
+mod installed_helper_tests;
 mod mft_directory_size_builder_tests;
 mod mft_index_client_tests;
 mod mft_index_host_tests;

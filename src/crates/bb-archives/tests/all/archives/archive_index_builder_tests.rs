@@ -227,3 +227,57 @@ fn capabilities_ride_along_unchanged() {
 
     assert_eq!(caps, index.capabilities);
 }
+
+#[test]
+fn ntfs_stream_syntax_never_reaches_the_index() {
+    for key in [
+        "a.txt:evil",
+        "x::$DATA",
+        "dir/a.txt:Zone.Identifier",
+        "d:/x",
+    ] {
+        let index = build(vec![file(key), file("ok.txt")]);
+
+        assert_eq!(1, index.file_count, "{key}");
+        assert_eq!(1, index.refused_count, "{key}");
+    }
+}
+
+#[test]
+fn dos_device_names_never_reach_the_index() {
+    for key in [
+        "CON",
+        "prn",
+        "Aux.txt",
+        "dir/nul",
+        "dir/NUL.tar.gz",
+        "com1",
+        "LPT9.log",
+        "aux .txt",
+        "aux.",
+        "ok/COM\u{b9}",
+    ] {
+        let index = build(vec![file(key), file("ok.txt")]);
+
+        assert_eq!(1, index.file_count, "{key}");
+    }
+    // Near misses are ordinary names.
+    for key in ["console.txt", "com10", "com0", "auxiliary", "lpt"] {
+        assert_eq!(1, build(vec![file(key)]).file_count, "{key}");
+    }
+}
+
+#[test]
+fn absurdly_deep_or_long_paths_are_refused_rather_than_recursed_into() {
+    let deep = vec!["a"; 40_000].join("/");
+    let index = build(vec![file(&deep), file("ok.txt")]);
+    assert_eq!(1, index.file_count);
+
+    let at_limit = vec!["a"; 128].join("/");
+    assert_eq!(1, build(vec![file(&at_limit)]).file_count);
+    let over = vec!["a"; 129].join("/");
+    assert_eq!(0, build(vec![file(&over)]).file_count);
+
+    let long = format!("{}/x.txt", "n".repeat(5000));
+    assert_eq!(0, build(vec![file(&long)]).file_count);
+}

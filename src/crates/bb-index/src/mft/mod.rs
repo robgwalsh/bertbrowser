@@ -15,6 +15,7 @@ mod client;
 mod dir_size_builder;
 pub mod fixtures;
 mod host;
+mod installed_helper;
 mod ntfs_layout;
 mod null;
 mod path_builder;
@@ -36,6 +37,9 @@ pub use build_progress::{BuildPhase, BuildProgress};
 pub use client::MftIndexClient;
 pub use dir_size_builder::MftDirectorySizeBuilder;
 pub use host::{IndexSessionEnd, MftIndexHost};
+pub use installed_helper::{
+    APP_FILE_NAME, AppDirectoryFault, HELPER_FILE_NAME, INSTALL_FOLDER_NAME, InstalledHelper,
+};
 pub use ntfs_layout::{DataRun, NtfsLayout};
 pub use null::NullMftIndex;
 pub use path_builder::{DirCache, MftNode, MftPathBuilder, ResolvedDir};
@@ -43,7 +47,7 @@ pub use presence::{
     IndexerPresence, IndexerPresenceProbe, NoIndexerPresence, WindowsIndexerPresence,
 };
 pub use raw_volume::{RawVolume, RawVolumeAccess};
-pub use reader::{BootGeometry, MftFileRecord, MftReader, VolumeRead};
+pub use reader::{BootGeometry, MftFileRecord, MftReader, ReadError, VolumeRead};
 pub use service::{ChangeRecorderOptions, MftIndexService};
 pub use state::MftIndexState;
 pub use transport::{

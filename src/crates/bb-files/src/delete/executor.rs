@@ -713,8 +713,20 @@ fn move_entry(from: &str, to: &str, is_directory: bool) -> io::Result<()> {
 
 /// Creates the folder (and whatever is missing above it) and hides it. Visible staging is ugly but
 /// not wrong, so the attribute is best-effort.
+///
+/// **A reparse point is refused, not followed.** `create_dir_all` succeeds on a name that already
+/// exists as a junction, and anyone who can create a folder at a volume root can plant one at
+/// `.bertbrowser-trash` before this (possibly elevated) run, which would then move the user's files
+/// through it to wherever it points. Callers answer the refusal as they answer a root that will not
+/// take a folder.
 fn create_staging_directory(path: &str) -> io::Result<String> {
     std::fs::create_dir_all(path)?;
+    if std::fs::symlink_metadata(path)?.file_attributes() & REPARSE_POINT != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("'{path}' is a link, not a folder."),
+        ));
+    }
     if let Some(attributes) = attributes_of(path) {
         set_attributes(path, attributes | HIDDEN);
     }

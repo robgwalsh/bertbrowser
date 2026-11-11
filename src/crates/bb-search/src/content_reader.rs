@@ -56,8 +56,13 @@ impl ContentReader for FileSystemContentReader {
 
         // One byte past the budget, so "is there more?" is answered without seeking or trusting a
         // length that may be stale.
-        let mut buffer = vec![0u8; budget + 1];
-        let head_target = ContentSearchRules::HEAD_SAMPLE_BYTES.min(budget + 1);
+        // Sized to the file when that is smaller (with slack for one that is being appended to),
+        // so a small file never costs the whole budget.
+        let known_len = file.metadata().map_or(u64::MAX, |m| m.len());
+        let capacity = (budget + 1)
+            .min(usize::try_from(known_len.saturating_add(64 * 1024)).unwrap_or(usize::MAX));
+        let mut buffer = vec![0u8; capacity];
+        let head_target = ContentSearchRules::HEAD_SAMPLE_BYTES.min(capacity);
         let Some(head) = fill(&mut file, &mut buffer, 0, head_target, cancel)? else {
             return Ok(FileText::Unreadable);
         };
@@ -81,7 +86,7 @@ impl ContentReader for FileSystemContentReader {
             )));
         }
 
-        let Some(total) = fill(&mut file, &mut buffer, head, budget + 1, cancel)? else {
+        let Some(total) = fill(&mut file, &mut buffer, head, capacity, cancel)? else {
             return Ok(FileText::Unreadable);
         };
         let more_remains = total > budget;

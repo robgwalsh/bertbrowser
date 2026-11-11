@@ -151,6 +151,22 @@ impl ArchiveIndexBuilder {
             return None;
         }
 
+        // Bounds first: `total`, `sort` and the extract planner recurse once per segment, and
+        // `ensure_directory` is quadratic in them, so `a/a/a/...` must never get in.
+        if path.len() > Self::MAX_PATH_BYTES && path.chars().count() > Self::MAX_PATH_CHARS {
+            return None;
+        }
+        let mut segments = 0usize;
+        for segment in path.split('\\') {
+            if segment.is_empty() {
+                continue;
+            }
+            segments += 1;
+            if segments > Self::MAX_SEGMENTS || Self::is_unwritable_segment(segment) {
+                return None;
+            }
+        }
+
         // The ordinary key needs nothing done to it, and is handed back as it stands.
         if Self::is_already_normal(&path) {
             return Some(path);
@@ -179,6 +195,42 @@ impl ArchiveIndexBuilder {
         } else {
             Some(parts.join("\\"))
         }
+    }
+
+    const MAX_SEGMENTS: usize = 128;
+    const MAX_PATH_CHARS: usize = 4096;
+    const MAX_PATH_BYTES: usize = Self::MAX_PATH_CHARS;
+
+    /// A segment Windows would not write as a plain file or folder: NTFS stream syntax
+    /// (`a.txt:evil`, `x::$DATA`) or a DOS device name, bare or with an extension (`aux.txt`).
+    fn is_unwritable_segment(segment: &str) -> bool {
+        if segment.contains(':') {
+            return true;
+        }
+        let trimmed = segment.trim_end_matches([' ', '.']);
+        let stem = trimmed
+            .split('.')
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(' ');
+        let upper = stem.to_uppercase();
+        if matches!(
+            upper.as_str(),
+            "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+        ) {
+            return true;
+        }
+        for prefix in ["COM", "LPT"] {
+            if let Some(rest) = upper.strip_prefix(prefix) {
+                let mut chars = rest.chars();
+                if let (Some(c), None) = (chars.next(), chars.next())
+                    && matches!(c, '1'..='9' | '\u{B9}' | '\u{B2}' | '\u{B3}')
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// True when no segment is empty or ends in a dot or a space, which rules out `.` and `..`

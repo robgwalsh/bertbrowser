@@ -115,7 +115,7 @@ impl<'a> MftReader<'a> {
     ) -> Result<bool, ReadError> {
         let mut boot = vec![0u8; 8192];
         self.volume.read_exact_at(0, &mut boot)?;
-        let Some(geometry) = Self::try_parse_boot_sector(&boot) else {
+        let Some(geometry) = Self::parse_boot_sector(&boot)? else {
             return Ok(false);
         };
         let BootGeometry {
@@ -264,34 +264,65 @@ impl<'a> MftReader<'a> {
 
     // --- Pure parsers (unit-tested) ---
 
-    /// The volume geometry, or None for anything that is not an NTFS boot sector.
+    /// The largest file record and cluster this reader will size a buffer for. Real volumes use
+    /// 1 KiB or 4 KiB records and clusters up to 64 KiB (2 MiB at the very most); the boot sector
+    /// is attacker-controlled on a mounted image, and these numbers are allocation sizes.
+    const MAX_BYTES_PER_FILE_RECORD: usize = 64 * 1024;
+    const MAX_BYTES_PER_CLUSTER: usize = 2 * 1024 * 1024;
+
+    /// The volume geometry, or None for anything that is not an NTFS boot sector (or whose
+    /// geometry is refused, see [`Self::parse_boot_sector`]).
     pub fn try_parse_boot_sector(boot: &[u8]) -> Option<BootGeometry> {
+        Self::parse_boot_sector(boot).ok().flatten()
+    }
+
+    /// As `try_parse_boot_sector`, but telling "not NTFS" (`Ok(None)`) from "claims to be NTFS and
+    /// describes a geometry no real volume has" (`Err`): the second is a crafted image, and
+    /// sizing a buffer from it would abort the elevated process that reads it.
+    pub fn parse_boot_sector(boot: &[u8]) -> io::Result<Option<BootGeometry>> {
         if boot.len() < 512 || &boot[3..11] != b"NTFS    " {
-            return None;
+            return Ok(None);
         }
         let bytes_per_sector = u16_at(boot, NtfsLayout::BOOT_BYTES_PER_SECTOR) as usize;
         let sectors_per_cluster = boot[NtfsLayout::BOOT_SECTORS_PER_CLUSTER] as usize;
         if bytes_per_sector < 256 || !bytes_per_sector.is_power_of_two() || sectors_per_cluster == 0
         {
-            return None;
+            return Ok(None);
         }
         let bytes_per_cluster = bytes_per_sector * sectors_per_cluster;
+        let refused = |what: &str| {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("The boot sector describes an impossible {what}."),
+            ))
+        };
+        if bytes_per_cluster > Self::MAX_BYTES_PER_CLUSTER {
+            return refused("cluster size");
+        }
         let mft_start_lcn = i64_at(boot, NtfsLayout::BOOT_MFT_START_LCN);
         let raw = boot[NtfsLayout::BOOT_CLUSTERS_PER_FILE_RECORD] as i8;
         let bytes_per_file_record = if raw >= 0 {
             raw as usize * bytes_per_cluster
         } else {
-            1usize << (-(raw as i32)) as usize
+            // A shift past the bound is checked before it is made, or 1 << 63 would be the size.
+            let shift = (-(raw as i32)) as u32;
+            if shift > Self::MAX_BYTES_PER_FILE_RECORD.trailing_zeros() {
+                return refused("file record size");
+            }
+            1usize << shift
         };
-        if bytes_per_file_record < 512 || mft_start_lcn <= 0 {
-            return None;
+        if bytes_per_file_record > Self::MAX_BYTES_PER_FILE_RECORD {
+            return refused("file record size");
         }
-        Some(BootGeometry {
+        if bytes_per_file_record < 512 || mft_start_lcn <= 0 {
+            return Ok(None);
+        }
+        Ok(Some(BootGeometry {
             bytes_per_sector,
             bytes_per_cluster,
             mft_start_lcn,
             bytes_per_file_record,
-        })
+        }))
     }
 
     /// Restores the last two bytes of each sector from the update-sequence array. NTFS stamps a

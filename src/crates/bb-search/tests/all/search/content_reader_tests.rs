@@ -216,3 +216,25 @@ fn a_file_opened_for_writing_elsewhere_is_still_searchable() {
 
     assert!(t.index_of("TODO").is_some());
 }
+
+#[test]
+fn a_small_file_under_a_huge_budget_is_read_whole() {
+    let fx = Fixture::new();
+    let path = fx.write("small.txt", "needle in a small file");
+    match fx.read_max(&path, u64::MAX).unwrap() {
+        FileText::Text(text) => assert!(!text.truncated),
+        _ => panic!("expected text"),
+    }
+
+    // And a file longer than the budget is still cut at it.
+    let long = fx.write(
+        "long.txt",
+        &"line of text
+"
+        .repeat(2000),
+    );
+    match fx.read_max(&long, 1000).unwrap() {
+        FileText::Text(text) => assert!(text.truncated),
+        _ => panic!("expected text"),
+    }
+}

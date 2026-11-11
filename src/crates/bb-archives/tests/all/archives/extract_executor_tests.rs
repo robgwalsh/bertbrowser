@@ -444,3 +444,34 @@ fn an_unwritable_destination_is_reported_and_costs_the_others_nothing() {
     assert_eq!("fine", read_text(&f.in_dest("ok.txt")));
     assert_eq!(1, outcome.files_written);
 }
+
+#[test]
+fn files_extracted_from_a_downloaded_archive_carry_its_mark_of_the_web() {
+    let f = Fixture::new();
+    let archive = f.zip("web.zip", &[("a.txt", b"one"), ("sub/b.txt", b"two")]);
+    let zone = "[ZoneTransfer]\r\nZoneId=3\r\n";
+    if std::fs::write(format!("{archive}:Zone.Identifier"), zone).is_err() {
+        return; // not NTFS: nothing to carry
+    }
+    let index = f.read(&archive);
+
+    let outcome = f.run_all(&archive, &index);
+
+    assert_eq!(2, outcome.files_written, "{:?}", outcome.failed);
+    for rel in ["a.txt", "sub/b.txt"] {
+        let stream = format!("{}:Zone.Identifier", f.in_dest(rel));
+        assert_eq!(zone, read_text(&stream), "{rel}");
+    }
+}
+
+#[test]
+fn an_archive_with_no_mark_of_the_web_leaves_its_files_unmarked() {
+    let f = Fixture::new();
+    let archive = f.zip("plain.zip", &[("a.txt", b"one")]);
+    let index = f.read(&archive);
+
+    let outcome = f.run_all(&archive, &index);
+
+    assert_eq!(1, outcome.files_written);
+    assert!(!exists(&format!("{}:Zone.Identifier", f.in_dest("a.txt"))));
+}

@@ -24,6 +24,17 @@ pub const REPO_URL: &str = "https://github.com/robgwalsh/bertbrowser";
 /// end-to-end update testing without touching GitHub.
 pub const URL_OVERRIDE_VARIABLE: &str = "BERTBROWSER_UPDATE_URL";
 
+/// The override feed to honour. A release build takes only `https://`: the variable is read from
+/// the environment, and a plain-http or local-path source would let whatever sets it choose what
+/// the app installs. A debug build (tests, the harness, a local `Releases` folder) takes anything.
+pub fn accepted_override(url: Option<&str>, allow_any: bool) -> Option<&str> {
+    let url = url.map(str::trim).filter(|u| !u.is_empty())?;
+    let https = url
+        .get(..8)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"));
+    (allow_any || https).then_some(url)
+}
+
 /// An update the feed found. `handle` is the feed's own record of it, handed back to the feed.
 #[derive(Clone)]
 pub struct AvailableUpdate {
@@ -112,7 +123,7 @@ impl VelopackFeed {
             .ok()
             .map(|m| m.get_current_version_as_string());
         let manager = installed.and_then(|version| {
-            match override_url.filter(|u| !u.is_empty()) {
+            match accepted_override(override_url, cfg!(debug_assertions)) {
                 Some(url) => UpdateManager::new(AutoSource::new(url), None, None),
                 None => UpdateManager::new(
                     GithubSource::new(REPO_URL, None, includes_prereleases(&version)),
@@ -201,6 +212,22 @@ pub fn run_installer_hooks(args: Vec<String>, before_uninstall: impl FnOnce() + 
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn a_release_build_honours_only_an_https_override() {
+        assert_eq!(
+            Some("https://x.test/r"),
+            accepted_override(Some("https://x.test/r"), false)
+        );
+        assert_eq!(None, accepted_override(Some("http://x.test/r"), false));
+        assert_eq!(None, accepted_override(Some(r"C:\Releases"), false));
+        assert_eq!(None, accepted_override(Some("  "), true));
+        assert_eq!(
+            Some(r"C:\Releases"),
+            accepted_override(Some(r"C:\Releases"), true)
+        );
+        assert_eq!(None, accepted_override(None, true));
+    }
 
     #[derive(Default)]
     struct Fake {

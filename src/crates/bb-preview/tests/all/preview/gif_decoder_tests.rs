@@ -232,3 +232,44 @@ fn not_a_gif_is_refused() {
         GifDecoder::probe(b"\x89PNG\r\n\x1a\n").map(|_| ())
     );
 }
+
+#[test]
+fn a_frame_larger_than_the_canvas_is_refused_before_it_is_allocated() {
+    // A 2x2 canvas holding a frame that claims 65535x65535: no data behind it at all.
+    let wider = write_gif(
+        2,
+        2,
+        &[Frame {
+            left: 0,
+            top: 0,
+            width: u16::MAX,
+            height: u16::MAX,
+            indices: vec![],
+            delay_cs: 1,
+            disposal: 0,
+        }],
+    );
+    assert_eq!(
+        Some(GifError::FrameTooLarge),
+        GifDecoder::decode(&wider, &CancelToken::none()).err()
+    );
+
+    // Even a canvas that big does not make 16 GB of pixels one frame's worth.
+    let huge = write_gif(
+        u16::MAX,
+        u16::MAX,
+        &[Frame {
+            left: 0,
+            top: 0,
+            width: u16::MAX,
+            height: u16::MAX,
+            indices: vec![],
+            delay_cs: 1,
+            disposal: 0,
+        }],
+    );
+    assert_eq!(
+        Some(GifError::FrameTooLarge),
+        GifDecoder::decode(&huge, &CancelToken::none()).err()
+    );
+}

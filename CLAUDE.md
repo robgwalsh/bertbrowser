@@ -301,7 +301,11 @@ behavior - this table only says where.
   because a helper started under a previous app has to find the next one; every session **replays**
   `Building`/`Complete` before `Ready`; and one helper per user is enforced by a mutex
   (`IndexerPresenceLock`) because two would tail one journal into one database. The app never launches
-  one at startup - it attaches, and a banner offers the prompt (`IndexerBannerRules`). Nothing supervises
+  one at startup - it attaches, and a banner offers the prompt (`IndexerBannerRules`). **The sign-in task
+  never runs the helper beside the app** (user-writable, and the task is elevated with no prompt): registering
+  copies it to `<Program Files>\BertBrowser` (`mft/installed_helper.rs`), the task passes `--app-dir`, and that
+  copy runs only while byte-identical to the one beside the app, which it reads and never executes. So an
+  update leaves the task `Stale` until re-registered, as does any older registration. Nothing supervises
   the helper, so it stops itself when the schema, its own exe, or `BertBrowser.exe` beside it changes
   (`bb-indexer/src/self_checks.rs`). **The helper measures its own resource use** and pushes raw counters
   (`Usage`, every 2 s while a session is attached): a medium app cannot read a high process's memory, and

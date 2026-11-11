@@ -80,6 +80,11 @@ impl<'r, P: ExtractProbe> ExtractExecutor<'r, P> {
                 .collect();
             let wanted: Vec<String> = files.iter().map(|f| f.entry_path.clone()).collect();
 
+            // The archive's own Mark of the Web, read once. What comes out of a downloaded archive
+            // is as untrusted as the archive, and Explorer carries the stream over the same way.
+            let zone: Option<Vec<u8>> =
+                std::fs::read(format!("{}:Zone.Identifier", plan.archive_file)).ok();
+
             let mut on_entry =
                 |entry_path: &str, content: &mut dyn Read, size: i64| -> Result<(), Cancelled> {
                     let Some(item) = by_entry.get(&fold_upper(entry_path)) else {
@@ -105,6 +110,13 @@ impl<'r, P: ExtractProbe> ExtractExecutor<'r, P> {
                     run.begin_file(size);
                     match write_entry(content, &item.destination_path, size, &mut run) {
                         Ok(copied) => {
+                            if let Some(zone) = &zone {
+                                // Mark of the Web, best effort: never a reason to fail the file.
+                                let _ = std::fs::write(
+                                    format!("{}:Zone.Identifier", item.destination_path),
+                                    zone,
+                                );
+                            }
                             created_files.push(item.destination_path.clone());
                             created.push(item.destination_path.clone());
                             bytes += copied;

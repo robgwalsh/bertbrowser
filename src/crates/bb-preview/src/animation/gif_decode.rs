@@ -33,6 +33,8 @@ pub enum GifError {
     NotAGif,
     /// The logical screen descriptor is missing or the canvas is empty.
     BadHeader,
+    /// A frame larger than the canvas, or whose pixels alone exceed the decoded-bytes limit.
+    FrameTooLarge,
     Cancelled,
 }
 
@@ -47,6 +49,7 @@ impl std::fmt::Display for GifError {
         f.write_str(match self {
             GifError::NotAGif => "not a GIF",
             GifError::BadHeader => "GIF header is unreadable",
+            GifError::FrameTooLarge => "a GIF frame is larger than its canvas",
             GifError::Cancelled => "cancelled",
         })
     }
@@ -143,6 +146,13 @@ impl GifDecoder {
                     min_code_size,
                     data,
                 } => {
+                    if u32::from(width) > reader.width
+                        || u32::from(height) > reader.height
+                        || u64::from(width) * u64::from(height) * 4
+                            > super::AnimationLimits::MAX_DECODED_BYTES
+                    {
+                        return Err(GifError::FrameTooLarge);
+                    }
                     let palette = palette.or(reader.global_palette);
                     let pixels = Self::pixels(
                         width,

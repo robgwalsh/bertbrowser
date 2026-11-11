@@ -135,36 +135,43 @@ impl VolumeAccess for RawVolumeAccess {
 /// One open raw volume.
 pub struct RawVolume {
     file: File,
+    /// The NUL-terminated `\\.\C:` path, kept so journal creation can open its own write handle.
+    path: Vec<u16>,
     last_error: u32,
 }
 
 impl RawVolume {
-    /// Opens `\\.\C:`. Read/write first, since creating a journal needs write; then read-only,
-    /// because querying an existing journal (and reading the MFT) does not, and some volumes deny
-    /// write handles.
+    /// Opens `\\.\C:` read-only. Reading the MFT and querying, enumerating and reading the
+    /// journal (all `FILE_ANY_ACCESS` FSCTLs) need no write access, and a write handle to a raw
+    /// volume is a handle that can overwrite the disk: only [`Self::create_journal`] asks for one,
+    /// for the length of that one call.
     pub fn open(drive_letter: &str) -> Option<RawVolume> {
         let path = to_wide(&format!("\\\\.\\{drive_letter}:"));
-        for access in [GENERIC_READ | GENERIC_WRITE, GENERIC_READ] {
-            let handle = unsafe {
-                CreateFileW(
-                    path.as_ptr(),
-                    access,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE,
-                    null_mut(),
-                    OPEN_EXISTING,
-                    0,
-                    null_mut(),
-                )
-            };
-            if handle != INVALID_HANDLE_VALUE && !handle.is_null() {
-                let owned = unsafe { OwnedHandle::from_raw_handle(handle.cast()) };
-                return Some(RawVolume {
-                    file: File::from(owned),
-                    last_error: 0,
-                });
-            }
+        let file = Self::open_handle(&path, GENERIC_READ)?;
+        Some(RawVolume {
+            file,
+            path,
+            last_error: 0,
+        })
+    }
+
+    fn open_handle(path: &[u16], access: u32) -> Option<File> {
+        let handle = unsafe {
+            CreateFileW(
+                path.as_ptr(),
+                access,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                null_mut(),
+                OPEN_EXISTING,
+                0,
+                null_mut(),
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE || handle.is_null() {
+            return None;
         }
-        None
+        let owned = unsafe { OwnedHandle::from_raw_handle(handle.cast()) };
+        Some(File::from(owned))
     }
 
     fn ioctl(
@@ -174,6 +181,18 @@ impl RawVolume {
         input_size: u32,
         output: &mut [u8],
     ) -> Option<usize> {
+        let (result, error) = Self::ioctl_on(&self.file, code, input, input_size, output);
+        self.last_error = error;
+        result
+    }
+
+    fn ioctl_on(
+        file: &File,
+        code: u32,
+        input: *const c_void,
+        input_size: u32,
+        output: &mut [u8],
+    ) -> (Option<usize>, u32) {
         let mut returned = 0u32;
         let out_ptr: *mut c_void = if output.is_empty() {
             null_mut()
@@ -182,7 +201,7 @@ impl RawVolume {
         };
         let ok = unsafe {
             DeviceIoControl(
-                self.file.as_raw_handle().cast(),
+                file.as_raw_handle().cast(),
                 code,
                 input,
                 input_size,
@@ -193,11 +212,9 @@ impl RawVolume {
             )
         };
         if ok == 0 {
-            self.last_error = unsafe { GetLastError() };
-            return None;
+            return (None, unsafe { GetLastError() });
         }
-        self.last_error = 0;
-        Some(returned as usize)
+        (Some(returned as usize), 0)
     }
 
     fn ioctl_struct<T>(&mut self, code: u32, input: &T, output: &mut [u8]) -> Option<usize> {
@@ -209,13 +226,24 @@ impl RawVolume {
         )
     }
 
+    /// Needs write access, so it opens a handle of its own for this one call and drops it.
     fn create_journal(&mut self) -> bool {
+        let Some(writer) = Self::open_handle(&self.path, GENERIC_READ | GENERIC_WRITE) else {
+            return false;
+        };
         let input = CreateUsnJournalData {
             maximum_size: 32 * 1024 * 1024,
             allocation_delta: 4 * 1024 * 1024,
         };
-        self.ioctl_struct(FSCTL_CREATE_USN_JOURNAL, &input, &mut [])
-            .is_some()
+        let (result, error) = Self::ioctl_on(
+            &writer,
+            FSCTL_CREATE_USN_JOURNAL,
+            (&input as *const CreateUsnJournalData).cast(),
+            std::mem::size_of::<CreateUsnJournalData>() as u32,
+            &mut [],
+        );
+        self.last_error = error;
+        result.is_some()
     }
 }
 

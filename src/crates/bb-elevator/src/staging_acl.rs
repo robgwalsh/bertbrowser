@@ -10,6 +10,7 @@
 //! full-control grant for the account that asked. Verify by hand with `icacls` after an elevated
 //! staged delete: the interactive user must have `(F)`, inherited.
 
+use std::os::windows::fs::MetadataExt;
 use std::ptr::null_mut;
 
 use windows_sys::Win32::Foundation::{ERROR_SUCCESS, LocalFree};
@@ -23,6 +24,7 @@ use windows_sys::Win32::Security::{
     PSECURITY_DESCRIPTOR, PSID,
 };
 
+const REPARSE_POINT: u32 = 0x400;
 const FILE_ALL_ACCESS: u32 = 0x001F_01FF;
 
 /// A grant for the given SID, ready to hand to `ElevationHost::with_grant_access`. Never panics: a
@@ -44,6 +46,13 @@ fn wide(text: &str) -> Vec<u16> {
 }
 
 fn grant(directory: &str, user_sid: &str) -> Result<(), String> {
+    // `SetNamedSecurityInfo` follows a link, so a junction swapped in for a staging folder would
+    // hand the user full control of whatever it points at.
+    match std::fs::symlink_metadata(directory) {
+        Ok(meta) if meta.file_attributes() & REPARSE_POINT == 0 => {}
+        Ok(_) => return Err("it is a link, not a folder".to_string()),
+        Err(error) => return Err(error.to_string()),
+    }
     let sid_text = wide(user_sid);
     let mut sid: PSID = null_mut();
     // SAFETY: NUL-terminated input; the SID is freed with LocalFree below.

@@ -314,6 +314,71 @@ fn an_unreadable_item_refuses_the_whole_request() {
     assert!(!exists(&f.p(&["c.txt"])));
 }
 
+// --- what the token is never used on, checked where the token is ---
+
+fn protected_folder() -> String {
+    std::env::var("SystemRoot").expect("SystemRoot is set on Windows")
+}
+
+#[test]
+fn a_transfer_of_a_protected_folder_is_refused_whole() {
+    let f = Fixture::new();
+    let (host, mut app) = hosted();
+    drain(&mut app, ElevationVerb::Ready);
+    let bystander = f.file("untouched", &["src", "a.txt"]);
+    let dest = f.dir(&["dest"]);
+
+    app.request(
+        &ElevationHost::write(
+            &ElevationHeader::new(ElevationOperation::TransferMove).with_destination(&dest),
+        ),
+        &[
+            ElevationHost::write(&ElevationTransferItem {
+                item: PlannedTransfer::new(&protected_folder(), true, &format!("{dest}\\w"), true),
+                resolution: ConflictResolution::KeepBoth,
+            }),
+            ElevationHost::write(&ElevationTransferItem {
+                item: PlannedTransfer::new(&bystander, false, &format!("{dest}\\a.txt"), false),
+                resolution: ConflictResolution::KeepBoth,
+            }),
+        ],
+    );
+
+    assert!(
+        app.receive_all()
+            .iter()
+            .any(|m| m.verb == ElevationVerb::Fatal)
+    );
+    assert!(join(&host, PATIENCE));
+    assert!(exists(&bystander));
+    assert!(!exists(&format!("{dest}\\a.txt")));
+}
+
+#[test]
+fn a_rename_of_a_protected_folder_is_refused_whole() {
+    let f = Fixture::new();
+    let (host, mut app) = hosted();
+    drain(&mut app, ElevationVerb::Ready);
+    let bystander = f.file("untouched", &["a.txt"]);
+
+    app.request(
+        &header(ElevationOperation::Rename),
+        &[
+            ElevationHost::write(&PlannedRename::new(&protected_folder(), &f.p(&["w"]), true)),
+            f.rename_item("a.txt", "c.txt"),
+        ],
+    );
+
+    assert!(
+        app.receive_all()
+            .iter()
+            .any(|m| m.verb == ElevationVerb::Fatal)
+    );
+    assert!(join(&host, PATIENCE));
+    assert!(exists(&bystander));
+    assert!(!exists(&f.p(&["c.txt"])));
+}
+
 // --- doing the work ---
 
 #[test]

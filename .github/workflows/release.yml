@@ -13,7 +13,7 @@ jobs:
     # Runs take about 40 minutes at most. A hung test otherwise runs for GitHub's 6 hours.
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Derive version from tag
         id: ver
@@ -30,7 +30,7 @@ jobs:
       - name: Pack and upload Velopack release
         shell: pwsh
         run: |
-          dotnet tool install -g vpk
+          dotnet tool install -g vpk --version 1.2.161
           # BertBrowser.exe and the two elevated helpers beside it, nothing else: vpk packs the whole folder.
           pwsh tools/stage-package.ps1 -Out out/release/pack
           # Fetch the previous release (if any) so vpk can build a delta package.
@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: vedantmgoyal9/winget-releaser@v2
+      - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # v2
         with:
           identifier: RobWalsh.BertBrowser
           installers-regex: 'Setup\.exe$'

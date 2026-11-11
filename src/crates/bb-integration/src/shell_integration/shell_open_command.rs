@@ -7,6 +7,8 @@
 //! program with a token, so anything it cannot read confidently is answered with None and the item
 //! is greyed out. Spec: Core/Services/ShellIntegration/ShellOpenCommand.cs.
 
+use crate::launch::escape_trailing_backslashes;
+
 /// A registered open command, split into the program to start and the arguments to give it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShellOpenCommand {
@@ -68,10 +70,34 @@ impl ShellOpenCommandParser {
             }),
             Some(p) => Some(ShellOpenCommand {
                 executable,
-                arguments: arguments.replace(p, file_path),
+                arguments: substitute(&arguments, p, file_path),
             }),
         }
     }
+}
+
+/// `arguments` with each `placeholder` replaced by the path. One that is not already inside double
+/// quotes gets the path quoted when it contains whitespace, or a file name with a space would reach
+/// the handler (elevated, for Run as administrator) as several arguments. One already inside quotes
+/// is left to its template.
+fn substitute(arguments: &str, placeholder: &str, file_path: &str) -> String {
+    let needs_quotes = file_path.contains(char::is_whitespace);
+    let quoted = format!("\"{}\"", escape_trailing_backslashes(file_path));
+    let mut out = String::with_capacity(arguments.len() + file_path.len());
+    let mut from = 0;
+    while let Some(i) = arguments[from..].find(placeholder) {
+        let at = from + i;
+        out.push_str(&arguments[from..at]);
+        let inside_quotes = arguments[..at].matches('"').count() % 2 == 1;
+        out.push_str(if needs_quotes && !inside_quotes {
+            &quoted
+        } else {
+            file_path
+        });
+        from = at + placeholder.len();
+    }
+    out.push_str(&arguments[from..]);
+    out
 }
 
 /// The program and the rest, which is only obvious when the program is quoted. An unquoted path

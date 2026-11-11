@@ -16,14 +16,15 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: dtolnay/rust-toolchain@stable
+    - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       with:
+        toolchain: stable
         components: clippy, rustfmt
 
-    - uses: Swatinem/rust-cache@v2
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
     # Prebuilt binaries rather than compiling them on every run.
-    - uses: taiki-e/install-action@v2
+    - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
       with:
         tool: cbindgen,cargo-hakari
 
@@ -63,11 +64,11 @@ runs:
     # The MSVC environment only from here on: the cargo steps above run without it, as cargo inside
     # the cmake build does (CMakeLists.txt, BB_CARGO_ENV). A C build script reruns when INCLUDE/LIB
     # differ from its last run, and bb-core and everything above it would compile a second time.
-    - uses: ilammy/msvc-dev-cmd@v1
+    - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
       with:
         arch: x64
 
-    - uses: seanmiddleditch/gha-setup-ninja@v5
+    - uses: seanmiddleditch/gha-setup-ninja@96bed6edff20d1dd61ecff9b75cc519d516e6401 # v5
 
     - name: Configure
       shell: pwsh

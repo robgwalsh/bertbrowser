@@ -13,6 +13,7 @@ windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Storage_FileSystem",
+    "Win32_System_LibraryLoader",
     "Win32_System_Pipes",
 ] }
 # The Task Scheduler is COM; the typed interfaces beat hand-declared vtables, where a wrong slot is

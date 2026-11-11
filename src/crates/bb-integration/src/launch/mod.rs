@@ -9,6 +9,6 @@ mod vscode_path;
 #[doc(hidden)]
 pub mod win_path;
 
-pub use command_template::CommandTemplate;
+pub use command_template::{CommandTemplate, escape_trailing_backslashes};
 pub use executable_path::ExecutablePath;
 pub use vscode_path::VsCodePath;
