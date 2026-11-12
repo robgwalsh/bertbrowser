@@ -380,8 +380,8 @@ void MainView::setup_sidebar(DockPanel& browser_dock) {
         auto* head = sidebar_column->emplace<StackPanel>(Orientation::Horizontal, 4.0f);
         head->name = "FolderTreeHeader";
         head->dock = Dock::Top;
-        head->pad = 4;
-        head->height = 28;
+        head->pad = 3;
+        head->height = TabStrip::kHeight;  // level with the tab strip beside it
         head->style.bg = tok::SurfaceBackground;
         auto* title = head->emplace<TextBlock>(L"DRIVES");
         title->style.fg = tok::TextMuted;
@@ -405,6 +405,14 @@ void MainView::setup_sidebar(DockPanel& browser_dock) {
                 if (tree_->is_expanded(id)) tree_->collapse(id);
             }
         };
+    }
+    {
+        // The rule under the header, as the tab strip has one under its row.
+        auto* rule = sidebar_column->emplace<Widget>();
+        rule->name = "FolderTreeHeaderRule";
+        rule->dock = Dock::Top;
+        rule->height = 1;
+        rule->style.bg = tok::BorderDefault;
     }
     tree_ = sidebar_column->emplace<TreeView>();
     tree_->dock = Dock::Fill;

@@ -33,8 +33,8 @@ Rect ScrollBar::thumb() const {
 void ScrollBar::paint(PaintContext& pc) const {
     if (!needed()) return;
     pc.fill(area, tok::ScrollBarBackground);
-    const Rect t = thumb().inflate(-2.0f);
-    pc.fill(t, dragging_ ? tok::ScrollBarThumbHover : tok::ScrollBarThumb);
+    // The thumb fills the track's width: no padding between it and the gutter's edges.
+    pc.fill(thumb(),dragging_ ? tok::ScrollBarThumbHover : tok::ScrollBarThumb);
 }
 
 bool ScrollBar::mouse_down(Point p) {
@@ -224,7 +224,17 @@ void Splitter::arrange(Rect r) {
 
 void Splitter::paint_children(PaintContext& pc) {
     Widget::paint_children(pc);
-    pc.fill(bar(), (dragging_ || hovered()) ? tok::AccentBackground : tok::SplitterBackground);
+    const Rect b = bar();
+    if (dragging_ || hovered()) {
+        pc.fill(b, tok::AccentBackground);
+        return;
+    }
+    pc.fill(b, tok::SplitterBackground);
+    // The themes leave the bar transparent, so draw a one-pixel rule down its middle: the edge between the panes.
+    const bool horiz = orientation == Orientation::Horizontal;
+    pc.fill(horiz ? Rect::xywh(b.l + (b.width() - 1.0f) * 0.5f, b.t, 1.0f, b.height())
+                  : Rect::xywh(b.l, b.t + (b.height() - 1.0f) * 0.5f, b.width(), 1.0f),
+            tok::BorderDefault);
 }
 
 Widget* Splitter::hit_test(Point p) {

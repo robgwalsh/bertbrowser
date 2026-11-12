@@ -215,10 +215,10 @@ TabView::TabView(MainView& main, core::Core& core, uint64_t tab)
 void TabView::setup_nav_bar() {
     BbApp* app = core_.app();
     auto nav = std::make_unique<StackPanel>(Orientation::Horizontal, 2.0f);
-    nav->pad = 4;
+    nav->pad = 3;
     nav->dock = Dock::Top;
     nav->name = "NavBar";
-    nav->style.bg = tok::ToolbarBackground;
+    nav->style.bg = tok::TabActiveBackground;  // the active tab above runs into this row
     nav_ = nav.get();
     // Drawn outlines, as the other toolbar buttons are; the tooltips name the key. Spec: DirectoryTabView.xaml.
     auto button = [&](const IconData& icon, std::function<void()> fn) {
@@ -305,6 +305,12 @@ void TabView::setup_nav_bar() {
         }
     }
     add(std::move(nav));
+    auto rule = std::make_unique<Widget>();
+    rule->name = "NavBarRule";
+    rule->dock = Dock::Top;
+    rule->height = 1;
+    rule->style.bg = tok::BorderDefault;
+    add(std::move(rule));
     apply_icon_size();
 }
 
@@ -316,7 +322,8 @@ void TabView::setup_banners() {
         auto strip = std::make_unique<Panel>();
         strip->name = "ActivityStrip";
         strip->dock = Dock::Top;
-        strip->height = 3;
+        strip->height = 2;
+        strip->style.bg = tok::TabActiveBackground;  // part of the nav row above, not a band between it and the list
         activity_ = strip->emplace<ProgressBar>();
         activity_->name = "ActivityBar";
         activity_->set_visible(false);

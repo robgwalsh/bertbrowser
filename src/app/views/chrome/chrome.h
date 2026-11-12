@@ -43,7 +43,7 @@ public:
     void set_title(std::wstring t);
     void arrange(ui::Rect r) override;
     void paint(ui::PaintContext& pc) override;
-    static constexpr float kHeight = 32.0f;
+    static constexpr float kHeight = 35.0f;
 };
 
 // The tab's status, then what Undo would undo (a link to the history), then the selection; at the right

@@ -311,23 +311,23 @@ TEST(splitter_drag_and_clamp) {
     sp->set_position(200);
     auto* s = rig.set(std::move(sp));
     expect_rect(first->bounds, 0, 0, 200, 300, "first");
-    expect_rect(second->bounds, 205, 0, 600, 300, "second");
-    CHECK(rig.root.hit_test({202, 100}) == s);  // the bar is the splitter's
+    expect_rect(second->bounds, 203, 0, 600, 300, "second");
+    CHECK(rig.root.hit_test({201, 100}) == s);  // the bar is the splitter's
     CHECK(rig.root.hit_test({100, 100}) == first);
-    CHECK(s->cursor_at({202, 100}) == Cursor::SizeWE);
+    CHECK(s->cursor_at({201, 100}) == Cursor::SizeWE);
     float moved = 0;
     s->on_moved = [&](float p) { moved = p; };
-    rig.down({202, 100});
-    rig.move({302, 100});
+    rig.down({201, 100});
+    rig.move({301, 100});
     CHECK_NEAR(s->position(), 300.0, 0.01);
     CHECK_NEAR(moved, 300.0, 0.01);
     rig.move({5, 100});
     CHECK_NEAR(s->position(), s->min_first, 0.01);  // clamped
     rig.move({900, 100});
-    CHECK_NEAR(s->position(), 600.0 - 5 - s->min_second, 0.01);
+    CHECK_NEAR(s->position(), 600.0 - 3 - s->min_second, 0.01);
     rig.up({900, 100});
     rig.relayout();
-    expect_rect(first->bounds, 0, 0, 555, 300, "first after drag");
+    expect_rect(first->bounds, 0, 0, 557, 300, "first after drag");
     // A vertical splitter divides top from bottom.
     Rig rig2(300, 400);
     auto sp2 = std::make_unique<Splitter>(Orientation::Vertical);
@@ -336,7 +336,7 @@ TEST(splitter_drag_and_clamp) {
     sp2->set_position(100);
     rig2.set(std::move(sp2));
     expect_rect(top->bounds, 0, 0, 300, 100, "top");
-    expect_rect(bottom->bounds, 0, 105, 300, 400, "bottom");
+    expect_rect(bottom->bounds, 0, 103, 300, 400, "bottom");
 }
 
 TEST(tree_view_expand_collapse_and_virtualisation) {

@@ -319,10 +319,10 @@ TabStrip::TabStrip() {
 }
 
 void TabStrip::sync_bar() {
-    const float room = std::max(0.0f, bounds.r - kButtons - 4 - (bounds.l + 4));
+    const float room = std::max(0.0f, bounds.r - kButtons - 4 - (bounds.l));
     h_.extent = tabs_width();
     h_.viewport = room;
-    h_.area = Rect{bounds.l + 4, bounds.b - 5, bounds.l + 4 + room, bounds.b - 1};
+    h_.area = Rect{bounds.l, bounds.b - 5, bounds.l + room, bounds.b - 1};
     h_.set_offset(scroll_);
 }
 
@@ -350,7 +350,24 @@ void TabStrip::paint(PaintContext& pc) {
     h_.paint(pc);
     const float rule = new_tab_->bounds.r + 5.5f;
     pc.line({rule, bounds.t + 8}, {rule, bounds.b - 8}, tok::BorderSubtle);
-    pc.line({bounds.l, bounds.b - 0.5f}, {bounds.r, bounds.b - 0.5f}, tok::TabBorder);
+    // The rule under the strip stops at the active tab, so that tab runs straight into the page below it.
+    float gap_l = bounds.l, gap_r = bounds.l;
+    for (size_t i = 0; i < tabs_.size(); ++i) {
+        if (!tabs_[i].active) continue;
+        const Rect r = tab_rect(i);
+        gap_l = std::max(r.l, bounds.l);
+        gap_r = std::min(r.r, tabs_right());
+        // Its two sides, so it reads as the top of the page below rather than a swatch on the strip.
+        if (r.l >= bounds.l) pc.fill(Rect{r.l, r.t, r.l + 1.0f, r.b}, tok::BorderDefault);
+        if (r.r <= tabs_right()) pc.fill(Rect{r.r - 1.0f, r.t, r.r, r.b}, tok::BorderDefault);
+    }
+    const float y = bounds.b - 0.5f;
+    if (gap_r <= gap_l) {
+        pc.line({bounds.l, y}, {bounds.r, y}, tok::BorderDefault);
+    } else {
+        pc.line({bounds.l, y}, {gap_l, y}, tok::BorderDefault);
+        pc.line({gap_r, y}, {bounds.r, y}, tok::BorderDefault);
+    }
 }
 
 
@@ -381,11 +398,11 @@ float TabStrip::tabs_width() const {
 }
 
 float TabStrip::tabs_right() const {
-    return std::min(bounds.l + 4 + tabs_width() - scroll_, bounds.r - kButtons - 4);
+    return std::min(bounds.l + tabs_width() - scroll_, bounds.r - kButtons - 4);
 }
 
 void TabStrip::clamp_scroll() {
-    const float room = bounds.r - kButtons - 4 - (bounds.l + 4);
+    const float room = bounds.r - kButtons - 4 - (bounds.l);
     scroll_ = std::clamp(scroll_, 0.0f, std::max(0.0f, tabs_width() - room));
 }
 
@@ -394,16 +411,16 @@ void TabStrip::reveal_active() {
         if (!tabs_[i].active) continue;
         const Rect r = tab_rect(i);
         const float right = bounds.r - kButtons - 4;
-        if (r.l < bounds.l + 4) scroll_ -= bounds.l + 4 - r.l;
+        if (r.l < bounds.l) scroll_ -= bounds.l - r.l;
         else if (r.r > right) scroll_ += r.r - right;
     }
     clamp_scroll();
 }
 
 Rect TabStrip::tab_rect(size_t i) const {
-    float x = bounds.l + 4 - scroll_;
+    float x = bounds.l - scroll_;
     for (size_t k = 0; k < i && k < tabs_.size(); ++k) x += tab_width(k) + 2;
-    return Rect{x, bounds.t + 3, x + (i < tabs_.size() ? tab_width(i) : 0), bounds.b};
+    return Rect{x, bounds.t, x + (i < tabs_.size() ? tab_width(i) : 0), bounds.b};
 }
 
 size_t TabStrip::index_at(Point p) const {
@@ -616,7 +633,7 @@ void BreadcrumbBar::lay_out() {
         --first;
     }
     more_left_ = first > 0;
-    float x = bounds.l + 4 + (more_left_ ? dots : 0);
+    float x = bounds.l + (more_left_ ? dots : 0);
     for (size_t i = first; i < end; ++i) {
         if (i > first) x += sep;
         segs_.push_back({i, Rect{x, bounds.t + 2, x + widths[i], bounds.b - 2}});
@@ -634,7 +651,7 @@ size_t BreadcrumbBar::seg_at(Point p) const {
 void BreadcrumbBar::paint(PaintContext& pc) {
     if (!laid_out_) lay_out();
     pc.fill(bounds, tok::InputBackground);
-    pc.stroke(bounds, tok::InputBorder);
+    if (focused()) pc.stroke(bounds, tok::InputBorder);  // an edge only while it is the selected field
     if (more_left_) pc.text(L"\u2026", Rect{bounds.l + 6, bounds.t, bounds.l + 20, bounds.b}, gfx::FontSpec{}, tok::TextMuted);
     if (more_right_ && !segs_.empty()) {
         const float x = segs_.back().rect.r + 4;

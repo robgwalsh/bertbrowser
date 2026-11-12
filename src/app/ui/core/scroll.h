@@ -83,7 +83,7 @@ class Splitter : public Widget {
 public:
     explicit Splitter(Orientation o = Orientation::Horizontal) : orientation(o) {}
     Orientation orientation;
-    float thickness = 5.0f;
+    float thickness = 3.0f;
     float min_first = 40.0f, min_second = 40.0f;
     std::function<void(float)> on_moved;  // the first pane's new size
     std::function<void()> on_released;    // a drag of the bar ended
