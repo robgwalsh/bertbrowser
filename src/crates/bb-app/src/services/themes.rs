@@ -141,6 +141,29 @@ fn argb(c: ThemeColor) -> u32 {
     u32::from(c.a) << 24 | u32::from(c.r) << 16 | u32::from(c.g) << 8 | u32::from(c.b)
 }
 
+/// The colours a Settings preview tile paints a theme with, as ARGB, in this order: window, panel, toolbar, title
+/// bar, active tab, inactive tab, accent, selected row, text, muted text, border. The theme as shipped or saved,
+/// not the colour tweaks in force: a tile shows what choosing that theme gives.
+fn preview_colors(st: &ThemeState, t: &ThemeDefinition) -> Vec<u32> {
+    let resolved = ThemeResolver::resolve(t, |id| st.find(id));
+    [
+        ThemeToken::WindowBackground,
+        ThemeToken::SurfaceBackground,
+        ThemeToken::SurfaceRaised,
+        ThemeToken::TitleBarBackground,
+        ThemeToken::TabActiveBackground,
+        ThemeToken::TabInactiveBackground,
+        ThemeToken::AccentBackground,
+        ThemeToken::ListSelectedBackground,
+        ThemeToken::TextPrimary,
+        ThemeToken::TextMuted,
+        ThemeToken::BorderDefault,
+    ]
+    .into_iter()
+    .map(|k| argb(resolved.color(k)))
+    .collect()
+}
+
 impl Inner {
     /// First run of the service: find the themes, decide whether to follow Windows, apply.
     pub(crate) fn theme_initialize(&self) {
@@ -635,6 +658,7 @@ impl Inner {
             "available": st.available.iter().map(|t| json!({
                 "id": t.id, "name": t.name, "isDark": t.is_dark, "builtIn": t.is_built_in,
                 "current": ids_equal(&t.id, &st.definition_id),
+                "preview": preview_colors(&st, t),
             })).collect::<Vec<_>>(),
             "overridden": st.overrides.keys().collect::<Vec<_>>(),
             "dirty": st.overrides != st.persisted,

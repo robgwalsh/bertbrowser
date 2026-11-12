@@ -124,6 +124,96 @@ public:
 
 // A row that turns the wheel over it into steps: the Columns page's width ("Scroll a width to change it"), Ctrl
 // for one DIP at a time. Spec: SettingsView.xaml.cs (ColumnWidth_Wheel).
+// One theme drawn small, as the app itself is arranged (title bar, tabs, toolbar, sidebar, a list with a selected
+// row), in that theme's own colours. The colours are literal ARGB because the point is to show a theme that is not
+// the one applied; every other colour here (name, focus, selection ring) is a token of the applied theme.
+class ThemeTile : public Widget {
+public:
+    static constexpr float kW = 156.0f, kPreviewH = 88.0f, kNameH = 22.0f;
+    // 0xAARRGGBB, in the order the core sends them: window, panel, toolbar, title bar, active tab, inactive tab,
+    // accent, selected row, text, muted text, border (`Appearance` in `themes.rs`, `preview_colors`).
+    std::vector<uint32_t> colors;
+    std::wstring label;
+    bool selected = false;
+    std::function<void()> on_pick;
+
+    ThemeTile() {
+        flags.focusable = true;
+        flags.tab_stop = true;
+    }
+    Size measure(Size) override { return {kW, kPreviewH + kNameH}; }
+    void paint(PaintContext& pc) override {
+        const Rect pr{bounds.l, bounds.t, bounds.r, bounds.t + kPreviewH};
+        if (colors.size() >= 11) {
+            auto fill = [&](const Rect& r, size_t i) {
+                ComPtr<ID2D1SolidColorBrush> b;
+                const uint32_t c = colors[i];
+                pc.dc->CreateSolidColorBrush(D2D1::ColorF(c & 0xFFFFFF, static_cast<float>(c >> 24) / 255.0f), &b);
+                if (b) pc.dc->FillRectangle(r.d2d(), b.Get());
+            };
+            enum { Window, Panel, Toolbar, Title, TabOn, TabOff, Accent, Sel, Text, Muted, Border };
+            // colors[] is in the order the core sends: window, panel, toolbar, title, tab on, tab off, accent, sel, text, muted, border.
+            const float l = pr.l + 2, r = pr.r - 2, w = r - l;
+            fill(pr, Window);
+            fill(Rect{pr.l, pr.t, pr.r, pr.t + 11}, Title);
+            fill(Rect{pr.l + 6, pr.t + 4, pr.l + 30, pr.t + 7}, Muted);
+            fill(Rect{pr.l, pr.t + 11, pr.r, pr.t + 25}, Panel);
+            fill(Rect{l + 2, pr.t + 13, l + 42, pr.t + 25}, TabOn);
+            fill(Rect{l + 2, pr.t + 23, l + 42, pr.t + 25}, Accent);
+            fill(Rect{l + 44, pr.t + 15, l + 80, pr.t + 25}, TabOff);
+            fill(Rect{pr.l, pr.t + 25, pr.r, pr.t + 35}, Toolbar);
+            for (int i = 0; i < 4; ++i) fill(Rect{l + 4 + i * 12.0f, pr.t + 28, l + 11 + i * 12.0f, pr.t + 32}, Muted);
+            const float sb = std::floor(w * 0.26f);
+            fill(Rect{pr.l, pr.t + 35, l + sb, pr.b}, Panel);
+            for (int i = 0; i < 4; ++i) fill(Rect{l + 4, pr.t + 40 + i * 11.0f, l + sb - 6 - (i % 2) * 6, pr.t + 43 + i * 11.0f}, i == 0 ? Accent : Muted);
+            for (int i = 0; i < 5; ++i) {
+                const float y = pr.t + 38 + i * 10.0f;
+                if (y + 9 > pr.b) break;
+                if (i == 1) fill(Rect{l + sb + 2, y, r, y + 9}, Sel);
+                fill(Rect{l + sb + 6, y + 3, l + sb + 6 + (w - sb) * (0.35f + 0.12f * ((i * 3) % 4)), y + 6}, i == 1 ? Text : Muted);
+            }
+            fill(Rect{pr.l, pr.t, pr.r, pr.t + 1}, Border);
+            fill(Rect{pr.l, pr.b - 1, pr.r, pr.b}, Border);
+            fill(Rect{pr.l, pr.t, pr.l + 1, pr.b}, Border);
+            fill(Rect{pr.r - 1, pr.t, pr.r, pr.b}, Border);
+        }
+        if (selected) {
+            pc.stroke(Rect{pr.l - 3, pr.t - 3, pr.r + 3, pr.b + 3}, tok::BorderFocus, 2.0f);
+        } else if (hovered()) {
+            pc.stroke(Rect{pr.l - 2, pr.t - 2, pr.r + 2, pr.b + 2}, tok::BorderDefault, 1.0f);
+        }
+        if (focused()) pc.stroke(bounds, tok::BorderFocus);
+        pc.text(label, Rect{bounds.l, pr.b + 4, bounds.r, bounds.b}, style.font, selected ? tok::TextPrimary : tok::TextSecondary);
+    }
+    bool on_mouse_down(const MouseEvent& e) override {
+        if (e.button != MouseButton::Left) return false;
+        pressed_ = true;
+        root()->capture(this);
+        return true;
+    }
+    bool on_mouse_up(const MouseEvent& e) override {
+        if (e.button != MouseButton::Left) return false;
+        const bool was = pressed_;
+        pressed_ = false;
+        if (was && bounds.contains(e.pt) && on_pick) on_pick();
+        return true;
+    }
+    bool on_key_down(const KeyEvent& e) override {
+        if ((e.vk == VK_SPACE || e.vk == VK_RETURN) && on_pick) {
+            on_pick();
+            return true;
+        }
+        return false;
+    }
+    void on_mouse_enter() override { invalidate(); }
+    void on_mouse_leave() override { invalidate(); }
+    void on_focus(bool) override { invalidate(); }
+    Cursor cursor_at(Point) const override { return Cursor::Hand; }
+
+private:
+    bool pressed_ = false;
+};
+
 class WheelRow : public StackPanel {
 public:
     WheelRow() : StackPanel(Orientation::Horizontal, 8.0f) {}
@@ -939,6 +1029,28 @@ void SettingsView::page_appearance(Widget& p) {
         if (available[i]["id"].str() == th["lightSlot"].str()) light = static_cast<int>(i);
         if (available[i]["id"].str() == th["darkSlot"].str()) dark = static_cast<int>(i);
     }
+    // A grid of preview tiles for the themes in `shown` (ids, in order); a click on one runs `pick(id)`.
+    auto theme_tiles = [&](Widget& parent, const json::Value& all, const std::vector<std::string>& shown, const std::string& selected,
+                           const std::string& prefix, std::function<void(const std::string&)> pick) {
+        constexpr size_t kPerRow = 4;
+        StackPanel* line = nullptr;
+        size_t n = 0;
+        for (const std::string& id : shown) {
+            for (size_t i = 0; i < all.size(); ++i) {
+                if (all[i]["id"].str() != id) continue;
+                if (n++ % kPerRow == 0) line = f::row(parent, 12);
+                auto* tile = line->emplace<ThemeTile>();
+                tile->label = core::wide(all[i]["name"].str());
+                tile->selected = id == selected;
+                tile->name = prefix + "Tile." + id;
+                tile->tooltip = tile->label;
+                const json::Value& pv = all[i]["preview"];
+                for (size_t k = 0; k < pv.size(); ++k) tile->colors.push_back(static_cast<uint32_t>(pv[k].i64()));
+                tile->on_pick = [pick, id] { pick(id); };
+                break;
+            }
+        }
+    };
     if (following) {
         const bool os_dark = th["appearance"]["dark"].boolean();
         const bool hc = th["appearance"]["highContrast"].boolean();
@@ -947,6 +1059,9 @@ void SettingsView::page_appearance(Widget& p) {
                                 : L"Windows is set to light, so BertBrowser is showing the light theme below.");
         auto* r1 = f::row(p);
         f::row_label(*r1, L"Light theme", 160);
+        f::button(*r1, L"Customise colours…", [this] { customise_colours(); })->tooltip =
+            L"Edit any colour in the theme currently in use and save it as your own";
+        std::vector<std::string> light_ids, dark_ids;
         // Light themes for the light slot and dark for the dark. Spec: SystemThemeRules.SlotChoices.
         auto slot_list = [&](const json::Value& allowed, const std::string& held, std::vector<std::wstring>* labels, std::vector<std::string>* keys) {
             int at = -1;
@@ -961,38 +1076,34 @@ void SettingsView::page_appearance(Widget& p) {
             return at;
         };
         std::vector<std::wstring> light_names, dark_names;
-        std::vector<std::string> light_ids, dark_ids;
-        const int light_at = slot_list(th["lightChoices"], th["lightSlot"].str(), &light_names, &light_ids);
-        const int dark_at = slot_list(th["darkChoices"], th["darkSlot"].str(), &dark_names, &dark_ids);
+        slot_list(th["lightChoices"], th["lightSlot"].str(), &light_names, &light_ids);
+        slot_list(th["darkChoices"], th["darkSlot"].str(), &dark_names, &dark_ids);
         (void)light;
         (void)dark;
-        auto* c1 = f::combo(*r1, light_names, light_at, 240, [this, light_ids](int i) {
+        theme_tiles(p, available, light_ids, th["lightSlot"].str(), "LightTheme", [this](const std::string& id) {
             BbOwnedStr o{};
-            if (i >= 0 && bb_theme_do(core_.app(), core::s(L"slot"), core::s(L"light " + core::wide(light_ids[static_cast<size_t>(i)])), &o) == BB_OK) bb_str_free(o);
+            if (bb_theme_do(core_.app(), core::s(L"slot"), core::s(L"light " + core::wide(id)), &o) == BB_OK) bb_str_free(o);
         });
-        c1->name = "LightThemeCombo";
-        f::button(*r1, L"Customise colours…", [this] { customise_colours(); })->tooltip =
-            L"Edit any colour in the theme currently in use and save it as your own";
+        f::gap(p, 6);
         auto* r2 = f::row(p);
         f::row_label(*r2, L"Dark theme", 160);
-        auto* c2 = f::combo(*r2, dark_names, dark_at, 240, [this, dark_ids](int i) {
-            BbOwnedStr o{};
-            if (i >= 0 && bb_theme_do(core_.app(), core::s(L"slot"), core::s(L"dark " + core::wide(dark_ids[static_cast<size_t>(i)])), &o) == BB_OK) bb_str_free(o);
-        });
-        c2->name = "DarkThemeCombo";
         f::button(*r2, L"Customise colours…", [this] { customise_colours(); })->tooltip =
             L"Edit any colour in the theme currently in use and save it as your own";
+        theme_tiles(p, available, dark_ids, th["darkSlot"].str(), "DarkTheme", [this](const std::string& id) {
+            BbOwnedStr o{};
+            if (bb_theme_do(core_.app(), core::s(L"slot"), core::s(L"dark " + core::wide(id)), &o) == BB_OK) bb_str_free(o);
+        });
     } else {
         auto* r = f::row(p);
         f::row_label(*r, L"Theme", 160);
-        auto* c = f::combo(*r, names, current, 240, [this, ids](int i) {
-            BbOwnedStr o{};
-            if (i >= 0 && bb_theme_do(core_.app(), core::s(L"select"), core::s(core::wide(ids[static_cast<size_t>(i)])), &o) == BB_OK) bb_str_free(o);
-        });
-        c->name = "ThemeCombo";
         f::button(*r, L"Customise colours…", [this] { customise_colours(); })->tooltip =
             L"Edit any colour in this theme and save it as your own";
+        theme_tiles(p, available, ids, th["id"].str(), "Theme", [this](const std::string& id) {
+            BbOwnedStr o{};
+            if (bb_theme_do(core_.app(), core::s(L"select"), core::s(core::wide(id)), &o) == BB_OK) bb_str_free(o);
+        });
     }
+    (void)current;
     (void)theme_do;
     for (size_t i = 0; i < th["issues"].size(); ++i) f::text(p, core::wide(th["issues"][i].str()), tok::WarningForeground, 13.0f)->wrap = true;
     f::gap(p, 6);
