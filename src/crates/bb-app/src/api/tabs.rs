@@ -361,6 +361,48 @@ impl App {
         self.inner.open_request(request)
     }
 
+    /// The banner of a tab choosing a file for another program, `{mode, title, filter, name,
+    /// canAnswer, why}`, or `null` for a tab that is not.
+    pub fn tab_pick_json(&self, tab: TabId) -> String {
+        self.inner.pick_json(tab).to_string()
+    }
+
+    /// `choose` (the selected file), `save` (`name`, in the folder shown) or `cancel`. An `Err` is
+    /// words for the status line; the question stays open.
+    pub fn tab_pick_do(&self, tab: TabId, verb: &str, name: &str) -> AppResult<()> {
+        let outcome = self.inner.pick_do(tab, verb, name);
+        if let Err(AppError::Invalid(why)) = &outcome {
+            self.inner.set_status(tab, why.clone());
+        }
+        outcome
+    }
+
+    /// The harness's `pick`: a command line, one argument per line, parsed and applied exactly as
+    /// a second launch's would be. Refused outside the harness's seams, whose reply channel is a
+    /// recorder; the product only ever takes a request from a real launch.
+    pub fn harness_launch_args(&self, lines: &str) -> AppResult<()> {
+        if self.probes().is_none() {
+            return Err(AppError::Invalid(
+                "launch arguments can only be posed with the harness's seams".into(),
+            ));
+        }
+        let args: Vec<&str> = lines.lines().collect();
+        let request = bb_core::cli::CommandLine::parse(&args);
+        if let Some(why) = request.errors.first() {
+            return Err(AppError::Invalid(why.clone()));
+        }
+        self.inner.open_request(&request)
+    }
+
+    /// The harness's `pose-asker-gone`: every program waiting on a pick has stopped waiting.
+    pub fn harness_pose_askers_gone(&self) -> AppResult<()> {
+        let probes = self
+            .probes()
+            .ok_or_else(|| AppError::Invalid("pose-asker-gone needs the harness's seams".into()))?;
+        probes.pose_askers_gone();
+        Ok(())
+    }
+
     /// Puts a sentence on the active tab's status line, for something the host did on its own.
     pub fn post_status(&self, text: &str) {
         self.inner.set_active_status(text);
@@ -480,6 +522,7 @@ impl Inner {
                     "error": t.error,
                     "empty": t.empty_message,
                     "notice": t.notice,
+                    "pick": t.pick.as_ref().map(|p| p.request.mode.name()),
                     "sortBy": t.sort_by,
                     "sortDescending": t.sort_desc,
                     "thumbnailScale": t.thumbnail_scale,
@@ -524,6 +567,14 @@ impl Inner {
                 "done": p.done, "total": p.total, "current": p.current_name, "bytes": p.bytes_done,
             })),
             "launches": self.probes.as_ref().map(|p| p.launches().len()).unwrap_or(0),
+            "replies": self.probes.as_ref().map(|p| p.replies().into_iter().map(|(pipe, reply)| match reply {
+                crate::seams::PosedReply::Waiting => json!({"pipe": pipe, "state": "waiting"}),
+                crate::seams::PosedReply::Cancelled => json!({"pipe": pipe, "state": "cancelled"}),
+                crate::seams::PosedReply::Answered(path) => json!({"pipe": pipe, "state": "answered", "path": path}),
+            }).collect::<Vec<_>>()),
+            "lastLaunch": self.probes.as_ref().and_then(|p| p.launch_requests().pop()).map(|r| json!({
+                "file": r.file, "arguments": r.arguments, "workingDirectory": r.working_directory,
+            })),
             "ui": self.ui_json(),
             "index": self.index_json(),
             "settingsProblem": self.settings_problem(),

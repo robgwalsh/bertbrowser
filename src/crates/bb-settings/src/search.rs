@@ -132,6 +132,17 @@ impl SettingsIndex {
             &["content search", "content:", "size limit", "bytes"],
         ),
         entry(
+            "preview",
+            "BertCut location",
+            &[
+                "video editor",
+                "edit video",
+                "edit in bertcut",
+                "bertcut.exe",
+                "program path",
+            ],
+        ),
+        entry(
             "search-index",
             "Search index",
             &[

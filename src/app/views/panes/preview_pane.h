@@ -157,7 +157,7 @@ private:
     // chrome
     ui::TextBlock *title_ = nullptr, *subtitle_ = nullptr, *footer_ = nullptr, *gif_time_ = nullptr, *message_ = nullptr;
     ui::Button *fit_width_ = nullptr, *auto_ = nullptr, *raw_ = nullptr, *hex_ = nullptr, *fit_ = nullptr, *wrap_ = nullptr,
-               *copy_ = nullptr, *gif_play_ = nullptr;
+               *copy_ = nullptr, *edit_ = nullptr, *gif_play_ = nullptr;
     ui::StackPanel* actions_ = nullptr;
     ui::Panel* footer_box_ = nullptr;
     ui::Panel* mode_box_ = nullptr;

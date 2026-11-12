@@ -59,6 +59,7 @@ const UI_OWNED: &[&str] = &[
     "file.run-as-admin",
     "file.open-terminal",
     "file.open-vscode",
+    "file.edit-in-bertcut",
     "file.new-folder",
     "file.new-file",
     "file.rename",
@@ -192,6 +193,7 @@ pub(crate) struct Ctx {
     selected_files: usize,
     single_folder: Option<String>,
     single_is_archive: bool,
+    single_is_video: bool,
     single_runnable: bool,
     all_bookmarked: bool,
     search_text: String,
@@ -332,6 +334,7 @@ impl Inner {
             selected_files: 0,
             single_folder: None,
             single_is_archive: false,
+            single_is_video: false,
             single_runnable: false,
             all_bookmarked: false,
             search_text: String::new(),
@@ -472,6 +475,8 @@ impl Inner {
                             ctx.single_folder = Some(row.full_path.clone());
                         } else {
                             ctx.single_is_archive = ArchiveFormats::is_archive_name(&row.name);
+                            ctx.single_is_video =
+                                bb_core::preview::PreviewClassifier::is_video(&row.name);
                             let lower = row.name.to_lowercase();
                             // The launcher knows the registry; without one the well-known list.
                             ctx.single_runnable = self
@@ -490,6 +495,7 @@ impl Inner {
             if ctx.selected != 1 {
                 ctx.single_folder = None;
                 ctx.single_is_archive = false;
+                ctx.single_is_video = false;
                 ctx.single_runnable = false;
             }
             selected_paths = paths;
@@ -600,6 +606,7 @@ impl Inner {
         );
         s.comparing = ctx.comparing;
         s.single_is_archive = ctx.single_is_archive;
+        s.single_is_video = ctx.single_is_video;
         s.archive_locked = ctx.archive_locked;
         s.all_bookmarked = ctx.all_bookmarked;
         s
@@ -864,6 +871,7 @@ fn file_verb_of(id: &str) -> Option<FileVerb> {
         "file.open-new-tab" => FileVerb::OpenInNewTab,
         "file.open-terminal" => FileVerb::OpenInTerminal,
         "file.open-vscode" => FileVerb::OpenInVSCode,
+        "file.edit-in-bertcut" => FileVerb::EditInBertCut,
         "file.rename" => FileVerb::Rename,
         "file.delete" => FileVerb::Delete,
         "file.properties" => FileVerb::Properties,
@@ -890,6 +898,7 @@ fn caption_in(ctx: &Ctx, id: &str) -> Option<String> {
         comparing: ctx.comparing,
         all_bookmarked: ctx.all_bookmarked,
         single_is_archive: ctx.single_is_archive,
+        single_is_video: ctx.single_is_video,
         ..FileVerbSnapshot::new(
             ctx.selected,
             ctx.selected_files,

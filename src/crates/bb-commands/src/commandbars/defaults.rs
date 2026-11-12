@@ -80,6 +80,7 @@ fn file() -> BarItem {
                     sep(),
                     cc("file.open-terminal", "Terminal"),
                     cc("file.open-vscode", "VS Code"),
+                    cc("file.edit-in-bertcut", "BertCut"),
                 ],
             ),
             sep(),

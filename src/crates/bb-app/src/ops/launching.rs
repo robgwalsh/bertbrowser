@@ -21,7 +21,7 @@ use crate::ids::{AppError, AppResult};
 pub fn is_launch_command(id: &str) -> bool {
     matches!(
         id,
-        "file.run-as-admin" | "file.open-terminal" | "file.open-vscode"
+        "file.run-as-admin" | "file.open-terminal" | "file.open-vscode" | "file.edit-in-bertcut"
     ) || id.starts_with("custom:")
 }
 
@@ -114,6 +114,50 @@ pub(crate) fn vscode_request(
     })
 }
 
+/// The video editor this app hands a video to: BertCut, a separate program the user may or may not
+/// have. Its pack id and exe name are the contract between the two apps.
+pub(crate) const BERTCUT_PACK_ID: &str = "BertCut";
+pub(crate) const BERTCUT_EXE: &str = "BertCut.exe";
+
+/// What the status line says while the host asks where BertCut is.
+pub(crate) const BERTCUT_UNKNOWN: &str =
+    "BertCut was not found: choose BertCut.exe to edit videos.";
+
+/// Which BertCut to start: the one the user named, while that file is still there, and the
+/// installed copy otherwise - so a path that went stale (BertCut moved, a drive unplugged) falls
+/// back to looking rather than failing, and None is the only answer that asks the user.
+pub(crate) fn bertcut_exe(
+    chosen: Option<&str>,
+    is_file: &dyn Fn(&str) -> bool,
+    installed: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    let chosen = chosen.map(|p| p.trim().trim_matches('"')).unwrap_or("");
+    if !chosen.is_empty() && std::path::Path::new(chosen).is_absolute() && is_file(chosen) {
+        return Some(chosen.to_string());
+    }
+    installed()
+}
+
+/// BertCut on one video. `bertcut` is where it is, or None when nothing knows; a second
+/// launch hands the file to the copy already open, which is BertCut's business and not ours.
+pub(crate) fn bertcut_request(
+    target: &Target,
+    bertcut: Option<String>,
+) -> Result<LaunchRequest, String> {
+    if target.is_directory {
+        return Err("Select one video.".to_string());
+    }
+    let Some(exe) = bertcut else {
+        return Err(BERTCUT_UNKNOWN.to_string());
+    };
+    Ok(LaunchRequest {
+        file: exe,
+        arguments: format!("\"{}\"", escape_trailing_backslashes(&target.path)),
+        working_directory: target.folder(),
+        ..LaunchRequest::default()
+    })
+}
+
 /// The user's command, once per target it applies to. `Ok(vec![])` when it applies to none of them.
 pub(crate) fn custom_requests(
     command: &CustomCommandDefinition,
@@ -189,6 +233,20 @@ impl Inner {
         self.seams.launcher.start(request)
     }
 
+    /// Where BertCut is - the user's own answer first, the installed copy second - or None.
+    pub(crate) fn bertcut(&self) -> Option<String> {
+        let chosen = lock(&self.settings).bertcut_path.clone();
+        bertcut_exe(
+            chosen.as_deref(),
+            &|p| std::path::Path::new(p).is_file(),
+            || {
+                self.seams
+                    .launcher
+                    .installed_app(BERTCUT_PACK_ID, BERTCUT_EXE)
+            },
+        )
+    }
+
     /// Runs one of the commands the host cannot run itself because it needs the selection. The
     /// outcome is the status line's; an `Err` is only for an id that is not one of these.
     pub(crate) fn run_launch_command(self: &Arc<Self>, id: &str) -> AppResult<()> {
@@ -249,6 +307,20 @@ impl Inner {
                 )
                 .and_then(|r| self.start(&r))
                 .map(|()| String::new()),
+            },
+            "file.edit-in-bertcut" => match targets {
+                [one] => {
+                    let bertcut = self.bertcut();
+                    if bertcut.is_none() && !one.is_directory {
+                        // Nothing knows where it is: the host asks, keeps the answer and runs
+                        // this again. The status line says so for a host with nobody to ask.
+                        self.hub.model(crate::events::Model::LocateBertCut);
+                    }
+                    bertcut_request(one, bertcut)
+                        .and_then(|r| self.start(&r))
+                        .map(|()| format!("Opened {} in BertCut", bb_paths::file_name(&one.path)))
+                }
+                _ => Err("Select one video.".to_string()),
             },
             custom => match self.custom_command(custom) {
                 None => Err(format!("'{custom}' is not a command.")),
@@ -404,6 +476,51 @@ mod tests {
         );
     }
 
+    #[test]
+    fn bertcut_is_handed_the_video_quoted_and_started_in_its_folder() {
+        let r = bertcut_request(
+            &file(r"C:\my clips\a b.mp4"),
+            Some(r"C:\L\BertCut\current\BertCut.exe".to_string()),
+        )
+        .unwrap();
+        assert_eq!(r"C:\L\BertCut\current\BertCut.exe", r.file);
+        assert_eq!(r#""C:\my clips\a b.mp4""#, r.arguments);
+        assert_eq!(r"C:\my clips", r.working_directory);
+        assert!(!r.elevated);
+    }
+
+    #[test]
+    fn the_users_own_bertcut_wins_while_it_is_still_there() {
+        let there = |p: &str| p == r"D:\Tools\BertCut.exe";
+        let installed = || Some(r"C:\L\BertCut\current\BertCut.exe".to_string());
+        assert_eq!(
+            Some(r"D:\Tools\BertCut.exe".to_string()),
+            bertcut_exe(Some(r#" "D:\Tools\BertCut.exe" "#), &there, installed)
+        );
+        // Gone, never said, blank, or not a full path: the installed copy, and None only without one.
+        for chosen in [
+            Some(r"E:\Gone\BertCut.exe"),
+            None,
+            Some("  "),
+            Some("BertCut.exe"),
+        ] {
+            assert_eq!(installed(), bertcut_exe(chosen, &|_| false, installed));
+            assert_eq!(None, bertcut_exe(chosen, &|_| false, || None));
+        }
+    }
+
+    #[test]
+    fn bertcut_that_is_not_installed_is_said_and_nothing_is_started() {
+        assert_eq!(
+            BERTCUT_UNKNOWN,
+            bertcut_request(&file(r"C:\a.mp4"), None).unwrap_err()
+        );
+        assert_eq!(
+            "Select one video.",
+            bertcut_request(&dir(r"C:\a"), Some("x".into())).unwrap_err()
+        );
+    }
+
     fn command(files: bool, dirs: bool, elevated: bool) -> CustomCommandDefinition {
         CustomCommandDefinition {
             id: "x".into(),
@@ -473,6 +590,7 @@ mod tests {
             "file.run-as-admin",
             "file.open-terminal",
             "file.open-vscode",
+            "file.edit-in-bertcut",
             "custom:abc",
         ] {
             assert!(is_launch_command(id), "{id}");

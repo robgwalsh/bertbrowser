@@ -2,7 +2,7 @@
 //! own startup arguments and by the single-instance pipe, so there is one grammar. Understands
 //! Explorer's `/select,<path>` convention, which arrives as one argv token or two. Spec: Core/Cli/CommandLine.cs.
 
-use super::{CommandLineRequest, OpenIn, OpenTarget};
+use super::{CommandLineRequest, OpenIn, OpenTarget, PickMode, PickRequest};
 
 pub struct CommandLine;
 
@@ -16,10 +16,25 @@ impl CommandLine {
         }
         let mut mode_chosen = false;
         let mut select_next = false;
+        // The picker's options each take the next token as their value, whatever it looks like:
+        // a title may well begin with a dash.
+        let mut value_for: Option<&'static str> = None;
+        let mut pick = PickOptions::default();
 
         for raw in args {
             let arg = raw.as_ref().trim();
+            if let Some(option) = value_for.take() {
+                pick.set(option, arg);
+                continue;
+            }
             if arg.is_empty() {
+                continue;
+            }
+            if let Some(option) = PickOptions::NAMES
+                .iter()
+                .find(|name| arg.eq_ignore_ascii_case(name))
+            {
+                value_for = Some(option);
                 continue;
             }
 
@@ -68,6 +83,25 @@ impl CommandLine {
                 .errors
                 .push("'/select' expects a path after it.".to_string());
         }
+        if let Some(option) = value_for {
+            request
+                .errors
+                .push(format!("'{option}' expects a value after it."));
+        }
+        if pick.asked() {
+            // A pick is the whole request: the one path beside it is where to start looking, not
+            // something else to open.
+            let start = request
+                .targets
+                .first()
+                .map(|t| t.path.clone())
+                .unwrap_or_default();
+            request.targets.clear();
+            match pick.build(&start) {
+                Ok(built) => request.pick = Some(built),
+                Err(why) => request.errors.push(why),
+            }
+        }
         request
     }
 }
@@ -97,4 +131,65 @@ fn is_option(arg: &str) -> bool {
 /// Undoes Windows' backslash-before-quote mangling: `"C:\Dir\"` reaches argv as `C:\Dir"`.
 fn repair(path: &str) -> &str {
     path.trim_end_matches('"')
+}
+
+/// What `--pick` and its companions said, before it is known whether they add up to a request.
+#[derive(Default)]
+struct PickOptions {
+    mode: Option<String>,
+    reply_pipe: Option<String>,
+    title: String,
+    filter: String,
+    default_name: String,
+}
+
+impl PickOptions {
+    const NAMES: [&'static str; 5] = [
+        "--pick",
+        "--reply-pipe",
+        "--pick-title",
+        "--pick-filter",
+        "--pick-name",
+    ];
+
+    fn set(&mut self, option: &str, value: &str) {
+        let value = value.to_string();
+        match option {
+            "--pick" => self.mode = Some(value),
+            "--reply-pipe" => self.reply_pipe = Some(value),
+            "--pick-title" => self.title = value,
+            "--pick-filter" => self.filter = value,
+            _ => self.default_name = value,
+        }
+    }
+
+    /// Any of the five was given. One without the others is a mistake to report, not to ignore:
+    /// the program that asked is waiting on an answer.
+    fn asked(&self) -> bool {
+        self.mode.is_some()
+            || self.reply_pipe.is_some()
+            || !self.title.is_empty()
+            || !self.filter.is_empty()
+            || !self.default_name.is_empty()
+    }
+
+    fn build(&self, start: &str) -> Result<PickRequest, String> {
+        let Some(mode) = self.mode.as_deref() else {
+            return Err("'--pick open' or '--pick save' is needed to choose a file.".to_string());
+        };
+        let Some(mode) = PickMode::parse(&mode.to_ascii_lowercase()) else {
+            return Err(format!("'--pick' expects open or save, not '{mode}'."));
+        };
+        let Some(reply_pipe) = self.reply_pipe.as_deref() else {
+            return Err("'--pick' needs '--reply-pipe <name>' to answer on.".to_string());
+        };
+        PickRequest::new(
+            mode,
+            reply_pipe,
+            &self.title,
+            &self.filter,
+            &self.default_name,
+            start,
+        )
+    }
 }

@@ -55,6 +55,85 @@ pub trait ProcessLauncher: Send + Sync {
     fn can_run_elevated(&self, _path: &str) -> Option<bool> {
         None
     }
+
+    /// The exe of another per-user app packed as pack_id, or None when it is not installed.
+    /// An implementation that looks at the disk remembers for a few seconds.
+    fn installed_app(&self, _pack_id: &str, _exe: &str) -> Option<String> {
+        None
+    }
+}
+
+/// Answering another program that asked the user to choose a file here (`--pick`): the pipe that
+/// program made, opened as its client. A hazard seam like the launcher: it reaches another process.
+pub trait ReplyChannels: Send + Sync {
+    /// Connects to the asker's pipe by its bare name. `Err` carries words for the status line.
+    fn connect(&self, pipe_name: &str) -> Result<Box<dyn ReplyChannel>, String>;
+}
+
+/// One asker, waiting. Dropping it hangs up, which the asker reads as "nothing was chosen".
+pub trait ReplyChannel: Send {
+    /// The answer: one path.
+    fn send_line(&mut self, text: &str) -> Result<(), String>;
+    /// Whether the asker has stopped waiting. False when that cannot be told.
+    fn is_closed(&self) -> bool;
+}
+
+/// The real channels: named pipes, through `bb-shell`.
+pub struct SystemReplyChannels;
+
+impl ReplyChannels for SystemReplyChannels {
+    fn connect(&self, pipe_name: &str) -> Result<Box<dyn ReplyChannel>, String> {
+        bb_shell::reply_pipe::ReplyPipe::connect(pipe_name)
+            .map(|pipe| Box::new(SystemReplyChannel(pipe)) as Box<dyn ReplyChannel>)
+            .map_err(|e| format!("The program that asked for a file is not waiting for one: {e}"))
+    }
+}
+
+struct SystemReplyChannel(bb_shell::reply_pipe::ReplyPipe);
+
+impl ReplyChannel for SystemReplyChannel {
+    fn send_line(&mut self, text: &str) -> Result<(), String> {
+        self.0.send_line(text).map_err(|e| e.to_string())
+    }
+
+    fn is_closed(&self) -> bool {
+        self.0.is_closed()
+    }
+}
+
+/// What became of one pick the harness took: still open, answered with a path, or hung up on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PosedReply {
+    Waiting,
+    Answered(String),
+    Cancelled,
+}
+
+/// The harness's end of a pick: it records what the asker would have received.
+struct RecordedReply {
+    log: Arc<Mutex<Vec<(String, PosedReply)>>>,
+    index: usize,
+    gone: Arc<Mutex<bool>>,
+}
+
+impl ReplyChannel for RecordedReply {
+    fn send_line(&mut self, text: &str) -> Result<(), String> {
+        lock(&self.log)[self.index].1 = PosedReply::Answered(text.to_string());
+        Ok(())
+    }
+
+    fn is_closed(&self) -> bool {
+        *lock(&self.gone)
+    }
+}
+
+impl Drop for RecordedReply {
+    fn drop(&mut self) {
+        let mut log = lock(&self.log);
+        if log[self.index].1 == PosedReply::Waiting {
+            log[self.index].1 = PosedReply::Cancelled;
+        }
+    }
 }
 
 /// The real launcher: `ShellExecuteExW`, through the one launcher in `bb-shell`.
@@ -91,6 +170,10 @@ impl ProcessLauncher for SystemProcessLauncher {
 
     fn can_run_elevated(&self, path: &str) -> Option<bool> {
         Some(self.0.can_run_elevated(path))
+    }
+
+    fn installed_app(&self, pack_id: &str, exe: &str) -> Option<String> {
+        self.0.installed_app(pack_id, exe)
     }
 }
 
@@ -306,6 +389,8 @@ pub struct Seams {
     pub devices: Arc<dyn PortableDeviceSource>,
     /// Runs a retry the user agreed to with administrator rights.
     pub elevated: ElevatedRunner,
+    /// Answers a program that asked the user to choose a file here.
+    pub replies: Arc<dyn ReplyChannels>,
 }
 
 impl Seams {
@@ -324,6 +409,7 @@ impl Seams {
             shell_new: Arc::new(CannedShellNew),
             devices: Arc::new(CannedDevices),
             elevated: Arc::new(NoElevation),
+            replies: probes.clone(),
         };
         (seams, probes)
     }
@@ -346,6 +432,7 @@ impl Seams {
             bb_shell::indexing::IndexAutoStart::default(),
         ));
         seams.elevated = Arc::new(bb_shell::SystemElevation::new());
+        seams.replies = Arc::new(SystemReplyChannels);
         seams.shell_new = Arc::new(SystemShellNew(
             data_dir.join(bb_settings::AppPaths::TEMPLATES_DIR_NAME),
         ));
@@ -420,6 +507,10 @@ impl ElevationLauncher for UiPrompts {
 /// the app tried.
 pub struct HarnessProbes {
     launches: Mutex<Vec<(String, bool)>>,
+    launch_requests: Mutex<Vec<LaunchRequest>>,
+    replies: Arc<Mutex<Vec<(String, PosedReply)>>>,
+    askers_gone: Arc<Mutex<bool>>,
+    installed_apps: Mutex<HashMap<String, String>>,
     elevation_offers: Mutex<Vec<String>>,
     confirms: Mutex<Vec<String>>,
     confirm_answer: Mutex<bool>,
@@ -439,6 +530,10 @@ impl Default for HarnessProbes {
     fn default() -> Self {
         HarnessProbes {
             launches: Mutex::default(),
+            launch_requests: Mutex::default(),
+            replies: Arc::default(),
+            askers_gone: Arc::default(),
+            installed_apps: Mutex::default(),
             elevation_offers: Mutex::default(),
             confirms: Mutex::default(),
             confirm_answer: Mutex::new(false),
@@ -459,6 +554,31 @@ impl HarnessProbes {
     /// Launch attempts (path, elevated). The launcher refuses every one.
     pub fn launches(&self) -> Vec<(String, bool)> {
         lock(&self.launches).clone()
+    }
+
+    /// Every launch attempt in full: the program, its arguments and where it would have started.
+    pub fn launch_requests(&self) -> Vec<LaunchRequest> {
+        lock(&self.launch_requests).clone()
+    }
+
+    /// Poses another app as installed at `exe_path` (Some) or as absent (None). Nothing is
+    /// installed until a script or a test says so, whatever the machine running it has.
+    pub fn pose_installed_app(&self, pack_id: &str, exe_path: Option<&str>) {
+        let mut apps = lock(&self.installed_apps);
+        match exe_path {
+            Some(path) => apps.insert(pack_id.to_uppercase(), path.to_string()),
+            None => apps.remove(&pack_id.to_uppercase()),
+        };
+    }
+
+    /// Every pick this run took, by reply pipe, with what its asker would have received.
+    pub fn replies(&self) -> Vec<(String, PosedReply)> {
+        lock(&self.replies).clone()
+    }
+
+    /// Poses every asker as having stopped waiting (its window closed, or its own Cancel).
+    pub fn pose_askers_gone(&self) {
+        *lock(&self.askers_gone) = true;
     }
 
     pub fn elevation_offers(&self) -> Vec<String> {
@@ -531,7 +651,36 @@ impl HarnessProbes {
 impl ProcessLauncher for HarnessProbes {
     fn launch(&self, path: &str, elevated: bool) -> Result<(), String> {
         lock(&self.launches).push((path.to_string(), elevated));
+        lock(&self.launch_requests).push(LaunchRequest {
+            file: path.to_string(),
+            elevated,
+            ..LaunchRequest::default()
+        });
         Err("it was not launched: launching is refused in this run".to_string())
+    }
+
+    fn start(&self, request: &LaunchRequest) -> Result<(), String> {
+        lock(&self.launches).push((request.file.clone(), request.elevated));
+        lock(&self.launch_requests).push(request.clone());
+        Err("it was not launched: launching is refused in this run".to_string())
+    }
+
+    fn installed_app(&self, pack_id: &str, _exe: &str) -> Option<String> {
+        lock(&self.installed_apps)
+            .get(&pack_id.to_uppercase())
+            .cloned()
+    }
+}
+
+impl ReplyChannels for HarnessProbes {
+    fn connect(&self, pipe_name: &str) -> Result<Box<dyn ReplyChannel>, String> {
+        let mut log = lock(&self.replies);
+        log.push((pipe_name.to_string(), PosedReply::Waiting));
+        Ok(Box::new(RecordedReply {
+            log: self.replies.clone(),
+            index: log.len() - 1,
+            gone: self.askers_gone.clone(),
+        }))
     }
 }
 

@@ -1024,6 +1024,33 @@ void SettingsView::page_preview(Widget& p) {
     choice_row(p, L"Search inside files up to", "searchContentMaxBytes", sizes);
     f::note(p, L"How much of each file content: reads. A file longer than this is searched to here and no further, and the status bar says so rather than reporting it as a miss.");
     f::note(p, L"Previews don't hold file locks!");
+    f::gap(p, 6);
+    // Where Edit on a video's preview finds BertCut, a separate program. Usually empty: an installed copy is
+    // found without it, and Edit asks this row's question itself the first time it finds none.
+    auto* row = f::row(p);
+    f::row_label(*row, L"BertCut location", 160);
+    auto trimmed = [](std::wstring t) {
+        while (!t.empty() && (iswspace(t.back()) || t.back() == L'"')) t.pop_back();
+        while (!t.empty() && (iswspace(t.front()) || t.front() == L'"')) t.erase(t.begin());
+        return t;
+    };
+    auto* e = f::field(*row, core::wide(get("bertcutPath").str()), 380, [this, trimmed](const std::wstring& t) { set_text("bertcutPath", trimmed(t), true); },
+                       L"Found automatically when installed");
+    e->automation_id = "bertcutPath";
+    f::button(*row, L"Browse\u2026", [this, e, trimmed] {
+        if (main_.scripted()) return;
+        PickPath pick;
+        pick.title = L"Where is BertCut?";
+        pick.filters = {{L"BertCut (BertCut.exe)", L"BertCut.exe"}, {L"Programs (*.exe)", L"*.exe"}};
+        const std::wstring now = trimmed(e->text());
+        const size_t slash = now.find_last_of(L"\\/");
+        if (slash != std::wstring::npos) pick.folder = now.substr(0, slash);
+        if (const auto chosen = pick_open_file(main_.window().hwnd(), pick)) {
+            e->set_text(*chosen);
+            set_text("bertcutPath", trimmed(*chosen), true);
+        }
+    });
+    f::note(p, L"The video editor that Edit on a video's preview opens. Leave it empty to use the installed BertCut; if none is found, Edit asks where it is and remembers the answer here.");
 }
 
 void SettingsView::page_search_index(Widget& p) {

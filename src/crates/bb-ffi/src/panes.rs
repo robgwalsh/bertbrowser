@@ -626,6 +626,40 @@ pub unsafe extern "C" fn bb_harness_pose_indexer(app: *mut BbApp, state: BbStr) 
     })
 }
 
+/// `bertcut` poses BertCut, the video editor a video is handed to, as installed; `none`, as absent
+/// (which is how a run starts). Only the harness's launcher can be posed.
+#[cfg(feature = "fixtures")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_harness_pose_installed(app: *mut BbApp, what: BbStr) -> BbStatus {
+    guard(|| {
+        let installed = match text_of(what).as_str() {
+            "bertcut" => true,
+            "none" => false,
+            other => {
+                return Err(Fail::Err(format!(
+                    "pose-installed wants bertcut or none, got '{other}'"
+                )));
+            }
+        };
+        Ok(app_of(app)?.app.harness_pose_bertcut(installed)?)
+    })
+}
+
+/// A command line as a second launch would hand it over, one argument per line (`--pick`, `open`,
+/// `--reply-pipe`, ...). Only the harness's seams take one: its reply channel is a recorder.
+#[cfg(feature = "fixtures")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_harness_launch_args(app: *mut BbApp, lines: BbStr) -> BbStatus {
+    guard(|| Ok(app_of(app)?.app.harness_launch_args(&text_of(lines))?))
+}
+
+/// Every program waiting on a pick stops waiting, as if it had been closed.
+#[cfg(feature = "fixtures")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_harness_pose_askers_gone(app: *mut BbApp) -> BbStatus {
+    guard(|| Ok(app_of(app)?.app.harness_pose_askers_gone()?))
+}
+
 // ---- fixtures the harness writes ----
 
 /// Writes a set of small real files into `dir` (created if need be): `metadata` (a camera picture,

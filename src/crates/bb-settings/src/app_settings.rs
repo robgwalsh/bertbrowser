@@ -107,6 +107,11 @@ pub struct AppSettings {
     /// exists, falls back to the user profile.
     pub startup_default_path: Option<String>,
 
+    /// Where `BertCut.exe` is, when the user said: chosen the first time Edit in BertCut could not
+    /// find it, or typed on the Preview page. None, or a file that is no longer there, means the
+    /// installed copy is looked for instead.
+    pub bertcut_path: Option<String>,
+
     /// When false (default), hidden files/folders are excluded from listings and search; when true
     /// they appear with a dimmed icon, like Explorer.
     pub show_hidden_items: bool,
@@ -323,6 +328,7 @@ impl Default for AppSettings {
             session: None,
             restore_last_session: true,
             startup_default_path: None,
+            bertcut_path: None,
             show_hidden_items: false,
             directory_thumbnail_scales: BTreeMap::new(),
             scroll_speed_multiplier: 2.0,

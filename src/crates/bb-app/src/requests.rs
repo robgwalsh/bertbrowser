@@ -55,11 +55,17 @@ pub fn remaining_after_start(
             .collect(),
         mode: request.mode,
         errors: request.errors.clone(),
+        pick: request.pick.clone(),
     }
 }
 
 impl Inner {
     pub(crate) fn open_request(self: &Arc<Self>, request: &CommandLineRequest) -> AppResult<()> {
+        // A pick is the whole request (the parser leaves it no targets), and one that cannot reach
+        // its asker opens nothing.
+        if let Some(pick) = &request.pick {
+            return self.begin_pick(pick);
+        }
         for target in &request.targets {
             let Some((directory, selection)) = resolve(target) else {
                 continue;
@@ -154,6 +160,7 @@ mod tests {
             ],
             mode: OpenIn::NewTab,
             errors: Vec::new(),
+            pick: None,
         };
         let rest = remaining_after_start(&request, Some(r"c:\A"));
         assert_eq!(

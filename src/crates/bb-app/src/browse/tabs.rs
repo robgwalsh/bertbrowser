@@ -1444,6 +1444,10 @@ impl Inner {
         if row.is_directory {
             return self.navigate(tab, &row.full_path);
         }
+        // A tab choosing a file for another program answers with it instead of opening it.
+        if let Some(answered) = self.pick_activate(tab, &row.full_path, &row.name) {
+            return answered;
+        }
         // An archive opens as a folder when the setting says so and the container can be read (or only
         // needs its password). One that cannot be read goes to whatever owns the extension, rather than
         // taking the tab inside it to show an empty folder.

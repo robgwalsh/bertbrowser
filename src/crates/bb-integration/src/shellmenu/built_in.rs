@@ -111,6 +111,13 @@ const ALL: &[BuiltInMenuItem] = &[
         Some("file.open-vscode"),
     ),
     row(
+        "edit-in-bertcut",
+        "Edit in BertCut",
+        FileList,
+        Some("Icon.VideoEdit"),
+        Some("file.edit-in-bertcut"),
+    ),
+    row(
         "disk-usage",
         "Analyse disk usage",
         Both,

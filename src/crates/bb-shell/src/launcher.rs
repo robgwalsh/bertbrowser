@@ -10,12 +10,14 @@
 //! place to audit, to fake in the harness, and to change. **Nothing starts elevated unless the user
 //! chose it.**
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
-use bb_integration::launch::ExecutablePath;
+use bb_integration::launch::{ExecutablePath, InstalledApp};
 use bb_integration::shell_integration::{ElevatedOpen, RunAsVerbRules};
 
-use crate::registry::{Registry, SystemRegistry};
+use crate::registry::{Hive, Registry, SystemRegistry};
 use crate::run_as::RunAsVerbRegistry;
 
 /// What to start. `arguments` and `working_directory` may be empty.
@@ -119,7 +121,15 @@ pub fn failure_message(error: u32, file: &str, elevated: bool) -> String {
 
 pub struct SystemLauncher {
     run_as: RunAsVerbRegistry,
+    registry: Arc<dyn Registry>,
+    /// Where each other app was last found, and when it was looked for.
+    installed: Mutex<HashMap<String, (Instant, Option<String>)>>,
 }
+
+/// How long an answer about another app being installed is believed. The question is asked on
+/// every selection change and costs a probe of the disk; an install or an uninstall showing up
+/// this much later is not something anyone waits on.
+const INSTALLED_APP_TTL: Duration = Duration::from_secs(5);
 
 impl SystemLauncher {
     pub fn new() -> SystemLauncher {
@@ -128,7 +138,9 @@ impl SystemLauncher {
 
     pub fn over(registry: Arc<dyn Registry>) -> SystemLauncher {
         SystemLauncher {
-            run_as: RunAsVerbRegistry::new(registry),
+            run_as: RunAsVerbRegistry::new(registry.clone()),
+            registry,
+            installed: Mutex::default(),
         }
     }
 
@@ -143,6 +155,40 @@ impl SystemLauncher {
     /// rather than leaving a bare name to be resolved later against whatever folder is current.
     pub fn resolve(&self, program: &str) -> Option<String> {
         ExecutablePath::resolve_on_disk(program)
+    }
+
+    /// The exe of another per-user app packed as `pack_id`, or None when it is not installed.
+    /// Remembered briefly: see [`INSTALLED_APP_TTL`].
+    pub fn installed_app(&self, pack_id: &str, exe: &str) -> Option<String> {
+        let key = format!("{pack_id}\\{exe}").to_uppercase();
+        let mut known = self.installed.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some((when, answer)) = known.get(&key)
+            && when.elapsed() < INSTALLED_APP_TTL
+        {
+            return answer.clone();
+        }
+        let answer = self.find_installed_app(pack_id, exe);
+        known.insert(key, (Instant::now(), answer.clone()));
+        answer
+    }
+
+    fn find_installed_app(&self, pack_id: &str, exe: &str) -> Option<String> {
+        let local_app_data = std::env::var("LOCALAPPDATA").ok();
+        let exists = |path: &str| std::fs::metadata(path).is_ok_and(|m| m.is_file());
+        // The default location first and alone: it is nearly always the answer, and finding it
+        // there saves the registry read.
+        InstalledApp::locate(pack_id, exe, local_app_data.as_deref(), None, exists).or_else(|| {
+            let location = self
+                .registry
+                .string_value(
+                    Hive::CurrentUser,
+                    &format!("{}\\{pack_id}", InstalledApp::UNINSTALL_KEY),
+                    InstalledApp::INSTALL_LOCATION,
+                )
+                .ok()
+                .flatten();
+            InstalledApp::locate(pack_id, exe, None, location.as_deref(), exists)
+        })
     }
 
     /// Whether "Run as administrator" can do anything for this file.

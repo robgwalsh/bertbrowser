@@ -234,6 +234,15 @@ private:
     ui::ProgressBar* activity_ = nullptr;
     ui::TextBlock* notice_ = nullptr;
     ui::Widget* notice_panel_ = nullptr;
+    // The strip of a tab that is choosing a file for another program (`--pick`): what was asked, a name box
+    // when it is a save, and the two answers. The core holds the question; this only shows it and answers.
+    ui::Widget* pick_panel_ = nullptr;
+    ui::TextBlock* pick_title_ = nullptr;
+    ui::Edit* pick_name_ = nullptr;
+    ui::Button *pick_answer_ = nullptr, *pick_cancel_ = nullptr;
+    std::string pick_mode_;
+    void sync_pick();
+    void pick_do(const wchar_t* verb);
     void apply_reveal(const BbTabState& st);
 
     void open_context(ui::Point p, bool header, bool background = false);
@@ -434,6 +443,11 @@ public:
     void sync_overlays();
     // Opens a dialog by kind in the window's dialog layer (modal until closed).
     void open_dialog(const std::wstring& kind);
+    // `Model::LocateBertCut`: Edit in BertCut was run and nothing knows where BertCut is. Asks for the exe in
+    // Windows' picker; a scripted run has nobody to answer one, so it does nothing (the status line has said).
+    void locate_bertcut();
+    // The answer: kept in the `bertcutPath` setting, and the command the question interrupted runs again.
+    void bertcut_located(const std::wstring& exe);
     // A dialog that is a popup (the column picker), opened with its corner at `at`.
     void open_dialog_at(const std::wstring& kind, ui::Point at) {
         dialog_anchor_ = at;

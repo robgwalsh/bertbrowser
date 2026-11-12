@@ -90,7 +90,7 @@ assert-not-launched
 # serves both menus; the tree shows the same order without what it does not offer, and the
 # extensions nobody placed still arrive at @more. ---
 
-menu-layout app:new - app:open app:run-as-admin app:open-new-tab app:open-new-pane app:open-terminal app:open-vscode app:disk-usage app:duplicates app:changes app:compare-panes app:compress clsid:{23170F69-40C1-278A-1000-000100020000} app:extract - app:copy-path app:copy-name app:compare-files app:settle-by-content app:verify-checksums app:checksum - app:rename app:delete app:delete-permanently app:bookmark - app:cut app:copy app:paste @more - app:properties
+menu-layout app:new - app:open app:run-as-admin app:open-new-tab app:open-new-pane app:open-terminal app:open-vscode app:edit-in-bertcut app:disk-usage app:duplicates app:changes app:compare-panes app:compress clsid:{23170F69-40C1-278A-1000-000100020000} app:extract - app:copy-path app:copy-name app:compare-files app:settle-by-content app:verify-checksums app:checksum - app:rename app:delete app:delete-permanently app:bookmark - app:cut app:copy app:paste @more - app:properties
 select photo.jpg
 menu files 09-menu-file-arranged
 assert-menu-order Compress | 7-Zip | - | Copy as path | - | Rename | Bookmark | - | Cut | Paste | - | Open Git Bash here | TortoiseSVN | - | Properties
@@ -111,7 +111,7 @@ list-drag MenuLayoutList 3 Open
 assert-list-row MenuLayoutList 2 Open
 list-drag MenuChoiceList>MenuLayoutList 0 Properties
 assert-list-row MenuLayoutList 0 Properties
-menu-layout app:new - app:open app:run-as-admin app:open-new-tab app:open-new-pane app:open-terminal app:open-vscode app:disk-usage app:duplicates app:changes app:compare-panes app:compress clsid:{23170F69-40C1-278A-1000-000100020000} app:extract - app:copy-path app:copy-name app:compare-files app:settle-by-content app:verify-checksums app:checksum - app:rename app:delete app:delete-permanently app:bookmark - app:cut app:copy app:paste @more - app:properties
+menu-layout app:new - app:open app:run-as-admin app:open-new-tab app:open-new-pane app:open-terminal app:open-vscode app:edit-in-bertcut app:disk-usage app:duplicates app:changes app:compare-panes app:compress clsid:{23170F69-40C1-278A-1000-000100020000} app:extract - app:copy-path app:copy-name app:compare-files app:settle-by-content app:verify-checksums app:checksum - app:rename app:delete app:delete-permanently app:bookmark - app:cut app:copy app:paste @more - app:properties
 settings context-menu
 assert-list-row MenuLayoutList 0 New
 settings context-menu dragging

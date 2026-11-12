@@ -1,0 +1,104 @@
+# Picker mode: another program asks the user to choose a file here (`--pick open|save
+# --reply-pipe <name>`), and gets one line back - the path - or nothing, which means they backed
+# out. The tab is an ordinary tab with a strip across the top.
+#
+# `pick` hands the app that command line through the same parser and request path a second launch
+# uses. The reply pipe is the run's recorder: nothing here reaches another process.
+
+tree .
+media-fixture Media
+refresh
+assert-tabs 1
+
+# --- an open: a new tab at the folder asked for, with the question across the top ---
+
+pick open Media filter=*.mp4;*.mkv title=Add-a-video
+assert-tabs 2
+assert-path Media
+assert-visible PickBanner
+assert-hidden PickName
+assert-reply waiting
+shot 01-pick-open
+
+# Nothing selected is nothing to choose, and the button says so rather than answering with a folder.
+press PickCancel
+assert-reply cancelled
+assert-tabs 1
+
+# --- the wrong kind of file is refused, and never launched ---
+
+pick open Media filter=*.mp4;*.mkv
+select tone.wav
+run file.open
+assert-reply waiting
+assert-not-launched
+assert-status not the kind of file asked for
+
+# --- the right kind answers, and the tab that was opened for the question goes with it ---
+
+select clip.mp4
+press PickAnswer
+assert-reply Media\clip.mp4
+assert-tabs 1
+assert-not-launched
+
+# --- Enter (or a double-click) on a file is the same answer ---
+
+pick open Media
+select tone.flac
+run file.open
+assert-reply Media\tone.flac
+assert-tabs 1
+assert-not-launched
+
+# --- a save: beside the file it was started from, with the name on offer in the box ---
+
+pick save Media\clip.mp4 name=clip-edit.mp4 filter=*.mp4;*.gif title=Save-as
+assert-tabs 2
+assert-path Media
+assert-visible PickName
+shot 02-pick-save
+press PickAnswer
+assert-reply Media\clip-edit.mp4
+assert-tabs 1
+
+# A typed name with no extension takes the first one the asker offered; nothing is written either way.
+pick save Media name=clip-edit.mp4 filter=*.mp4;*.gif
+field-type PickName holiday
+press PickAnswer
+assert-reply Media\holiday.mp4
+assert-missing Media\holiday.mp4
+
+# A name that is a path is not a name.
+pick save Media name=clip-edit.mp4
+field-type PickName ..\elsewhere.mp4
+press PickAnswer
+assert-reply waiting
+assert-status Type a file name
+press PickCancel
+assert-reply cancelled
+
+# --- closing the tab is backing out ---
+
+pick open Media
+assert-tabs 2
+closetab
+assert-reply cancelled
+assert-tabs 1
+
+# --- the asker going away withdraws the question and leaves an ordinary tab ---
+
+pick open Media
+assert-visible PickBanner
+pose-asker-gone
+assert-hidden PickBanner
+assert-tabs 2
+assert-status stopped waiting
+closetab
+
+# --- a pick tab is not part of the session ---
+
+pick open Media
+assert-tabs 2
+session
+assert-tabs 1

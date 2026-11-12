@@ -838,6 +838,17 @@ void Runner::install_asserts() {
         const int64_t n = bb::json::parse(s_.core().state_json())["launches"].i64();
         if (n != expected) throw AssertionError("expected " + std::to_string(expected) + " launch(es), the run tried " + std::to_string(n) + ".");
     };
+    // assert-launch-args <text> -- the last program the run tried to start, and what it was handed: the text
+    // must appear in `<program> <arguments>`. A count says something was started; this says what.
+    verbs_[L"assert-launch-args"] = [this](const std::wstring& r) {
+        const std::wstring want = require(r, "assert-launch-args");
+        const bb::json::Value last = bb::json::parse(s_.core().state_json())["lastLaunch"];
+        if (last.is_null()) throw AssertionError("the run has not tried to start anything.");
+        const std::wstring line = from_utf8(last["file"].str()) + L" " + from_utf8(last["arguments"].str());
+        if (!icontains(line, want)) {
+            throw AssertionError("the last launch was `" + to_utf8(line) + "`, which does not mention `" + to_utf8(want) + "`.");
+        }
+    };
     verbs_[L"assert-not-launched"] = [this](const std::wstring&) {
         const bb::json::Value st = bb::json::parse(s_.core().state_json());
         const int64_t n = st["launches"].i64();

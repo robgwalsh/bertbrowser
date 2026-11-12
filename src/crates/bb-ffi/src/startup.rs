@@ -56,6 +56,8 @@ pub unsafe extern "C" fn bb_startup(argc: i32, argv: *const *const u16) -> BbSta
         updates::run_installer_hooks(args, || {
             FolderHandlerRegistry::system().try_unregister();
             WinEHandlerRegistry::system().try_unregister();
+            // And nothing is left telling BertCut to ask a copy that is gone.
+            let _ = bb_shell::PickerRegistration::unregister(&bb_shell::SystemRegistry);
         });
         trace.mark(StartupMarks::VELOPACK_DONE);
         Ok(())
@@ -329,6 +331,10 @@ pub unsafe extern "C" fn bb_launch_serve(
                 // part-way) put a live path back. Never creates one that is absent.
                 FolderHandlerRegistry::system().repair_if_stale();
                 WinEHandlerRegistry::system().repair_if_stale();
+
+                // Where a program that wants a file chosen (BertCut) finds the copy to ask: this
+                // one, the last started. Not under a startup trace, which returned above.
+                bb_shell::PickerRegistration::register_this_exe(&bb_shell::SystemRegistry);
 
                 // A delete holds its items until the undo record is retired, which normally happens
                 // by the time the app closes. A crash leaves them behind, so sweep up anything a

@@ -732,6 +732,16 @@ const ROWS: &[Row] = &[
         &["code", "editor"],
     ),
     Row(
+        "file.edit-in-bertcut",
+        "Edit in BertCut",
+        C::FILE,
+        Browser,
+        "Icon.VideoEdit",
+        "",
+        Standard,
+        &["video", "cut", "trim", "crop", "clip", "editor"],
+    ),
+    Row(
         "file.new-folder",
         "New folder",
         C::FILE,

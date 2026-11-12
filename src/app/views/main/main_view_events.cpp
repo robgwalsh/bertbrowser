@@ -166,6 +166,11 @@ void MainView::handle(const BbEvent& e) {
                 refresh_index_usage();
                 return;
             }
+            // A request, not a state: Edit in BertCut could not find BertCut, and nothing else is stale.
+            if (e.a == 26) {
+                locate_bertcut();
+                return;
+            }
             if (e.a == 2) apply_theme();
             if (e.a == 10) {
                 for (auto& kv : by_tab_) kv.second->reload_columns();

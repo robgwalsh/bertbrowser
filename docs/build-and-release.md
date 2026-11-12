@@ -225,6 +225,46 @@ the channel plumbing without publishing anything: pack `-unstable.1` and `-unsta
 directory, install the first, point `BERTBROWSER_UPDATE_URL` at that directory, and confirm it finds the
 second.
 
+## Installing from the command line
+
+`install.ps1` at the repository root installs from any of three sources into the **same** place, Velopack's
+per-user `%LOCALAPPDATA%\BertBrowser`, so another app looking for an installed BertBrowser
+(`%LOCALAPPDATA%\BertBrowser\current\BertBrowser.exe`, or the Uninstall key's `InstallLocation`) finds
+whichever went in last:
+
+```powershell
+irm https://raw.githubusercontent.com/robgwalsh/bertbrowser/main/install.ps1 | iex                       # latest release
+iex "& { $(irm https://raw.githubusercontent.com/robgwalsh/bertbrowser/main/install.ps1) } -Channel unstable"  # or -Version 2.0.1
+pwsh .\install.ps1 -Local [-Config debug] [-Build] [-Watch]                                                # this checkout's build
+```
+
+The download forms fetch the release's `Setup.exe` and run it `--silent`; they run in Windows PowerShell 5.1
+as well as 7, and never `exit` (that would close the shell `iex` runs in). Like any Velopack install,
+Setup **starts the app** when it finishes - there is no flag to stop it.
+
+**A local build is a third channel, `local`**, version `<next patch>-local.<yyyyMMddHHmmss>`:
+
+- The first `-Local` install, or one over a release/unstable copy, or `-Repack`, stages the build with
+  `stage-package.ps1`, packs it (`vpk pack --channel local --delta None` into `out\local-install\`, ~4 s) and
+  runs that Setup - so the install has its stub, shortcuts and Apps & features entry like any other.
+- Every later one only copies the staged executables whose bytes differ into `current\` (~1 s, most of it
+  hashing). It closes the installed copy first (politely, then by force after 5 s) - never a dev build running
+  from `out\`. An exe still running (the elevated index helper, which this cannot stop) is renamed aside and
+  replaced; the helper exits on its own when it sees the executables change, and the moved file is deleted on
+  the next run. `sq.version` is not touched, so the install stays on `local`.
+- **A `-local` installed version never checks GitHub** (`ReleaseChannel::is_local`, `follows_github` in
+  `bb-shell/src/updates.rs`); otherwise the next release would replace the developer's build on exit.
+  `BERTBROWSER_UPDATE_URL` still applies. Installing a release or unstable build over it puts it back on that
+  channel.
+- **The title bar's app icon says which copy is running**: its tip is the version and where it came from
+  (release or unstable from GitHub, a local build, or a development build nothing installed), decided from
+  Velopack's installed version (`InstallSource`, `bb_version_json`). A local or development build reports the
+  unstamped workspace version, so its tip adds when the exe was built and the folder it runs from.
+- `-Watch` polls `out\<config>\app` and installs each time its executables change and then hold still for 2 s,
+  so any build - `build.ps1`, CMake from an IDE, an agent - lands in the installed copy.
+- Because `bb-indexer.exe` is copied only when its bytes change, the sign-in task (which runs a byte-identical
+  copy, see CLAUDE.md) goes `Stale` only after a build that changed the helper.
+
 ## How updates reach users
 
 The update service (`bb-shell/src/updates.rs`, driven from `bb-app`) checks GitHub Releases on startup,

@@ -1,6 +1,7 @@
 #include "views/panes/preview_pane.h"
 
 #include "gfx/icons.gen.h"
+#include "views/bridge/model.h"
 #include "views/panes/media_pane.h"
 
 #include <windows.h>
@@ -168,6 +169,16 @@ PreviewPane::PreviewPane(core::Core& core, uint64_t tab, HWND window) : core_(co
     wrap_->tooltip = L"Wrap long lines (turns the line numbers off)";
     copy_ = make_button(*actions_, L"Copy", "PreviewCopy", [this] { copy_text(); });
     copy_->tooltip = L"Copy the previewed text";
+    // A video's own action: hand it to BertCut, a separate program. The command decides whether it is offered
+    // (one video selected), so this row and the right-click menu cannot disagree; a BertCut nothing can find is
+    // asked for when the button is pressed, never a reason to hide it.
+    // Stopped first, not paused: the video is about to play in the editor, and a closed engine lets go of the
+    // file the editor may be asked to save over.
+    edit_ = make_button(*actions_, L"Edit", "PreviewEdit", [this] {
+        if (media_->started()) media_->stop();
+        bb_launch_command(core_.app(), core::s(L"file.edit-in-bertcut"));
+    });
+    edit_->automation_id = "PreviewEdit";
 
     // ---- the foot: whichever footer belongs to the body showing ----
     footer_box_ = emplace<Panel>();
@@ -656,7 +667,18 @@ void PreviewPane::sync_chrome() {
     wrap_->set_visible(text);
     wrap_->primary = code_->wrap();
     copy_->set_visible(text || hex);
-    actions_->set_visible(choose || image || text || hex);
+    bool edit = false;
+    if (state_ == "media" && media_->is_video() && !loading_) {
+        const json::Value st = try_model([&](BbOwnedStr* o) { return bb_command_state(core_.app(), core::s(L"file.edit-in-bertcut"), o); });
+        edit = !st.is_null() && !st["hidden"].boolean();
+        if (edit) {
+            const bool can = st["whyNot"].is_null();
+            edit_->set_enabled(can);
+            edit_->tooltip = can ? L"Cut, crop or overlay this video in BertCut" : core::wide(st["whyNot"].str());
+        }
+    }
+    edit_->set_visible(edit);
+    actions_->set_visible(choose || image || text || hex || edit);
     footer_->set_text(footer_text_);
     footer_box_->set_visible(!footer_text_.empty());
     gif_bar_->set_visible(gif_ != 0);

@@ -6,6 +6,7 @@
 #include "views/main/folder_tree.h"
 #include "views/panes/media_pane.h"
 #include "views/bridge/ops.h"
+#include "views/dialogs/file_pickers.h"
 #include "views/dialogs/ops_card.h"
 #include "views/dialogs/ops_menus.h"
 #include "views/panes/property_host.h"
@@ -171,7 +172,8 @@ bool MainView::host_command(const std::wstring& id) {
     }
     // Commands that start another program for the user: the core decides what from the selection and
     // starts it through the one launcher (the harness's refuses and records).
-    if (id == L"file.run-as-admin" || id == L"file.open-terminal" || id == L"file.open-vscode" || id.rfind(L"custom:", 0) == 0) {
+    if (id == L"file.run-as-admin" || id == L"file.open-terminal" || id == L"file.open-vscode" || id == L"file.edit-in-bertcut" ||
+        id.rfind(L"custom:", 0) == 0) {
         return bb_launch_command(core_.app(), core::s(id)) == BB_OK;
     }
     // Commands that put a dialog up. A run with no one to answer reports them instead.
@@ -335,6 +337,21 @@ bool MainView::transfer_to_chosen(bool move) {
     dialog->Release();
     if (!chosen.empty()) transfer_into(core_, sources, chosen, move ? "move" : "copy");
     return true;
+}
+
+void MainView::locate_bertcut() {
+    if (headless_dialogs_) return;
+    PickPath pick;
+    pick.title = L"Where is BertCut?";
+    pick.filters = {{L"BertCut (BertCut.exe)", L"BertCut.exe"}, {L"Programs (*.exe)", L"*.exe"}};
+    if (const auto chosen = pick_open_file(window_.hwnd(), pick)) bertcut_located(*chosen);
+}
+
+void MainView::bertcut_located(const std::wstring& exe) {
+    // Kept first: the core reads the setting when the command runs. A path it will not take (gone since it was
+    // chosen) asks again, and backing out of that picker is the way out.
+    if (bb_settings_set(core_.app(), core::s(L"bertcutPath"), core::s(core::wide(json_quote(exe)))) != BB_OK) return;
+    bb_launch_command(core_.app(), core::s(L"file.edit-in-bertcut"));
 }
 
 void MainView::open_duplicates(const std::wstring& folder) {

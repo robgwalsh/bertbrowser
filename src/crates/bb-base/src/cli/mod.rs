@@ -3,9 +3,11 @@
 
 mod command_line;
 mod navigation_request;
+mod pick;
 
 pub use command_line::CommandLine;
 pub use navigation_request::NavigationRequest;
+pub use pick::{PickMode, PickRequest};
 
 /// Where a request wants its folders opened.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -64,6 +66,8 @@ pub struct CommandLineRequest {
     pub targets: Vec<OpenTarget>,
     pub mode: OpenIn,
     pub errors: Vec<String>,
+    /// Another program asking the user to choose a file here, instead of anything to open.
+    pub pick: Option<PickRequest>,
 }
 
 impl CommandLineRequest {

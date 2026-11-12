@@ -417,6 +417,17 @@ inline constexpr float kVSCode[] = {
     2.f,14.6906f,15.0384f,14.3743f,15.0573f,14.1679f,14.8742f, 2.f,13.9617f,14.6909f,13.9429f,14.3746f,14.126f,14.1682f,
     1.f,17.831f,10.0002f, 1.f,14.126f,5.83225f, 2.f,13.9428f,5.6259f,13.9618f,5.3096f,14.1679f,5.12619f, 3.f,
 };
+inline constexpr float kVideoEdit[] = {
+    0.f,8.76512f,7.07608f, 2.f,8.61099f,6.97969f,8.41669f,6.97454f,8.25768f,7.06264f,
+    2.f,8.09867f,7.15075f,8.f,7.31821f,8.f,7.5f, 1.f,8.f,12.65f, 2.f,8.f,12.8341f,8.10118f,13.0033f,8.26337f,13.0905f,
+    2.f,8.42557f,13.1776f,8.62252f,13.1685f,8.77603f,13.0669f, 1.f,12.776f,10.4185f,
+    2.f,12.9178f,10.3246f,13.0022f,10.1651f,13.f,9.99508f, 2.f,12.9978f,9.82505f,12.9093f,9.6678f,12.7651f,9.57764f,
+    1.f,8.76512f,7.07608f, 3.f, 0.f,4.5f,3.f, 2.f,3.11929f,3.f,2.f,4.11929f,2.f,5.5f, 1.f,2.f,14.5f,
+    2.f,2.f,15.8807f,3.11929f,17.f,4.5f,17.f, 1.f,15.5f,17.f, 2.f,16.8807f,17.f,18.f,15.8807f,18.f,14.5f, 1.f,18.f,5.5f,
+    2.f,18.f,4.11929f,16.8807f,3.f,15.5f,3.f, 1.f,4.5f,3.f, 3.f, 0.f,3.f,5.5f, 2.f,3.f,4.67157f,3.67157f,4.f,4.5f,4.f,
+    1.f,15.5f,4.f, 2.f,16.3284f,4.f,17.f,4.67157f,17.f,5.5f, 1.f,17.f,14.5f, 2.f,17.f,15.3284f,16.3284f,16.f,15.5f,16.f,
+    1.f,4.5f,16.f, 2.f,3.67157f,16.f,3.f,15.3284f,3.f,14.5f, 1.f,3.f,5.5f, 3.f,
+};
 inline constexpr float kShield[] = {
     0.f,9.72265f,2.08397f, 2.f,9.8906f,1.97201f,10.1094f,1.97201f,10.2774f,2.08397f,
     2.f,12.2155f,3.3761f,14.3117f,4.1823f,16.5707f,4.50503f, 2.f,16.817f,4.54021f,17.f,4.75117f,17.f,5.f, 1.f,17.f,9.5f,
@@ -1214,6 +1225,7 @@ inline constexpr ui::IconData Archive{20.f, data::kArchive, sizeof(data::kArchiv
 inline constexpr ui::IconData Open{20.f, data::kOpen, sizeof(data::kOpen) / sizeof(float)};
 inline constexpr ui::IconData Terminal{20.f, data::kTerminal, sizeof(data::kTerminal) / sizeof(float)};
 inline constexpr ui::IconData VSCode{20.f, data::kVSCode, sizeof(data::kVSCode) / sizeof(float)};
+inline constexpr ui::IconData VideoEdit{20.f, data::kVideoEdit, sizeof(data::kVideoEdit) / sizeof(float)};
 inline constexpr ui::IconData Shield{20.f, data::kShield, sizeof(data::kShield) / sizeof(float)};
 inline constexpr ui::IconData Search{20.f, data::kSearch, sizeof(data::kSearch) / sizeof(float)};
 inline constexpr ui::IconData Settings{20.f, data::kSettings, sizeof(data::kSettings) / sizeof(float)};
@@ -1300,6 +1312,7 @@ inline constexpr NamedIcon kAll[] = {
     {"Open", &Open},
     {"Terminal", &Terminal},
     {"VSCode", &VSCode},
+    {"VideoEdit", &VideoEdit},
     {"Shield", &Shield},
     {"Search", &Search},
     {"Settings", &Settings},

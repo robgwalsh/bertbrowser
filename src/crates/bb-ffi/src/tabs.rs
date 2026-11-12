@@ -170,6 +170,36 @@ pub unsafe extern "C" fn bb_tab_set_side_pane(app: *mut BbApp, tab: u64, pane: u
     })
 }
 
+/// The banner of a tab that is choosing a file for another program: `{mode: "open"|"save", title,
+/// filter, name, canAnswer, why}`, or `null` when the tab is not choosing anything.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_tab_pick(
+    app: *mut BbApp,
+    tab: u64,
+    out_json: *mut BbOwnedStr,
+) -> BbStatus {
+    guard(|| put(out_json, &app_of(app)?.app.tab_pick_json(TabId(tab))))
+}
+
+/// Answers the program a pick tab is choosing for: `choose` (the selected file), `save` (`name`,
+/// in the folder being shown) or `cancel`. `BB_ERR` leaves the question open, with the reason in
+/// `bb_last_error()`. Only a path is ever sent; nothing is written to disk.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_tab_pick_do(
+    app: *mut BbApp,
+    tab: u64,
+    verb: BbStr,
+    name: BbStr,
+) -> BbStatus {
+    guard(|| {
+        Ok(app_of(app)?.app.tab_pick_do(
+            TabId(tab),
+            &verb.to_string_lossy(),
+            &name.to_string_lossy(),
+        )?)
+    })
+}
+
 /// Enter on a row: a folder opens in place, anything else goes to the launcher.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_tab_open_item(app: *mut BbApp, tab: u64, index: u32) -> BbStatus {

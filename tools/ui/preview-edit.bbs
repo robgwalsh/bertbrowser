@@ -1,0 +1,69 @@
+# Edit in BertCut: the button on a video's preview that hands the video to BertCut, a separate
+# program the user may or may not have.
+#
+# Nothing here presses play, and nothing is started: the run's launcher records what it was asked
+# for and refuses. A run begins with BertCut absent whatever this machine has; `pose-installed`
+# says otherwise, and `locate-bertcut` answers "Where is BertCut?" as Windows' picker would.
+
+tree .
+media-fixture Media
+write Tools/BertCut.exe 64
+refresh
+go Media
+preview on
+
+# --- a video always offers the button, found or not ---
+
+select clip.mp4
+settle 400
+assert-preview media
+assert-visible PreviewEdit
+assert-command file.edit-in-bertcut available
+shot 01-edit-button PreviewPane
+
+# --- pressed with no BertCut anywhere: nothing starts, and the status says what is wanted ---
+
+assert-not-launched
+press PreviewEdit
+assert-not-launched
+assert-status choose BertCut.exe
+
+# --- the answer is kept, and the Edit that asked runs ---
+
+locate-bertcut Tools/BertCut.exe
+assert-launches 1
+assert-launch-args Tools\BertCut.exe
+assert-launch-args clip.mp4"
+
+# --- remembered: the next press asks nothing ---
+
+press PreviewEdit
+assert-launches 2
+assert-launch-args Tools\BertCut.exe
+
+# --- and it is on the Preview page, where it can be changed ---
+
+settings preview
+shot 02-settings-row
+settings close
+
+# --- the same command, from the keyboard's side ---
+
+run file.edit-in-bertcut
+assert-launches 3
+
+# --- the user's own answer wins over an installed copy ---
+
+pose-installed bertcut
+press PreviewEdit
+assert-launches 4
+assert-launch-args Tools\BertCut.exe
+
+# --- sound is not video ---
+
+select tone.wav
+settle 400
+assert-preview media
+assert-hidden PreviewEdit
+assert-command file.edit-in-bertcut unavailable Select one video.
+assert-launches 4

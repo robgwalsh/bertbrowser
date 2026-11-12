@@ -53,6 +53,7 @@ pub const PAGE_KEYS: &[&str] = &[
     "drivesOpenTarget",
     "restoreLastSession",
     "startupDefaultPath",
+    "bertcutPath",
     "scrollSpeedMultiplier",
     "showPreviewPane",
     "showMetadataPane",

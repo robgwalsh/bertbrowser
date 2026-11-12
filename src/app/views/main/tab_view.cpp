@@ -5,6 +5,7 @@
 #include "gfx/icons.gen.h"
 #include "views/main/folder_tree.h"
 #include "views/panes/media_pane.h"
+#include "views/bridge/model.h"
 #include "views/bridge/ops.h"
 #include "views/dialogs/ops_card.h"
 #include "views/dialogs/ops_menus.h"
@@ -337,6 +338,39 @@ void TabView::setup_banners() {
         notice_panel_ = add(std::move(notice));
     }
 
+    // Another program asked the user to choose a file here and is waiting. The strip says what for and holds
+    // the two answers; Enter or a double-click on a file answers too. Accent, not warning: nothing is wrong.
+    {
+        auto pick = std::make_unique<StackPanel>(Orientation::Horizontal, 8.0f);
+        pick->name = "PickBanner";
+        pick->dock = Dock::Top;
+        pick->pad = 6;
+        pick->style.bg = tok::AccentMuted;
+        pick_title_ = pick->emplace<TextBlock>();
+        pick_title_->name = "PickTitle";
+        pick_title_->style.font.weight = 600;
+        pick_title_->vcenter = true;
+        pick_title_->flex = 1;
+        pick_name_ = pick->emplace<Edit>();
+        pick_name_->name = "PickName";
+        pick_name_->automation_id = "PickName";
+        pick_name_->placeholder = L"File name";
+        pick_name_->width = 260;
+        pick_name_->on_commit = [this] { pick_do(L"save"); };
+        pick_name_->on_cancel = [this] { pick_do(L"cancel"); };
+        pick_answer_ = pick->emplace<Button>(L"Choose");
+        pick_answer_->name = "PickAnswer";
+        pick_answer_->automation_id = "PickAnswer";
+        pick_answer_->primary = true;
+        pick_answer_->on_click = [this] { pick_do(pick_mode_ == "save" ? L"save" : L"choose"); };
+        pick_cancel_ = pick->emplace<Button>(L"Cancel");
+        pick_cancel_->name = "PickCancel";
+        pick_cancel_->automation_id = "PickCancel";
+        pick_cancel_->on_click = [this] { pick_do(L"cancel"); };
+        pick->set_visible(false);
+        pick_panel_ = add(std::move(pick));
+    }
+
     auto banner = std::make_unique<StackPanel>(Orientation::Horizontal, 8.0f);
     banner->pad = 6;  // grows with what it says: an access-denied message is long, and a pane can be narrow
     banner->dock = Dock::Top;
@@ -609,5 +643,32 @@ void TabView::drain_thumbnails() {
 
 Widget* TabView::active_view() const { return tiles_on_ ? static_cast<Widget*>(tiles_) : static_cast<Widget*>(list_); }
 
+
+// Re-reads the question from the core. The name box is only written when the question arrives (or changes
+// kind): after that it is the user's, and a refresh must not put the suggestion back over what they typed.
+void TabView::sync_pick() {
+    const json::Value m = try_model([&](BbOwnedStr* o) { return bb_tab_pick(core_.app(), tab_, o); });
+    const std::string mode = m.is_null() ? std::string() : m["mode"].str();
+    if (mode != pick_mode_) {
+        pick_mode_ = mode;
+        if (mode == "save") pick_name_->set_text(core::wide(m["name"].str()));
+    }
+    pick_panel_->set_visible(!mode.empty());
+    if (mode.empty()) return;
+    const bool save = mode == "save";
+    pick_title_->set_text(core::wide(m["title"].str()));
+    pick_name_->set_visible(save);
+    pick_answer_->text = save ? L"Save here" : L"Choose";
+    const bool can = m["canAnswer"].boolean();
+    pick_answer_->set_enabled(can);
+    pick_answer_->tooltip = can ? std::wstring() : core::wide(m["why"].str());
+}
+
+// Answers the program that asked. A refusal (no file selected, a name that is not one) is said in the tab's
+// status line by the core; the strip stays, because the question is still open.
+void TabView::pick_do(const wchar_t* verb) {
+    const std::wstring typed = pick_name_->text();
+    bb_tab_pick_do(core_.app(), tab_, core::s(verb), core::s(typed));
+}
 
 }  // namespace bb::views

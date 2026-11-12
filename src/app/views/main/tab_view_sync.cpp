@@ -311,6 +311,7 @@ void TabView::reload_state() {
     const std::wstring notice = core_.tab_text(tab_, BB_TEXT_NOTICE);
     if (notice_->text() != notice) notice_->set_text(notice);
     notice_panel_->set_visible(!notice.empty());
+    sync_pick();
     // Indeterminate only while shown: its animation timer runs for as long as it is.
     const bool busy = st.is_loading || st.is_search_running;
     activity_->set_indeterminate(busy);

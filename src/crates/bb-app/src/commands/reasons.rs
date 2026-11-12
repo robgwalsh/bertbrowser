@@ -164,6 +164,7 @@ impl Inner {
             }
             "file.open-terminal" => self.verb_reason(ctx, FileVerb::OpenInTerminal),
             "file.open-vscode" => self.verb_reason(ctx, FileVerb::OpenInVSCode),
+            "file.edit-in-bertcut" => self.verb_reason(ctx, FileVerb::EditInBertCut),
             "file.new-folder" | "file.new-file" => self.verb_reason(ctx, FileVerb::New),
             "file.rename" => self.verb_reason(ctx, FileVerb::Rename),
             "file.delete" => self.verb_reason(ctx, FileVerb::Delete),

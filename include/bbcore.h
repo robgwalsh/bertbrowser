@@ -33,6 +33,20 @@
 // A menu or dropdown has the keyboard.
 #define BB_FOCUS_IN_POPUP 16
 
+// The outcome of a call. Only `BB_OK` carries a result.
+typedef enum BbStatus {
+  // The call succeeded.
+  BB_OK = 0,
+  // The call failed; `bb_last_error` has the message.
+  BB_ERR = 1,
+  // Rust panicked inside the call; `bb_last_error` has the panic message.
+  BB_PANIC = 2,
+  // A handle or id named something that no longer exists.
+  BB_STALE = 3,
+  // Another operation holds the app; try again once it finishes.
+  BB_BUSY = 4,
+} BbStatus;
+
 // What an event is about. `BbEvent.id` and `a` mean different things per kind; each variant says.
 typedef enum BbEventKind {
   // A tab's listing was replaced. `id` = tab, `a` = the new listing version. Drop the snapshot you
@@ -61,20 +75,6 @@ typedef enum BbEventKind {
   // `bb_props_requests`, answer with `bb_props_supply`.
   BB_EVT_PROPERTIES_NEEDED = 10,
 } BbEventKind;
-
-// The outcome of a call. Only `BB_OK` carries a result.
-typedef enum BbStatus {
-  // The call succeeded.
-  BB_OK = 0,
-  // The call failed; `bb_last_error` has the message.
-  BB_ERR = 1,
-  // Rust panicked inside the call; `bb_last_error` has the panic message.
-  BB_PANIC = 2,
-  // A handle or id named something that no longer exists.
-  BB_STALE = 3,
-  // Another operation holds the app; try again once it finishes.
-  BB_BUSY = 4,
-} BbStatus;
 
 // Which seams the app is built over.
 typedef enum BbFakes {
@@ -345,6 +345,13 @@ struct BbStr bb_version(void);
 // Whether this build is on the unstable release channel, decided from its own version string.
 bool bb_is_unstable(void);
 
+// What the title-bar icon's tip says about this copy, as JSON: `version` (what this build reports),
+// `source` (where it came from, in words), and for a development or local build - whose version
+// does not change from one build to the next - `built` ("3 min ago") and `location` (the folder the
+// exe runs from). Built when the tip is shown, never at startup: it reads the install's manifest and
+// the exe's date. Free with `bb_str_free`.
+enum BbStatus bb_version_json(struct BbOwnedStr *out_json);
+
 // The message behind the last non-OK status on this thread. The view is valid until the next
 // `bb_*` call on the same thread.
 void bb_last_error(struct BbStr *out);
@@ -433,6 +440,15 @@ enum BbStatus bb_tab_set_thumbnail_scale(struct BbApp *app, uint64_t tab, double
 
 // 0 none, 1 preview, 2 metadata.
 enum BbStatus bb_tab_set_side_pane(struct BbApp *app, uint64_t tab, uint32_t pane);
+
+// The banner of a tab that is choosing a file for another program: `{mode: "open"|"save", title,
+// filter, name, canAnswer, why}`, or `null` when the tab is not choosing anything.
+enum BbStatus bb_tab_pick(struct BbApp *app, uint64_t tab, struct BbOwnedStr *out_json);
+
+// Answers the program a pick tab is choosing for: `choose` (the selected file), `save` (`name`,
+// in the folder being shown) or `cancel`. `BB_ERR` leaves the question open, with the reason in
+// `bb_last_error()`. Only a path is ever sent; nothing is written to disk.
+enum BbStatus bb_tab_pick_do(struct BbApp *app, uint64_t tab, struct BbStr verb, struct BbStr name);
 
 // Enter on a row: a folder opens in place, anything else goes to the launcher.
 enum BbStatus bb_tab_open_item(struct BbApp *app, uint64_t tab, uint32_t index);
@@ -1087,6 +1103,17 @@ enum BbStatus bb_undo_clear(struct BbApp *app);
 // `running` poses an index helper that is up and reporting canned usage; `off`, none. Only the
 // harness's seams can be posed: the product's index is the real client.
 enum BbStatus bb_harness_pose_indexer(struct BbApp *app, struct BbStr state);
+
+// `bertcut` poses BertCut, the video editor a video is handed to, as installed; `none`, as absent
+// (which is how a run starts). Only the harness's launcher can be posed.
+enum BbStatus bb_harness_pose_installed(struct BbApp *app, struct BbStr what);
+
+// A command line as a second launch would hand it over, one argument per line (`--pick`, `open`,
+// `--reply-pipe`, ...). Only the harness's seams take one: its reply channel is a recorder.
+enum BbStatus bb_harness_launch_args(struct BbApp *app, struct BbStr lines);
+
+// Every program waiting on a pick stops waiting, as if it had been closed.
+enum BbStatus bb_harness_pose_askers_gone(struct BbApp *app);
 
 // Writes a set of small real files into `dir` (created if need be): `metadata` (a camera picture,
 // a bare picture, two songs), `media` (the same tone as FLAC, WAV, M4A and WMA, and a two-track

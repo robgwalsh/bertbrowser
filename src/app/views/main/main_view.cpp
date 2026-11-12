@@ -47,6 +47,26 @@ MainView::MainView(core::Core& core, platform::Window& window)
     wire_window(std::move(outer));
 }
 
+namespace {
+// The caption's app icon. Its tip says which build this is and where it came from (a release or unstable
+// build from GitHub, a local build from a checkout, or a development build nothing installed), asked of the
+// core each time it is shown, so nothing about it is read at startup.
+class AppIconView : public ImageView {
+public:
+    bool has_rich_tip() const override { return true; }
+    std::unique_ptr<Widget> make_rich_tip(gfx::Resources& res) override {
+        BbOwnedStr o{};
+        const json::Value v = bb_version_json(&o) == BB_OK ? json::parse(core::utf8(core::take(o))) : json::Value{};
+        RichTipContent c;
+        c.title = L"BertBrowser " + core::wide(v["version"].str());
+        c.subtitle = core::wide(v["source"].str());
+        if (!v["built"].str().empty()) c.rows.push_back({L"Built", core::wide(v["built"].str())});
+        if (!v["location"].str().empty()) c.rows.push_back({L"Running from", core::wide(v["location"].str())});
+        return std::make_unique<RichTip>(res, std::move(c));
+    }
+};
+}  // namespace
+
 // The caption: icon, menu bar, toolbar, the switchers and the search group.
 void MainView::setup_title_bar(DockPanel& root) {
     title_ = root.emplace<TitleBar>();
@@ -54,9 +74,9 @@ void MainView::setup_title_bar(DockPanel& root) {
     title_->dock = Dock::Top;
     title_->show_title = false;
     // The app's icon at the left of the caption; a click on it is the window menu. Spec: MainWindow.xaml
-    // (ShowsAppIcon). The harness exe has no icon resource, and shows none.
+    // (ShowsAppIcon). The harness exe has no icon resource, and shows none. Its tip is the version (AppIconView).
     if (HICON icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR))) {
-        auto* logo = title_->emplace<ImageView>();
+        auto* logo = title_->emplace<AppIconView>();
         logo->name = "TitleAppIcon";
         logo->interactive = false;
         logo->checkerboard = false;

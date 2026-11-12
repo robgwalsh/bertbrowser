@@ -404,6 +404,56 @@ void Runner::install_ui_banner() {
         s_.settle();
         s_.view().sync_overlays();
     };
+    // pick open|save <folder or file> [name=<file name>] [filter=<*.a;*.b>] [title=<words>] -- another program
+    // asks the user to choose a file, as its command line would (`--pick ... --reply-pipe ...`): the same
+    // parser and the same request path as a second launch. The reply pipe is the run's recorder.
+    verbs_[L"pick"] = [this](const std::wstring& r) {
+        const std::vector<std::wstring> parts = words(require(r, "pick"));
+        if (parts.size() < 2) throw FormatError("pick wants open or save, then a folder or file to start at.");
+        static int picks = 0;
+        std::wstring lines = L"--pick\n" + parts[0] + L"\n--reply-pipe\nharness-pick-" + std::to_wstring(++picks) + L"\n";
+        std::wstring start = parts[1];
+        for (size_t i = 2; i < parts.size(); ++i) {
+            const size_t eq = parts[i].find(L'=');
+            const std::wstring key = eq == std::wstring::npos ? L"" : lower(parts[i].substr(0, eq));
+            if (key == L"name" || key == L"filter" || key == L"title") lines += L"--pick-" + key + L"\n" + parts[i].substr(eq + 1) + L"\n";
+            else start += L" " + parts[i];  // a path with a space in it
+        }
+        lines += sandbox_.resolve(start).wstring();
+        core::check(bb_harness_launch_args(s_.core().app(), core::s(lines)), "pick");
+        s_.settle();
+    };
+    // The program that asked stops waiting (it was closed, or its own Cancel was pressed).
+    verbs_[L"pose-asker-gone"] = [this](const std::wstring&) {
+        core::check(bb_harness_pose_askers_gone(s_.core().app()), "pose-asker-gone");
+        Sleep(600);  // the tab looks every 400 ms
+        s_.settle();
+    };
+    // assert-reply waiting|cancelled|<path> -- what the last program that asked has received.
+    verbs_[L"assert-reply"] = [this](const std::wstring& r) {
+        const std::wstring want = require(r, "assert-reply");
+        const bb::json::Value replies = bb::json::parse(s_.core().state_json())["replies"];
+        if (replies.size() == 0) throw AssertionError("nothing has asked this run to choose a file.");
+        const bb::json::Value& last = replies[replies.size() - 1];
+        const std::string state = last["state"].str();
+        const std::wstring got = state == "answered" ? core::wide(last["path"].str()) : core::wide(state);
+        const std::wstring expected = (lower(want) == L"waiting" || lower(want) == L"cancelled") ? lower(want) : sandbox_.resolve(want).wstring();
+        if (!core::iequals(got, expected)) throw AssertionError("the asker has `" + to_utf8(got) + "`, not `" + to_utf8(expected) + "`.");
+    };
+    // BertCut, the video editor a video is handed to, installed or not. A run starts with it absent whatever
+    // this machine has, so the Edit button and its command are the same in every run.
+    verbs_[L"pose-installed"] = [this](const std::wstring& r) {
+        const std::wstring what = lower(require(r, "pose-installed"));
+        if (what != L"bertcut" && what != L"none") throw FormatError("pose-installed wants bertcut or none, got '" + to_utf8(what) + "'.");
+        core::check(bb_harness_pose_installed(s_.core().app(), core::s(what)), "pose-installed");
+        s_.settle();
+    };
+    // locate-bertcut <path> -- answers "Where is BertCut?" as Windows' picker would have, with a sandbox file: a run
+    // has nobody to answer the real one. The answer is kept and the interrupted Edit runs again.
+    verbs_[L"locate-bertcut"] = [this](const std::wstring& r) {
+        s_.view().bertcut_located(sandbox_.resolve(require(r, "locate-bertcut")).wstring());
+        s_.settle();
+    };
     // Shows a widget's tip as resting the pointer on it would (a run posts no mouse input), for a `shot`.
     verbs_[L"tip"] = [this](const std::wstring& r) {
         const std::wstring name = require(r, "tip");

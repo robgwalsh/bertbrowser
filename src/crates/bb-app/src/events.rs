@@ -61,6 +61,10 @@ pub enum Model {
     /// The index helper reported what it costs, or stopped being able to (`index_state().usage`).
     /// Apart from `Index` so a two-second tick re-reads only the rows, never the banner and overlays.
     IndexUsage = 25,
+    /// Edit in BertCut was run and nothing knows where BertCut is: ask the user for `BertCut.exe`,
+    /// keep the answer in the `bertcutPath` setting and run the command again. A request, not a
+    /// state - a host with nobody to ask does nothing, and the status line has already said why.
+    LocateBertCut = 26,
 }
 
 #[derive(Clone, Debug, PartialEq)]

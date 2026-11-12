@@ -64,6 +64,9 @@ Archive           | Folder Zip              | folder_zip              | 20
 Open              | Open                    | open                    | 20
 Terminal          | Window Console          | window_console          | 20
 VSCode            | Code                    | code                    | 20
+# Handing a video to BertCut, the separate editor. A clip of film rather than the scissors, which already
+# mean the clipboard's Cut in the same menu.
+VideoEdit         | Video Clip              | video_clip              | 20
 Shield            | Shield                  | shield                  | 20
 
 # Everything else

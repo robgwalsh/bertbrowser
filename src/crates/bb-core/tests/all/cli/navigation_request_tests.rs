@@ -84,6 +84,7 @@ fn a_request_survives_the_round_trip() {
         ],
         mode: OpenIn::NewTab,
         errors: vec![],
+        pick: None,
     };
 
     let parsed = NavigationRequest::try_parse(&NavigationRequest::format(&original)).unwrap();
@@ -102,6 +103,7 @@ fn a_path_with_spaces_survives_the_round_trip() {
         targets: vec![OpenTarget::new(r"C:\Program Files\Some App", false)],
         mode: OpenIn::Default,
         errors: vec![],
+        pick: None,
     };
 
     let parsed = NavigationRequest::try_parse(&NavigationRequest::format(&original)).unwrap();
@@ -127,6 +129,7 @@ fn formatting_drops_a_path_that_would_not_be_accepted() {
         ],
         mode: OpenIn::Default,
         errors: vec![],
+        pick: None,
     };
 
     let parsed = NavigationRequest::try_parse(&NavigationRequest::format(&request)).unwrap();

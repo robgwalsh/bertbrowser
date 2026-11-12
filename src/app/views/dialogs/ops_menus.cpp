@@ -62,6 +62,7 @@ const std::vector<Spec>& specs() {
         {"open-new-pane", {"file.open-pane-right", "file.open-pane-below"}, L"Open in new pane", true},
         {"open-terminal", {"file.open-terminal"}, nullptr, true},
         {"open-vscode", {"file.open-vscode"}, nullptr, true},
+        {"edit-in-bertcut", {"file.edit-in-bertcut"}, nullptr, false},
         {"disk-usage", {"tools.disk-usage"}, nullptr, true},
         {"duplicates", {"tools.duplicates"}, nullptr, true},
         {"changes", {"tools.changes"}, nullptr, true},

@@ -47,6 +47,11 @@ A [very fast and memory efficient](docs/performance.md) Windows file browser. Wr
 winget install RobWalsh.BertBrowser
 ```
 
+* **Or**, with no winget and no wait for its catalogue, straight from the latest release (add `-Channel unstable` or `-Version 2.0.1` with the second form):
+  ```powershell
+  irm https://raw.githubusercontent.com/robgwalsh/bertbrowser/main/install.ps1 | iex
+  iex "& { $(irm https://raw.githubusercontent.com/robgwalsh/bertbrowser/main/install.ps1) } -Channel unstable"
+  ```
 * **Or** grab the [latest installer](https://github.com/robgwalsh/bertbrowser/releases/latest/download/BertBrowser-win-Setup.exe) and run it.
 * **Or** download the [latest portable executable](https://github.com/robgwalsh/bertbrowser/releases/latest/download/BertBrowser-win-Portable.zip) if you'd rather not install anything.
 

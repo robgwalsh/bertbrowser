@@ -207,6 +207,26 @@ fn the_version_is_a_static_view() {
     assert!(v.starts_with("2."), "{v}");
 }
 
+/// The app icon's tip. A test binary is a build nothing installed, so it is a development build and
+/// says when it was built and where it runs - the two things its version cannot tell apart.
+#[test]
+fn the_version_tip_of_an_uninstalled_build_says_when_and_where() {
+    let mut o = BbOwnedStr {
+        ptr: ptr::null_mut(),
+        len: 0,
+    };
+    assert_eq!(BbStatus::BB_OK, unsafe { bb_version_json(&mut o) });
+    let json: serde_json::Value = serde_json::from_str(&unsafe { take(o) }.unwrap()).unwrap();
+    assert_eq!(unsafe { text(bb_version()) }, json["version"]);
+    assert_eq!("Development build, not installed", json["source"]);
+    assert!(!json["built"].as_str().unwrap().is_empty(), "{json}");
+    let exe = std::env::current_exe().unwrap();
+    assert_eq!(
+        exe.parent().unwrap().display().to_string(),
+        json["location"]
+    );
+}
+
 #[test]
 fn a_panic_is_a_status_with_a_message_and_not_an_unwind() {
     assert_eq!(BbStatus::BB_PANIC, bb_selftest_panic());

@@ -974,6 +974,20 @@ impl App {
         Ok(())
     }
 
+    /// The harness's `pose-installed`: poses BertCut as installed, or as absent. A run starts with
+    /// it absent whatever the machine has, so no script depends on the developer's own installs.
+    pub fn harness_pose_bertcut(&self, installed: bool) -> AppResult<()> {
+        let probes = self
+            .probes()
+            .ok_or_else(|| AppError::Invalid("pose-installed needs the harness's seams".into()))?;
+        probes.pose_installed_app(
+            crate::ops::launching::BERTCUT_PACK_ID,
+            installed.then_some(r"Q:\Apps\BertCut\current\BertCut.exe"),
+        );
+        self.inner.hub.model(crate::events::Model::Commands);
+        Ok(())
+    }
+
     /// `dismiss-banner`, `start` (the one thing that raises the elevation prompt), `retry`.
     pub fn index_do(&self, verb: &str) -> AppResult<()> {
         match verb {

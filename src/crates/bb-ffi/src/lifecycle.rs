@@ -26,6 +26,47 @@ pub extern "C" fn bb_is_unstable() -> bool {
     bb_core::updates::ReleaseChannel::is_unstable(Some(APP_VERSION))
 }
 
+/// What the title-bar icon's tip says about this copy, as JSON: `version` (what this build reports),
+/// `source` (where it came from, in words), and for a development or local build - whose version
+/// does not change from one build to the next - `built` ("3 min ago") and `location` (the folder the
+/// exe runs from). Built when the tip is shown, never at startup: it reads the install's manifest and
+/// the exe's date. Free with `bb_str_free`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_version_json(out_json: *mut BbOwnedStr) -> BbStatus {
+    static INSTALLED: OnceLock<Option<String>> = OnceLock::new();
+    guard(|| {
+        use bb_core::updates::InstallSource;
+        let source = InstallSource::of(
+            INSTALLED
+                .get_or_init(bb_shell::updates::installed_version)
+                .as_deref(),
+        );
+        let exe = std::env::current_exe().ok();
+        let (built, location) = match (&exe, source.is_unpublished()) {
+            (Some(exe), true) => (
+                std::fs::metadata(exe)
+                    .and_then(|m| m.modified())
+                    .map(|t| {
+                        let t = bb_core::time::FileTime::from_system_time(t);
+                        bb_core::format::relative_time(t, bb_core::time::FileTime::now())
+                    })
+                    .unwrap_or_default(),
+                exe.parent()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
+            ),
+            _ => (String::new(), String::new()),
+        };
+        let json = serde_json::json!({
+            "version": APP_VERSION,
+            "source": source.description(),
+            "built": built,
+            "location": location,
+        });
+        put(out_json, &json.to_string())
+    })
+}
+
 /// The message behind the last non-OK status on this thread. The view is valid until the next
 /// `bb_*` call on the same thread.
 #[unsafe(no_mangle)]

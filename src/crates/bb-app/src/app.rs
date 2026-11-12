@@ -122,6 +122,9 @@ pub(crate) struct TabData {
     pub preview_fit: bool,
     /// What the comparison on screen says about this tab's rows, while there is one.
     pub compare: Option<Arc<crate::tools::compare_view::TabCompare>>,
+    /// The file another program is waiting for this tab to choose, while it is. Dropping it hangs
+    /// up on that program, which is how closing the tab cancels.
+    pub pick: Option<crate::browse::pick::PickState>,
 }
 
 impl TabData {
@@ -179,6 +182,7 @@ impl TabData {
             preview_wrap: false,
             preview_fit: false,
             compare: None,
+            pick: None,
         }
     }
 

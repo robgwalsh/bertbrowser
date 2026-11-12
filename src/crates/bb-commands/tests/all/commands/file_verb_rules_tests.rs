@@ -12,6 +12,7 @@ struct Tab {
     has_folder: bool,
     comparing: bool,
     single_archive: bool,
+    single_video: bool,
     all_bookmarked: bool,
     locked: bool,
     clipboard: bool,
@@ -28,6 +29,7 @@ impl Default for Tab {
             has_folder: true,
             comparing: false,
             single_archive: false,
+            single_video: false,
             all_bookmarked: false,
             locked: false,
             clipboard: false,
@@ -69,6 +71,10 @@ impl Tab {
         self.single_archive = true;
         self
     }
+    fn single_video(mut self) -> Tab {
+        self.single_video = true;
+        self
+    }
     fn all_bookmarked(mut self) -> Tab {
         self.all_bookmarked = true;
         self
@@ -107,6 +113,7 @@ impl Tab {
             has_folder: self.has_folder,
             comparing: self.comparing,
             single_is_archive: self.single_archive,
+            single_is_video: self.single_video,
             all_bookmarked: self.all_bookmarked,
             archive_locked: self.locked,
             clipboard_has_files: Some(&clip),
@@ -393,4 +400,38 @@ fn bookmark_becomes_remove_only_when_everything_selected_is_bookmarked() {
 fn unlock_is_for_a_locked_archive() {
     assert!(tab().in_archive().locked().on(FileVerb::UnlockArchive));
     assert!(!tab().in_archive().on(FileVerb::UnlockArchive));
+}
+
+// --- Edit in BertCut ---
+
+/// Always, whether or not BertCut can be found: running it is what asks where BertCut is.
+#[test]
+fn one_video_can_always_be_edited() {
+    let state = tab().files(1).single_video().state(FileVerb::EditInBertCut);
+    assert!(state.visible && state.enabled);
+    assert_eq!("Edit in BertCut", state.header);
+}
+
+/// Hidden, not greyed: a greyed "Edit in BertCut" on every text file and folder would be noise.
+#[test]
+fn anything_but_one_video_hides_the_verb() {
+    for selection in [tab(), tab().files(1), tab().folders(1)] {
+        let state = selection.state(FileVerb::EditInBertCut);
+        assert!(!state.visible && !state.enabled);
+    }
+}
+
+/// Shown and refused, with the way out: the preview is playing it, so "why not?" is a fair question.
+#[test]
+fn a_video_inside_an_archive_says_to_extract_it() {
+    let state = tab()
+        .files(1)
+        .single_video()
+        .in_archive()
+        .state(FileVerb::EditInBertCut);
+    assert!(state.visible && !state.enabled);
+    assert_eq!(
+        Some("Extract this video to edit it.".to_string()),
+        state.reason
+    );
 }

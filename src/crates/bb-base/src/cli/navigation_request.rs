@@ -4,7 +4,7 @@
 //! path, and nothing else. One line per request, tab-separated: tab is safe because control
 //! characters are refused. Spec: Core/Cli/NavigationRequest.cs.
 
-use super::{CommandLineRequest, OpenIn, OpenTarget};
+use super::{CommandLineRequest, OpenIn, OpenTarget, PickMode, PickRequest};
 
 pub struct NavigationRequest;
 
@@ -17,6 +17,9 @@ impl NavigationRequest {
 
     const SEPARATOR: char = '\t';
     const PREFIX: &'static str = "OPEN";
+    /// A request to choose a file: `PICK`, the mode, the reply pipe, title, filter, default name,
+    /// start. Seven fields exactly; any of the last four may be empty.
+    const PICK_PREFIX: &'static str = "PICK";
 
     /// Whether a path may be navigated to. Rejects anything relative (it would resolve against
     /// whatever directory this process happens to be in), Win32 device paths, wildcards, control
@@ -42,6 +45,25 @@ impl NavigationRequest {
     /// Renders a request as one line. Targets failing `is_acceptable_path` are dropped rather than
     /// sent.
     pub fn format(request: &CommandLineRequest) -> String {
+        if let Some(pick) = &request.pick {
+            // A start that may not be navigated to is sent as none: the tab opens where it would
+            // anyway, which is better than no picker.
+            let start = if Self::is_acceptable_path(&pick.start) {
+                pick.start.as_str()
+            } else {
+                ""
+            };
+            return [
+                Self::PICK_PREFIX,
+                pick.mode.name(),
+                &pick.reply_pipe,
+                &pick.title,
+                &pick.filter,
+                &pick.default_name,
+                start,
+            ]
+            .join("\t");
+        }
         let mut line = String::from(Self::PREFIX);
         line.push(Self::SEPARATOR);
         line.push_str(request.mode.name());
@@ -63,7 +85,11 @@ impl NavigationRequest {
             return None;
         }
         let mut parts = line.split(Self::SEPARATOR);
-        if parts.next()? != Self::PREFIX {
+        let prefix = parts.next()?;
+        if prefix == Self::PICK_PREFIX {
+            return Self::parse_pick(parts);
+        }
+        if prefix != Self::PREFIX {
             return None;
         }
         let mode = OpenIn::parse(parts.next()?)?;
@@ -87,6 +113,29 @@ impl NavigationRequest {
             targets,
             mode,
             errors: Vec::new(),
+            pick: None,
+        })
+    }
+
+    /// The six fields after `PICK`. Unlike a list of paths, a pick is all or nothing: a request
+    /// with one field wrong is not a smaller request, it is a different one.
+    fn parse_pick<'a>(mut parts: impl Iterator<Item = &'a str>) -> Option<CommandLineRequest> {
+        let mode = PickMode::parse(parts.next()?)?;
+        let reply_pipe = parts.next()?;
+        let title = parts.next()?;
+        let filter = parts.next()?;
+        let default_name = parts.next()?;
+        let start = parts.next()?;
+        if parts.next().is_some() {
+            return None;
+        }
+        if !start.is_empty() && !Self::is_acceptable_path(start) {
+            return None;
+        }
+        let pick = PickRequest::new(mode, reply_pipe, title, filter, default_name, start).ok()?;
+        Some(CommandLineRequest {
+            pick: Some(pick),
+            ..CommandLineRequest::default()
         })
     }
 }

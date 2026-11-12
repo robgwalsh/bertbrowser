@@ -110,6 +110,20 @@ pub fn includes_prereleases(installed_version: &str) -> bool {
     ReleaseChannel::is_unstable(Some(installed_version))
 }
 
+/// The version Velopack installed this copy as, or None when nothing installed it (a build running
+/// from `out\`). A source-less manager is enough: it only reads the install's own manifest. That
+/// version, not the build's, is what picks the update source and what says where a copy came from.
+pub fn installed_version() -> Option<String> {
+    UpdateManager::new(NoneSource {}, None, None)
+        .ok()
+        .map(|m| m.get_current_version_as_string())
+}
+
+/// Whether an installed copy takes updates from GitHub at all: not a local build.
+pub fn follows_github(installed_version: &str) -> bool {
+    !ReleaseChannel::is_local(Some(installed_version))
+}
+
 /// The Velopack feed. `None` manager means this copy was not installed by Velopack.
 pub struct VelopackFeed {
     manager: Option<UpdateManager>,
@@ -118,20 +132,19 @@ pub struct VelopackFeed {
 impl VelopackFeed {
     /// For this installed copy, from GitHub (or `override_url` when given).
     pub fn for_this_install(override_url: Option<&str>) -> VelopackFeed {
-        // A source-less manager is enough to read the installed version, which picks the source.
-        let installed = UpdateManager::new(NoneSource {}, None, None)
-            .ok()
-            .map(|m| m.get_current_version_as_string());
-        let manager = installed.and_then(|version| {
+        let manager = installed_version().and_then(|version| {
             match accepted_override(override_url, cfg!(debug_assertions)) {
-                Some(url) => UpdateManager::new(AutoSource::new(url), None, None),
+                Some(url) => UpdateManager::new(AutoSource::new(url), None, None).ok(),
+                // A checkout's build installed by `install.ps1 -Local`: updating it from GitHub
+                // would replace the developer's build with the last release behind their back.
+                None if !follows_github(&version) => None,
                 None => UpdateManager::new(
                     GithubSource::new(REPO_URL, None, includes_prereleases(&version)),
                     None,
                     None,
-                ),
+                )
+                .ok(),
             }
-            .ok()
         });
         VelopackFeed { manager }
     }
@@ -227,6 +240,13 @@ mod tests {
             accepted_override(Some(r"C:\Releases"), true)
         );
         assert_eq!(None, accepted_override(None, true));
+    }
+
+    #[test]
+    fn only_a_local_build_stays_off_github() {
+        assert!(follows_github("2.0.1"));
+        assert!(follows_github("2.0.2-unstable.88"));
+        assert!(!follows_github("2.0.2-local.20261111093000"));
     }
 
     #[derive(Default)]

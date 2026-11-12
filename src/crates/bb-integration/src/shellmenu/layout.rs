@@ -60,6 +60,7 @@ const DEFAULT: &[&str] = &[
     "app:open-new-pane",
     "app:open-terminal",
     "app:open-vscode",
+    "app:edit-in-bertcut",
     "app:disk-usage",
     "app:duplicates",
     "app:changes",

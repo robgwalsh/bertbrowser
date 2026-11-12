@@ -14,6 +14,7 @@ pub enum FileVerb {
     OpenInNewPane,
     OpenInTerminal,
     OpenInVSCode,
+    EditInBertCut,
     DiskUsage,
     Duplicates,
     Changes,
@@ -39,7 +40,7 @@ pub enum FileVerb {
 }
 
 impl FileVerb {
-    pub const ALL: [FileVerb; 29] = [
+    pub const ALL: [FileVerb; 30] = [
         FileVerb::New,
         FileVerb::Open,
         FileVerb::RunAsAdmin,
@@ -47,6 +48,7 @@ impl FileVerb {
         FileVerb::OpenInNewPane,
         FileVerb::OpenInTerminal,
         FileVerb::OpenInVSCode,
+        FileVerb::EditInBertCut,
         FileVerb::DiskUsage,
         FileVerb::Duplicates,
         FileVerb::Changes,
@@ -87,6 +89,8 @@ pub struct FileVerbSnapshot<'a> {
     pub comparing: bool,
     /// Exactly one row is selected and it is an archive file.
     pub single_is_archive: bool,
+    /// Exactly one row is selected and it is a video file.
+    pub single_is_video: bool,
     pub all_bookmarked: bool,
     pub archive_locked: bool,
     pub clipboard_has_files: Option<&'a dyn Fn() -> bool>,
@@ -110,6 +114,7 @@ impl<'a> FileVerbSnapshot<'a> {
             has_folder,
             comparing: false,
             single_is_archive: false,
+            single_is_video: false,
             all_bookmarked: false,
             archive_locked: false,
             clipboard_has_files: None,
@@ -203,6 +208,7 @@ impl FileVerbRules {
                 }
             }
             FileVerb::OpenInTerminal | FileVerb::OpenInVSCode => Self::open_in_program(verb, s),
+            FileVerb::EditInBertCut => Self::edit_in_bertcut(s),
             // One folder, since the view analyses a single root; with nothing selected, the folder
             // being shown. Every size inside a container is already exact, so it stays on there.
             FileVerb::DiskUsage => one_folder_or_none(s, "Analyse disk usage\u{2026}"),
@@ -379,6 +385,23 @@ impl FileVerbRules {
             FileVerbState::on(header)
         } else {
             FileVerbState::off(header, "There is no folder here to open.")
+        }
+    }
+
+    // Another program: hidden rather than greyed wherever it has nothing to say, so a selection
+    // that is not one video never sees it. Whether BertCut can be found is not asked here - a
+    // video always offers it, and running it asks where BertCut is when nothing knows.
+    // An entry inside an archive has no path to hand over; that one is said, because the preview
+    // is showing a video and the question of why it cannot be edited is a fair one.
+    fn edit_in_bertcut(s: &FileVerbSnapshot<'_>) -> FileVerbState {
+        let header = "Edit in BertCut";
+        if !s.single_is_video {
+            return FileVerbState::hidden(header, "Select one video.");
+        }
+        if s.in_archive {
+            FileVerbState::off(header, "Extract this video to edit it.")
+        } else {
+            FileVerbState::on(header)
         }
     }
 

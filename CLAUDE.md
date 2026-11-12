@@ -32,7 +32,13 @@ out\debug\harness\bb-harness.exe --script tools\ui\smoke.bbs --out $env:TEMP\loo
 target\release\bb-bench.exe run|ui|startup|compare|baseline|report|corpus   # --help for flags
 
 pwsh tools\parity\tests.ps1 [-All] [-File X.cs]   # C# test vs Rust test, by file and name
+
+pwsh .\install.ps1 -Local [-Config debug] [-Build] [-Watch]   # this build into the real install (docs/build-and-release.md)
 ```
+
+`install.ps1 -Local` closes the user's installed BertBrowser, and when there is no `-local` install yet (or
+with `-Repack`) it runs Setup, which **opens the app** - so never run that first install or `-Repack`
+yourself (see "Never launch the GUI"), and run a later one only when the user asked for local installs.
 
 `build.ps1` prints a harmless "vswhere.exe not recognized" line. `LNK1104` on `app\BertBrowser.exe`
 means a running instance holds it - kill it (`Get-Process BertBrowser | Stop-Process -Force`) and
@@ -163,6 +169,8 @@ behavior - this table only says where.
 | Launching other programs | `shell/launcher.rs`, `app/ops/launching.rs`, `core/launch/*`, `shell/run_as.rs` |
 | Shell context menu (7-Zip, Git, TortoiseSVN...) | `core/shellmenu/*` (`keys`, `rules`, `built_in`, `layout`, `separators`, `static_verb`), ui: `shell_menu_real.cpp` (hosts the handlers), `ops_menus.cpp` (composer), Context menu page `settings_ctxmenu.cpp`, `harness/canned_shell_menu.h`, `tools/ui/shellmenu.bbs` |
 | Startup / CLI / single instance | `core/cli/*`, `shell/single_instance.rs`, `core/ipc/instance_endpoint.rs`, `bb-ffi/src/startup.rs`, `app/requests.rs`, ui: `src/app/app/main.cpp` |
+| Picker mode (`--pick`, another program asks for a file) | `base/cli/pick.rs` (`PickRequest`, the `PICK` wire line in `navigation_request.rs`), `app/browse/pick.rs`, `shell/reply_pipe.rs`, `ReplyChannels` in `app/seams.rs`, ui: `TabView::sync_pick` (`tab_view.cpp`), `tools/ui/pick.bbs` |
+| Edit in BertCut (the other app) | `EditInBertCut` in `core/commands/verbs.rs`, `bertcut_request` in `app/ops/launching.rs`, `core/launch/installed_app.rs`, `SystemLauncher::installed_app`, ui: `PreviewEdit` in `preview_pane.cpp`, `tools/ui/preview-edit.bbs` |
 | Foreground raise | `shell/foreground.rs`, `ForegroundRaiseRules` in `core/rules.rs` |
 | Default folder handler, Win+E (shell) | `core/shell_integration/*` (`folder_handler`, `win_e_handler`), `shell/folder_handler.rs`, `shell/win_e_handler.rs` |
 | Updates / legacy data | `shell/updates.rs`, `core/updates/mod.rs` (`ReleaseChannel`), `core/settings/legacy.rs` |
@@ -319,6 +327,23 @@ behavior - this table only says where.
   both sides. **Recording continues while the app is closed** (the helper keeps the last policy) -
   deliberate, and stated on the settings page. Any feature that keeps history follows the same rule: off
   until the user turns it on, on its own Settings page, with a way to clear it.
+- **BertCut and this app find each other, and neither needs the other.** `InstalledApp::locate` is the
+  contract for "installed": `%LOCALAPPDATA%\<pack id>\current\<exe>`, then the HKCU Uninstall key's
+  `InstallLocation` - never the Velopack stub beside `current`. Edit in BertCut is offered on every
+  single video whether or not BertCut can be found: the `bertcutPath` setting (Preview page) wins while
+  that file exists, then the installed copy, and with neither the core raises `Model::LocateBertCut` -
+  the host asks for the exe in Windows' picker, keeps it and runs the command again. **A pick request
+  (`--pick open|save --reply-pipe <name>`) is answered with one path on the asker's pipe and nothing
+  else**: this app writes nothing for the asker, nothing inside an archive is an answer, and a file
+  activated in a pick tab is the answer or a status line - never a launch. Dropping `PickState` is the
+  cancel (tab closed, window closed, Cancel are one thing), a watcher clears it when the asker hangs up,
+  and a pick tab is left out of the saved session. The reply pipe is a bare name
+  (`PickRequest::is_acceptable_pipe_name`); a pick line with one bad field is no request at all. BertCut
+  asks the copy named by `HKCU\Software\BertBrowser` `PickerExe` (`shell/picker_registration.rs`: every
+  ordinary start writes its own exe, so a source build is found and the value's presence is the
+  capability; the uninstall hook removes it), else an installed one past its version gate
+  (`BertBrowserLocator.LastWithoutPicking` there), since an older copy opens an ordinary window for
+  `--pick` and never answers.
 - **One program-launching door**, `bb-shell` `launcher.rs` (`ShellExecuteExW`). A second call site is a
   bug. The carve-outs: the Indexer registers its sign-in task through Task Scheduler's COM API (starts no
   process), and `IContextMenu::InvokeCommand` in `shell_menu_real.cpp` (what 7-Zip starts is 7-Zip's

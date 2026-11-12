@@ -20,13 +20,19 @@ fn capture_node(shell: &Shell, node: NodeId) -> SessionLayout {
         let mut tabs = Vec::new();
         let mut active = 0;
         if let Some(pane) = shell.panes.get(&pane_id) {
-            for (i, id) in pane.tabs.iter().enumerate() {
+            // A tab choosing a file for another program is not part of the session: the question
+            // does not outlive the program that asked. It is kept only as the pane's sole tab,
+            // where leaving it out would save a pane with nothing in it, and then as a plain tab.
+            let keep = |id: &TabId| {
+                pane.tabs.len() <= 1 || shell.tabs.get(id).is_none_or(|c| lock(c).pick.is_none())
+            };
+            for id in pane.tabs.iter().filter(|id| keep(id)) {
                 let Some(cell) = shell.tabs.get(id) else {
                     continue;
                 };
                 let t = lock(cell);
                 if pane.active == Some(*id) {
-                    active = i as i32;
+                    active = tabs.len() as i32;
                 }
                 tabs.push(SessionTab {
                     path: t.path.clone(),

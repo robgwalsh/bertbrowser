@@ -1,5 +1,6 @@
 pub(crate) mod columns;
 pub(crate) mod dirwatch;
+pub(crate) mod pick;
 pub(crate) mod portable_devices;
 pub(crate) mod properties;
 pub(crate) mod rows;
