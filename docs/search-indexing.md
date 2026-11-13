@@ -18,22 +18,25 @@ provides — network shares, exFAT sticks — and is described at the end.
 
 ## What the index is
 
-One table, created in `Data/Migrations/002_search_index.sql`:
+One table, created in `bb-index/src/data/migrations/001_schema.sql`:
 
 ```sql
 CREATE TABLE fs_entry (
-    path_key     TEXT PRIMARY KEY,   -- "C:\USERS\ROB\NOTES.TXT" — canonical, uppercased
-    name         TEXT NOT NULL,      -- "Notes.txt" — display casing
-    name_key     TEXT NOT NULL,      -- "NOTES.TXT" — what queries match against
+    path_key     TEXT    PRIMARY KEY, -- "C:\USERS\ROB\NOTES.TXT" — canonical, uppercased
+    name         TEXT    NOT NULL,    -- "Notes.txt" — display casing
+    name_key     TEXT    NOT NULL,    -- "NOTES.TXT" — what queries match against
     is_dir       INTEGER NOT NULL,
     size_bytes   INTEGER NOT NULL DEFAULT 0,
-    modified_utc TEXT NOT NULL,
+    modified_utc INTEGER NOT NULL DEFAULT 0,  -- FILETIME ticks; 0 = unknown
+    created_utc  INTEGER NOT NULL DEFAULT 0,
+    attributes   INTEGER NOT NULL DEFAULT 0,  -- the entry's own FILE_ATTRIBUTE mask
     hidden       INTEGER NOT NULL DEFAULT 0,
-    attributes   INTEGER NOT NULL DEFAULT 0,   -- the entry's own FILE_ATTRIBUTE mask
-    created_utc  TEXT    NOT NULL DEFAULT '',
     crawl_gen    INTEGER NOT NULL
 ) WITHOUT ROWID;
 ```
+
+Connections open with WAL, `synchronous=NORMAL` and a 1 GB `mmap_size` (`db.rs`): a global search is
+a full scan, and mapped pages are read without a copy into each pooled connection's page cache.
 
 Five decisions in that schema do most of the work:
 
@@ -286,7 +289,9 @@ Beyond that, **`Matches` is the definition and the SQL is only an optimisation**
 re-applies `Matches` to every row it reads back. SQL that is too *wide* costs a longer scan and
 nothing else; SQL that is too *narrow* drops rows and `SearchAgreementTests` — which runs ~40
 queries through both paths over one corpus and compares — goes red. This is what lets `re:` compile
-to `1`.
+to `1`, or, when it opens with an anchored literal (`^img_`), to `name_key GLOB 'IMG_*'`
+(`regex_prefix_glob`; `k`/`s` become classes, because `(?i)` folds them with the Kelvin sign and long s).
+The row reader borrows the text columns for the re-check and copies only rows that match.
 
 Two consequences fall out of that and are easy to undo by accident:
 
@@ -325,12 +330,9 @@ the no-secondary-index rule above exists to avoid.
   page (1,000 hits) is sorted in the caller, where it is cheap.
 - **The limit is `cap + 1`.** If the extra row comes back, the result set was truncated; it is
   dropped and the status bar says "showing first 1,000".
-- **`modified_utc` and `created_utc` are TEXT written with `"O"`** — fixed-width and zero-padded —
-  so BINARY collation is already a correct chronological order and a date bound is a plain string
-  comparison. Rows from the fallback build carry `0001-01-01…`, and rows predating the created
-  column carry `''`; both sort below the 1601 floor every date term applies, so an unmeasured row
-  satisfies no date filter rather than matching every open-ended one. (`''` is also why the row
-  reader maps it back to `DateTime.MinValue` itself — `DateTime.Parse("")` throws.)
+- **`modified_utc` and `created_utc` are FILETIME integers**, so a date bound is an integer
+  comparison. Rows from the fallback build carry 0 (unknown), and every date term's floor is at least
+  1, so an unmeasured row satisfies no date filter rather than matching every open-ended one.
 
 A whole-PC search (`SearchGlobal`) is the identical query with the range bound removed, so it scans
 every indexed volume.

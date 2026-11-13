@@ -127,6 +127,18 @@ fn corpus() -> Vec<Entry> {
             ARCHIVE,
             b,
         ),
+        // A case-insensitive `k` also matches the Kelvin sign, which upper-casing keeps: a regex's
+        // prefix GLOB that said `K*` would drop this row.
+        e(
+            "C:\\Corpus\\\u{212A}elvin.dat",
+            false,
+            30,
+            b,
+            false,
+            ARCHIVE,
+            b,
+        ),
+        e(r"C:\Corpus\sketch-01.dat", false, 31, b, false, ARCHIVE, b),
         e(r"C:\Corpus\Projects", true, 0, b, false, DIRECTORY, b),
         // Copied in: modified two years ago, created today.
         e(
@@ -326,6 +338,20 @@ const QUERIES: &[&str] = &[
     "re:^report",
     r"re:^img_\d+",
     "re:log$",
+    // A regex's SQL is a prefix GLOB when it opens with an anchored literal.
+    "re:^kelvin",
+    "re:^KEL",
+    "re:^sketch-01",
+    "re:^sketch-0?1",
+    "re:^img_?0",
+    "re:^img_*7",
+    "re:^i{1}mg",
+    "re:^img+",
+    "re:^report final",
+    "re:^report|photo",
+    "re:^photo|^img",
+    "!re:^sketch ext:dat",
+    "re:^sketch ext:dat",
     "report !draft",
     "!draft ext:txt",
     "report !ext:docx",

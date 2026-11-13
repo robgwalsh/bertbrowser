@@ -103,7 +103,15 @@ impl Db {
         };
         let conn = Connection::open_with_flags(&self.path, flags)?;
         conn.busy_timeout(Duration::from_millis(5000))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+        // mmap: a whole-PC search scans the index, and reading its pages through the map skips a copy
+        // into each connection's own page cache; mapped pages are the file's, shared, never this
+        // process's private bytes. synchronous=NORMAL is the WAL setting SQLite recommends: still
+        // consistent after a crash, and at worst the last commit is lost to a power cut: index rows
+        // the helper's journal tail writes again, or a saved search made a moment before.
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; \
+             PRAGMA synchronous=NORMAL; PRAGMA mmap_size=1073741824;",
+        )?;
         Ok(conn)
     }
 

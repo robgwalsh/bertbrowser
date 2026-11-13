@@ -345,6 +345,35 @@ fn negating_a_regex_widens_rather_than_inverting() {
     assert!(!query.matches(&Entry::file("img_report.txt").candidate()));
 }
 
+/// The GLOB a regex's SQL carries, if any.
+fn regex_glob(text: &str) -> Option<String> {
+    let predicate = q(text).compile();
+    assert!(!predicate.complete, "{text}: a regex is always re-checked");
+    predicate.parameters.iter().find_map(|(_, v)| match v {
+        rusqlite::types::Value::Text(t) => Some(t.clone()),
+        _ => None,
+    })
+}
+
+/// An anchored literal opening keeps rows that cannot match inside SQLite; anything less plain scans.
+#[test]
+fn a_regex_with_an_anchored_literal_prefix_narrows_the_scan() {
+    assert_eq!(Some("IMG_*".to_string()), regex_glob(r"re:^img_\d+"));
+    assert_eq!(Some("REPORT*".to_string()), regex_glob("re:^Report"));
+    // The last literal before a quantifier may be absent.
+    assert_eq!(Some("IMG*".to_string()), regex_glob("re:^img_?x"));
+    assert_eq!(Some("IM*".to_string()), regex_glob("re:^img{0,1}"));
+    // `k` and `s` fold with characters outside ASCII under (?i).
+    assert_eq!(
+        Some("[K\u{212A}]E[S\u{17F}]*".to_string()),
+        regex_glob("re:^kes")
+    );
+    assert_eq!(None, regex_glob("re:img_"));
+    assert_eq!(None, regex_glob("re:^img|photo"));
+    assert_eq!(None, regex_glob(r"re:^\d+"));
+    assert_eq!(None, regex_glob("re:^a*"));
+}
+
 // --- is:hidden ---
 
 #[test]

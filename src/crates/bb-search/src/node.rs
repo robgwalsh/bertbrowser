@@ -57,11 +57,49 @@ pub enum SearchNode {
     Attribute(u32),
     /// `in:archives`: a scope rather than a predicate. `matches` is always yes and the SQL `1`.
     InArchives,
-    /// A regular expression over the entry name. The one term with no SQL at all.
+    /// A regular expression over the entry name. Its SQL is at most a prefix GLOB
+    /// (`regex_prefix_glob`), and every row is re-checked.
     Regex(fancy_regex::Regex),
     /// Text somewhere inside the file: the one term that reads the disk. The needle keeps the case
     /// it was typed in and is compared ignoring case.
     Content(String),
+}
+
+/// A `name_key` GLOB matching every name a `re:` pattern can match, when the pattern opens with an
+/// anchored literal (`^img_`): `IMG_*`. None for anything less plain, which keeps the scan as it was.
+///
+/// The pattern is what the grammar compiled, `(?i)` + what was typed, matched against `name_key`
+/// (upper-cased). Only letters, digits, `_`, `-` and spaces count as literal, and nothing with a `|`
+/// anywhere, so the prefix is a prefix of every match. A quantifier after the run (`?`, `*`, `{`)
+/// may make its last character optional, so that one is dropped. Case-insensitive matching folds `k`
+/// with the Kelvin sign and `s` with the long s, so those two become classes: the GLOB must never
+/// match less than the pattern (`search_agreement_tests`).
+pub(crate) fn regex_prefix_glob(pattern: &str) -> Option<String> {
+    let body = pattern.strip_prefix("(?i)")?;
+    if body.contains('|') {
+        return None;
+    }
+    let rest = body.strip_prefix('^')?;
+    let mut literal: Vec<char> = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | ' '))
+        .collect();
+    if matches!(rest[literal.len()..].chars().next(), Some('?' | '*' | '{')) {
+        literal.pop();
+    }
+    if literal.is_empty() {
+        return None;
+    }
+    let mut glob = String::with_capacity(literal.len() + 16);
+    for c in literal {
+        match c.to_ascii_uppercase() {
+            'K' => glob.push_str("[K\u{212A}]"),
+            'S' => glob.push_str("[S\u{17F}]"),
+            upper => glob.push(upper),
+        }
+    }
+    glob.push('*');
+    Some(glob)
 }
 
 /// `*` + the term + `*`: the term as typed when `plain`, else GLOB-escaped (see `GlobText::escape`).
@@ -322,7 +360,20 @@ impl SearchNode {
             SearchNode::InArchives => {
                 b.append("1");
             }
-            SearchNode::Regex(_) | SearchNode::Content(_) => {
+            // Still a superset, still re-checked per row: the GLOB only keeps rows that cannot match
+            // from ever leaving SQLite.
+            SearchNode::Regex(regex) => {
+                b.mark_incomplete();
+                match regex_prefix_glob(regex.as_str()) {
+                    Some(glob) => {
+                        b.append("name_key GLOB ").append_parameter(glob);
+                    }
+                    None => {
+                        b.append("1");
+                    }
+                }
+            }
+            SearchNode::Content(_) => {
                 b.mark_incomplete();
                 b.append("1");
             }

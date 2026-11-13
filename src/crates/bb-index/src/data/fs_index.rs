@@ -609,22 +609,23 @@ fn read_matching_rows(
     query: &SearchQuery,
     cap: usize,
 ) -> Result<(Vec<EntryRow>, bool)> {
-    let mut stmt = conn.prepare(sql)?;
+    let mut stmt = conn.prepare_cached(sql)?;
     let mut rows = stmt.query(bindings)?;
     let mut out = Vec::new();
     while let Some(r) = rows.next()? {
-        let key: String = r.get(0)?;
-        let name: String = r.get(1)?;
+        // The text columns are read in place and copied only for a row that matches: an inexact
+        // predicate (a regex) hands every row in scope to this loop, most of them to be dropped.
+        let key = text_at(r, 0)?;
         let is_dir = r.get::<_, i64>(2)? != 0;
         let size: i64 = r.get(3)?;
         let modified = FileTime(r.get(4)?);
         let hidden = r.get::<_, i64>(5)? != 0;
-        let name_key: String = r.get(6)?;
+        let name_key = text_at(r, 6)?;
         let attributes = r.get::<_, i64>(7)? as u32;
         let created = FileTime(r.get(8)?);
         let candidate = SearchCandidate {
-            name_key: &name_key,
-            path_key: &key,
+            name_key,
+            path_key: key,
             is_directory: is_dir,
             size_bytes: size,
             modified_utc: modified,
@@ -636,6 +637,8 @@ fn read_matching_rows(
         if !query.matches(&candidate) {
             continue;
         }
+        let key = key.to_string();
+        let name: String = r.get(1)?;
         out.push(EntryRow {
             key,
             name,
@@ -651,6 +654,13 @@ fn read_matching_rows(
         }
     }
     Ok((out, false))
+}
+
+/// A text column read in place, without copying it out of SQLite.
+fn text_at<'r>(r: &'r rusqlite::Row<'_>, index: usize) -> rusqlite::Result<&'r str> {
+    r.get_ref(index)?.as_str().map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(index, rusqlite::types::Type::Text, Box::new(e))
+    })
 }
 
 /// The eight-column projection the non-search scans select.
