@@ -225,7 +225,9 @@ void Runner::install_ui_columns() {
     verbs_[L"thumbnails"] = [this](const std::wstring& r) {
         const double scale = fraction(r, "thumbnails");
         core::check(bb_tab_set_thumbnail_scale(s_.core().app(), tab(), scale), "thumbnails");
-        s_.settle(120);
+        // No quiet period: settle already waits for the tiles' pictures, and a fixed wait here was most of
+        // what `bench-tiles-5k`'s tiles.on/tiles.large measured.
+        s_.settle();
     };
     verbs_[L"preview"] = [this](const std::wstring& r) {
         const bool on = on_off(r, "preview");
