@@ -306,7 +306,7 @@ fn a_folder_search_flattens_and_clearing_it_restores_the_listing() {
     let folders: Vec<String> = listing
         .rows()
         .iter()
-        .map(|r| r.relative_dir.clone())
+        .map(|r| r.relative_dir().to_string())
         .collect();
     assert!(
         folders.iter().any(|d| d.is_empty() || d == "."),

@@ -2,6 +2,7 @@
 //! the display half. A snapshot is never mutated: every load, merge or re-sort builds a new one and
 //! announces it with `ListingChanged`, so a painting thread never sees a half-applied change.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -54,10 +55,29 @@ pub fn extension_of(name: &str) -> &str {
     }
 }
 
+/// The UTF-16 views `bb_listing_row` hands out, made the first time a row is asked for: only rows
+/// that are painted or acted on ever have them.
 struct Wide {
     name: Box<[u16]>,
     full_path: Box<[u16]>,
     relative_dir: Box<[u16]>,
+}
+
+/// Where a row lives. Nearly always its folder plus its name, and the folder is one `Arc` shared by
+/// every row from it; a path that is not literally `folder + name` is kept whole.
+enum RowPath {
+    /// The folder with its trailing separator, so the full path is `dir + name`.
+    Joined(Arc<str>),
+    Whole(Box<str>),
+}
+
+/// What most rows never carry: a folder size's computing time, a content match, shell-property
+/// cells. Boxed together so a plain row pays one pointer for all three.
+#[derive(Clone)]
+struct RowExtras {
+    size_computed: FileTime,
+    content_match: Option<ContentMatch>,
+    props: Option<Arc<RowProps>>,
 }
 
 pub struct Row {
@@ -67,57 +87,198 @@ pub struct Row {
     /// `PathKey::canonicalize` of the path; what rows are matched by.
     pub key: Arc<str>,
     pub name: String,
-    pub full_path: String,
-    pub relative_dir: String,
+    path: RowPath,
+    /// The folder a search or flat result came from, relative to where it was searched; shared by
+    /// the rows of one folder, empty otherwise.
+    relative_dir: Arc<str>,
     pub is_directory: bool,
     pub attributes: u32,
     /// None is a folder whose size is not known: blank, never zero.
     pub size: Option<i64>,
     pub size_incomplete: bool,
-    pub size_computed: FileTime,
     pub modified: FileTime,
     pub created: FileTime,
     pub accessed: FileTime,
-    pub type_name: String,
     pub is_media: bool,
-    pub content_match: Option<ContentMatch>,
-    /// Shell-property values the host has supplied, by upper-cased canonical name. `None` for a
-    /// property the handler had no value for: asked, answered, blank.
-    pub props: Option<Arc<RowProps>>,
+    extras: Option<Box<RowExtras>>,
     /// What a comparison says about this row (`compare_view::state_number`), 0 when it says nothing.
     /// Stamped when a listing is made or the result changes; not part of the file, so it is not part
     /// of what a refresh weighs.
     pub compare: std::sync::atomic::AtomicU8,
-    wide: OnceLock<Wide>,
+    wide: OnceLock<Box<Wide>>,
 }
 
 /// The shell-property cells of one row.
 pub type RowProps = HashMap<String, Option<ColumnValue>>;
 
+thread_local! {
+    /// The last folder and relative folder a row was built with. Rows arrive a folder at a time (a
+    /// listing is one folder, a walk hands over a folder's entries together), so remembering one is
+    /// enough to share each between all its rows.
+    static LAST_SHARED: std::cell::RefCell<LastShared> =
+        const { std::cell::RefCell::new((None, None)) };
+}
+
+/// The last (folder, relative folder) handed out.
+type LastShared = (Option<Arc<str>>, Option<Arc<str>>);
+
+/// `text` as an `Arc`, the same one as the last call's when the text is the same.
+fn shared(text: &str, folder: bool) -> Arc<str> {
+    LAST_SHARED.with(|cell| {
+        let Ok(mut last) = cell.try_borrow_mut() else {
+            return Arc::from(text);
+        };
+        let slot = if folder { &mut last.0 } else { &mut last.1 };
+        match slot {
+            Some(arc) if **arc == *text => arc.clone(),
+            _ => {
+                let arc: Arc<str> = Arc::from(text);
+                *slot = Some(arc.clone());
+                arc
+            }
+        }
+    })
+}
+
+impl RowPath {
+    fn of(full_path: &str, name: &str) -> RowPath {
+        if !name.is_empty() && full_path.len() > name.len() && full_path.ends_with(name) {
+            let dir = &full_path[..full_path.len() - name.len()];
+            if dir.ends_with(['\\', '/']) {
+                return RowPath::Joined(shared(dir, true));
+            }
+        }
+        RowPath::Whole(full_path.into())
+    }
+}
+
 impl Row {
     pub fn from_entry(entry: &FileEntry) -> Row {
-        Row::build(entry, String::new(), None)
+        Row::build(entry, "", None)
     }
 
     /// A copy with the same id and display state, for building the next snapshot of a listing.
     pub fn duplicate(&self) -> Row {
-        let mut c = Row::from_entry(&self.to_entry());
-        c.id = self.id;
-        c.relative_dir = self.relative_dir.clone();
-        c.content_match = self.content_match.clone();
-        c.size = self.size;
-        c.size_incomplete = self.size_incomplete;
-        c.size_computed = self.size_computed;
-        c.props = self.props.clone();
-        c.compare = std::sync::atomic::AtomicU8::new(
-            self.compare.load(std::sync::atomic::Ordering::Relaxed),
-        );
-        c
+        Row {
+            id: self.id,
+            key: self.key.clone(),
+            name: self.name.clone(),
+            path: match &self.path {
+                RowPath::Joined(dir) => RowPath::Joined(dir.clone()),
+                RowPath::Whole(path) => RowPath::Whole(path.clone()),
+            },
+            relative_dir: self.relative_dir.clone(),
+            is_directory: self.is_directory,
+            attributes: self.attributes,
+            size: self.size,
+            size_incomplete: self.size_incomplete,
+            modified: self.modified,
+            created: self.created,
+            accessed: self.accessed,
+            is_media: self.is_media,
+            extras: self.extras.clone(),
+            compare: std::sync::atomic::AtomicU8::new(
+                self.compare.load(std::sync::atomic::Ordering::Relaxed),
+            ),
+            wide: OnceLock::new(),
+        }
     }
 
     /// The row's value for a property (upper-cased canonical name), when the host supplied one.
     pub fn prop(&self, folded: &str) -> Option<&ColumnValue> {
-        self.props.as_ref()?.get(folded)?.as_ref()
+        self.props()?.get(folded)?.as_ref()
+    }
+
+    /// Shell-property values the host has supplied, by upper-cased canonical name. `None` for a
+    /// property the handler had no value for: asked, answered, blank.
+    pub fn props(&self) -> Option<&Arc<RowProps>> {
+        self.extras.as_ref()?.props.as_ref()
+    }
+
+    pub fn set_props(&mut self, props: Option<Arc<RowProps>>) {
+        if props.is_none() && self.extras.is_none() {
+            return;
+        }
+        self.extras_mut().props = props;
+    }
+
+    pub fn content_match(&self) -> Option<&ContentMatch> {
+        self.extras.as_ref()?.content_match.as_ref()
+    }
+
+    /// When a folder's size was computed; unknown for a file, or a folder with no size yet.
+    pub fn size_computed(&self) -> FileTime {
+        self.extras
+            .as_ref()
+            .map_or(FileTime::UNKNOWN, |e| e.size_computed)
+    }
+
+    pub fn set_size_computed(&mut self, when: FileTime) {
+        if when.is_unknown() && self.extras.is_none() {
+            return;
+        }
+        self.extras_mut().size_computed = when;
+    }
+
+    fn extras_mut(&mut self) -> &mut RowExtras {
+        self.extras.get_or_insert_with(|| {
+            Box::new(RowExtras {
+                size_computed: FileTime::UNKNOWN,
+                content_match: None,
+                props: None,
+            })
+        })
+    }
+
+    /// The full display path.
+    pub fn full_path(&self) -> Cow<'_, str> {
+        match &self.path {
+            RowPath::Joined(dir) => {
+                let mut path = String::with_capacity(dir.len() + self.name.len());
+                path.push_str(dir);
+                path.push_str(&self.name);
+                Cow::Owned(path)
+            }
+            RowPath::Whole(path) => Cow::Borrowed(path),
+        }
+    }
+
+    /// The folder a search or flat result came from, relative to where it was searched.
+    pub fn relative_dir(&self) -> &str {
+        &self.relative_dir
+    }
+
+    /// What the Type column says: "Folder", "<EXT> file", or "File".
+    pub fn type_name(&self) -> Cow<'static, str> {
+        if self.is_directory {
+            return Cow::Borrowed("Folder");
+        }
+        match self.extension() {
+            "" => Cow::Borrowed("File"),
+            ext => Cow::Owned(format!("{} file", ext.to_uppercase())),
+        }
+    }
+
+    /// `fold_upper(type_name)` order between two rows, without building either name.
+    pub fn type_cmp(&self, other: &Row) -> std::cmp::Ordering {
+        fn folded(row: &Row) -> impl Iterator<Item = char> + '_ {
+            let (head, ext, tail) = if row.is_directory {
+                ("FOLDER", "", "")
+            } else {
+                match row.extension() {
+                    "" => ("FILE", "", ""),
+                    ext => ("", ext, " FILE"),
+                }
+            };
+            head.chars()
+                .chain(
+                    ext.chars()
+                        .flat_map(char::to_uppercase)
+                        .map(bb_paths::fold_upper_char),
+                )
+                .chain(tail.chars())
+        }
+        folded(self).cmp(folded(other))
     }
 
     pub fn from_hit(hit: &SearchHit) -> Row {
@@ -125,36 +286,24 @@ impl Row {
         if hit.hidden {
             attributes |= HIDDEN;
         }
-        let entry = FileEntry {
-            name: hit.name.clone(),
-            full_path: hit.display_path.clone(),
-            is_directory: hit.is_directory,
-            size_bytes: if hit.is_directory { -1 } else { hit.size_bytes },
-            modified_utc: hit.modified_utc,
-            attributes,
-            created_utc: hit.created_utc,
-            accessed_utc: FileTime::UNKNOWN,
+        let size = if hit.is_directory {
+            None
+        } else {
+            Some(hit.size_bytes)
         };
-        Row::build(
-            &entry,
-            hit.relative_dir_display.clone(),
+        Row::make(
+            &hit.name,
+            &hit.display_path,
+            &hit.relative_dir_display,
+            hit.is_directory,
+            size,
+            attributes,
+            (hit.modified_utc, hit.created_utc, FileTime::UNKNOWN),
             hit.content_match.clone(),
         )
     }
 
-    fn build(entry: &FileEntry, relative_dir: String, content_match: Option<ContentMatch>) -> Row {
-        let extension = extension_of(&entry.name);
-        let type_name = if entry.is_directory {
-            "Folder".to_string()
-        } else if extension.len() > 1 {
-            format!("{} file", extension[1..].to_uppercase())
-        } else {
-            "File".to_string()
-        };
-        let is_media = !entry.is_directory
-            && MEDIA_EXTENSIONS
-                .iter()
-                .any(|m| m.eq_ignore_ascii_case(extension_of(&entry.full_path)));
+    fn build(entry: &FileEntry, relative_dir: &str, content_match: Option<ContentMatch>) -> Row {
         // A directory's size is normally unknown at listing time and arrives from dir_size_cache;
         // a lister that already knows it writes a real value, which is what >= 0 reads.
         let size = if entry.is_directory {
@@ -162,26 +311,55 @@ impl Row {
         } else {
             Some(entry.size_bytes)
         };
-        let key = PathKey::canonicalize(&entry.full_path)
-            .unwrap_or_else(|_| entry.full_path.to_uppercase());
+        Row::make(
+            &entry.name,
+            &entry.full_path,
+            relative_dir,
+            entry.is_directory,
+            size,
+            entry.attributes,
+            (entry.modified_utc, entry.created_utc, entry.accessed_utc),
+            content_match,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn make(
+        name: &str,
+        full_path: &str,
+        relative_dir: &str,
+        is_directory: bool,
+        size: Option<i64>,
+        attributes: u32,
+        (modified, created, accessed): (FileTime, FileTime, FileTime),
+        content_match: Option<ContentMatch>,
+    ) -> Row {
+        let is_media = !is_directory
+            && MEDIA_EXTENSIONS
+                .iter()
+                .any(|m| m.eq_ignore_ascii_case(extension_of(full_path)));
+        let key = PathKey::canonicalize(full_path).unwrap_or_else(|_| full_path.to_uppercase());
         Row {
             id: 0,
             key: Arc::from(key),
-            name: entry.name.clone(),
-            full_path: entry.full_path.clone(),
-            relative_dir,
-            is_directory: entry.is_directory,
-            attributes: entry.attributes,
+            name: name.to_string(),
+            path: RowPath::of(full_path, name),
+            relative_dir: shared(relative_dir, false),
+            is_directory,
+            attributes,
             size,
             size_incomplete: false,
-            size_computed: FileTime::UNKNOWN,
-            modified: entry.modified_utc,
-            created: entry.created_utc,
-            accessed: entry.accessed_utc,
-            type_name,
+            modified,
+            created,
+            accessed,
             is_media,
-            content_match,
-            props: None,
+            extras: content_match.map(|m| {
+                Box::new(RowExtras {
+                    size_computed: FileTime::UNKNOWN,
+                    content_match: Some(m),
+                    props: None,
+                })
+            }),
             compare: std::sync::atomic::AtomicU8::new(0),
             wide: OnceLock::new(),
         }
@@ -190,7 +368,7 @@ impl Row {
     pub fn to_entry(&self) -> FileEntry {
         FileEntry {
             name: self.name.clone(),
-            full_path: self.full_path.clone(),
+            full_path: self.full_path().into_owned(),
             is_directory: self.is_directory,
             size_bytes: if self.is_directory {
                 -1
@@ -258,10 +436,10 @@ impl Row {
     /// it may be short when part of the tree could not be read; a file's size otherwise.
     /// Spec: FileItemViewModel.SizeTooltip.
     pub fn size_tip(&self) -> String {
-        if self.is_directory && self.size.is_some() && !self.size_computed.is_unknown() {
+        if self.is_directory && self.size.is_some() && !self.size_computed().is_unknown() {
             let mut tip = format!(
                 "Computed {}",
-                bb_core::time::format_short_local(self.size_computed)
+                bb_core::time::format_short_local(self.size_computed())
             );
             if self.size_incomplete {
                 tip.push_str("\nMay be incomplete \u{2014} some folders were inaccessible.");
@@ -274,10 +452,9 @@ impl Row {
     pub fn cell_text(&self, column: u32) -> String {
         match CELL_COLUMNS.get(column as usize).copied() {
             Some(ColumnCatalog::NAME) => self.name.clone(),
-            Some(ColumnCatalog::RELATIVE_PATH) => self.relative_dir.clone(),
+            Some(ColumnCatalog::RELATIVE_PATH) => self.relative_dir.to_string(),
             Some(ColumnCatalog::MATCH) => self
-                .content_match
-                .as_ref()
+                .content_match()
                 .map(|m| m.line.clone())
                 .unwrap_or_default(),
             Some(ColumnCatalog::COMPARE_STATUS) => crate::tools::compare_view::state_words(
@@ -285,7 +462,7 @@ impl Row {
             )
             .to_string(),
             Some(ColumnCatalog::SIZE) => self.size_text(),
-            Some(ColumnCatalog::TYPE) => self.type_name.clone(),
+            Some(ColumnCatalog::TYPE) => self.type_name().into_owned(),
             Some(ColumnCatalog::MODIFIED) => stamp(self.modified),
             Some(ColumnCatalog::CREATED) => stamp(self.created),
             Some(ColumnCatalog::ACCESSED) => stamp(self.accessed),
@@ -308,10 +485,12 @@ impl Row {
     }
 
     fn wide(&self) -> &Wide {
-        self.wide.get_or_init(|| Wide {
-            name: self.name.encode_utf16().collect(),
-            full_path: self.full_path.encode_utf16().collect(),
-            relative_dir: self.relative_dir.encode_utf16().collect(),
+        self.wide.get_or_init(|| {
+            Box::new(Wide {
+                name: self.name.encode_utf16().collect(),
+                full_path: self.full_path().encode_utf16().collect(),
+                relative_dir: self.relative_dir.encode_utf16().collect(),
+            })
         })
     }
 }

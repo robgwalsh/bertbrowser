@@ -387,12 +387,12 @@ impl Inner {
                 .iter()
                 .filter(|r| t.selection.contains(&r.id))
                 .map(|r| Picked {
-                    path: r.full_path.clone(),
+                    path: r.full_path().into_owned(),
                     name: r.name.clone(),
                     size: r.size,
                     modified: r.modified,
                     is_directory: r.is_directory,
-                    type_name: r.type_name.clone(),
+                    type_name: r.type_name().into_owned(),
                 })
                 .collect()
         };

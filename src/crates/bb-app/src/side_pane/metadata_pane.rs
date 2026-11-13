@@ -705,8 +705,9 @@ impl Inner {
             .iter()
             .filter(|r| t.selection.contains(&r.id))
         {
-            paths.push(r.full_path.clone());
-            signature.push_str(&format!("{}|{}\n", upper(&r.full_path), r.modified.0));
+            let path = r.full_path().into_owned();
+            signature.push_str(&format!("{}|{}\n", upper(&path), r.modified.0));
+            paths.push(path);
         }
         Ok((paths, signature))
     }

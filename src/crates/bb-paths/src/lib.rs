@@ -7,7 +7,9 @@ mod natural;
 mod text;
 mod unique;
 
-pub use key::{PathError, PathKey, fold_upper, parent_key, root_len};
+pub use key::{
+    PathError, PathKey, fold_upper, fold_upper_char, fold_upper_cmp, parent_key, root_len,
+};
 pub use natural::natural_cmp;
 pub use text::PathText;
 pub use unique::UniquePath;

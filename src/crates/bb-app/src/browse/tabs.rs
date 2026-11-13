@@ -137,22 +137,7 @@ impl TabData {
     pub(crate) fn install(&mut self, mut rows: Vec<Row>, keep_selection: bool) {
         self.is_loading = false;
         for row in rows.iter_mut() {
-            row.id = intern(self, &row.key);
-            // What the host already read for this file survives the reload, unless the file has been
-            // written since: a title edited in place must not go on reading as it did.
-            if self
-                .prop_stamps
-                .get(&row.key)
-                .is_some_and(|stamp| *stamp != (row.modified.0, row.size.unwrap_or(-1)))
-            {
-                self.props.remove(&row.key);
-                self.prop_stamps.remove(&row.key);
-            }
-            if row.props.is_none()
-                && let Some(known) = self.props.get(&row.key)
-            {
-                row.props = Some(Arc::new(known.clone()));
-            }
+            self.adopt(row);
         }
         if keep_selection {
             let present: std::collections::HashSet<u64> = rows.iter().map(|r| r.id).collect();
@@ -167,6 +152,40 @@ impl TabData {
             self.is_flat_browse,
         );
         self.apply_pending_selection();
+    }
+
+    /// Adds `rows` after the ones listed, which carry over as they are (ids, selection and all): a
+    /// streaming listing's next batch.
+    pub(crate) fn append(&mut self, mut rows: Vec<Row>) {
+        for row in rows.iter_mut() {
+            self.adopt(row);
+        }
+        let mut all: Vec<Arc<Row>> = Vec::with_capacity(self.listing.len() + rows.len());
+        all.extend(self.listing.source_rows().iter().cloned());
+        all.extend(rows.into_iter().map(Arc::new));
+        self.version += 1;
+        self.listing = self.make_listing(all, self.is_flattened, self.is_flat_browse);
+        self.apply_pending_selection();
+    }
+
+    /// Gives a row arriving in the listing its stable id and whatever the host has already read for it.
+    fn adopt(&mut self, row: &mut Row) {
+        row.id = intern(self, &row.key);
+        // What the host already read for this file survives the reload, unless the file has been
+        // written since: a title edited in place must not go on reading as it did.
+        if self
+            .prop_stamps
+            .get(&row.key)
+            .is_some_and(|stamp| *stamp != (row.modified.0, row.size.unwrap_or(-1)))
+        {
+            self.props.remove(&row.key);
+            self.prop_stamps.remove(&row.key);
+        }
+        if row.props().is_none()
+            && let Some(known) = self.props.get(&row.key)
+        {
+            row.set_props(Some(Arc::new(known.clone())));
+        }
     }
 
     pub(crate) fn reset_view_flags(&mut self) {
@@ -491,7 +510,11 @@ impl Inner {
         if dirs.is_empty() {
             return;
         }
-        let paths: Vec<&str> = dirs.iter().map(|&i| rows[i].full_path.as_str()).collect();
+        let full: Vec<String> = dirs
+            .iter()
+            .map(|&i| rows[i].full_path().into_owned())
+            .collect();
+        let paths: Vec<&str> = full.iter().map(String::as_str).collect();
         let Ok(cache) = self.dir_sizes.get_many(&paths) else {
             return;
         };
@@ -499,7 +522,7 @@ impl Inner {
             if let Some(hit) = cache.get(&*rows[i].key) {
                 rows[i].size = Some(hit.size_bytes);
                 rows[i].size_incomplete = hit.incomplete;
-                rows[i].size_computed = hit.computed_utc;
+                rows[i].set_size_computed(hit.computed_utc);
             }
         }
     }
@@ -563,7 +586,7 @@ impl Inner {
                 if replacement.is_directory {
                     replacement.size = existing.size;
                     replacement.size_incomplete = existing.size_incomplete;
-                    replacement.size_computed = existing.size_computed;
+                    replacement.set_size_computed(existing.size_computed());
                 }
                 replacement.id = existing.id;
                 rows.push(Arc::new(replacement));
@@ -702,9 +725,10 @@ impl Inner {
         if t.generation != generation {
             return;
         }
-        let mut rows: Vec<Row> = t.listing.rows().iter().map(|r| clone_row(r)).collect();
-        rows.extend(hits.iter().map(Row::from_hit));
-        t.install(rows, true);
+        // The rows already shown are shared with the next snapshot, never rebuilt: a flat view of 20,000
+        // arrives in a dozen batches, and copying every earlier row into each was most of its time.
+        let new_rows: Vec<Row> = hits.iter().map(Row::from_hit).collect();
+        t.append(new_rows);
         t.is_loading = true;
         if let Some(status) = status {
             // `{N}` is the count with thousands separators (the flat view's), `{n}` without.
@@ -1079,11 +1103,33 @@ impl Inner {
             self.hub.emit(AppEvent::TabChanged { tab });
             return;
         }
-        let mut rows: Vec<Row> = outcome.hits.iter().map(Row::from_hit).collect();
-        t.sort_spec().sort(&mut rows);
-        self.hydrate_dir_sizes(&mut rows);
-        let count = rows.len();
-        t.install(rows, false);
+        // Every hit has already streamed onto the list (the walk reports each one in a batch), so the
+        // rows only need putting in order. Anything else - an archive lists without batches - builds
+        // them from the hits.
+        let streamed = {
+            let shown = t.listing.source_rows();
+            shown.len() == outcome.hits.len()
+                && shown.iter().all(|r| !(r.is_directory && r.size.is_none()))
+        };
+        let count = if streamed {
+            let spec = t.sort_spec();
+            let mut rows: Vec<Arc<Row>> = t.listing.source_rows().to_vec();
+            rows.sort_by(|a, b| spec.compare(a, b));
+            let count = rows.len();
+            t.is_loading = false;
+            t.selection.clear();
+            t.version += 1;
+            t.listing = t.make_listing(rows, t.is_flattened, t.is_flat_browse);
+            t.apply_pending_selection();
+            count
+        } else {
+            let mut rows: Vec<Row> = outcome.hits.iter().map(Row::from_hit).collect();
+            t.sort_spec().sort(&mut rows);
+            self.hydrate_dir_sizes(&mut rows);
+            let count = rows.len();
+            t.install(rows, false);
+            count
+        };
         t.empty_message = (count == 0).then(|| format!("Nothing under \"{folder}\"."));
         t.notice = outcome.truncated.then(|| {
             format!(
@@ -1367,7 +1413,7 @@ impl Inner {
                 .iter()
                 .map(|r| SelectionRow {
                     name: r.name.clone(),
-                    full_path: r.full_path.clone(),
+                    full_path: r.full_path().into_owned(),
                     is_directory: r.is_directory,
                     size_bytes: r.size.unwrap_or(0),
                     modified_utc: r.modified,
@@ -1428,7 +1474,7 @@ impl Inner {
             .rows()
             .iter()
             .filter(|r| t.selection.contains(&r.id))
-            .map(|r| r.full_path.clone())
+            .map(|r| r.full_path().into_owned())
             .collect())
     }
 
@@ -1442,10 +1488,10 @@ impl Inner {
             .cloned()
             .ok_or(AppError::Stale)?;
         if row.is_directory {
-            return self.navigate(tab, &row.full_path);
+            return self.navigate(tab, &row.full_path());
         }
         // A tab choosing a file for another program answers with it instead of opening it.
-        if let Some(answered) = self.pick_activate(tab, &row.full_path, &row.name) {
+        if let Some(answered) = self.pick_activate(tab, &row.full_path(), &row.name) {
             return answered;
         }
         // An archive opens as a folder when the setting says so and the container can be read (or only
@@ -1467,7 +1513,7 @@ impl Inner {
             };
             self.hub.emit(AppEvent::TabChanged { tab });
             self.schedule(move |inner| {
-                let index = inner.fs.read_archive(&row.full_path);
+                let index = inner.fs.read_archive(&row.full_path());
                 let Ok(cell) = inner.tab(tab) else { return };
                 {
                     let mut t = lock(&cell);
@@ -1478,7 +1524,7 @@ impl Inner {
                 }
                 inner.hub.emit(AppEvent::TabChanged { tab });
                 if index.failure != bb_core::archives::ArchiveFailure::Damaged {
-                    let _ = inner.navigate(tab, &row.full_path);
+                    let _ = inner.navigate(tab, &row.full_path());
                 } else {
                     inner.launch_row(tab, &row);
                 }
@@ -1496,7 +1542,7 @@ impl Inner {
 
     /// Hands a file to whatever owns its extension, saying so when that is refused.
     fn launch_row(&self, tab: TabId, row: &Row) {
-        if let Err(why) = self.seams.launcher.launch(&row.full_path, false) {
+        if let Err(why) = self.seams.launcher.launch(&row.full_path(), false) {
             self.set_status(tab, format!("{} was not launched \u{2014} {why}", row.name));
         }
     }
@@ -1587,7 +1633,7 @@ fn hydrate_search_metadata(row: &mut Row) {
     if !row.modified.is_unknown() {
         return;
     }
-    if let Ok(meta) = std::fs::metadata(&row.full_path) {
+    if let Ok(meta) = std::fs::metadata(&*row.full_path()) {
         row.modified = bb_core::FileTime(meta.last_write_time() as i64);
         row.created = bb_core::FileTime(meta.creation_time() as i64);
         row.accessed = bb_core::FileTime(meta.last_access_time() as i64);

@@ -2,7 +2,7 @@
 // here because every name sort in the app goes through it.
 use std::cmp::Ordering;
 
-use bb_paths::natural_cmp;
+use bb_paths::{fold_upper, fold_upper_cmp, natural_cmp};
 
 #[test]
 fn numbers_compare_by_value_not_by_digit() {
@@ -23,4 +23,29 @@ fn sorting_a_listing_matches_explorer() {
         vec!["a.txt", "img1.png", "img2.png", "img12.png", "Notes"],
         names
     );
+}
+
+#[test]
+fn a_long_name_after_a_short_one_does_not_keep_the_short_ones_tail() {
+    // The comparison reuses its buffers; a stale tail would make these two unequal.
+    assert_eq!(Ordering::Less, natural_cmp("a much longer name.txt", "b"));
+    assert_eq!(Ordering::Equal, natural_cmp("b", "B"));
+}
+
+// The sort's allocation-free fold must order exactly as comparing the two folded strings does.
+#[test]
+fn fold_upper_cmp_orders_as_the_folded_strings_do() {
+    let words = [
+        "", "a", "A", "ab", "aB", "b", "TXT file", "txt FILE", "PNG file", "é", "É", "ß", "SS",
+        "ﬃ", "straße", "STRASSE", "\u{212A}", "k", "z", "Ω", "ω", "日本",
+    ];
+    for a in words {
+        for b in words {
+            assert_eq!(
+                fold_upper(a).cmp(&fold_upper(b)),
+                fold_upper_cmp(a, b),
+                "{a:?} vs {b:?}"
+            );
+        }
+    }
 }

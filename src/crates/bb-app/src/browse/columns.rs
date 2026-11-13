@@ -457,7 +457,7 @@ impl Inner {
                         continue;
                     }
                     t.props_inflight.insert(token);
-                    out.push((row.full_path.clone(), canonical.clone()));
+                    out.push((row.full_path().into_owned(), canonical.clone()));
                 }
             }
             t.props_pending = false;
@@ -499,7 +499,7 @@ impl Inner {
                 if touched.contains(&row.key) {
                     let mut next = row.duplicate();
                     let map: RowProps = t.props.get(&row.key).cloned().unwrap_or_default();
-                    next.props = Some(Arc::new(map));
+                    next.set_props(Some(Arc::new(map)));
                     rows.push(Arc::new(next));
                 } else {
                     rows.push(row.clone());

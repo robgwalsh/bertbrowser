@@ -503,7 +503,8 @@ impl SearchService {
         let root_display = PathKey::normalize_display(root_path)?;
         let root_trimmed = root_display.trim_end_matches('\\').to_string();
         let mut hits: Vec<SearchHit> = Vec::new();
-        let mut batch: Vec<SearchHit> = Vec::new();
+        // A batch is the hits since the last report: a range of `hits`, never a second copy of them.
+        let mut batch_start = 0usize;
         let mut truncated = false;
         let mut batch_size = Self::FIRST_LIVE_BATCH_SIZE;
         let mut since_flush = Instant::now();
@@ -558,14 +559,15 @@ impl SearchService {
                 created_utc: entry.created_utc,
                 content_match: None,
             };
-            hits.push(hit.clone());
-            batch.push(hit);
+            hits.push(hit);
 
-            if batch.len() >= batch_size || since_flush.elapsed() >= Self::LIVE_BATCH_INTERVAL {
+            if hits.len() - batch_start >= batch_size
+                || since_flush.elapsed() >= Self::LIVE_BATCH_INTERVAL
+            {
                 if let Some(report) = live_batches {
-                    report(&batch);
+                    report(&hits[batch_start..]);
                 }
-                batch.clear();
+                batch_start = hits.len();
                 batch_size = (batch_size * 2).min(Self::MAX_LIVE_BATCH_SIZE);
                 since_flush = Instant::now();
             }
@@ -573,10 +575,10 @@ impl SearchService {
         });
         walked.map_err(walk_error)?;
 
-        if !batch.is_empty()
+        if batch_start < hits.len()
             && let Some(report) = live_batches
         {
-            report(&batch);
+            report(&hits[batch_start..]);
         }
 
         Ok(SearchOutcome::new(

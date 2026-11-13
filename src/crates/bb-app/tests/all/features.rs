@@ -565,7 +565,7 @@ fn the_containing_folder_command_leaves_a_flat_view_selecting_the_row() {
         .unwrap()
         .rows()
         .iter()
-        .position(|r| r.full_path == f.path("Documents\\report.md"))
+        .position(|r| r.full_path() == f.path("Documents\\report.md"))
         .unwrap() as u32;
     f.app
         .select(f.tab, bb_app::SelectOp::Replace, &[index])
@@ -1484,7 +1484,7 @@ fn shell_property_cells_are_read_by_the_host_and_hold_the_settle_until_it_has_lo
     let at = listing
         .rows()
         .iter()
-        .position(|r| r.full_path == photo)
+        .position(|r| r.full_path() == photo)
         .unwrap();
     assert_eq!(
         "6240 x 4160",
@@ -1493,7 +1493,7 @@ fn shell_property_cells_are_read_by_the_host_and_hold_the_settle_until_it_has_lo
     let blank = listing
         .rows()
         .iter()
-        .position(|r| r.full_path == f.path("notes.txt"))
+        .position(|r| r.full_path() == f.path("notes.txt"))
         .unwrap();
     assert!(listing.cell(blank, column).unwrap().is_empty());
 

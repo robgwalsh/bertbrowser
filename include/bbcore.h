@@ -484,6 +484,14 @@ uint64_t bb_listing_version(const struct BbListing *l);
 
 enum BbStatus bb_listing_row(const struct BbListing *l, uint32_t index, struct BbRow *out_row);
 
+// A row's id and `BB_ROW_*` flags, without its text. For questions asked of every row (laying
+// tiles out, finding a row by id): `bb_listing_row` makes the row's UTF-16 strings, which a row
+// otherwise has only once it is painted.
+enum BbStatus bb_listing_row_meta(const struct BbListing *l,
+                                  uint32_t index,
+                                  uint64_t *out_id,
+                                  uint32_t *out_flags);
+
 // The formatted text of one cell. `column` is a cell index from `bb_tab_columns`. The view is valid
 // as long as the snapshot is.
 enum BbStatus bb_listing_cell(const struct BbListing *l,

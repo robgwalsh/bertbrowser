@@ -108,21 +108,6 @@ pub unsafe extern "C" fn bb_listing_row(
         let row = listing
             .row(index as usize)
             .ok_or_else(|| Fail::Err(format!("row {index} is out of range")))?;
-        let mut flags = 0;
-        if row.is_directory {
-            flags |= BB_ROW_DIRECTORY;
-        }
-        if row.is_hidden() {
-            flags |= BB_ROW_HIDDEN;
-        }
-        if row.is_media {
-            flags |= BB_ROW_MEDIA;
-        }
-        if row.size_incomplete {
-            flags |= BB_ROW_SIZE_INCOMPLETE;
-        }
-        flags |= (u32::from(row.compare.load(std::sync::atomic::Ordering::Relaxed)) & 7)
-            << BB_ROW_COMPARE_SHIFT;
         *out_row = BbRow {
             row_id: row.id,
             name: BbStr::of(row.name_wide()),
@@ -133,10 +118,50 @@ pub unsafe extern "C" fn bb_listing_row(
             created: row.created.0,
             accessed: row.accessed.0,
             attributes: row.attributes,
-            flags,
+            flags: row_flags(row),
         };
         Ok(())
     })
+}
+
+/// A row's id and `BB_ROW_*` flags, without its text. For questions asked of every row (laying
+/// tiles out, finding a row by id): `bb_listing_row` makes the row's UTF-16 strings, which a row
+/// otherwise has only once it is painted.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_listing_row_meta(
+    l: *const BbListing,
+    index: u32,
+    out_id: *mut u64,
+    out_flags: *mut u32,
+) -> BbStatus {
+    guard(|| {
+        let listing = listing_of(l)?;
+        let row = listing
+            .row(index as usize)
+            .ok_or_else(|| Fail::Err(format!("row {index} is out of range")))?;
+        set_opt(out_id, row.id);
+        set_opt(out_flags, row_flags(row));
+        Ok(())
+    })
+}
+
+fn row_flags(row: &bb_app::Row) -> u32 {
+    let mut flags = 0;
+    if row.is_directory {
+        flags |= BB_ROW_DIRECTORY;
+    }
+    if row.is_hidden() {
+        flags |= BB_ROW_HIDDEN;
+    }
+    if row.is_media {
+        flags |= BB_ROW_MEDIA;
+    }
+    if row.size_incomplete {
+        flags |= BB_ROW_SIZE_INCOMPLETE;
+    }
+    flags
+        | (u32::from(row.compare.load(std::sync::atomic::Ordering::Relaxed)) & 7)
+            << BB_ROW_COMPARE_SHIFT
 }
 
 /// The formatted text of one cell. `column` is a cell index from `bb_tab_columns`. The view is valid
@@ -202,7 +227,7 @@ pub unsafe extern "C" fn bb_listing_match(
         let row = listing
             .row(index as usize)
             .ok_or_else(|| Fail::Err(format!("row {index} is out of range")))?;
-        let (line, start, length) = match &row.content_match {
+        let (line, start, length) = match row.content_match() {
             Some(m) => {
                 // The core counts characters; the cell is drawn in UTF-16.
                 let units = |chars: usize| -> u32 {

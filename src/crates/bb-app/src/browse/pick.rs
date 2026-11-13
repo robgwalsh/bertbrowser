@@ -203,7 +203,7 @@ impl Inner {
                         .rows()
                         .iter()
                         .find(|r| t.selection.contains(&r.id))
-                        .map(|r| r.full_path.clone())
+                        .map(|r| r.full_path().into_owned())
                 }
                 ("save", PickMode::Save) => {
                     readiness(&t, &pick.request).map_err(AppError::Invalid)?;

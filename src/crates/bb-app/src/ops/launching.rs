@@ -212,7 +212,7 @@ impl Inner {
             .iter()
             .filter(|r| t.selection.contains(&r.id))
             .map(|r| Target {
-                path: r.full_path.clone(),
+                path: r.full_path().into_owned(),
                 is_directory: r.is_directory,
             })
             .collect();

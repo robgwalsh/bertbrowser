@@ -469,10 +469,10 @@ impl Inner {
                     if !row.is_directory {
                         ctx.selected_files += 1;
                     }
-                    paths.push(row.full_path.clone());
+                    paths.push(row.full_path().into_owned());
                     if ctx.selected == 1 {
                         if row.is_directory {
-                            ctx.single_folder = Some(row.full_path.clone());
+                            ctx.single_folder = Some(row.full_path().into_owned());
                         } else {
                             ctx.single_is_archive = ArchiveFormats::is_archive_name(&row.name);
                             ctx.single_is_video =
@@ -482,7 +482,7 @@ impl Inner {
                             ctx.single_runnable = self
                                 .seams
                                 .launcher
-                                .can_run_elevated(&row.full_path)
+                                .can_run_elevated(&row.full_path())
                                 .unwrap_or_else(|| {
                                     [".exe", ".bat", ".cmd", ".msc"]
                                         .iter()
@@ -757,7 +757,7 @@ impl Inner {
             .iter()
             .filter(|r| r.is_directory && t.selection.contains(&r.id))
             .take(cap)
-            .map(|r| r.full_path.clone())
+            .map(|r| r.full_path().into_owned())
             .collect())
     }
 

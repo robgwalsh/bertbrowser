@@ -91,8 +91,8 @@ void ListAdapter::reload_selection() {
 }
 
 uint64_t ListAdapter::row_id(size_t row) const {
-    BbRow r{};
-    return listing_ && listing_->row(row, r) ? r.row_id : row;
+    uint64_t id = 0;
+    return listing_ && listing_->meta(row, &id, nullptr) ? id : row;
 }
 
 std::wstring ListAdapter::cell_text(size_t row, int column_id) const {
@@ -103,8 +103,8 @@ std::wstring ListAdapter::cell_text(size_t row, int column_id) const {
 
 // Pictures and videos are tiles; folders and every other file are rows above them. Spec: ThumbnailTemplateSelector.
 bool ListAdapter::row_is_tile(size_t row) const {
-    BbRow r{};
-    return listing_ && listing_->row(row, r) && (r.flags & BB_ROW_MEDIA) && !(r.flags & BB_ROW_DIRECTORY);
+    uint32_t flags = 0;
+    return listing_ && listing_->meta(row, nullptr, &flags) && (flags & BB_ROW_MEDIA) && !(flags & BB_ROW_DIRECTORY);
 }
 
 std::wstring ListAdapter::tile_row_text(size_t row, int part) const {
@@ -122,8 +122,8 @@ std::wstring ListAdapter::cell_tip(size_t row, int column_id) const {
 }
 
 bool ListAdapter::row_faded(size_t row) const {
-    BbRow r{};
-    return listing_ && listing_->row(row, r) && (r.flags & BB_ROW_HIDDEN);
+    uint32_t flags = 0;
+    return listing_ && listing_->meta(row, nullptr, &flags) && (flags & BB_ROW_HIDDEN);
 }
 
 bool ListAdapter::cell_marks(size_t row, int column_id, CellMarks* out) const {
@@ -135,10 +135,10 @@ bool ListAdapter::cell_marks(size_t row, int column_id, CellMarks* out) const {
 }
 
 Token ListAdapter::row_tint(size_t row) const {
-    BbRow r{};
-    if (!listing_ || !listing_->row(row, r)) return gfx::kNoToken;
+    uint32_t flags = 0;
+    if (!listing_ || !listing_->meta(row, nullptr, &flags)) return gfx::kNoToken;
     // What a folder comparison says about the row, in the bits above the row flags.
-    switch ((r.flags >> BB_ROW_COMPARE_SHIFT) & 7) {
+    switch ((flags >> BB_ROW_COMPARE_SHIFT) & 7) {
         case 1: return tok::CompareUnknown;
         case 3: return tok::CompareOnlyHere;
         case 4: return tok::CompareNewer;

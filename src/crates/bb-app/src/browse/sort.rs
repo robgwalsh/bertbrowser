@@ -6,7 +6,7 @@
 use std::cmp::Ordering;
 
 use bb_core::columns::{ColumnCatalog, ColumnComparison, ColumnKind};
-use bb_paths::{fold_upper, natural_cmp};
+use bb_paths::{fold_upper, fold_upper_cmp, natural_cmp};
 
 use crate::browse::rows::Row;
 
@@ -17,15 +17,50 @@ pub struct SortSpec {
     pub descending: bool,
     pub flattened: bool,
     pub thumbnails: bool,
+    /// The column resolved once, here: a sort compares n log n times, and asking the catalogue on
+    /// each comparison was several allocations apiece.
+    key: SortKey,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum SortKey {
+    Name,
+    Size,
+    Type,
+    Modified,
+    Created,
+    Accessed,
+    Attributes,
+    Extension,
+    RelativePath,
+    /// A shell property, by its upper-cased canonical name.
+    Property(String),
 }
 
 impl SortSpec {
     pub fn new(column: &str, descending: bool, flattened: bool, thumbnails: bool) -> SortSpec {
+        let spec = ColumnCatalog::sort_spec(Some(column));
+        let key = if spec.kind == ColumnKind::ShellProperty {
+            SortKey::Property(fold_upper(&spec.id))
+        } else {
+            match spec.id.as_str() {
+                ColumnCatalog::SIZE => SortKey::Size,
+                ColumnCatalog::TYPE => SortKey::Type,
+                ColumnCatalog::MODIFIED => SortKey::Modified,
+                ColumnCatalog::CREATED => SortKey::Created,
+                ColumnCatalog::ACCESSED => SortKey::Accessed,
+                ColumnCatalog::ATTRIBUTES => SortKey::Attributes,
+                ColumnCatalog::EXTENSION => SortKey::Extension,
+                ColumnCatalog::RELATIVE_PATH => SortKey::RelativePath,
+                _ => SortKey::Name,
+            }
+        };
         SortSpec {
-            column: ColumnCatalog::sort_spec(Some(column)).id,
+            column: spec.id,
             descending,
             flattened,
             thumbnails,
+            key,
         }
     }
 
@@ -44,31 +79,26 @@ impl SortSpec {
         if band != Ordering::Equal {
             return band;
         }
-        let spec = ColumnCatalog::sort_spec(Some(&self.column));
-        let mut ordered = if spec.kind == ColumnKind::ShellProperty {
-            let key = fold_upper(&spec.id);
-            let (left, right) = (a.prop(&key), b.prop(&key));
-            // A missing value sorts last in both directions: a blank is not a small value.
-            let known =
-                ColumnComparison::known_band(left).cmp(&ColumnComparison::known_band(right));
-            if known != Ordering::Equal {
-                return known;
-            }
-            ColumnComparison::compare(left, right, natural_cmp)
-        } else {
-            match spec.id.as_str() {
-                ColumnCatalog::SIZE => a.size_sort_key().cmp(&b.size_sort_key()),
-                ColumnCatalog::TYPE => fold_upper(&a.type_name).cmp(&fold_upper(&b.type_name)),
-                ColumnCatalog::MODIFIED => a.modified.cmp(&b.modified),
-                ColumnCatalog::CREATED => a.created.cmp(&b.created),
-                ColumnCatalog::ACCESSED => a.accessed.cmp(&b.accessed),
-                ColumnCatalog::ATTRIBUTES => a.attributes_text().cmp(&b.attributes_text()),
-                ColumnCatalog::EXTENSION => {
-                    fold_upper(a.extension()).cmp(&fold_upper(b.extension()))
+        let mut ordered = match &self.key {
+            SortKey::Property(key) => {
+                let (left, right) = (a.prop(key), b.prop(key));
+                // A missing value sorts last in both directions: a blank is not a small value.
+                let known =
+                    ColumnComparison::known_band(left).cmp(&ColumnComparison::known_band(right));
+                if known != Ordering::Equal {
+                    return known;
                 }
-                ColumnCatalog::RELATIVE_PATH => natural_cmp(&a.relative_dir, &b.relative_dir),
-                _ => natural_cmp(&a.name, &b.name),
+                ColumnComparison::compare(left, right, natural_cmp)
             }
+            SortKey::Size => a.size_sort_key().cmp(&b.size_sort_key()),
+            SortKey::Type => a.type_cmp(b),
+            SortKey::Modified => a.modified.cmp(&b.modified),
+            SortKey::Created => a.created.cmp(&b.created),
+            SortKey::Accessed => a.accessed.cmp(&b.accessed),
+            SortKey::Attributes => a.attributes_text().cmp(&b.attributes_text()),
+            SortKey::Extension => fold_upper_cmp(a.extension(), b.extension()),
+            SortKey::RelativePath => natural_cmp(a.relative_dir(), b.relative_dir()),
+            SortKey::Name => natural_cmp(&a.name, &b.name),
         };
         if ordered == Ordering::Equal {
             ordered = natural_cmp(&a.name, &b.name);

@@ -80,6 +80,9 @@ uint64_t Listing::version() const { return l_ ? bb_listing_version(l_) : 0; }
 bool Listing::row(size_t i, BbRow& out) const {
     return l_ && bb_listing_row(l_, static_cast<uint32_t>(i), &out) == BB_OK;
 }
+bool Listing::meta(size_t i, uint64_t* id, uint32_t* flags) const {
+    return l_ && bb_listing_row_meta(l_, static_cast<uint32_t>(i), id, flags) == BB_OK;
+}
 std::wstring Listing::name(size_t i) const {
     BbRow r{};
     return row(i, r) ? w(r.name) : std::wstring();

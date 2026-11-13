@@ -142,6 +142,26 @@ pub fn fold_upper(s: &str) -> String {
     out
 }
 
+/// `fold_upper(a).cmp(&fold_upper(b))` without building either string: the same per-character fold,
+/// compared as it goes. For a sort, which asks n log n times.
+pub fn fold_upper_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    a.chars()
+        .map(fold_upper_char)
+        .cmp(b.chars().map(fold_upper_char))
+}
+
+/// One character of [`fold_upper`]: its single-character uppercase, or itself when it has none.
+pub fn fold_upper_char(c: char) -> char {
+    if c.is_ascii() {
+        return c.to_ascii_uppercase();
+    }
+    let mut upper = c.to_uppercase();
+    match (upper.next(), upper.next()) {
+        (Some(u), None) => u,
+        _ => c,
+    }
+}
+
 /// The end (exclusive, trailing separator dropped unless it is the root) of `path` when it is a plain
 /// `X:\a\b` path that `GetFullPathNameW` would hand back unchanged apart from a trailing separator,
 /// so the Win32 call can be skipped. Anything unusual (forward slashes, `.`/`..`, doubled or trailing

@@ -51,6 +51,9 @@ public:
     size_t size() const;
     uint64_t version() const;
     bool row(size_t i, BbRow& out) const;
+    // Row i's id and BB_ROW_* flags without its text: for asking about every row, which `row` would make
+    // the core spell out in UTF-16.
+    bool meta(size_t i, uint64_t* id, uint32_t* flags) const;
     std::wstring name(size_t i) const;
     std::wstring cell(size_t i, uint32_t column) const;
     // A content: search's match on row i: its line number (0 for none) and the needle's place in the cell.
