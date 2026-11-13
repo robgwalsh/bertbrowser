@@ -331,6 +331,13 @@ void PreviewPane::reload() {
 }
 
 void PreviewPane::schedule(bool debounce) {
+    if (debounce) {
+        // Only a selection that follows another closely waits: an arrow-key sweep is swallowed, and a
+        // click after a pause shows its file without a fixed 150 ms first.
+        const auto now = std::chrono::steady_clock::now();
+        debounce = now - last_selection_ < std::chrono::milliseconds(kDebounceMs);
+        last_selection_ = now;
+    }
     ++scheduled_;
     latest_ = scheduled_;
     loading_ = true;
@@ -384,11 +391,11 @@ void PreviewPane::worker_main() {
             request_.valid = false;
         }
         if (r.debounce) {
-            // Long enough to swallow an arrow-key sweep down a list, short enough that a click feels immediate.
+            // Long enough to swallow an arrow-key sweep down a list (schedule only asks for it inside one).
             // A newer request (schedule notifies) ends the wait early. Sleep(10) in a loop rounds each step
             // up to the 15.6 ms timer tick, which made the 150 ms debounce 234 ms.
             std::unique_lock<std::mutex> lock(mu_);
-            cv_.wait_for(lock, std::chrono::milliseconds(150), [this] { return stop_ || request_.valid; });
+            cv_.wait_for(lock, std::chrono::milliseconds(kDebounceMs), [this] { return stop_ || request_.valid; });
         }
         if (latest_ != r.generation || stop_) continue;
         {

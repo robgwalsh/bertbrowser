@@ -26,6 +26,7 @@
 #include "views/panes/pane_images.h"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -118,6 +119,9 @@ public:
     void on_timer(int id) override;
 
 private:
+    // How long a selection waits for the next one in a sweep.
+    static constexpr int kDebounceMs = 150;
+
     struct Request {
         uint64_t generation = 0;
         int mode = 0;
@@ -194,6 +198,9 @@ private:
     std::atomic<uint64_t> latest_{0};
     uint64_t scheduled_ = 0;  // UI thread
     uint64_t applied_ = 0;    // UI thread
+    // When the last selection-driven request was made (UI thread): one that follows it closely is part
+    // of a sweep and waits; one after a pause is a click and loads at once.
+    std::chrono::steady_clock::time_point last_selection_{};
 
     // the animation
     int64_t gif_ = 0;

@@ -138,8 +138,10 @@ fn read_file(
         None
     };
 
-    let mut buffer = vec![0u8; BUFFER_BYTES];
     let limit = if max_bytes > 0 { max_bytes } else { i64::MAX };
+    // No bigger than the read can use: the duplicate finder's prefix pass reads 64 KB from each of
+    // thousands of files, and a megabyte apiece was all churn.
+    let mut buffer = vec![0u8; limit.min(BUFFER_BYTES as i64) as usize];
     let mut read = 0i64;
 
     while read < limit {
